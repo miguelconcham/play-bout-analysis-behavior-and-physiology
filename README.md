@@ -118,22 +118,6 @@ Not included in the minimal bundle. If archived separately:
 
 Document the link in the same Zenodo record (second zip) or in lab handover notes.
 
----
-
-## Leaving the lab — checklist
-
-Use this before your last day:
-
-- [ ] **Copy `Data/`** from `Codes repository\Data\` to personal + lab backup (you already have a curated copy).
-- [ ] **Upload data zip to Zenodo/OSF**; save DOI and update the table above in this README.
-- [ ] **Push this code repo to GitHub** (private first, then public if allowed).
-- [ ] **Export MATLAB classifiers** if re-training is needed: `LDA_PLAY_AGG_REG.mat`, `trainedModel_LDA_ALL_BEHAVIORS.mat` (included in data bundle).
-- [ ] **Document external functions** (`play_bout`, etc.) — copy `.m` files or note where they live on the lab share.
-- [ ] **Export Python env** (`pip freeze` or `conda env export`) for HMM/CNN steps.
-- [ ] **Leave handover note** for PI: GitHub URL, Zenodo DOI, original paths on `experimentfs`.
-- [ ] **Verify reproduction**: fresh clone + downloaded `Data/` → run `Figure 1 LDA.m` and `Figure 1 HMM.m` once.
-
----
 
 ## Citation
 
