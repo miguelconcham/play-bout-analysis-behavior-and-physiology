@@ -1,0 +1,60 @@
+import os
+import numpy as np
+import ssm
+from pathlib import Path
+
+# --- SETTINGS ---
+base_dir = Path("//experimentfs.bccn-berlin.pri/experiment/PlayNeuralData/NPX-OPTO PLAY NMM/PlayBout Analysis/Codes repository/Data/HMM data/HMM raw data")
+Ks = [2, 3, 4, 5]
+D = 14  # number of emission variables
+num_it = 500;
+
+# --- FUNCTION TO COMPUTE NUMBER OF PARAMETERS ---
+def compute_num_params(K, D):
+    # Initial state probs: (K - 1)
+    # Transition probs: K * (K - 1)
+    # Emissions: K means + K variances (diagonal) per D dims
+    return (K - 1) + K * (K - 1) + K * D * 2
+
+# --- PROCESS FILES IN BASE DIRECTORY ---
+for file in base_dir.glob("*.npy"):
+    var_name = file.stem  # e.g., "B1S3 1008 Single"
+    
+    try:
+        # Load data
+        con_call = np.load(file)
+        n_timepoints = con_call.shape[0]
+
+        # Initialize storage for model comparison
+        model_comp = np.zeros((len(Ks), 3))  # columns: [LL, AIC, BIC]
+
+        for i, K in enumerate(Ks):
+            # Fit HMM
+            hmm = ssm.HMM(K, D, observations="diagonal_gaussian", transitions="sticky")
+            hmm.fit(con_call, method="em", num_iters=num_it)
+
+            # Most likely state sequence
+            z = hmm.most_likely_states(con_call)
+            trans_mat = hmm.transitions.transition_matrix  # shape (K, K)
+
+            # Save states and transition matrix
+            states_path = base_dir / f"{var_name}_states_K{K}.npy"
+            transmat_path = base_dir / f"{var_name}_transmat_K{K}.npy"
+            np.save(states_path, z)
+            np.save(transmat_path, trans_mat)
+
+            # Compute metrics
+            ll = hmm.log_likelihood(con_call)
+            num_params = compute_num_params(K, D)
+            aic = 2 * num_params - 2 * ll
+            bic = num_params * np.log(n_timepoints) - 2 * ll
+
+            model_comp[i] = [ll, aic, bic]
+
+        # Save model comparison
+        model_comp_path = base_dir / f"model_comp_{var_name}.npy"
+        np.save(model_comp_path, model_comp)
+        print(f"✅ Processed {var_name}")
+
+    except Exception as e:
+        print(f"❌ Error processing {var_name}: {e}")

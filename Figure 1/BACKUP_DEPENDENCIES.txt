@@ -1,0 +1,246 @@
+Figure 1 - Backup Dependencies Checklist
+=========================================
+Generated from audit of all scripts in the Figure 1 folder.
+This list covers saved files being loaded, raw data folders, code dependencies,
+and software requirements. Original data files are NOT modified by this document.
+
+Base path prefix (all paths below are relative to):
+\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\Codes repository\Data\
+
+(Figure 1 scripts now load from this local Data folder.)
+
+
+================================================================================
+1. SAVED FILES LOADED DIRECTLY BY PLOTTING SCRIPTS (HIGHEST PRIORITY)
+================================================================================
+
+--- LDA / Motion-USV space (Figure 1 LDA.m) ---
+
+Folder: Analysis results\locomotive behaviors 2 partners\
+  - all_behavior.mat
+  - all_not_labeled_behavior.mat
+  - all_var_names.mat
+
+Folder: Analysis results\Behavior classification\
+  - LDA_PLAY_AGG_REG.mat
+  - trainedModel_LDA_ALL_BEHAVIORS.mat
+
+Note: all_behavior.mat, all_not_labeled_behavior.mat, and all_var_names.mat are
+created by:
+  Codes\Behavior-Modeling\REclassifiy_locomotive_behaviors.m
+(not by Obtain_Feature_USV_space.m in its current form)
+
+--- CNN / embedding pipeline (Convolutional classification.ipynb) ---
+
+Folder: Analysis results\locomotive behaviors 2 partners\
+  - Numeric *.npy files (e.g. 1410.npy) - behavior segment feature matrices
+  - autoencoder.pth
+  - training_checkpoint.pt
+  - training_data.pt
+  - all_embeddings.npy
+  - embedding_file_order.txt
+  - cnn_filters_1.npy
+  - cnn_filters_2.npy
+
+Folder: Analysis results\non labeled behavior 2 partners\
+  - Numeric *.npy files - non-labeled segment feature matrices
+  - embeddings.npy
+  - file_order.txt
+  - autoencoder.pth (if embeddings were computed on this folder)
+
+
+--- HMM plotting (Figure 1 HMM.m) ---
+
+Example session (Fig 1B panel):
+
+Folder: Synch data\{animal_name}\
+  - synch_model_video2audio.mat
+
+Folder: Behavior backups\
+  - {animal_name}.txt
+
+Folder: HMM data\HMM raw data\
+  - {animal_name} P{pt}_PropAndTime.mat
+  - {animal_name} P{pt}_states_K2.npy
+
+Folder: CallDetectionBackup\
+  - {animal_name}_Stats.xlsx
+  - {animal_name}.wav
+
+Aggregated HMM analysis outputs (loaded via dir wildcards):
+
+Folder: Analysis results\HMM 2 and 3 states 2 partners\
+  - *prediction_struct*          (HMM vs play-bout alignment, autocorrelation)
+  - *variable_onset_struct*      (time-wrapped kinematic/call variables, Fig H-J)
+  - *behavior_onset_offset_struct* (behavior aligned to HMM states)
+  - *play_behavior_struct*       (behavior proportions within HMM states, Fig 2E)
+  - matching_lengths.mat          (paired engaged/unengaged state matching)
+
+Model comparison (Fig S2B):
+
+Folder: HMM data\HMM raw data\
+  - model_comp_*.npy
+
+Also produced by Load_HMM_outputs_and_analyze.m (loaded indirectly via structs above):
+  - {animal_code} P{pt} confusion_matrix
+  - {animal_code} P{pt} call_struct
+
+
+--- Play bout plotting (Figure 1 Play Bouts.m) ---
+
+Folder: Behavior backups\
+  - All *.txt behavior annotation files
+
+This script does NOT load saved .mat outputs; it rebuilds play bouts from .txt files.
+
+
+================================================================================
+2. RAW INPUT DATA FOLDERS (needed to regenerate everything from scratch)
+================================================================================
+
+Back up these entire folders:
+
+  Behavior backups\           -> *.txt manual behavior annotations
+  Traking backups\            -> traking_structure .mat files (*{animal_code}*)
+  Synch data\                 -> synch_model_video2audio.mat per animal subfolder
+  CallDetectionBackup\        -> *{animal_code}*.xlsx, *_Stats.xlsx, *.wav
+  OLD DATA FORMAT\            -> animal session folders (used for batch processing)
+
+
+================================================================================
+3. INTERMEDIATE / GENERATED DATA FOLDERS (backup to avoid recomputation)
+================================================================================
+
+  Analysis results\locomotive behaviors 2 partners\
+    -> labeled behavior .npy, .mat summaries, CNN model outputs
+
+  Analysis results\non labeled behavior 2 partners\
+    -> non-labeled .npy segments, embeddings
+
+  Analysis results\Behavior classification\
+    -> trained LDA classifier .mat files
+
+  HMM data\HMM raw data\
+    -> HMM input .npy, state sequences, transition matrices, model comparison
+
+  Analysis results\HMM 2 and 3 states 2 partners\
+    -> all downstream HMM analysis structs (prediction, variable onset, etc.)
+
+
+================================================================================
+4. CODE DEPENDENCIES (functions NOT in Figure 1 folder - must be on MATLAB path)
+================================================================================
+
+External functions (back up separately or ensure on path):
+
+  play_bout              -> Figure 1 Play Bouts.m, Create_HMM_inputs.m,
+                            Load_HMM_outputs_and_analyze.m
+
+  readNPY / writeNPY     -> HMM + LDA pipelines (npy-matlab package)
+
+  run_umap               -> Figure 1 LDA.m (UMAP MATLAB interface)
+
+  fit_exp_heaviside3     -> Figure 1 Play Bouts.m (double exponential fit)
+
+  play_song              -> Figure 1 HMM.m (audio playback during spectrogram)
+
+Functions already inside Figure 1 folder:
+
+  LDA analysis\get_behavior_properties.m
+  LDA analysis\normalizedRadialPosition.m
+  LDA analysis\Obtain_Feature_USV_space.m
+  HMM modeling\Create_HMM_inputs.m
+  HMM modeling\Load_HMM_outputs_and_analyze.m
+  HMM modeling\CreateHMMFIiles.m
+  HMM modeling\python hmm estimate.txt
+
+Related code outside Figure 1 (worth backing up):
+
+  Codes\Behavior-Modeling\REclassifiy_locomotive_behaviors.m
+    -> saves all_behavior.mat, all_not_labeled_behavior.mat, all_var_names.mat
+
+  Codes\Figure codes\Figure1.m
+    -> older combined figure script (reference)
+
+Note: Figure 1 HMM.m calls is_this_a_playful_hmm(...) as a function, but in
+Figure1.m it is computed inline as:
+  is_this_a_playful_hmm = sum(is_this_hmm & is_there_play_beh, 2) > 0;
+You may need to define this before running the autocorrelation section (Fig 2F).
+
+
+================================================================================
+5. SOFTWARE / TOOLBOX DEPENDENCIES
+================================================================================
+
+MATLAB toolboxes / built-ins:
+  - Statistics and Machine Learning Toolbox
+      (pca, fitglm, predict, confusionmat, linkage, cluster, mdscale,
+       ksdensity, autocorr, kstest2, signrank, matchpairs, ttest)
+  - Signal Processing Toolbox (spectrogram, smoothdata)
+  - Image Processing Toolbox (imsharpen, imfilter, fspecial, conv2)
+  - swarmchart (MATLAB R2020a+)
+
+Python packages:
+  - numpy
+  - ssm                    (HMM fitting, python hmm estimate.txt)
+  - torch, torch.nn        (Convolutional classification.ipynb)
+  - pathlib, os
+
+Third-party MATLAB packages:
+  - npy-matlab             (readNPY, writeNPY)
+  - run_umap               (UMAP MATLAB interface)
+
+
+================================================================================
+6. MINIMAL BACKUP TIERS
+================================================================================
+
+Tier A - Run Figure plotting only (fastest restore):
+  - All files/folders from Section 1
+  - Behavior classification\ LDA .mat files
+  - HMM 2 and 3 states 2 partners\ (full folder)
+  - HMM raw data\ (model_comp_*, example _PropAndTime.mat, _states_K2.npy)
+  - For Fig 1B example: one animal's .wav, _Stats.xlsx, .txt, sync .mat
+
+Tier B - Regenerate from raw features:
+  - Everything in Tier A
+  - locomotive behaviors 2 partners\ + non labeled behavior 2 partners\
+  - Behavior backups\, Traking backups\, Synch data\, CallDetectionBackup\
+
+Tier C - Full reproducibility:
+  - Everything in Tier B
+  - All code dependencies (play_bout, fit_exp_heaviside3, npy-matlab, run_umap)
+  - Python environment with ssm + torch
+  - OLD DATA FORMAT\ animal folders
+  - Codes\Behavior-Modeling\ and related pipeline scripts
+
+
+================================================================================
+7. PIPELINE ORDER (what generates what)
+================================================================================
+
+LDA pipeline:
+  1. Obtain_Feature_USV_space.m (+ get_behavior_properties.m)
+     -> writes numeric *.npy to locomotive / non-labeled folders
+  2. REclassifiy_locomotive_behaviors.m
+     -> saves all_behavior.mat, all_not_labeled_behavior.mat, all_var_names.mat
+  3. Convolutional classification.ipynb
+     -> trains autoencoder, saves embeddings and model weights
+  4. (Trained separately) LDA classifiers
+     -> LDA_PLAY_AGG_REG.mat, trainedModel_LDA_ALL_BEHAVIORS.mat
+  5. Figure 1 LDA.m
+     -> loads all of the above for plotting
+
+HMM pipeline:
+  1. CreateHMMFIiles.m -> Create_HMM_inputs.m
+     -> HMM raw data\ (*.npy inputs, *_PropAndTime.mat)
+  2. python hmm estimate.txt
+     -> *_states_K*.npy, *_transmat_K*.npy, model_comp_*.npy
+  3. CreateHMMFIiles.m -> Load_HMM_outputs_and_analyze.m
+     -> HMM 2 and 3 states 2 partners\ (all analysis structs)
+  4. Figure 1 HMM.m
+     -> loads HMM outputs for plotting
+
+Play bout pipeline:
+  1. Figure 1 Play Bouts.m
+     -> loads Behavior backups\*.txt directly, calls play_bout()
