@@ -1,66 +1,49 @@
-# Play Bout Analysis — Figure 1
+# Play Bout Analysis — Codes Repository
 
-MATLAB and Python code for Figure 1 analyses: play-bout statistics, motion–USV (LDA/UMAP) space, and HMM-based play-state detection and plotting.
+MATLAB and Python code for play-bout analyses in this project. **Figure 1** covers behavior statistics, motion–USV (LDA/UMAP) space, and HMM-based play-state detection. **Figure 2** covers LFP power PSTHs, cross-frequency coupling, phase dynamics, and related neural maps around play bouts.
 
 This repository contains **code only**. Experimental data are archived separately (see [Data availability](#data-availability)).
 
 ## Repository structure
 
 ```
-Figure 1/
-├── Figure 1 Play Bouts.m          # Play-bout duration / interval distributions (Fig 1G)
-├── Figure 1 LDA.m                 # Motion–USV UMAP + LDA plots (Fig 1C, S1B–D)
-├── Figure 1 HMM.m                 # HMM example trace + summary panels (Fig 1B, 2E, S2)
-├── BACKUP_DEPENDENCIES.txt        # Full list of inputs each script loads
-├── outputs/                       # Saved figures (created locally; not in git)
-├── LDA analysis/
-│   ├── Obtain_Feature_USV_space.m
-│   ├── get_behavior_properties.m
-│   ├── normalizedRadialPosition.m
-│   └── Convolutional classification.ipynb
-└── HMM modeling/
-    ├── CreateHMMFIiles.m          # Batch: inputs → HMM fit → analysis
-    ├── Create_HMM_inputs.m
-    ├── Load_HMM_outputs_and_analyze.m
-    ├── python hmm estimate.txt
-    └── README.md
+Codes repository/
+├── Figure 1/
+│   ├── Figure 1 Play Bouts.m          # Play-bout duration / interval distributions (Fig 1G)
+│   ├── Figure 1 LDA.m                 # Motion–USV UMAP + LDA plots (Fig 1C, S1B–D)
+│   ├── Figure 1 HMM.m                 # HMM example trace + summary panels (Fig 1B, 2E, S2)
+│   ├── BACKUP_DEPENDENCIES.txt        # Full list of inputs each script loads
+│   ├── outputs/                       # Saved figures (created locally; not in git)
+│   ├── LDA analysis/
+│   └── HMM modeling/
+│       └── README.md                  # HMM pipeline order
+│
+├── Figure 2/
+│   ├── Figure 2.m                     # Main Figure 2 plotting script
+│   ├── Play partner.m
+│   ├── Reciprocity.m
+│   ├── Estimate percentage of R2.m
+│   ├── Supporting codes/              # Original scripts (legacy; kept unchanged)
+│   └── Supporting codes v2/         # Renamed, simplified scripts (recommended)
+│
+├── Data/                              # Local data copy (not in git; see .gitignore)
+└── README.md
 ```
 
-## Requirements
+## Figure 1
 
-### MATLAB
+### Requirements
+
+**MATLAB**
 - Statistics and Machine Learning Toolbox (`pca`, `fitglm`, `mdscale`, …)
 - Signal Processing Toolbox (`spectrogram`, `smoothdata`)
 - Image Processing Toolbox (`imfilter`, `imsharpen`, …)
 - Third-party on path: `readNPY` / `writeNPY` ([npy-matlab](https://github.com/kwikteam/npy-matlab)), `run_umap`, `play_bout`, `fit_exp_heaviside3`
 
-### Python
+**Python**
 - `numpy`, `ssm` (HMM fitting), `torch` (CNN notebook)
 
-## Setup after cloning
-
-1. Clone this repository.
-2. Download the **Figure 1 data bundle** (see [Data availability](#data-availability)).
-3. Extract so the layout matches:
-
-```
-Codes repository/
-├── Figure 1/          ← this repo
-└── Data/              ← downloaded archive
-    ├── Behavior backups/
-    ├── Analysis results/
-    ├── HMM data/
-    ├── Synch data/
-    └── CallDetectionBackup/
-```
-
-4. Scripts expect data at:
-   `...\Codes repository\Data\`
-   (already configured in the Figure 1 `.m` files).
-
-5. Add external MATLAB functions to your path (`play_bout`, `readNPY`, `run_umap`, etc.).
-
-## Running analyses
+### Running Figure 1
 
 | Goal | Script |
 |------|--------|
@@ -74,11 +57,95 @@ Pipeline order for HMM: see `Figure 1/HMM modeling/README.md`.
 
 ---
 
+## Figure 2
+
+Neural analyses around play bouts: band-limited LFP power PSTHs, area-resolved maps, behavior-resolved PSTHs, cross-frequency coupling, phase at exploratory-bout onset, speed–frequency relations, and call-locked PSTHs.
+
+### Supporting codes v2 (recommended)
+
+Use **`Figure 2/Supporting codes v2/`** for new work. Scripts follow a consistent naming convention:
+
+| Prefix | Role | Example |
+|--------|------|---------|
+| `GENERATE_*` | Build per-session structs from raw/preprocessed NPX data | `GENERATE_PSTH_AREA_MAPS.m` |
+| `Estimate_*` | Batch drivers: loop animals, call `GENERATE_*`, merge results | `Estimate_psth_area_maps.m` |
+| `Analyze_*` | Load saved `.mat` files, statistics and figures | `Analyze_psth_area_maps.m` |
+| `Compute_*` | Shared utilities (e.g. PLI/wPLI) | `Compute_pli_wpli.m` |
+
+Only **`GENERATE_*`** filenames use all capitals; other prefixes use mixed case.
+
+**Typical pipeline**
+
+```
+Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m
+```
+
+| Analysis | Estimate (generate) | Analyze (plot) |
+|----------|---------------------|----------------|
+| Area-resolved play-bout PSTH maps | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
+| PSTH per behavior (self / partner) | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
+| Full-spectrum PSTH | `Estimate_psth_full_spectrogram.m` | `Analyze_psth_full_spectrogram.m` |
+| Single-channel band power PSTH | `Estimate_psth_band_power.m` | — |
+| PSTH + kinematic/call regressors | `Estimate_psth_all_regressors.m` | — |
+| Call-locked PSTH | `Estimate_psth_calls_all_animals.m` | (includes plots in same script) |
+| Cross-frequency coupling (mid-PAG) | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m` |
+| Cross-frequency coupling maps | `Estimate_freq_coupling_maps.m` | `Analyze_freq_coupling_maps.m` |
+| Phase at exploratory-bout onset | `Estimate_phase_exploratory_onset.m` | `Analyze_phase_exploratory_onset.m` |
+| Speed vs band-limited power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m` |
+| Coherence / PLI maps | `Estimate_coherence_maps.m` | — |
+
+Main panel script: **`Figure 2/Figure 2.m`** (loads precomputed PSTH structs and assembles publication figures).
+
+### Supporting codes (legacy)
+
+**`Figure 2/Supporting codes/`** holds the original scripts (mixed naming, typos such as `Estiamte_*` / `Abalyze_*`). These are **not modified**; use v2 for cleaner names and simplified code.
+
+### Figure 2 requirements
+
+**MATLAB**
+- Signal Processing Toolbox (`spectrogram`, `filtfilt`, `hilbert`, `designfilt`)
+- Statistics and Machine Learning Toolbox (`fitlme`, `fitlm`, `ttest`, …)
+- Third-party on path: `play_bout`, `wrap_probe_values`, `generateDistinctColors`, `align_by_area`, circular statistics helpers as used in the original pipeline
+
+**Data** (not in git): NPX raw/preprocessed LFP, behavior backups, synch models, channel maps, area limits table, and precomputed results under `Analysis results/Theta psth/`.
+
+---
+
+## Setup after cloning
+
+1. Clone this repository.
+2. Download the data bundle(s) (see [Data availability](#data-availability)).
+3. Extract so the layout matches:
+
+```
+Codes repository/
+├── Figure 1/
+├── Figure 2/
+└── Data/                    ← downloaded archive
+    ├── Behavior backups/
+    ├── Analysis results/
+    ├── HMM data/
+    ├── Synch data/
+    ├── CallDetectionBackup/
+    └── …
+```
+
+4. **Figure 1** scripts are configured for:
+   `...\Codes repository\Data\`
+
+5. **Figure 2** v2 scripts currently point to lab network paths under `DataSets\` on the BCCN share. To run locally, update paths in the relevant `Estimate_*` / `Analyze_*` scripts or add a shared path config.
+
+6. Add external MATLAB functions to your path (`play_bout`, `readNPY`, `run_umap`, `wrap_probe_values`, etc.).
+
+7. Add **`Figure 2/Supporting codes v2`** to the MATLAB path before running Figure 2 estimate/analyze scripts.
+
+---
+
 ## Data availability
 
 **Data are not stored in this GitHub repository** (too large for git; see `.gitignore`).
 
-### What the bundled `Data/` folder contains (minimum for plotting)
+### Figure 1 data bundle (minimum for plotting)
 
 Copied subset used by Figure 1 scripts (~141 files):
 
@@ -92,6 +159,10 @@ Copied subset used by Figure 1 scripts (~141 files):
 
 Full file list: see `Data/COPY_MANIFEST.txt` in the archived bundle.
 
+### Figure 2 data (additional)
+
+Figure 2 requires NPX LFP, probe channel maps, and precomputed PSTH/coupling `.mat` files (e.g. under `Analysis results/Theta psth/`). A Figure 2 data bundle can be archived separately on Zenodo alongside the Figure 1 bundle.
+
 ### Where to download data
 
 > **Update these links before leaving the lab:**
@@ -102,22 +173,22 @@ Full file list: see `Data/COPY_MANIFEST.txt` in the archived bundle.
 | OSF | `[URL]` | Alternative open archive |
 | Lab / institutional storage | `[URL]` | If Zenodo/OSF not used |
 
-**Suggested Zenodo record title:**  
-`Play Bout Analysis — Figure 1 data bundle (behavior, HMM, LDA)`
-
-Upload a single zip: `Figure1_Data_bundle.zip` containing the `Data/` folder.
+**Suggested Zenodo record titles:**
+- `Play Bout Analysis — Figure 1 data bundle (behavior, HMM, LDA)`
+- `Play Bout Analysis — Figure 2 data bundle (NPX PSTH, coupling)`
 
 ### Full raw data (optional, for re-running pipelines from scratch)
 
-Not included in the minimal bundle. If archived separately:
+Not included in minimal bundles. If archived separately:
 
-- `Traking backups/` — `traking_structure` `.mat` per session  
-- `Synch data/` — all animals  
-- `CallDetectionBackup/` — all sessions  
-- `OLD DATA FORMAT/` or equivalent session folders  
+- `NPX data/NPX raw data/` — session folders with LFP and channel maps
+- `Traking backups/` — `traking_structure` `.mat` per session
+- `Synch data/` — all animals
+- `CallDetectionBackup/` — all sessions
 
-Document the link in the same Zenodo record (second zip) or in lab handover notes.
+Document links in the same Zenodo record (additional zip) or in lab handover notes.
 
+---
 
 ## Citation
 
