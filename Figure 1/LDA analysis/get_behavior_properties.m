@@ -1,6 +1,6 @@
 function [all_behavior_list,all_non_labeled_list,all_spatial_prop] =get_behavior_properties(animal_code, behaviors2check,call_prop_list, extended_time,get_non_labeled)
 
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\Codes repository\Data';
+data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 
 synch_folder = [data_root, '\Synch data'];
 traking_folder = [data_root, '\Traking backups'];

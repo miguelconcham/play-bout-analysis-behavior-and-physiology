@@ -1,11 +1,11 @@
 %% Estimate_psth_area_maps
-% Driver script: compute theta PSTH maps per brain area across selected animals.
+% Driver script: compute psth power by frequency and behavior maps per brain area across selected animals.
 % Calls GENERATE_PSTH_AREA_MAPS for each session and merges results.
 % Outputs: psth_structure, animal_names (save manually when needed).
 
 %% Paths and animal selection
 npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
 
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];

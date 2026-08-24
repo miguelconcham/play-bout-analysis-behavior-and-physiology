@@ -400,7 +400,7 @@ for ch_n=1:numel(mid_PAG_channel)
     freq_pow_high = mean(log10(pow_spectrogram_high_freq(f_index_high,:)));
     freq_pow_high = movmean(freq_pow_high,1/(max(high_freq_range)*real_bin_size));
 
-    %% -------------------- COMPUTE PERI-EVENT THETA PSTHs --------------------
+    %% -------------------- COMPUTE PERI-EVENT psth power by frequency and behaviors --------------------
     % Allocate arrays for different peri-event alignments
    
     play_bout_onset_low_freq                = nan(size(play_bouts_table,1), round(range(hist_range)/spect_bin_size));

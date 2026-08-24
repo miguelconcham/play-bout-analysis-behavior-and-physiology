@@ -1,15 +1,30 @@
-%% Analyze_phase_exploratory_onset
-% Delta phase reset at exploratory-behavior bout onset.
+%% Analyze_phase_psth
+% Phase reset analysis at bout onset (circular stats + surrogate test).
+%
+% Precomputed file combinations (frequency band, behavior, calls, CV) are listed in:
+%   Figure 2/Figure 2 Psth animal names and result combinations.txt
+%
+% This script uses the PHASE row. For band-limited power PSTHs (delta/theta/gamma
+% play bout, calls, etc.), swap the load filenames per that list — see Figure 2.m.
 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
-figure_2_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure 2 Inputs';
+repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+figure2_dir = fullfile(repo_root, 'Figure 2');
+combo_file = fullfile(figure2_dir, 'Figure 2 Psth animal names and result combinations.txt');
+data_root = fullfile(repo_root, 'Data');
+saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
+figure_2_folder = fullfile(figure2_dir, 'outputs');
 
 %% Load precomputed phase-onset data
-load([saving_folder,'\phase_onset_playbout.mat'],'psth_structure');
-load([saving_folder,'\animal_names_dphase_onset_playbout.mat'],'animal_names');
+% Default: PHASE section in combo file. Other examples (commented):
+%   Delta play bout  → psth_structure_delta_updated.mat / animal_names_delta_updated.mat
+%   Delta exploratory → psth_structure_delta_exploratory_bout.mat / animal_names_delta_exploratory_bout.mat
+%   Theta play bout  → psth_structure_theta_updated.mat / animal_names_theta_updated.mat
+%   Gamma calls      → psth_structure_call_gamma.mat / animal_names_call_gamma.mat
+
+load(fullfile(saving_folder, 'phase_onset_playbout.mat'), 'psth_structure');
+load(fullfile(saving_folder, 'animal_names_dphase_onset_playbout.mat'), 'animal_names');
 
 hist_range = psth_structure(1).hist_range;
-lfp_sr = 2500;
 time = linspace(hist_range(1), hist_range(2), size(psth_structure(1).Phase_data_onset, 2));
 
 %% Concatenate phase across sessions
@@ -36,7 +51,7 @@ time_range = [-5 5];
 time4perm = time(time >= time_range(1) & time <= time_range(2));
 all_phase_onset4perm = all_phase_onset(:, time >= time_range(1) & time <= time_range(2));
 
-load([saving_folder,'\phase_surrogate.mat'],'surrogate_r');
+load(fullfile(saving_folder, 'phase_surrogate.mat'), 'surrogate_r');
 n_perm = size(surrogate_r, 1);
 pctl = sum(surrogate_r > circ_r(all_phase_onset4perm)) / (n_perm + 1);
 
@@ -117,7 +132,8 @@ xticks([-.5 0 .312 .5 .66 1])
 xlim(x_lim)
 set(gca, 'TickDir', 'out')
 
-print(gcf, '-vector', '-dsvg', [figure_2_folder, '/phasse reset during play.svg'])
+if ~exist(figure_2_folder, 'dir'), mkdir(figure_2_folder); end
+print(gcf, '-vector', '-dsvg', fullfile(figure_2_folder, 'phasse reset during play.svg'))
 
 %% Multi-panel phase reset with polar histograms at key times
 pctl = sum(surrogate_r > circ_r(all_phase_onset4perm)) / (n_perm + 1);
@@ -169,4 +185,4 @@ for j = 1:numel(angle_values)
     title([num2str(r), ' at ', num2str(angle_values(j))])
 end
 
-print(gcf, '-vector', '-dsvg', [figure_2_folder, '/phasse reset during play witn alge description.svg'])
+print(gcf, '-vector', '-dsvg', fullfile(figure_2_folder, 'phasse reset during play witn alge description.svg'))

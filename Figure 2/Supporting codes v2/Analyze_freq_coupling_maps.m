@@ -1,7 +1,9 @@
 %% Analyze_freq_coupling_maps
 % Spatial maps of cross-frequency coupling aligned by PAG sub-area.
 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+data_root = fullfile(repo_root, 'Data');
+saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
 %% Load precomputed coupling map structures
 disp('loading')

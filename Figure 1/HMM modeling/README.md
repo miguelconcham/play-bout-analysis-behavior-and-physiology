@@ -4,6 +4,8 @@ Pipeline for detecting play states in rat social interactions using Hidden Marko
 
 ## Pipeline Order
 
+You need in the same dir the backups (traking, calldetection and behavior)
+
 ### 1. `CreateHMMFIiles.m` (MATLAB script)
 Batch wrapper that drives the full pipeline across all animal sessions. Loops over all animal folders in the raw data directory and:
 - Calls `Create_HMM_inputs` to generate the `.npy` feature matrices for each session.

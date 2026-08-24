@@ -1,5 +1,5 @@
 %% defining loading folders and fix parameters
-repo_root     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\Codes repository';
+repo_root     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology';
 data_root     = [repo_root, '\Data'];
 saving_folder = [repo_root, '\Figure 1\outputs'];
 behavior_data = [data_root, '\Behavior backups'];

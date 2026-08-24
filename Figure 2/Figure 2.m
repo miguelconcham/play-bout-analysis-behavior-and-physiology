@@ -1,22 +1,28 @@
-%% LOAD DELTA DATA NOW
-figure_dir          = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure 2 Inputs';
-synch_directory     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Synch data';
-hmm_raw_data        = ['\\experimentfs.bccn-berlin.pri\experiment\PlayN' ...
-    'euralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\HMM data\HMM raw data'];
-call_folder         = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\CallDetectionBackup';
-behavior_folder     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Behavior backups';
-npx_folder          = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-area_limit_table    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
-%% LOAD DELTA DATA NOW
-%% LOAD DELTA DATA NOW
-%% LOAD DELTA DATA NOW
+%% Figure 2 — main plotting script
+% PSTH / results file combinations (frequency band, behavior, calls, CV):
+%   Figure 2 Psth animal names and result combinations.txt
+
+repo_root = fileparts(mfilename('fullpath'));
+combo_file = fullfile(repo_root, 'Figure 2 Psth animal names and result combinations.txt');
+data_root = fullfile(repo_root, '..', 'Data');
+saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
+
+figure_dir = fullfile(repo_root, 'outputs');
+synch_directory = fullfile(data_root, 'Synch data');
+hmm_raw_data = fullfile(data_root, 'HMM data', 'HMM raw data');
+call_folder = fullfile(data_root, 'CallDetectionBackup');
+behavior_folder = fullfile(data_root, 'Behavior backups');
+npx_folder = fullfile(data_root, 'NPX data', 'NPX raw data');
+area_limit_table = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
+
+%% Load PSTH — example: DELTA play bout (combo file row DELTA #1)
+% Other combinations: swap filenames per combo file (see combo_file).
 
 disp('loading')
-load([saving_folder,'\psth_structure_delta_updated.mat'],'psth_structure');
-load([saving_folder,'\animal_names_delta_updated.mat'],'animal_names');
-% load([saving_folder,'\psth_structure_delta_olny_aggr.mat'],'psth_structure');
-% load([saving_folder,'\animal_names_delta_olny_aggr.mat'],'animal_names');
+load(fullfile(saving_folder, 'psth_structure_delta_updated.mat'), 'psth_structure'); % Struct of struct with one day each. Struct(1)  has band power and play bout.
+load(fullfile(saving_folder, 'animal_names_delta_updated.mat'), 'animal_names');     % Animals names correspond to structures
+% load(fullfile(saving_folder, 'psth_structure_delta_olny_aggr.mat'), 'psth_structure');
+% load(fullfile(saving_folder, 'animal_names_delta_olny_aggr.mat'), 'animal_names');
 
 
 
@@ -375,12 +381,12 @@ end
 xlim(x_lim)
 ylim(lfp_ylim_right)
 
-%% plot explained variance
-% predictors = {'Call','SelfSpeed','OtherSpeed','OtherAcc','SelfAcc','PlayBout'};
-% load([saving_folder,'\cvResults_single_calls.mat'],'cvResults')
-% load([saving_folder,'\cvResults_mean_calls_delta_v2.mat'],'cvResults')
-load([saving_folder,'\cvResults_mean_calls_delta_v2_AlllVar.mat'],'cvResults')
-load([saving_folder,'\cvResults_mean_calls_theta_v2_AlllVar.mat'],'cvResults')
+%% Load explained variance — example: DELTA + THETA CV (combo file DELTA #7, THETA #3)
+% GAMMA #3 → cvResults_mean_calls_gamma_AlllVar_play_baut.mat
+% load(fullfile(saving_folder, 'cvResults_single_calls.mat'), 'cvResults')
+% load(fullfile(saving_folder, 'cvResults_mean_calls_delta_v2.mat'), 'cvResults')
+load(fullfile(saving_folder, 'cvResults_mean_calls_delta_v2_AlllVar.mat'), 'cvResults')
+load(fullfile(saving_folder, 'cvResults_mean_calls_theta_v2_AlllVar.mat'), 'cvResults')
 
 
 
@@ -458,10 +464,10 @@ ylim([-1 y_for_sig+10])
 title('Cross-validated \DeltaR^2 when removing each predictor')
 set(gca, 'FontSize', 24)
 
-%% load psth of LFPW POWER lock to different behaviors  (function: Estimamte_psth_all_files)
+%% Load PSTH for LFP power panels — example: DELTA play bout (combo file DELTA #1)
 disp('Loading')
-load([saving_folder,'\psth_structure_delta_updated.mat'],'psth_structure');
-load([saving_folder,'\animal_names_delta_updated.mat'],'animal_names');
+load(fullfile(saving_folder, 'psth_structure_delta_updated.mat'), 'psth_structure');
+load(fullfile(saving_folder, 'animal_names_delta_updated.mat'), 'animal_names');
 disp('Loading Ready')
 
 %% merging_psth
@@ -570,10 +576,9 @@ for an= 1:numel(animal_label)
     stacked_mean_onset = [stacked_mean_onset;mean(array, 'omitmissing')];
 end
 
-%% load mixed model effect
-
-% load([saving_folder,'\results_play_bout.mat'],'results'); %using all time points
-load([saving_folder,'\results_play_bout_PBonly_zscore4_updated.mat'],'results'); %using only time points within playbouts
+%% Load mixed-model results — example: DELTA play bout (combo file DELTA #1)
+% load(fullfile(saving_folder, 'results_play_bout.mat'), 'results'); % all time points
+load(fullfile(saving_folder, 'results_play_bout_PBonly_zscore4_updated.mat'), 'results'); % play-bout-only bins
 est = results.est;
 ci = results.ci;
 pvals_fdr = results.pvals;
@@ -634,9 +639,9 @@ plot([0 0],y_lim, 'k' )
 ylim tight
 %% Call responses
 
-%% now load call data (from "Estimate psth call all animals")
-load([saving_folder,'\psth_structure_call_gamma.mat'],'psth_structure');
-load([saving_folder,'\animal_names_call_gamma.mat'],'animal_names');
+%% Load call PSTH — example: GAMMA calls (combo file GAMMA #2)
+load(fullfile(saving_folder, 'psth_structure_call_gamma.mat'), 'psth_structure');
+load(fullfile(saving_folder, 'animal_names_call_gamma.mat'), 'animal_names');
 
 %% mergin data
 
@@ -732,9 +737,8 @@ for an= 1:numel(animal_label)
     stacked_mean = [stacked_mean;mean(array,'omitmissing')];
 end
 
-%% load result file for ploting all together
-
-load([saving_folder,'\results_call_updated_gamma.mat'],'results');
+%% Load call mixed-model results — example: GAMMA calls (combo file GAMMA #2)
+load(fullfile(saving_folder, 'results_call_updated_gamma.mat'), 'results');
 
 limited_time = results.time;
 est = results.est;

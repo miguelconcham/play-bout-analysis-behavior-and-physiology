@@ -1,13 +1,15 @@
-# Play Bout Analysis — Codes Repository
+# Play Bout Analysis — Behavior and Physiology
 
-MATLAB and Python code for play-bout analyses in this project. **Figure 1** covers behavior statistics, motion–USV (LDA/UMAP) space, and HMM-based play-state detection. **Figure 2** covers LFP power PSTHs, cross-frequency coupling, phase dynamics, and related neural maps around play bouts.
+MATLAB and Python code for play-bout analyses: behavior statistics, motion–USV (LDA/UMAP) space, HMM play-state detection, and LFP physiology (PSTH power by frequency and behavior, coupling, phase).
 
 This repository contains **code only**. Experimental data are archived separately (see [Data availability](#data-availability)).
+
+**GitHub:** [play-bout-analysis-behavior-and-physiology](https://github.com/miguelconcham/play-bout-analysis-behavior-and-physiology)
 
 ## Repository structure
 
 ```
-Codes repository/
+play bout analysis behavior and physiology/
 ├── Figure 1/
 │   ├── Figure 1 Play Bouts.m          # Play-bout duration / interval distributions (Fig 1G)
 │   ├── Figure 1 LDA.m                 # Motion–USV UMAP + LDA plots (Fig 1C, S1B–D)
@@ -26,7 +28,9 @@ Codes repository/
 │   ├── Supporting codes/              # Original scripts (legacy; kept unchanged)
 │   └── Supporting codes v2/         # Renamed, simplified scripts (recommended)
 │
-├── Data/                              # Local data copy (not in git; see .gitignore)
+├── Data/
+│   └── Analysis results/
+│       └── psth power by frequency and behavior/   # Figure 2 PSTH / results .mat (local copy)
 └── README.md
 ```
 
@@ -90,7 +94,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m
 | Call-locked PSTH | `Estimate_psth_calls_all_animals.m` | (includes plots in same script) |
 | Cross-frequency coupling (mid-PAG) | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m` |
 | Cross-frequency coupling maps | `Estimate_freq_coupling_maps.m` | `Analyze_freq_coupling_maps.m` |
-| Phase at exploratory-bout onset | `Estimate_phase_exploratory_onset.m` | `Analyze_phase_exploratory_onset.m` |
+| Phase PSTH (band/behavior via GENERATE) | `Estimate_phase_psth.m` | `Analyze_phase_psth.m` |
 | Speed vs band-limited power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m` |
 | Coherence / PLI maps | `Estimate_coherence_maps.m` | — |
 
@@ -107,7 +111,7 @@ Main panel script: **`Figure 2/Figure 2.m`** (loads precomputed PSTH structs and
 - Statistics and Machine Learning Toolbox (`fitlme`, `fitlm`, `ttest`, …)
 - Third-party on path: `play_bout`, `wrap_probe_values`, `generateDistinctColors`, `align_by_area`, circular statistics helpers as used in the original pipeline
 
-**Data** (not in git): NPX raw/preprocessed LFP, behavior backups, synch models, channel maps, area limits table, and precomputed results under `Analysis results/Theta psth/`.
+**Data** (not in git): NPX raw/preprocessed LFP, behavior backups, synch models, channel maps, area limits table, and precomputed results under `Analysis results/psth power by frequency and behavior/`.
 
 ---
 
@@ -118,7 +122,7 @@ Main panel script: **`Figure 2/Figure 2.m`** (loads precomputed PSTH structs and
 3. Extract so the layout matches:
 
 ```
-Codes repository/
+play bout analysis behavior and physiology/
 ├── Figure 1/
 ├── Figure 2/
 └── Data/                    ← downloaded archive
@@ -131,7 +135,7 @@ Codes repository/
 ```
 
 4. **Figure 1** scripts are configured for:
-   `...\Codes repository\Data\`
+   `...\play bout analysis behavior and physiology\Data\`
 
 5. **Figure 2** v2 scripts currently point to lab network paths under `DataSets\` on the BCCN share. To run locally, update paths in the relevant `Estimate_*` / `Analyze_*` scripts or add a shared path config.
 
@@ -159,9 +163,17 @@ Copied subset used by Figure 1 scripts (~141 files):
 
 Full file list: see `Data/COPY_MANIFEST.txt` in the archived bundle.
 
-### Figure 2 data (additional)
+### Figure 2 data (local copy)
 
-Figure 2 requires NPX LFP, probe channel maps, and precomputed PSTH/coupling `.mat` files (e.g. under `Analysis results/Theta psth/`). A Figure 2 data bundle can be archived separately on Zenodo alongside the Figure 1 bundle.
+Precomputed PSTH, mixed-model results, and CV structs for Figure 2 live in:
+
+`Data/Analysis results/psth power by frequency and behavior/`
+
+File combinations (frequency band × behavior / calls / CV) are documented in:
+
+`Figure 2/Figure 2 Psth animal names and result combinations.txt`
+
+See `Data/Analysis results/psth power by frequency and behavior/COPY_MANIFEST.txt` for the full file list.
 
 ### Where to download data
 
@@ -174,8 +186,8 @@ Figure 2 requires NPX LFP, probe channel maps, and precomputed PSTH/coupling `.m
 | Lab / institutional storage | `[URL]` | If Zenodo/OSF not used |
 
 **Suggested Zenodo record titles:**
-- `Play Bout Analysis — Figure 1 data bundle (behavior, HMM, LDA)`
-- `Play Bout Analysis — Figure 2 data bundle (NPX PSTH, coupling)`
+- `Play Bout Analysis — Behavior and Physiology (Figure 1 data: behavior, HMM, LDA)`
+- `Play Bout Analysis — Behavior and Physiology (Figure 2 data: PSTH power by frequency and behavior)`
 
 ### Full raw data (optional, for re-running pipelines from scratch)
 

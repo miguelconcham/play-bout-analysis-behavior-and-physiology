@@ -1,7 +1,9 @@
 %% Analyze_speed_freq_relation
 % Theta power vs relative speed during play vs non-play bouts.
 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+data_root = fullfile(repo_root, 'Data');
+saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
 %% Load precomputed speed-power model data
 load([saving_folder,'\psth_structure_speed_delta.mat'],'psth_structure')

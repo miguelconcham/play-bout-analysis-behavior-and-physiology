@@ -1,6 +1,6 @@
 
 npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];
 
@@ -68,7 +68,7 @@ save([saving_folder,'\coherence_structure_animal_names_pli_struct_NPX2.mat'],'an
 
 
 %% loading 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
 
 disp('loading')
 load([saving_folder,'\coherence_structure_pli_struct_mpfc.mat'],'pli_struct_mpfc');
@@ -131,7 +131,7 @@ for j=1:numel(pli_struct)
     title(animal_names{j,1})
 end
 %%
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
 
 disp('loading')
 load([saving_folder,'\coherence_structure_pli_struct_mpfc.mat'],'pli_struct_mpfc');

@@ -1,12 +1,15 @@
 %% Analyze_freq_coupling
 % Cross-frequency coupling analysis (delta phase vs gamma amplitude).
 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+data_root = fullfile(repo_root, 'Data');
+saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
 area_limit_table = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
 
 freq_range_1 = [.1 5];
-freq_range_2 = [35 90];
+% freq_range_2 = [35 90]; % for gamma
+freq_range_2 = [6 12]; % for theta
 sr = 2500;
 filter_order = 2000;
 
@@ -28,8 +31,11 @@ Hd_freq2 = designfilt('bandpassfir', ...
 
 %% Load precomputed coupling structures
 disp('loading')
-load([saving_folder,'\couplig_structure_delta_gamma.mat'],'psth_structure');
-load([saving_folder,'\animal_names_coupling_delta_gamma.mat'],'animal_names');
+
+load([saving_folder,'\couplig_structure_delta_theta.mat'],'psth_structure');
+load([saving_folder,'\animal_names_coupling_delta_theta.mat'],'animal_names');
+% load([saving_folder,'\couplig_structure_delta_gamma.mat'],'psth_structure');
+% load([saving_folder,'\animal_names_coupling_delta_gamma.mat'],'animal_names');
 disp('ready')
 
 %% Merge sessions — phase-align amplitude distributions

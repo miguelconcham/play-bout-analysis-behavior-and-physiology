@@ -2,7 +2,7 @@
 % Streamlined version of Analyze_psth_all_files_maps.m
 % Keeps only the processing needed for Plot 1, Plot 2, and Plot 3.
 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
 
 %% Load precomputed PSTH structures
 disp('loading')

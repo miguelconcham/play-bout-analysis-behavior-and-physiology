@@ -4,7 +4,7 @@ import ssm
 from pathlib import Path
 
 # --- SETTINGS ---
-base_dir = Path("//experimentfs.bccn-berlin.pri/experiment/PlayNeuralData/NPX-OPTO PLAY NMM/PlayBout Analysis/Codes repository/Data/HMM data/HMM raw data")
+base_dir = Path("//experimentfs.bccn-berlin.pri/experiment/PlayNeuralData/NPX-OPTO PLAY NMM/PlayBout Analysis/play bout analysis behavior and physiology/Data/HMM data/HMM raw data")
 Ks = [2, 3, 4, 5]
 D = 14  # number of emission variables
 num_it = 500;

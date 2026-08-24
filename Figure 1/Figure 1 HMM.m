@@ -1,5 +1,5 @@
 %%  define folders
-repo_root       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\Codes repository';
+repo_root       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology';
 data_root       = [repo_root, '\Data'];
 figure_dir      = [repo_root, '\Figure 1\outputs'];
 synch_folder    = [data_root, '\Synch data'];

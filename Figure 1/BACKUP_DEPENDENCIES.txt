@@ -5,7 +5,7 @@ This list covers saved files being loaded, raw data folders, code dependencies,
 and software requirements. Original data files are NOT modified by this document.
 
 Base path prefix (all paths below are relative to):
-\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\Codes repository\Data\
+\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\
 
 (Figure 1 scripts now load from this local Data folder.)
 

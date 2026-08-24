@@ -1,4 +1,4 @@
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\Codes repository\Data';
+data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 behavior_folder = [data_root, '\Behavior backups'];
 behavior_files = dir(fullfile(behavior_folder, '*.txt'));
 dir_output = [data_root, '\HMM data\HMM raw data'];
@@ -14,11 +14,13 @@ for j=1:numel(behavior_files)
     close all
 end
 
+%% then run pythoin
+
 %%
 
 
 behavior_files = dir(fullfile(behavior_folder, '*.txt'));
-dir_output = [data_root, '\Analysis results\HMM 2 and 3 states 2 partners'];
+dir_output = [data_root, '\Analysis results\HMM 2 and 3 states 2 partners']; %% change this folder if you want to run it again
 
 for j=2:numel(behavior_files)
     animal_code = strrep(behavior_files(j).name, '.txt', '');

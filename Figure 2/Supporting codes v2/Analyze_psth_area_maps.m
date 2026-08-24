@@ -3,7 +3,9 @@
 % Keeps only Plot 1 (LPAG vs VLPAG LME), Plot 2 (power percentile maps),
 % and Plot 3 (LPAG 4-panel).
 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+data_root = fullfile(repo_root, 'Data');
+saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
 %% Load precomputed PSTH structures
 disp('loading')

@@ -1,12 +1,12 @@
 %% Estimate_psth_band_power
-% Driver script: compute band-limited PSTH around play-bout events.
-% Calls GENERATE_PSTH_PLAY_BOUT for each animal and merges results.
-% Modify GENERATE_PSTH_PLAY_BOUT to select different behaviors/frequency bands.
-% Outputs: psth_structure, animal_names (save manually when needed).
+% Driver: band-limited power PSTH around play-bout events (delta/theta/gamma via parameters below).
+% Saved .mat pairs are listed in:
+%   Figure 2/Figure 2 Psth animal names and result combinations.txt
+% Calls GENERATE_PSTH_PLAY_BOUT (modify GENERATE for behavior type).
 
 %% Paths and animal selection
 npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
 
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];

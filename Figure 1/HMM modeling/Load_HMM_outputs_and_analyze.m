@@ -1,7 +1,7 @@
 %% 1 SET PARAMS
 function [] = Load_HMM_outputs_and_analyze(dir_output,animal_code)
 
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\Codes repository\Data';
+data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 
 synch_folder = [data_root, '\Synch data'];
 traking_folder = [data_root, '\Traking backups'];

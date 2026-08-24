@@ -161,7 +161,7 @@ for ch_n=1:numel(mid_PAG_channel)
     freq_pow = mean(log10(pow_spectrogram(f_index,:)));
     freq_pow = movmean(freq_pow,1/max(freq_range));
 
-    %% -------------------- COMPUTE PERI-EVENT THETA PSTHs --------------------
+    %% -------------------- COMPUTE PERI-EVENT psth power by frequency and behaviors --------------------
     % Allocate arrays for different peri-event alignments
     call_onset              = nan(size(CallStats,1), round(range(hist_range)/spect_bin_size) +1);
     call_offset             = nan(size(CallStats,1), round(range(hist_range)/spect_bin_size)+1);
