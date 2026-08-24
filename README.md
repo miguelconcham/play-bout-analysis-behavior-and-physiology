@@ -1,6 +1,6 @@
 # Play Bout Analysis — Behavior and Physiology
 
-MATLAB and Python code for play-bout analyses: behavior statistics, motion–USV (LDA/UMAP) space, HMM play-state detection, and LFP physiology (PSTH power by frequency and behavior, coupling, phase).
+MATLAB and Python code for play-bout analyses: behavior statistics, motion–USV (LDA/UMAP) space, HMM play-state detection, LFP physiology (PSTH power by frequency and behavior, coupling, phase), and Figure 3 spike–LFP and pairwise analyses (phase locking, coincidence, cross-correlograms, activation index).
 
 This repository contains **code only**. Experimental data are archived separately (see [Data availability](#data-availability)).
 
@@ -28,9 +28,20 @@ play bout analysis behavior and physiology/
 │   ├── Supporting codes/              # Original scripts (legacy; kept unchanged)
 │   └── Supporting codes v2/         # Renamed, simplified scripts (recommended)
 │
+├── Figure 3/
+│   ├── Figure 3.m                     # Phase locking (peak / trough / unlocked)
+│   ├── Figure 3 Activation Index.m    # Within-structure activation-index plots
+│   ├── Figure 3 Coincident events.m   # Surprise / coincidence empty-bar plots
+│   ├── Figure 3 cross correlogram.m   # Example trough–trough CCGs
+│   ├── Supp Fig 3 Correlation between power and activation index.m
+│   └── Supporting codes/              # GENERATE / Estimate / ANALYZE pipelines
+│
 ├── Data/
 │   └── Analysis results/
-│       └── psth power by frequency and behavior/   # Figure 2 PSTH / results .mat (local copy)
+│       ├── psth power by frequency and behavior/   # Figure 2 PSTH / results .mat
+│       ├── phase locking data/                     # Figure 3 phase-coupling .mat
+│       ├── Cross_correlogram/                      # Figure 3 CCG / coincidence .mat
+│       └── activation index/                       # Figure 3 activation-index checkpoint
 └── README.md
 ```
 
@@ -115,6 +126,30 @@ Main panel script: **`Figure 2/Figure 2.m`** (loads precomputed PSTH structs and
 
 ---
 
+## Figure 3
+
+Spike–LFP phase locking, pairwise coincidence (surprise), example cross-correlograms, and within-structure activation index. Plotting scripts load local copies under `Data/Analysis results/` (DataSets originals are not modified).
+
+| Goal | Script |
+|------|--------|
+| Phase locking (peak / trough / unlocked) | `Figure 3/Figure 3.m` |
+| Activation-index plots | `Figure 3/Figure 3 Activation Index.m` |
+| Coincidence / surprise empty-bar plots | `Figure 3/Figure 3 Coincident events.m` |
+| Example trough–trough CCGs | `Figure 3/Figure 3 cross correlogram.m` |
+| Activation index vs delta power | `Figure 3/Supp Fig 3 Correlation between power and activation index.m` |
+
+**`Figure 3/Supporting codes/`** holds the GENERATE / Estimate / ANALYZE pipelines that build those `.mat` files from NPX data (legacy names such as `Estiamte_*` / `ANALYSE *` are kept).
+
+### Figure 3 requirements
+
+**MATLAB**
+- Signal Processing Toolbox, Statistics and Machine Learning Toolbox
+- Supporting codes on the MATLAB path (needed for `GENERATE_CROSS_CORR_EXAMPLE.m` and related helpers)
+
+**Data** (not in git): local copies under `Data/Analysis results/phase locking data/`, `Cross_correlogram/`, and `activation index/`. Estimate / GENERATE scripts still write and load DataSets originals on the lab share.
+
+---
+
 ## Setup after cloning
 
 1. Clone this repository.
@@ -125,6 +160,7 @@ Main panel script: **`Figure 2/Figure 2.m`** (loads precomputed PSTH structs and
 play bout analysis behavior and physiology/
 ├── Figure 1/
 ├── Figure 2/
+├── Figure 3/
 └── Data/                    ← downloaded archive
     ├── Behavior backups/
     ├── Analysis results/
@@ -139,9 +175,11 @@ play bout analysis behavior and physiology/
 
 5. **Figure 2** v2 scripts currently point to lab network paths under `DataSets\` on the BCCN share. To run locally, update paths in the relevant `Estimate_*` / `Analyze_*` scripts or add a shared path config.
 
-6. Add external MATLAB functions to your path (`play_bout`, `readNPY`, `run_umap`, `wrap_probe_values`, etc.).
+6. **Figure 3** plotting scripts load `Data\Analysis results\` on the BCCN share (phase locking, coincidence, activation index). Estimate / GENERATE scripts still use DataSets.
 
-7. Add **`Figure 2/Supporting codes v2`** to the MATLAB path before running Figure 2 estimate/analyze scripts.
+7. Add external MATLAB functions to your path (`play_bout`, `readNPY`, `run_umap`, `wrap_probe_values`, etc.).
+
+8. Add **`Figure 2/Supporting codes v2`** to the MATLAB path before running Figure 2 estimate/analyze scripts. Add **`Figure 3/Supporting codes`** before running Figure 3 CCG example plots.
 
 ---
 
@@ -175,6 +213,16 @@ File combinations (frequency band × behavior / calls / CV) are documented in:
 
 See `Data/Analysis results/psth power by frequency and behavior/COPY_MANIFEST.txt` for the full file list.
 
+### Figure 3 data (local copy)
+
+Precomputed phase-coupling, coincidence, CCG, and activation-index structs live in:
+
+- `Data/Analysis results/phase locking data/`
+- `Data/Analysis results/Cross_correlogram/`
+- `Data/Analysis results/activation index/`
+
+See `Data/Analysis results/FIGURE3_COPY_MANIFEST.txt` for the copied file list.
+
 ### Where to download data
 
 > **Update these links before leaving the lab:**
@@ -188,6 +236,7 @@ See `Data/Analysis results/psth power by frequency and behavior/COPY_MANIFEST.tx
 **Suggested Zenodo record titles:**
 - `Play Bout Analysis — Behavior and Physiology (Figure 1 data: behavior, HMM, LDA)`
 - `Play Bout Analysis — Behavior and Physiology (Figure 2 data: PSTH power by frequency and behavior)`
+- `Play Bout Analysis — Behavior and Physiology (Figure 3 data: phase locking, coincidence, activation index)`
 
 ### Full raw data (optional, for re-running pipelines from scratch)
 
