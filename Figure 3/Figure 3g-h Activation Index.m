@@ -92,7 +92,9 @@ end
 
 
 
-%% 3: Fig 3h Activation index, mean ± CI 
+%% 3: Fig 3h (and Supp Fig 5d) Activation index, mean ± CI
+% Fig 3h uses LPAG and VLPAG rows; Supp Fig 5d uses the remaining areas
+% (SC, DLPAG, DR) from this same figure. 
 % Logit activation index over warped time: how extreme the cell-type median is
 % relative to a within-structure null (other neurons in the same area).
 % Rows = structures, columns = peak / trough / unlocked. Play red, non-play black.

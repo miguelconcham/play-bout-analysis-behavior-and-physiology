@@ -677,7 +677,7 @@ for psth2use_cell = psth_list'
 end
 play_song([],[],[])
 
-%% 6 Saving — checkpoint for plotting 
+% 6 Saving — checkpoint for plotting 
 
 checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
 checkpoint_file = [checkpoint_folder, '\activation_index_section6.mat'];
@@ -737,3 +737,21 @@ end
 if ~exist(checkpoint_folder, 'dir'), mkdir(checkpoint_folder); end
 save([checkpoint_folder, '\stacked_psth_by_area_celltype.mat'], 'saved_data')
 disp(['Also saved: ', checkpoint_folder, '\stacked_psth_by_area_celltype.mat'])
+
+
+%% 8 SAVE checkpoint for example plot (section 9)
+% Needs the filled all_neurons_TD table from sections 1–4 (PSTHs, Exited /
+% Inhibited, delta/theta locking). After this save, section 9 can be run
+% on its own from a fresh MATLAB session.
+checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
+
+example_checkpoint = [checkpoint_folder, '\activation_index_example_plot.mat'];
+vars_example = {'all_neurons_TD', 'psth_map'};
+if exist('mig_edges_centers', 'var')
+    vars_example{end+1} = 'mig_edges_centers';
+end
+disp('Saving example-plot checkpoint')
+save(example_checkpoint, vars_example{:}, '-v7.3');
+disp(['Saved: ', example_checkpoint])
+
+

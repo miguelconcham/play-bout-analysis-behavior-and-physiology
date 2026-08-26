@@ -29,6 +29,7 @@ play bout analysis behavior and physiology/
 │   ├── Figure 3i cross correlogram.m
 │   ├── Fig 3j.m
 │   ├── Figure 3k Coincident events.m
+│   ├── SuppFig4 ActivationIndex Example.m   # Supp Fig 5a–c
 │   └── Supporting codes/
 ├── Figure 6/
 │   ├── Figure 6 Basic MI.m
@@ -130,12 +131,12 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | e | Locking during play vs before (and non-play control) | `Figure 3/Figure 3a-e.m` | `%% 14`–`%% 15 (Fig 3e)` |
 | f | Excited vs inhibited fractions by area and cell type | `Figure 3/Supporting codes/Estiamte_activation_index_and_other_variables.m` | inhibition / excitation block |
 | g | Activation-index heatmaps (LPAG, peak / trough / unlocked) | `Figure 3/Figure 3g-h Activation Index.m` | `%% 4 Fig 3g` |
-| h | Activation-index time course (LPAG, VLPAG) | `Figure 3/Figure 3g-h Activation Index.m` | `%% 3: Fig 3h` |
+| h | Activation-index time course (LPAG, VLPAG) | `Figure 3/Figure 3g-h Activation Index.m` | `%% 3: Fig 3h` (same section also yields Supp Fig 5d for SC, DLPAG, DR) |
 | i | Example coincident-spike cross-correlogram | `Figure 3/Figure 3i cross correlogram.m` | `%% 7 Fig 3i, and Supp Fig 5g` (`GENERATE_CROSS_CORR_EXAMPLE`) |
 | j | Coincidence-spike LFP phase (peak / trough / unlocked) | `Figure 3/Fig 3j.m` | `%% Fig 3j` |
 | k | Between-area coincidence change (play vs before) | `Figure 3/Figure 3k Coincident events.m` | `%% Fig 3k` |
 
-`Figure 3/Supporting codes/` holds GENERATE / Estimate / ANALYZE pipelines that build the `.mat` files those plots load.
+`Figure 3/Supporting codes/` holds GENERATE / Estimate / ANALYZE pipelines that build the `.mat` files those plots load. `Estiamte_activation_index_and_other_variables.m` section 8 writes the example-plot checkpoint used by `SuppFig4 ActivationIndex Example.m`.
 
 ---
 
@@ -228,7 +229,8 @@ Which PSTH / CV files to load for each band is listed in `Figure 2/Figure 2 Psth
 
 | Panel | What it is | Script | Section |
 |-------|------------|--------|---------|
-| a–d | Extra activation-index heatmaps / time courses (LPAG and other areas) | `Figure 3/Figure 3g-h Activation Index.m` | `%% 2`, `%% 8`, `%% 9` (marked “not shown in paper” in the script; these are the supplementary panels) |
+| a–c | LPAG neuron heatmap, population-rate envelopes, and LPAG activation-index overlay | `Figure 3/SuppFig4 ActivationIndex Example.m` | `%% (Supp fig 4 a-c)` (loads `activation_index_example_plot.mat`; set `psth2use` for the example behavior) |
+| d | Activation-index time courses for SC, DLPAG, and DR (same plot as Fig 3h, remaining areas) | `Figure 3/Figure 3g-h Activation Index.m` | `%% 3: Fig 3h` |
 | e | Dual-probe histology | — (illustration) | — |
 | f | Example coincident spikes (two trough cells) | `Figure 3/Figure 3i cross correlogram.m` | `%% 7` (`GENERATE_CROSS_CORR_EXAMPLE`) |
 | g | Coincidence raster and mean count vs play onset | `Figure 3/Figure 3i cross correlogram.m` | `%% 7 Fig 3i, and Supp Fig 5g` |
@@ -276,7 +278,7 @@ Example traces also need `Data/Synch data/<animal>/` and `Data/NPX data/NPX raw 
 
 - `Data/Analysis results/phase locking data/`
 - `Data/Analysis results/Cross_correlogram/`
-- `Data/Analysis results/activation index/`
+- `Data/Analysis results/activation index/` — `activation_index_section6.mat` for Fig 3g–h / Supp Fig 5d; `activation_index_example_plot.mat` for `SuppFig4 ActivationIndex Example.m` (Supp Fig 5a–c). Rebuild both with `Figure 3/Supporting codes/Estiamte_activation_index_and_other_variables.m` (sections 6 and 8).
 
 ### Figure 6
 
