@@ -1,13 +1,16 @@
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
+this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Play partner.m';
+repo_root = fileparts(fileparts(this_file));
+data_root = fullfile(repo_root, 'Data');
+saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
-%%
+%% 1 Loading data
 disp('loading')
 
 
 load([saving_folder,'\psth_structure_delta_updated.mat'],'psth_structure');
 load([saving_folder,'\animal_names_delta_updated.mat'],'animal_names');
 disp('ready')
-%% merging_psth
+%% 2 merging psth
 smooth_wind = 20;
 baseline_range = [-2 0]
 animal_label = {'B1D1','B1S3','B2S2','B3D2', 'B4S2', 'B4D4'};
@@ -156,7 +159,7 @@ play_bout_length = diff(all_play_bouts')';
 
 [sorted_play_bout_length, order] = sort(play_bout_length);
 
-%% plot animal responses
+%% 3 (not shown) plot  responses to playbout with each play partener (onset)
 
 X_lim = [-1 2];
 y_lim = [-1 3];
@@ -220,7 +223,7 @@ for an= 1:numel(animal_label)
       data_for_paired = [data_for_paired;play_lengths];
 end
 
-%%
+%% 4 Supp Fig 2i (change in delta power in the relevan window, correlate with changes in amount of play)
 figure
 
 subplot(1,3,1)
@@ -318,7 +321,7 @@ title(p)
 axis square
 xlabel('Proportion of play during session')
 ylabel('Change in delta power (zscored)')
-%%
+%% 5 Stacking and ploting responsed with each partner 
 staked_mean_responses = cell(3,1);
 min_length = .0;
 pn=1;
@@ -354,7 +357,7 @@ for partner_number_list = {1, 2, [1 2 3]};
     pn =pn+1;
 end
 
-%%
+%% 6 (Supp Fig 2h) Load linear mixed model, and plot partner effect (difference between partners effect)
 
 load([saving_folder,'\results_play_bout_PBonly_zscore4_updated.mat'],'results');   %     here we use all play bouts
 

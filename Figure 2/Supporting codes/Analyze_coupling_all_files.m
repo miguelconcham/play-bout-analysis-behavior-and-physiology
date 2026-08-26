@@ -3,8 +3,8 @@
 
 
 
-npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
+npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];
 
@@ -174,7 +174,7 @@ ylabel('Count')
 
 fn =4;
 current_dir = [npx_Raw_Data, '\', animal_list(fn).name];
-area_limit_table    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
+area_limit_table    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
 % npx_raw_data = 
 animal_code         = strsplit(current_dir, '\');
 animal_code         = animal_code{end};
@@ -215,7 +215,7 @@ if NPX_Type == 1
     channel_Range = [min(PAG_channels(:)) max(PAG_channels(:))];
     mid_PAG_channel = round(mean(channel_Range));
 else
-    load([current_dir,'\ChannelMap.mat'], 'xcoords', 'ycoords','chanMap')
+    load([current_dir,'\chann_map_PAG.mat'], 'xcoords', 'ycoords','chanMap')
     Y_Range = area_limit{ismember(area_limit.area, {'LPAG'}), {'ProbeNum','depth_start', 'depth_end'}};
     mid_PAG_channel = nan(size(Y_Range,1),1);
     figure
@@ -312,5 +312,5 @@ ylim([0 4])
 
 %% save resulint figure
 
-figure_dir='\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Data cros s freuqnecy coupling';
+figure_dir='\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Data cros s freuqnecy coupling';
 print(gcf,'-vector','-dsvg',[figure_dir,'\gamma delta entreinment.svg'])

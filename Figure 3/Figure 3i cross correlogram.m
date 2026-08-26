@@ -12,7 +12,7 @@ data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO P
 % Per-session structs from Estimate cross correlogram all aniamls
 % (play, non-play, and percentile/shuffle CCGs). Local copies under Data\.
 
-npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
+npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
 cc_folder = [data_root, '\Analysis results\Cross_correlogram'];
 neuron_folder = [data_root, '\Analysis results\phase locking data'];
 
@@ -154,7 +154,7 @@ for kk_n = 1:numel(list_of_neuron)
     nsp = nsp + 1;
 end
 
-%% 7 Plot a chosen pair (GENERATE_CROSS_CORR_EXAMPLE)
+%% 7 Fig 3i, and Supp Fig 5g Plot a chosen pair (GENERATE_CROSS_CORR_EXAMPLE)
 % Uses list_of_neuron(plotting index) from section 6: session + cluster IDs
 % → example CCG at higher time precision.
 

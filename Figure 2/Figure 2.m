@@ -2,20 +2,21 @@
 % PSTH / results file combinations (frequency band, behavior, calls, CV):
 %   Figure 2 Psth animal names and result combinations.txt
 
-repo_root = fileparts(mfilename('fullpath'));
-combo_file = fullfile(repo_root, 'Figure 2 Psth animal names and result combinations.txt');
-data_root = fullfile(repo_root, '..', 'Data');
-saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
+this_file       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Figure 2.m';
+repo_root       = fileparts(this_file);
+combo_file      = fullfile(repo_root, 'Figure 2 Psth animal names and result combinations.txt');
+data_root       = fullfile(repo_root, '..', 'Data');
+saving_folder   = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
-figure_dir = fullfile(repo_root, 'outputs');
+figure_dir      = fullfile(repo_root, 'outputs');
 synch_directory = fullfile(data_root, 'Synch data');
-hmm_raw_data = fullfile(data_root, 'HMM data', 'HMM raw data');
-call_folder = fullfile(data_root, 'CallDetectionBackup');
+hmm_raw_data    = fullfile(data_root, 'HMM data', 'HMM raw data');
+call_folder     = fullfile(data_root, 'CallDetectionBackup');
 behavior_folder = fullfile(data_root, 'Behavior backups');
-npx_folder = fullfile(data_root, 'NPX data', 'NPX raw data');
-area_limit_table = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
+npx_folder      = fullfile(data_root, 'NPX data', 'NPX raw data');
+area_limit_table = fullfile(data_root, 'Area_limits_GoodLooking.xlsx');
 
-%% Load PSTH — example: DELTA play bout (combo file row DELTA #1)
+%% 1 Load PSTH — example: DELTA play bout (combo file row DELTA #1)
 % Other combinations: swap filenames per combo file (see combo_file).
 
 disp('loading')
@@ -26,7 +27,7 @@ load(fullfile(saving_folder, 'animal_names_delta_updated.mat'), 'animal_names');
 
 
 
-%% mergind psth data 
+%% 2 mergind psth data 
 smooth_wind = 20;
 baseline_range = [-5 -2];
 animal_label = {'B1D1','B1S3','B2S2','B3D2', 'B4S2', 'B4D4'};
@@ -120,7 +121,7 @@ play_bout_length = diff(all_play_bouts')';
 
 
 [sorted_play_bout_length, order] = sort(play_bout_length);
-%% plot single animals  (and obtain mean response per animal)
+%% 3 (Fig 2d) plot single animals  (and obtain mean response per animal)
 X_lim = [-3 3]
 figure
 min_length = 0;
@@ -161,7 +162,13 @@ for an= 1:numel(animal_label)
     xlim(X_lim)
     stacked_mean_onset = [stacked_mean_onset;mean(array, 'omitmissing')];
 end
-%% plot lfp together with power
+%% 4 plot lfp (next section) together with power (this section)
+% keep figure open until lfp data is loaded and filtered, then the secodnn
+% subplot will be aded (first subplot contains power estimated using
+% fourirer, which is how we estiamted delta(theta) power, and is saved
+% within the psth_strucutre, hilbert data need to be estimated from raw
+% data
+
 min_length = .0;
 animal =2;
 session_number = 6;
@@ -253,30 +260,34 @@ for trial = all_session_6(trial_n)
     xlim(x_lim)
     pause(.1)
 end
-%% load lfp 
-
-this_animal_dir = [npx_folder,'\',animal_names{this_sessions(order(trial)),1}];
+%% 5 load lfp  and channel map
+% Session folder under Data\NPX data\NPX raw data (same names as animal_names col 1).
+session_name    = animal_names{this_sessions(order(trial)),1};
+this_animal_dir = fullfile(npx_folder, session_name);
 
 disp('LOADING LFP')
-if exist([npx_folder,'\',animal_names{this_sessions(order(trial)),1},'\LFP_PAG.mat'], 'file')==2
+if exist(fullfile(this_animal_dir, 'LFP_PAG.mat'), 'file')==2
     % Preprocessed LFP file exists
     NPX_Type = 2;
-    load([npx_folder,'\',animal_names{this_sessions(order(trial)),1},'\LFP_PAG.mat'], 'LFP')
-elseif exist([npx_folder,'\',animal_names{this_sessions(order(trial)),1},'\LFP_PAG.dat'], 'file')==2
+    load(fullfile(this_animal_dir, 'LFP_PAG.mat'), 'LFP')
+elseif exist(fullfile(this_animal_dir, 'LFP_PAG.dat'), 'file')==2
     % Load raw binary LFP file
     NPX_Type = 1;
-    file_pointer = fopen([npx_folder,'\',animal_names{this_sessions(order(trial)),1},'\LFP_PAG.dat'], 'r');
+    file_pointer = fopen(fullfile(this_animal_dir, 'LFP_PAG.dat'), 'r');
     LFP = fread(file_pointer,'int16');
+    fclose(file_pointer);
     LFP = reshape(LFP, 384, numel(LFP)/384);
+else
+    disp('LFP NOT FOUND')
 end
 disp('LFP LOADED')
-
-%% -------------------- SELECT PAG CHANNEL(S) --------------------
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%% -------------------- SELECT PAG CHANNEL(S) -------------------- %%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 disp('Loading Channel Map')
 hard_coded_x_coords = [8 40;258 290; 508 540; 758 790];
 area_limit = readtable(area_limit_table);
-
-animal_code_params = strsplit(animal_names{this_sessions(order(trial)),1}, ' ');
+animal_code_params = strsplit(session_name, ' ');
 animal_batch       = animal_code_params{1};
 date               = animal_code_params{2};
 repeated_animal    = animal_code_params{3};
@@ -287,20 +298,41 @@ else
     this_animal = ['Batch', animal_batch(2), repeated_animal,animal_batch(4)];
 end
 area_limit = area_limit(ismember(area_limit.AnimalName,this_animal),:);
+load(fullfile(this_animal_dir, 'chann_map_PAG.mat'), 'xcoords', 'ycoords', 'chanMap')
 
 if NPX_Type == 1
-    % Raw LFP: select channel range for LPAG region
-    PAG_channels = area_limit{ismember(area_limit.area, {'LPAG'}), {'ch_start', 'ch_end'}};
-    PAG_channels = str2double(PAG_channels);
-    channel_Range = [min(PAG_channels(:)) max(PAG_channels(:))];
-    mid_PAG_channel = round(mean(channel_Range));
-else
-    % Preprocessed: use ChannelMap.mat to locate mid-PAG channel
-    load([npx_folder,'\',animal_code,'\ChannelMap.mat'], 'xcoords', 'ycoords','chanMap')
-    Y_Range = area_limit{ismember(area_limit.area, {'LPAG'}), {'ProbeNum','depth_start', 'depth_end'}};
-    mid_PAG_channel = nan(size(Y_Range,1),1);
+    if ~ismember(192, chanMap)
+        pos_191 = find(chanMap==191);
+        pos_193 = find(chanMap==193);
+        if pos_193 == pos_191+1
+            xcoords = [xcoords;NaN];
+            xcoords(pos_193+1:end) = xcoords(pos_193:end-1);
+            xcoords(pos_193) = 43;
+            ycoords = [ycoords;NaN];
+            ycoords(pos_193+1:end) = ycoords(pos_193:end-1);
+            ycoords(pos_193) = 1900;
+            chanMap = [chanMap;NaN];
+            chanMap(pos_193+1:end) = chanMap(pos_193:end-1);
+            chanMap(pos_193) = 192;
+        else
+            disp('Inconsistent ChannelMap')
+        end
+    end
     figure
     plot(xcoords,ycoords, 'k.'); hold on
+    Y_Range = area_limit{ismember(area_limit.area, {'LPAG'}), {'ProbeNum','depth_start', 'depth_end'}};
+    this_indexes = ycoords>=Y_Range(2) & ycoords<=Y_Range(3);
+    all_locs = [xcoords(this_indexes) ycoords(this_indexes)];
+    plot(all_locs(:,1),all_locs(:,2), 'r.')
+    mean_loc = mean(all_locs);
+    [~, closest_channel]= min(sum(abs([xcoords ycoords]-repmat(mean_loc,numel(ycoords),1)),2));
+    plot(xcoords(closest_channel), ycoords(closest_channel), 'xb')
+    mid_PAG_channel = chanMap(closest_channel);
+else
+    figure
+    plot(xcoords,ycoords, 'k.'); hold on
+    Y_Range = area_limit{ismember(area_limit.area, {'LPAG'}), {'ProbeNum','depth_start', 'depth_end'}};
+    mid_PAG_channel = nan(size(Y_Range,1),1);
     for j=1:size(Y_Range,1)
         this_indexes = ycoords>=Y_Range(j,2) & ycoords<=Y_Range(j,3) & ismember(xcoords,hard_coded_x_coords(Y_Range(j,1),:));
         all_locs = [xcoords(this_indexes) ycoords(this_indexes)];
@@ -311,21 +343,30 @@ else
         mid_PAG_channel(j) = chanMap(closest_channel);
     end
 end
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%% load synch function %%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+disp('Loading Synch files')
+load(fullfile(synch_directory, session_name, 'synch_model_video2NPX.mat'))
+audio_synch = fullfile(synch_directory, session_name, 'synch_model_audio2NPX.mat');
+if exist(audio_synch, 'file')==2
+    load(audio_synch)
+else
+    disp(['audio synch not found: ', audio_synch])
+end
+disp('Done')
 
-%% load synch function
+%% 6 filter raw data into delta or theta
+% select manually if you want to estiamte theta or delta filtered signal,
+% see below.
 
-load([synch_directory,'\', animal_names{this_sessions(order(trial)),1}, '\synch_model_video2NPX.mat'])
-load([synch_directory,'\', animal_names{this_sessions(order(trial)),1}, '\synch_model_audio2NPX.mat'])
-%% load raw data
 lfp_ylim_left = [-2000 2000];
 lfp_ylim_right = [-1000 1000];
 
 low_pass_freq = 50;
 
-
 start_event = this_anima_play_bout(order(trial),1)+time2use(1); %in video time
 end_event   =this_anima_play_bout(order(trial),1)+time2use(end); %in video time
-
 
 sr = 2500;
 start_event_index = round(start_event*sr);
@@ -381,13 +422,12 @@ end
 xlim(x_lim)
 ylim(lfp_ylim_right)
 
-%% Load explained variance — example: DELTA + THETA CV (combo file DELTA #7, THETA #3)
+%% 7 (Figre 2g, Supp Fig 4c,f) Load explained variance — example: DELTA + THETA CV (combo file DELTA #7, THETA #3)
 % GAMMA #3 → cvResults_mean_calls_gamma_AlllVar_play_baut.mat
 % load(fullfile(saving_folder, 'cvResults_single_calls.mat'), 'cvResults')
-% load(fullfile(saving_folder, 'cvResults_mean_calls_delta_v2.mat'), 'cvResults')
-load(fullfile(saving_folder, 'cvResults_mean_calls_delta_v2_AlllVar.mat'), 'cvResults')
-load(fullfile(saving_folder, 'cvResults_mean_calls_theta_v2_AlllVar.mat'), 'cvResults')
-
+% load(fullfile(saving_folder, 'cvResults_mean_calls_delta_v2_AlllVar.mat'), 'cvResults')
+% load(fullfile(saving_folder, 'cvResults_mean_calls_delta_v2_AlllVar.mat'), 'cvResults')
+load(fullfile(saving_folder, 'cvResults_mean_calls_gamma_AlllVar_play_baut.mat'), 'cvResults')
 
 
 
@@ -416,9 +456,10 @@ for j=1:numel(predictors)
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
     mean_diff(j) =mean( r2_full - r2_reduced)/mean(r2_full); % difference per fold
 end
-% [~, re_order] =  sort(mean_diff, 'descend');
+[~, re_order] =  sort(mean_diff, 'descend'); 
 
-re_order = [14 7 1 15  2 13 6 4 3 8 9 10 5 11 12]; % manual order
+ re_order = [14 7 1 15 2 13 6 4 3 8 9 10 5 11 12]; % manual order,
+ % comes from copying re_order values used during play
 % re_order =1:numel(re_order) % manual order
 
 for j=1:numel(re_order)
@@ -464,13 +505,13 @@ ylim([-1 y_for_sig+10])
 title('Cross-validated \DeltaR^2 when removing each predictor')
 set(gca, 'FontSize', 24)
 
-%% Load PSTH for LFP power panels — example: DELTA play bout (combo file DELTA #1)
+%% 8 Load PSTH for LFP power panels — example: DELTA play bout (combo file DELTA #1)
 disp('Loading')
 load(fullfile(saving_folder, 'psth_structure_delta_updated.mat'), 'psth_structure');
 load(fullfile(saving_folder, 'animal_names_delta_updated.mat'), 'animal_names');
 disp('Loading Ready')
 
-%% merging_psth
+%% 9 merging_psth
 smooth_wind = 20;
 baseline_range = [-2 0]
 animal_label = {'B1D1','B1S3','B2S2','B3D2', 'B4S2', 'B4D4'};
@@ -541,7 +582,7 @@ play_bout_length = diff(all_play_bouts')';
 
 [sorted_play_bout_length, order] = sort(play_bout_length);
 
-%% plot single animals  (and obtain mean response per animal)
+%% 10 plot single animals  (and obtain mean response per animal)
 X_lim = [-2 2]
 figure
 min_length = .0;
@@ -576,13 +617,13 @@ for an= 1:numel(animal_label)
     stacked_mean_onset = [stacked_mean_onset;mean(array, 'omitmissing')];
 end
 
-%% Load mixed-model results — example: DELTA play bout (combo file DELTA #1)
+%% 11 Load mixed-model results — example: DELTA play bout (combo file DELTA #1)
 % load(fullfile(saving_folder, 'results_play_bout.mat'), 'results'); % all time points
 load(fullfile(saving_folder, 'results_play_bout_PBonly_zscore4_updated.mat'), 'results'); % play-bout-only bins
 est = results.est;
 ci = results.ci;
 pvals_fdr = results.pvals;
-%% plot all together
+%% 12 (Fig 2e,f and Supp Fig 4a,d) plot all together
 
 X_lim = [-1 3];
 alpha = 0.05;
@@ -637,13 +678,14 @@ hold on
 y_lim =ylim;
 plot([0 0],y_lim, 'k' )
 ylim tight
-%% Call responses
-
-%% Load call PSTH — example: GAMMA calls (combo file GAMMA #2)
+%%%%%%%%%%%%%%%%%%%%
+%% Call responses %%
+%%%%%%%%%%%%%%%%%%%%
+%% 13 Load call PSTH — example: GAMMA calls (combo file GAMMA #2)
 load(fullfile(saving_folder, 'psth_structure_call_gamma.mat'), 'psth_structure');
 load(fullfile(saving_folder, 'animal_names_call_gamma.mat'), 'animal_names');
 
-%% mergin data
+%% 14 mergin call data
 
 smooth_wind             = 20;
 baseline_range          = [-2 0]
@@ -700,7 +742,7 @@ call_lengths = all_Calls.CallLengths;
 [sorted_call_lengths, order] = sort(call_lengths);
 
 disp('merge done')
-%% ploting each animal (and obtain mean response per animal)
+%% 15 ploting each animal (and obtain mean response per animal)
 
 stacked_mean = [];
 X_lim = [-2 .5];
@@ -737,14 +779,14 @@ for an= 1:numel(animal_label)
     stacked_mean = [stacked_mean;mean(array,'omitmissing')];
 end
 
-%% Load call mixed-model results — example: GAMMA calls (combo file GAMMA #2)
+%% 16 Load call mixed-model results — example: GAMMA calls (combo file GAMMA #2)
 load(fullfile(saving_folder, 'results_call_updated_gamma.mat'), 'results');
 
 limited_time = results.time;
 est = results.est;
 ci = results.ci;
 pvals_fdr = results.pvals;
-%% now plot all together
+%% 17 (Supp Fig 4e) now plot all together
 figure
 an=2;
 alpha = 0.01;
@@ -803,13 +845,15 @@ yyaxis right
 plot(time, mean(all_onset_regressors( length_bool,:)), 'r')
 xlim(X_lim)
 
-%% plot theta and speed
+%% Speed responses %%
+%%%%%%%%%%%%%%%%%%%%%
 
+%% 18 plot theta and speed
+speed_theta_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
+load(fullfile(speed_theta_folder, 'psth_structure_speed_theta_v2.mat'), 'psth_structure')
+load(fullfile(speed_theta_folder, 'animal_names_speed_theta_v2.mat'), 'animal_names')
 
-load([saving_folder,'\psth_structure_speed_theta.mat'],'psth_structure')
-load([saving_folder,'\animal_names_speed_theta.mat'],'animal_names')
-
-%% obtain theta increas eduirng play (mixed effect linear model)
+%% 19 obtain theta increas eduirng play (mixed effect linear model)
 
 stasts_table = cell(numel(psth_structure),6);
 
@@ -836,7 +880,7 @@ fprintf('Mean = %.3f, 95%% CI [%.3f, %.3f], p = %.4f\n', coef, ci(1), ci(2), pva
 
 
 
-%% Compute speed and theta  
+%% 20 Compute speed and theta  
 n_grid = 101;
 distance_grid = linspace(-10, 10, n_grid);
 
@@ -882,7 +926,7 @@ for j=1:numel(psth_structure)
     mean_powers_play(j,:)    = meanA;
     mean_powers_noplay(j,:)  = meanB;
 end
-%% now plot
+%% 21 (Fig Supp 4b) now plot
 [bin_count, ~, samples2plot] = histcounts(data_together(:,1), -5:.1:10);
 
 figure

@@ -2,9 +2,9 @@ function psth_struct = GENERATE_DELTA_PSTH_ALL_BEHAVIORS(current_dir,wind_length
 
 
 all_behaviors           =  {'Pounce', 'CC','Boxing', 'Evasion','Pin', 'Escape', 'CB', 'CD','Grooming','Rearing', 'Sniffing','Scratching','PounceI', 'Bite'};
-synch_directory     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Synch data';
-area_limit_table    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
-behavior_data       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Behavior backups';
+synch_directory     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Synch data';
+area_limit_table    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
+behavior_data       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Behavior backups';
 % npx_raw_data =
 animal_code         = strsplit(current_dir, '\');
 animal_code         = animal_code{end};
@@ -130,7 +130,7 @@ if NPX_Type == 1
     mid_PAG_channel = chanMap(closest_channel);
     title([this_animal, ' Probe#', num2str(Y_Range(1))])
 else
-    % Preprocessed: use ChannelMap.mat to locate mid-PAG channel
+    % Preprocessed: use chann_map_PAG.mat to locate mid-PAG channel
     plot(xcoords,ycoords, 'k.'); hold on
     Y_Range = area_limit{ismember(area_limit.area, {'LPAG'}), {'ProbeNum','depth_start', 'depth_end'}};
 

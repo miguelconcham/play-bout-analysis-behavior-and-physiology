@@ -11,11 +11,11 @@ varNames2store = {'model_data', 'lm', ...
     'play_behaviors', 'Behavior', ...
     'play_bouts_table'};
 
-synch_directory  = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Synch data';
-area_limit_table = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
-npx_folder       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-trakcking_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Traking backups';
-behavior_data    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Behavior backups';
+synch_directory  = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Synch data';
+area_limit_table = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
+npx_folder       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
+trakcking_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Traking backups';
+behavior_data    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Behavior backups';
 
 animal_code_params = strsplit(animal_code, ' ');
 animal_batch       = animal_code_params{1};
@@ -107,7 +107,7 @@ if NPX_Type == 1
     channel_Range = [min(PAG_channels(:)) max(PAG_channels(:))];
     mid_PAG_channel = round(mean(channel_Range));
 else
-    load([npx_folder, '\', animal_code, '\ChannelMap.mat'], 'xcoords', 'ycoords', 'chanMap')
+    load([npx_folder, '\', animal_code, '\chann_map_PAG.mat'], 'xcoords', 'ycoords', 'chanMap')
     Y_Range = area_limit{ismember(area_limit.area, {'LPAG'}), {'ProbeNum', 'depth_start', 'depth_end'}};
     mid_PAG_channel = nan(size(Y_Range, 1), 1);
     figure

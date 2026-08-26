@@ -3,7 +3,8 @@
 % Keeps only Plot 1 (LPAG vs VLPAG LME), Plot 2 (power percentile maps),
 % and Plot 3 (LPAG 4-panel).
 
-repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_area_maps.m';
+repo_root = fileparts(fileparts(fileparts(this_file)));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 

@@ -16,7 +16,7 @@ load(checkpoint_file);
 disp('Checkpoint loaded')
 
 
-%% 2 Per-neuron PSTHs by cell type and area (play vs non-play)
+%% 2 Per-neuron PSTHs by cell type and area (play vs non-play). NOT SHOWN IN PAPAER
 % Within each structure, neurons are split into peak-locked, trough-locked, and
 % unlocked. Each row is one neuron’s z-scored, time-warped PSTH, median across
 % play (top) vs non-play (middle) behaviors. Bottom: population mean ± 95% CI
@@ -92,7 +92,7 @@ end
 
 
 
-%% 3 Activation index, mean ± CI (Figure 3h)
+%% 3: Fig 3h Activation index, mean ± CI 
 % Logit activation index over warped time: how extreme the cell-type median is
 % relative to a within-structure null (other neurons in the same area).
 % Rows = structures, columns = peak / trough / unlocked. Play red, non-play black.
@@ -143,7 +143,7 @@ for an=1:5
 end
 %% print if needed
 % print(gcf,'-vector','-dsvg',[figure_folder,'/mean and ci activation index.svg'])
-%% 4 Activation index per behavior (Figure 3g)
+%% 4 Fig 3g Activation index per behavior 
 % Same logit ranking as section 3, shown as one row per behavior (play then
 % non-play). Color is how strongly that cell type outranks (or is outranked by)
 % the rest of the structure over time. White line separates play from non-play.
@@ -197,7 +197,7 @@ for an=1:5
 end
 
 
-%% 5 Self–other consistency of the within-structure ranking
+%% 5 (Not shown in paper) Self–other consistency of the within-structure ranking
 % Alternative to the time-resolved index: correlation of activation-index
 % waveforms across behaviors. For each cell type × structure, compare
 % (1) matched self vs partner of the same behavior vs (2) unmatched behaviors,
@@ -268,7 +268,7 @@ end
 
 
 
-%% 6 Bout-averaged activation index per behavior
+%% 6 (Not shown in paper)  Bout-averaged activation index per behavior
 % Alternative summary of the same ranking: mean logit during the bout window
 % [0 5] s, one bar per behavior (play magenta, non-play black). Collapses the
 % time course from sections 3–4 into a single within-structure rank per
@@ -318,7 +318,7 @@ for an=1:5
     end
 end
 
-%% 7 Fraction of behaviors with a significant ranking
+%% 7 (Not shown in paper)  Fraction of behaviors with a significant ranking
 % Alternative to the mean index: how often the cell type’s rank in the structure
 % crosses a significance threshold (|logit| > −log10(0.05)) at any time.
 % Bars: play up, play down, non-play up, non-play down. Asks whether play
@@ -352,7 +352,7 @@ for an=1:5
 end
 
 
-%% 8 Within-structure relative activity (IRI heatmaps)
+%% 8 (Not shown in paper)  Within-structure relative activity (IRI heatmaps)
 % Neuron-level alternative to the population activation index. For each
 % structure, subtract the area-wide median PSTH from every neuron (IRI), then
 % average those residuals by cell type. Heatmaps: behaviors × time. This is
@@ -434,7 +434,7 @@ yticklabels(psth_list([non_play_behaviors,play_behaviors]))
        
 end
 
-%% 9 Within-structure relative activity, play vs non-play
+%% 9 (Not shown in paper) Within-structure relative activity, play vs non-play
 % Same IRI as section 8 (neuron minus structure median, then mean by cell type),
 % shown as mean ± 95% CI over time. Play red, non-play black. Asks whether a
 % cell type’s rank inside the area shifts during play relative to other

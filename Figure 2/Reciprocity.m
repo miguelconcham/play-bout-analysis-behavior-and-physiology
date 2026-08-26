@@ -1,5 +1,6 @@
 %% 1 LOAD DATA
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
+% Regressor PSTH structs (~5 GB) live on DataSets Theta psth; not copied into repo Data.
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth';
 disp('Loading')
 % load([saving_folder,'\psth_structure_all_regressors_beta_gamma.mat'],'psth_structure'); 
 % load([saving_folder,'\animal_names_all_regressors_beta_gamma.mat'],'animal_names');
@@ -266,7 +267,7 @@ array = repmat(stacked_data.meta(:,1),1, size(regressors.call_onset_regressor,2)
 array(~expanded_regressor) = {'NaN'};
 animal_name = categorical(array);
 
-%% 6 plot playboput colored according to reciprocity
+%% 6 (not shwon) plot playboput colored according to reciprocity
 
 
 
@@ -352,7 +353,7 @@ xlabel('x'); ylabel('y'); title('Kernel-smoothed estimate of y = f(x)');
 % DO NOT RUN SESSION BEFORE< SINCE YOU MAY OVERWRITE DATA
 % later section also should be avoided.
 
-%% select needed arrays
+%% 7 select needed arrays (regressors)
 array = detailed_playbout;
 array(expanded_regressor==0) = NaN;
 detailed_playbout_regressor_matrix = array;
@@ -365,9 +366,6 @@ play_bout_matrix  = array;
 array = detailed_play_other;
 array(expanded_regressor==0) = NaN;
 detailed_play_other_matrix  = array;
-
-
-
 
 
 array = detailed_play_self;
@@ -402,10 +400,6 @@ for j=1:size(detailed_playbout_regressor_matrix,1)
 end
 
 
-
-
-%%
-
 array = repmat(stacked_data.meta(:,1),1, size(regressors.call_onset_regressor,2));
 array(~expanded_regressor) = {'NaN'};
 animal_name = categorical(array);
@@ -413,8 +407,7 @@ animal_name = categorical(array);
 animal_list = unique(animal_name);
 animal_list(ismember(animal_list, 'NaN')) = [];
 
-%%
-
+%% 8 (Supp Fig 3a) % of reciprocical and nonreciprocal play
 index = play_bout_matrix==1 & detailed_playbout_regressor_matrix>=0;
 x = detailed_playbout_regressor_matrix(index);
 
@@ -428,7 +421,7 @@ hold on
 plot(xf, f, 'k')
 subplot(1,2,1)
 pie([sum(x==0) sum(x>0)], {['Nonreciprocal ', num2str(100*mean(x==0))],['Reciprocal ', num2str(100*mean(x>0))]})
-%% select here if you want to estimae power duirng play botius (firt group of code) or self play  (second group of code lines)
+%% 9 select here if you want to estimae power duirng play botius (firt group of code) or self play  (second group of code lines)
 % 
 % index = play_bout_matrix==1 & detailed_playbout_regressor_matrix>=0 & abs(pow_regressor_matrix)<3;
 % x = detailed_playbout_regressor_matrix(index);
@@ -446,7 +439,7 @@ animal_cat = animal_name(index);
 
 
 
-%%
+%% 10 (not shown) percentage of reciprocity ony when implanted animal is playing 
 
 figure
 subplot(1,2,2)
@@ -458,10 +451,9 @@ plot(xf, f, 'k')
 subplot(1,2,1)
 pie([sum(x==0) sum(x>0)])
 
-%%
+%% 11 (Fig 2h, Supp Fig 3b,c)
 
 figure
-
 
 subplot(1,5,1)
 histogram(y(x <0.1),-4:0.05:4,'Normalization','pdf', 'FaceAlpha',.5, 'EdgeColor','none')
@@ -489,8 +481,6 @@ hold on
 plot(xf_high, f_high, 'r')
 
 
-
-
 subplot(1,5,3)
 hold on
 all_differences = nan(numel(animal_list),3);
@@ -516,7 +506,7 @@ title(num2str([p,tstats.tstat, max(all_differences(:,1))]))
 
 
 
-%% now estiamte correlation for recirpocal index (above threshold = .75)
+%% 12 (Supp Fig 3e,f) now estiamte correlation for recirpocal index (above threshold = .75)
 
 index = play_bout_matrix==1 & detailed_playbout_regressor_matrix>=.7 & abs(pow_regressor_matrix)<3;
 x = detailed_playbout_regressor_matrix(index);
@@ -584,258 +574,15 @@ hold on
 plot(x_rand_loc(corr_per_animal(:,2)<0.01),corr_per_animal(corr_per_animal(:,2)<0.01,1), '.r')
 bar(mean(corr_per_animal(:,1)), 'FaceAlpha',.1)
 
-
-
-%% not sure if what is coming is usually in the paaer
-
-
-
-recip_lm_playbout = fitlm(detailed_playbout_regressor(~isnan(pow_regressor) & ~isnan(detailed_playbout_regressor)),pow_regressor(~isnan(pow_regressor) & ~isnan(detailed_playbout_regressor)));
+%% 13 (not shwon) Distribution of reciprocal play index for each animal play behavior, isntead that of playbouts
 x_lim = [.75 1];
 figure
-histogram([detailed_play_self_regressor(~isnan(pow_regressor) & ~isnan(detailed_play_self_regressor) & ~isnan(detailed_play_other_regressor) & play_bout==1),detailed_play_other_regressor(~isnan(pow_regressor) & ~isnan(detailed_play_other_regressor) & ~isnan(detailed_play_self_regressor)   & play_bout==1) ], 'Normalization','percentage')
+condition2incluide_1 = ~isnan(pow_regressor) & ~isnan(detailed_play_self_regressor) & ~isnan(detailed_play_other_regressor) & play_bout==1;
+condition2incluide_2 = ~isnan(pow_regressor) & ~isnan(detailed_play_other_regressor) & ~isnan(detailed_play_self_regressor)   & play_bout==1;
+
+reciprocal_index_for_each_animal_play = [detailed_play_self_regressor(condition2incluide_1),detailed_play_other_regressor(condition2incluide_2)];
+histogram(reciprocal_index, 'Normalization','percentage')
 n_val2plot = 100000;
 zscore_limit = Inf;
-figure
-y_lim = [-2 2];
-
-subplot(1,4,1)
-index2select = ~isnan(pow_regressor) & ~isnan(detailed_play_self_regressor) & detailed_play_self_regressor>x_lim(1) & abs(pow_regressor)<zscore_limit;
-x           = detailed_play_self_regressor(index2select);
-y           = pow_regressor(index2select);
-column_animal_name = animal_name(index2select);
-animal_list = unique(column_animal_name);
-
-ploting_index   = randsample(numel(x),n_val2plot, false);
-shifted_x       = x(ploting_index) + rand(size(ploting_index))*std(x(ploting_index));
-newX            = min(shifted_x):0.001:max(shifted_x);
-% plot(shifted_x,y(ploting_index), 'k.')
-shifted_x       = x(ploting_index);
-% swarmchart(shifted_x,y(ploting_index), 'k.','XJitterWidth', .02)
-hold on
-unique_x        = unique(shifted_x);
-selected_y      = y(ploting_index);
-for k=1:numel(unique_x)
-    plot(unique_x(k),mean(selected_y(shifted_x==unique_x(k))), 'k.' )
-end
-hold on
-stacked_self_c = [];
-stacked_extremes_self = [];
-for j=1:numel(animal_list)
-    this_animal_x = x(column_animal_name==animal_list(j));
-    this_animal_y = y(column_animal_name==animal_list(j));
-    this_animal_model = fitlm(this_animal_x,this_animal_y);
-    sub_x = detailed_play_self_regressor(~isnan(pow_regressor) & ~isnan(detailed_play_self_regressor) & play_bout==1 & animal_name(:)==animal_list(j));
-    sub_pow = pow_regressor(~isnan(pow_regressor) & ~isnan(detailed_play_self_regressor)  & play_bout==1 & animal_name(:)==animal_list(j));
-    stacked_extremes_self = [stacked_extremes_self;[mean(sub_pow(sub_x==0)) mean(sub_pow(sub_x>.95))]];
-
-     stacked_self_c= [stacked_self_c;this_animal_model.Coefficients.Estimate(2)];
-    [this_animal_yhat, yCI] = predict(this_animal_model, newX','Alpha', 0.0001);
-    fill([newX fliplr(newX)],[yCI(:,1)' fliplr(yCI(:,2)')], 'r', 'FaceAlpha',.5, 'EdgeColor','none')
-    plot(newX,this_animal_yhat, 'b', 'LineWidth',2)
-end
-xlim(x_lim)
-ylim(y_lim)
-modeling_Table  = table(x,y,column_animal_name, 'VariableNames',{'Reciprocity', 'Power', 'Amimal'});
-recip_lm_self   = fitlme(modeling_Table, 'Power ~ Reciprocity + (1|Amimal)');
-
-c               =  recip_lm_self.Coefficients.Estimate(2);
-p               = recip_lm_self.Coefficients.pValue(2);
-
-shifted_x = x(ploting_index);
-% plot(recip_lm_self)
-title(num2str([c p]))
 
 
-
-subplot(1,4,2)
-index2select    = ~isnan(pow_regressor) & ~isnan(detailed_play_other_regressor) & detailed_play_other_regressor>x_lim(1) & abs(pow_regressor)<zscore_limit;
-x               = detailed_play_other_regressor(index2select);
-y               = pow_regressor(index2select);
-column_animal_name = animal_name(index2select);
-animal_list     = unique(column_animal_name);
-
-newX            = min(shifted_x):0.001:max(shifted_x);
-% plot(shifted_x,y(ploting_index), 'k.')
-shifted_x   = x(ploting_index);
-% swarmchart(shifted_x,y(ploting_index), 'k.','XJitterWidth', .02)
-hold on
-unique_x    = unique(shifted_x);
-selected_y = y(ploting_index);
-for k=1:numel(unique_x)
-    plot(unique_x(k),mean(selected_y(shifted_x==unique_x(k))), 'k.' )
-end
-hold on
-
-stacked_other_c = [];
-stacked_extremes_other = [];
-oter_c_p_val = nan(numel(animal_list),1);
-
-for j=1:numel(animal_list)
-    this_animal_x = x(column_animal_name==animal_list(j));
-    this_animal_y = y(column_animal_name==animal_list(j));
-    this_animal_model = fitlm(this_animal_x,this_animal_y);
-    stacked_other_c= [stacked_other_c;this_animal_model.Coefficients.Estimate(2)];
-    sub_x = detailed_play_other_regressor(~isnan(pow_regressor) & ~isnan(detailed_play_other_regressor) & play_bout==1 & animal_name(:)==animal_list(j));
-    sub_pow = pow_regressor(~isnan(pow_regressor) & ~isnan(detailed_play_other_regressor) & play_bout==1 & animal_name(:)==animal_list(j));
-    stacked_extremes_other = [stacked_extremes_other;[mean(sub_pow(sub_x==0)) mean(sub_pow(sub_x>.95))]];
-    oter_c_p_val(j,2) = this_animal_model.Coefficients.pValue(2);
-oter_c_p_val(j,1) = this_animal_model.Coefficients.Estimate(2);
-    [this_animal_yhat, yCI] = predict(this_animal_model, newX','Alpha', 0.0001);
-    fill([newX fliplr(newX)],[yCI(:,1)' fliplr(yCI(:,2)')], 'r', 'FaceAlpha',.5, 'EdgeColor','none')
-    plot(newX,this_animal_yhat, 'b', 'LineWidth',2)
-end
-
-
-
-modeling_Table = table(x,y,column_animal_name, 'VariableNames',{'Reciprocity', 'Power', 'Amimal'});
-recip_lm_other = fitlme(modeling_Table, 'Power ~ Reciprocity + (1|Amimal)');
-
-c       = recip_lm_other.Coefficients.Estimate(2);
-p       = recip_lm_other.Coefficients.pValue(2);
-
-xlim(x_lim)
-ylim(y_lim)
-
-title(num2str([c p]))
-
-
-
-subplot(1,4,3)
-
-index2select    = ~isnan(pow_regressor) & ~isnan(detailed_playbout_regressor) & detailed_playbout_regressor>x_lim(1) & abs(pow_regressor)<zscore_limit;
-x               = detailed_playbout_regressor(index2select);
-y               = pow_regressor(index2select);
-column_animal_name = animal_name(index2select);
-animal_list     = unique(column_animal_name);
-
-newX            = min(shifted_x):0.001:max(shifted_x);
-% plot(shifted_x,y(ploting_index), 'k.')
-shifted_x   = x(ploting_index);
-% swarmchart(shifted_x,y(ploting_index), 'k.','XJitterWidth', .02)
-hold on
-unique_x    = unique(shifted_x);
-selected_y = y(ploting_index);
-for k=1:numel(unique_x)
-    plot(unique_x(k),mean(selected_y(shifted_x==unique_x(k))), 'k.' )
-end
-hold on
-
-stacked_other_c = [];
-stacked_extremes_other = [];
-for j=1:numel(animal_list)
-    this_animal_x = x(column_animal_name==animal_list(j));
-    this_animal_y = y(column_animal_name==animal_list(j));
-    this_animal_model = fitlm(this_animal_x,this_animal_y);
-    stacked_other_c= [stacked_other_c;this_animal_model.Coefficients.Estimate(2)];
-    sub_x = detailed_playbout_regressor(~isnan(pow_regressor) & ~isnan(detailed_playbout_regressor) & play_bout==1 & animal_name(:)==animal_list(j));
-    sub_pow = pow_regressor(~isnan(pow_regressor) & ~isnan(detailed_playbout_regressor) & play_bout==1 & animal_name(:)==animal_list(j));
-    stacked_extremes_other = [stacked_extremes_other;[mean(sub_pow(sub_x==0)) mean(sub_pow(sub_x>.95))]];
-
-    [this_animal_yhat, yCI] = predict(this_animal_model, newX','Alpha', 0.0001);
-    fill([newX fliplr(newX)],[yCI(:,1)' fliplr(yCI(:,2)')], 'r', 'FaceAlpha',.5, 'EdgeColor','none')
-    plot(newX,this_animal_yhat, 'b', 'LineWidth',2)
-end
-
-modeling_Table = table(x,y,column_animal_name, 'VariableNames',{'Reciprocity', 'Power', 'Amimal'});
-recip_lm_playbout = fitlme(modeling_Table, 'Power ~ Reciprocity + (1|Amimal)');
-
-c       = recip_lm_playbout.Coefficients.Estimate(2);
-p       = recip_lm_playbout.Coefficients.pValue(2);
-
-xlim(x_lim)
-ylim(y_lim)
-
-title(num2str([c p]))
-
-
-subplot(1,4,4)
-
-index2select1    = ~isnan(pow_regressor) & ~isnan(detailed_play_other_regressor) & detailed_play_other_regressor>x_lim(1) & abs(pow_regressor)<zscore_limit;
-x1               = detailed_play_other_regressor(index2select1);
-y1               = pow_regressor(index2select1);
-column_animal_name1 = animal_name(index2select1);
-
-
-index2select2 = ~isnan(pow_regressor) & ~isnan(detailed_play_self_regressor) & detailed_play_self_regressor>x_lim(1) & abs(pow_regressor)<zscore_limit;
-x2           = detailed_play_self_regressor(index2select2);
-y2           = pow_regressor(index2select2);
-column_animal_name2 = animal_name(index2select2);
-
-
-x = [x1;x2];
-y = [y1;y2];
-
-
-column_animal_name = [column_animal_name1;column_animal_name2];
-
-
-
-animal_list     = unique(column_animal_name);
-
-
-
-
-newX            = min(shifted_x):0.001:max(shifted_x);
-% plot(shifted_x,y(ploting_index), 'k.')
-shifted_x   = x(ploting_index);
-% swarmchart(shifted_x,y(ploting_index), 'k.','XJitterWidth', .02)
-hold on
-unique_x    = unique(shifted_x);
-selected_y = y(ploting_index);
-for k=1:numel(unique_x)
-    plot(unique_x(k),mean(selected_y(shifted_x==unique_x(k))), 'k.' )
-end
-hold on
-
-stacked_other_c = [];
-stacked_extremes_other = [];
-for j=1:numel(animal_list)
-    this_animal_x = x(column_animal_name==animal_list(j));
-    this_animal_y = y(column_animal_name==animal_list(j));
-    this_animal_model = fitlm(this_animal_x,this_animal_y);
-    stacked_other_c= [stacked_other_c;this_animal_model.Coefficients.Estimate(2)];
-    sub_x = detailed_playbout_regressor(~isnan(pow_regressor) & ~isnan(detailed_playbout_regressor) & play_bout==1 & animal_name(:)==animal_list(j));
-    sub_pow = pow_regressor(~isnan(pow_regressor) & ~isnan(detailed_playbout_regressor) & play_bout==1 & animal_name(:)==animal_list(j));
-    stacked_extremes_other = [stacked_extremes_other;[mean(sub_pow(sub_x==0)) mean(sub_pow(sub_x>.95))]];
-
-    [this_animal_yhat, yCI] = predict(this_animal_model, newX','Alpha', 0.0001);
-    fill([newX fliplr(newX)],[yCI(:,1)' fliplr(yCI(:,2)')], 'r', 'FaceAlpha',.5, 'EdgeColor','none')
-    plot(newX,this_animal_yhat, 'b', 'LineWidth',2)
-end
-
-
-
-modeling_Table = table(x,y,column_animal_name, 'VariableNames',{'Reciprocity', 'Power', 'Amimal'});
-recip_lm_playbout = fitlme(modeling_Table, 'Power ~ Reciprocity + (1|Amimal)');
-
-c       = recip_lm_playbout.Coefficients.Estimate(2);
-p       = recip_lm_playbout.Coefficients.pValue(2);
-xlim(x_lim)
-ylim(y_lim)
-
-title(num2str([c p]))
-
-
-
-
-
-
-%%
-
-figure
-subplot(1,3,1)
-plot(stacked_extremes_self', 'K:')
-hold on
-plot(stacked_extremes_self', 'K.')
-
-subplot(1,3,2)
-plot(stacked_extremes_other', 'K:')
-hold on
-plot(stacked_extremes_other', 'K.')
-
-
-subplot(1,3,3)
-plot([stacked_extremes_self;stacked_extremes_other]', 'K:')
-hold on
-plot([stacked_extremes_self;stacked_extremes_other]', 'K.')

@@ -8,10 +8,10 @@
 % Coincidence (surprise) structs and neuron tables are local copies under
 % Data\Analysis results. NPX raw data stay on DataSets.
 
-npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
+npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 saving_folder = [data_root, '\Analysis results\Cross_correlogram'];
-figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure cross correlations';
+figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure cross correlations';
 
 bin_size = 0.01;
 hist_range = [-.25 .5];
@@ -340,7 +340,7 @@ predTbl.CI_low(missingIdx)    = NaN;
 predTbl.CI_high(missingIdx)   = NaN;
 predTbl.aboveZero(missingIdx) = false;
 
-%% X Plot (with empty bar plots, as on Supp Figure)
+%% Fig 3k: X Plot (with empty bar plots, as on Supp Figure)
 % Filled bar: 95% CI excludes 0. Empty bar: not significant.
 
 figure('Color','w','Position',[100 100 1000 500]);

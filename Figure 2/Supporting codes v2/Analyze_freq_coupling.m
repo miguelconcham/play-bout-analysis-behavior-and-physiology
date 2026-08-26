@@ -4,8 +4,8 @@
 repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
-npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-area_limit_table = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
+npx_Raw_Data = fullfile(data_root, 'NPX data', 'NPX raw data');
+area_limit_table = fullfile(data_root, 'Area_limits_GoodLooking.xlsx');
 
 freq_range_1 = [.1 5];
 % freq_range_2 = [35 90]; % for gamma
@@ -170,7 +170,7 @@ if NPX_Type == 1
     channel_Range = [min(PAG_channels(:)) max(PAG_channels(:))];
     mid_PAG_channel = round(mean(channel_Range));
 else
-    load(fullfile(current_dir, 'ChannelMap.mat'), 'xcoords', 'ycoords', 'chanMap')
+    load(fullfile(current_dir, 'chann_map_PAG.mat'), 'xcoords', 'ycoords', 'chanMap')
     Y_Range = area_limit{ismember(area_limit.area, {'LPAG'}), {'ProbeNum', 'depth_start', 'depth_end'}};
     mid_PAG_channel = nan(size(Y_Range, 1), 1);
     for j = 1:size(Y_Range, 1)

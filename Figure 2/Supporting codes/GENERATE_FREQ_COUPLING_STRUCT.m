@@ -1,8 +1,8 @@
 function coupling_struct = GENERATE_FREQ_COUPLING_STRUCT(current_dir,Hd_freq1,Hd_freq2 )
 
 
-% synch_directory     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Synch data';
-area_limit_table    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
+% synch_directory     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Synch data';
+area_limit_table    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
 % npx_raw_data = 
 animal_code         = strsplit(current_dir, '\');
 animal_code         = animal_code{end};
@@ -51,7 +51,7 @@ if NPX_Type == 1
     channel_Range = [min(PAG_channels(:)) max(PAG_channels(:))];
     mid_PAG_channel = round(mean(channel_Range));
 else
-    load([current_dir,'\ChannelMap.mat'], 'xcoords', 'ycoords','chanMap')
+    load([current_dir,'\chann_map_PAG.mat'], 'xcoords', 'ycoords','chanMap')
     Y_Range = area_limit{ismember(area_limit.area, {'LPAG'}), {'ProbeNum','depth_start', 'depth_end'}};
     mid_PAG_channel = nan(size(Y_Range,1),1);
     figure

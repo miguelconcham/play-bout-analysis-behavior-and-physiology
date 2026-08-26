@@ -1,8 +1,8 @@
 
 
-npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Cross_correlogram';
-figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure cross correlations';
+npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Cross_correlogram';
+figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure cross correlations';
 % mkdir(saving_folder)
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];
@@ -67,7 +67,7 @@ save([saving_folder,'\surpirse_stats_struct_PLAY_dittering_long_interval_2ms_ALL
 % save([saving_folder,'\surpirse_stats_struct_animal_names_no_play.mat'],'animal_names');
 
 %%
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Cross_correlogram';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Cross_correlogram';
 
 load([saving_folder,'\surpirse_stats_struct_structure_play_dittering.mat'],'synch_structure');
 load([saving_folder,'\surpirse_stats_struct_animal_names_play_dittering.mat'],'animal_names');
@@ -116,7 +116,7 @@ unique_area_combinations = unique_area_combinations(ismember(unique_area_combina
 
 %%
 %% load delta and theta phase data
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\phase locking data';
 
 load([saving_folder,'\theta_all_neurons_v2.mat'],'all_neurons');
 all_neurons.area(ismember(all_neurons.area, {'isRT'})) =     {'isRt'  };
@@ -547,6 +547,6 @@ xticklabels(legnedfor_xticks)
 % ylim([0.90 1])
 
 %%
-cross_corr_figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure cross correlations';
+cross_corr_figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure cross correlations';
 
 print(gcf,'-vector','-dsvg',[cross_corr_figure_folder,'/Trough cells exeess coactvation.svg'])

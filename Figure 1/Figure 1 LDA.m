@@ -1,7 +1,7 @@
 %%  define folders and load main data
 data_root                       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 hmm_data_folder                 = [data_root, '\HMM data\HMM raw data'];
-labeled_data_folder             = [data_root, '\HMM data\locomotive behaviors'];
+labeled_data_folder             = [data_root, '\Analysis results\locomotive behaviors'];
 segmented_data_folder           = [data_root, '\Analysis results\locomotive behaviors 2 partners'];
 not_labeled_data_folder         = [data_root, '\Analysis results\non labeled behavior 2 partners'];
 folder_with_anima_names         = [data_root, '\Behavior backups'];

@@ -1,5 +1,6 @@
 %% 1 LOAD DATA
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\psth power by frequency and behavior';
+% Regressor PSTH structs (~5 GB) live on DataSets Theta psth; not copied into repo Data.
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth';
 disp('Loading')
 % load([saving_folder,'\psth_structure_all_regressors_beta_gamma.mat'],'psth_structure'); 
 % load([saving_folder,'\animal_names_all_regressors_beta_gamma.mat'],'animal_names');

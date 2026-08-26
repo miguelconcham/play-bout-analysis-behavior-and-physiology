@@ -1,7 +1,7 @@
 
 
-npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Cross_correlogram';
+npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Cross_correlogram';
 % mkdir(saving_folder) 
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];
@@ -57,7 +57,7 @@ disp('saving')
 save([saving_folder,'\cross_corr_struct_structure_updated_with_non_playbouts_3sec.mat'],'cross_corr_struct', '-v7.3');
 save([saving_folder,'\cross_corr_struct_animal_names_updated_with_non_playbouts_3sec.mat'],'animal_names');
 %% load data
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Cross_correlogram';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Cross_correlogram';
 
 bin_size = 0.01;
 hist_range = [-3 3];
@@ -537,7 +537,7 @@ figure
 %% cross corr for peak and trough cells
 
 %% load delta and theta phase data
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\phase locking data';
 
 load([saving_folder,'\theta_all_neurons_v2.mat'],'all_neurons');
 all_neurons.area(ismember(all_neurons.area, {'isRT'})) =     {'isRt'  };
@@ -1186,7 +1186,7 @@ bin_size = mean(diff(time_centers));
 kk=list_of_neuron(65);
   time_precision = 0.002  ;
 
-npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
+npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
 
 bin_size = 0.01;
 hist_range = [-3 3];

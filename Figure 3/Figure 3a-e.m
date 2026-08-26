@@ -7,9 +7,9 @@
 %% 1 Folders
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 saving_folder = [data_root, '\Analysis results\phase locking data'];
-figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure 3 Updated';
+figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 3 Updated';
 
-%% 2 Peak and trough schematic
+%% 2 FIg 3a Peak and trough schematic
 % Sine wave split at 0: red = peak half-cycle, blue = trough half-cycle.
 figure
 x = (1:2000)/1000;
@@ -105,7 +105,7 @@ for ns = 1:numel(phase_struct)
 end
 %%
 % save([saving_folder,'\gamma_all_neurons_v2.mat'],'all_neurons');
-%% 4 Entrainment per area and PSTHs
+%% (Not shown) 4 Entrainment per area and PSTHs
 % Heatmaps / mean PSTHs of locked vs unlocked cells in each structure.
 psth_edges = phase_struct(1).edges_freq;
 psth_centers = .5*(psth_edges(1:end-1) + psth_edges(2:end));
@@ -296,11 +296,16 @@ for j=1:size(locked_neurons,1)
     estiamted_frequencies(j) = fittedmdl.b/(2*pi);
     modulation_amp(j) = fittedmdl.a/fittedmdl.b;
 end
-%% 6 Frequency and modulation histograms
+%% (Reproted in text) 6 Frequency and modulation histograms
 % Distributions of fitted frequency, modulation depth, and seed frequency.
 title('estimated frequencies')
 xlabel('Hz')
+figure
+subplot(1,3,1)
 
+histogram(estiamted_frequencies, 0:.1:20,'Normalization','percentage')
+title('Estimated frequency')
+xlim([0 10])
 subplot(1,3,2)
 histogram(abs(modulation_amp), 0:.1:100,'Normalization','percentage')
 title('proportion of modualtion from mean rate')
@@ -314,10 +319,10 @@ title('Seed Frequency used for estimating freq')
 %% plot saving line example %%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% figures_folder2 = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure call supplementary'
+% figures_folder2 = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure call supplementary'
 % print(gcf,'-vector','-dsvg',[figures_folder, '\phaselocking delt aall areas together theta.svg'])
 
-%% 7 Bimodal preferred-angle distribution
+%% 7 (Fig 3c) Bimodal preferred-angle distribution
 % Histogram of preferred phase for significantly locked cells in one area.
 % Mixture of two von Mises; bootstrap LR is saved (do not rerun unless needed).
 
@@ -349,7 +354,7 @@ LR = 2*(LL2 - LL1);
 legend('Phase distribution','estiamted mean phase peak','estimated mean phase trough' )
 
 %% Run to estiamte estiatsitc only, its already saved dont run again unless needed
-% figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure 7 Inputs';
+% figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 7 Inputs';
 % 
 % N = numel(this_Area_Angles);
 % nBoot = 10000;
@@ -371,11 +376,11 @@ legend('Phase distribution','estiamted mean phase peak','estimated mean phase tr
 % p_value = mean(LR_boot >= LR);
 % 
 % save([figure_folder, '\LR_boot_theta.mat'], 'LR_boot')
-%% 8 Mixture fit vs bootstrap LR
+%% 8 (Reported in text) Mixture fit vs bootstrap LR
 % Overlay two-component circular mixture on the angle histogram; compare
 % observed LR to the saved bootstrap (LR_boot.mat = delta, LR_boot_theta = theta).
 figure_folder = [data_root, '\Figure codes\Figure 7 Inputs'];
-% figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure 5 Inputs';
+% figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 5 Inputs';
 load([figure_folder, '\LR_boot.mat'], 'LR_boot') % for delta
 % load([figure_folder, '\LR_boot_theta.mat'], 'LR_boot') % for theta
 anged_edges = -pi:(pi/32):pi;
@@ -436,7 +441,7 @@ nGroups = numel(group_names);
 [p, table] = circ_wwtest(angles, group_idx);
 disp(p)
 
-%% 10 Pairwise circular tests
+%% (not reported) 10 Pairwise circular tests, no significnat difference in mean angle per structure
 % Pairwise circ_wwtest between structures.
 
 pairs = nchoosek(1:nGroups, 2);
@@ -469,18 +474,18 @@ xticklabels(group_names(x_tick_orde))
 
 
 %% saving if needed
-figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure coincident phases';
+figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure coincident phases';
 
 print(gcf,'-vector','-dsvg',[figures_folder, '\phaselocking delt  angle violin plots.svg'])
 
 
 
 %%
-figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Codes\Figure codes\Figure coincident phases';
+figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure coincident phases';
 
 print(gcf,'-vector','-dsvg',[figures_folder, '\phaselocking delta  phases percentiles and time equivalents.svg'])
 
-%% 12 Percent locked / trough / peak (older counts)
+%% 12 (Not used any more) Percent locked / trough / peak (older counts)
 area_list = {'SupCol','DLPAG','LPAG','VLPAG', 'DR'}
 number_per_area = nan(numel(area_list),4);
 non_entrained_tresh = 0.1;
@@ -518,7 +523,7 @@ subplot(4,1,2:4)
 bar(number_per_area(:,1:2))
 xticklabels(area_list)
 
-%% 13 Percent per area (updated 2026-02-06)
+%% 13 (Fig 3d) Percent per area (updated 2026-02-06)
 % Stacked bars: trough vs peak vs unlocked, by structure.
 freq2use        = 'EntireSession'; %options:   ThetaEntireSession DeltaEntireSession
 alpha_tresh = 0.01;
@@ -569,7 +574,7 @@ uitable(f, ...
 %%
 print(gcf,'-vector','-dsvg',[figures_folder, '\phaselocking theta angle and modulation.svg'])
 
-%% 14 Partner-session locking and rate
+%% 14 (Fig 3e) Partner-session locking and rate
 % Compare two conditions (Partner1 vs Partner2 by default; Play vs PrePlay
 % or non-play alternatives are commented). Square plots: paired cells.
 all_neurons.area(ismember(all_neurons.area, {'isRT'})) =     {'isRt'  };
@@ -614,7 +619,7 @@ for an=1:numel(area_list)
 
 end
 
-%% 15 Paired comparisons (square plots)
+%% 15 (Fig 3e) Paired comparisons (square plots)
 % Per-cell Partner1 vs Partner2 (or Play vs PrePlay): PPC and rate, trough vs peak.
 
   alpha=0.05;
@@ -761,12 +766,12 @@ end
   axis square
 
 
-%% 16 Example neuron (LFP + spikes)
+%% 16 (Fig 3a-b) Example neuron (LFP + spikes)
 % Highest-MVL cell in a chosen structure/session: raw LFP, delta/theta
 % peaks, and spike phase. NPX raw data stay on DataSets.
 
 
-npx_Raw_Data    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\NPX raw data';
+npx_Raw_Data    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
 saving_folder   = [data_root, '\Analysis results\phase locking data'];
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];
@@ -834,7 +839,7 @@ disp(max_mvl_table)
 
 %% estimate neurons (select neurons from the displayed table, write below the raw from max_mvl_table you want to select)
 
-row2select = 10; % for delta 1 for theta 10 (to replicate paper figure)
+row2select = 1; % for delta 1 for theta 10 (to replicate paper figure)
 plot_bool = true;
 this_neuron_phase_struct = GENERATE_PHASE_COUPLING_NEURON_ID([npx_Raw_Data, '\', max_mvl_table.Session{row2select}],Hd_freq,bin_size_freq , max_mvl_table.ClusterID(row2select), plot_bool );
 %%
@@ -937,7 +942,7 @@ polarhistogram(delta_peak_phases, -pi:(pi/32):pi,'FaceColor', 'r', 'EdgeColor','
 print(gcf,'-vector','-dsvg',[figures_folder, '\neuron example lfp and spikes theta.svg'])
 
 
-%% 17 Theta and delta locking together
+%% 17 (Former cross-freq-coupling figure) Theta and delta locking together
 % Reload theta, gamma, and delta all_neurons tables and plot both bands.
 
 saving_folder = [data_root, '\Analysis results\phase locking data'];

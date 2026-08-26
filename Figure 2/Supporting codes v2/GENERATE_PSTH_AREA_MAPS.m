@@ -2,10 +2,10 @@ function psth_struct = GENERATE_PSTH_AREA_MAPS(current_dir, wind_length, wind_ov
 
 %% Parameters
 play_behaviors    = {'Pounce', 'CC', 'Boxing', 'Evasion', 'Pin', 'Escape', 'CB', 'CD'};
-synch_directory   = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Synch data';
-chan_map_folder   = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\NPX data\StarndarChannMap';
-area_limit_table  = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\Area_limits_GoodLooking.xlsx';
-behavior_data     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\DataSets\Behavior backups';
+synch_directory   = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Synch data';
+chan_map_folder   = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\StarndarChannMap';
+area_limit_table  = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
+behavior_data     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Behavior backups';
 
 animal_code        = strsplit(current_dir, '\');
 animal_code        = animal_code{end};
@@ -82,7 +82,7 @@ if NPX_Type == 1
         areas_by_channel{ch} = area_limit.area{ycoords(ch_n) >= area_limit.depth_start & ycoords(ch_n) < area_limit.depth_end + 1 & ismember(area_limit.Probe_Area, 'PAG')};
     end
 else
-    load([current_dir, '\ChannelMap.mat'], 'xcoords', 'ycoords', 'chanMap')
+    load([current_dir, '\chann_map_PAG.mat'], 'xcoords', 'ycoords', 'chanMap')
     for ch_n = 1:384
         probe_n = find(any(ismember(hard_coded_x_coords, xcoords(ch_n)), 2));
         ch = chanMap(ch_n) + 1;
