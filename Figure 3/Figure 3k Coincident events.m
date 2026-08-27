@@ -5,8 +5,7 @@
 % Former sections VI, IX, and XI+ in this file are omitted.
 
 %% I define folders
-% Coincidence (surprise) structs and neuron tables are local copies under
-% Data\Analysis results. NPX raw data stay on DataSets.
+% Coincidence structs, neuron tables, and NPX raw data are under Data\.
 
 npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';

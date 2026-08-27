@@ -6,7 +6,7 @@
 %% 1 Load cross-correlograms
 % Per-session structs from Estimate cross correlogram all aniamls
 % (play, non-play, entire session, and percentile/shuffle CCGs).
-% Local copies under Data\; Estimate still writes originals to DataSets.
+% Structs are under Data\Analysis results\Cross_correlogram.
 
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';

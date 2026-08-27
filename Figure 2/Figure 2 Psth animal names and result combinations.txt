@@ -5,7 +5,7 @@ Base folder (local repo copy):
   ...\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior\
 
 Network originals (do not edit; copy from here if a local file is missing):
-  ...\PlayBout Analysis\DataSets\Analysis results\Theta psth\
+  ...\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth\
 
 MATLAB path setup (use in Figure 2.m):
   repo_root = fileparts(mfilename('fullpath'));              % Figure 2/
@@ -132,7 +132,7 @@ PHASE (delta band, exploratory bout onset)
 SUPPORTING CODES V2 — ANALYZE FUNCTIONS
 --------------------------------------------------------------------------------
 Precomputed inputs for each Analyze_*.m in Figure 2/Supporting codes v2/.
-Copied from DataSets\Analysis results\Theta psth\ into the local folder above
+Copied from Analysis results\Theta psth\ into the local folder above
 when they were not already present.
 
 1) Analyze_psth_all_behaviors.m

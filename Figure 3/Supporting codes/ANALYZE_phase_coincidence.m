@@ -3,7 +3,7 @@
 
 npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
 saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Cross_correlogram';
-% Per-animal coincidence structs (~3.5 GB) stay on DataSets; ALL-ANIMALS copy is in repo Data.
+% Coincidence structs are under Data\Analysis results\Cross_correlogram.
 coincidence_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Cross_correlogram';
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];

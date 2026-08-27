@@ -1,7 +1,7 @@
 %% Analyze_freq_coupling
 % Cross-frequency coupling analysis (delta phase vs gamma amplitude).
 
-this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Freq coupling.m';
+this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\CrossFreq coupling.m';
 repo_root = fileparts(fileparts(this_file));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');

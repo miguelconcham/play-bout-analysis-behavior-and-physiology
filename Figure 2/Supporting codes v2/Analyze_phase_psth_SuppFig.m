@@ -7,7 +7,7 @@
 % This script uses the PHASE row. For band-limited power PSTHs (delta/theta/gamma
 % play bout, calls, etc.), swap the load filenames per that list — see Figure 2.m.
 
-this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_phase_psth.m';
+this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_phase_psth_SuppFig.m';
 repo_root = fileparts(fileparts(fileparts(this_file)));
 figure2_dir = fullfile(repo_root, 'Figure 2');
 combo_file = fullfile(figure2_dir, 'Figure 2 Psth animal names and result combinations.txt');

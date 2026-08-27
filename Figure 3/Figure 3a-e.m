@@ -2,7 +2,7 @@
 % Preferred phase, locking strength, and rate for cells grouped as
 % peak-locked, trough-locked, or unlocked. Default load is delta; switch
 % the block in section 3 for theta / beta / gamma. Analysis .mat files are
-% local copies under Data\ (DataSets originals are not modified).
+% under Data\.
 
 %% 1 Folders
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -768,7 +768,7 @@ end
 
 %% 16 (Fig 3a-b) Example neuron (LFP + spikes)
 % Highest-MVL cell in a chosen structure/session: raw LFP, delta/theta
-% peaks, and spike phase. NPX raw data stay on DataSets.
+% peaks, and spike phase. NPX raw data are under Data\NPX data\NPX raw data.
 
 
 npx_Raw_Data    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';

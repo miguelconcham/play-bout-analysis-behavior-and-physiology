@@ -4,8 +4,7 @@
 % are built: all_angles (pooled events) and angle_per_condition_after
 % (circular mean per area pair, after bout onset).
 %
-% ALL-ANIMALS coincidence structs and delta locking labels are local copies
-% under Data\Analysis results. Per-animal coincidence files stay on DataSets.
+% Coincidence structs and delta locking labels are under Data\Analysis results.
 
 %% 1 Load coincidence events and delta locking labels
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';

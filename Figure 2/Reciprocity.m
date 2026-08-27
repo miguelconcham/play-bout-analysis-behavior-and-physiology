@@ -1,5 +1,5 @@
 %% 1 LOAD DATA
-% Regressor PSTH structs (~5 GB) live on DataSets Theta psth; not copied into repo Data.
+% Regressor PSTH structs live under Data\Analysis results\Theta psth.
 saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth';
 disp('Loading')
 % load([saving_folder,'\psth_structure_all_regressors_beta_gamma.mat'],'psth_structure'); 
