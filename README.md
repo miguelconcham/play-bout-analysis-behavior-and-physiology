@@ -1,6 +1,6 @@
 # Play Bout Analysis — Behavior and Physiology
 
-MATLAB and Python code for play-bout analyses: behavior statistics, motion–USV (LDA/UMAP) space, HMM play-state detection, LFP physiology (PSTH power by frequency and behavior, coupling, phase), pairwise spike–LFP analyses (phase locking, coincidence, cross-correlograms, activation index), and two-animal mutual information (Figure 6).
+MATLAB and Python code for large-scale behavioral and neural time-series analysis. The methods below are grouped for a data-science read of the stack; paper-figure scripts follow later.
 
 This repository contains **code only**. Experimental data are archived separately (see [Data availability](#data-availability)). Publication figures live in [`Paper figures/`](Paper%20figures/).
 
@@ -8,34 +8,37 @@ This repository contains **code only**. Experimental data are archived separatel
 
 ## Methods and tools
 
-This repository is a working example of end-to-end analysis: from raw Neuropixels, video, and USV data to paper figures. The stack below is what the code actually uses.
+What this repository actually implements.
 
-**Languages.** MATLAB and Python (Jupyter, NumPy, PyTorch, [`ssm`](https://github.com/lindermanlab/ssm)).
+**Languages and environment**
+- MATLAB (Statistics and Machine Learning, Signal Processing, Image Processing, Curve Fitting toolboxes)
+- Python: Jupyter, NumPy, PyTorch, [`ssm`](https://github.com/lindermanlab/ssm)
+- CircStat and npy-matlab (`readNPY` / `writeNPY`)
 
-**Machine learning and representation learning**
-- Linear discriminant analysis (LDA) for play / bite / exploratory and fine-grained behavior classes (`Figure 1/Figure 1 LDA.m`)
-- UMAP embeddings of motion–USV features (`run_umap`)
-- Convolutional autoencoder (PyTorch `Conv1d` / `ConvTranspose1d`, MSE reconstruction) that trains on variable-length behavior snippets and saves embeddings and `autoencoder.pth` (`Figure 1/LDA analysis/Convolutional classification.ipynb`)
-- Hidden Markov models (sticky HMM, Gaussian emissions, AIC/BIC model selection) for engaged vs unengaged play states (`Figure 1/HMM modeling/`)
-- Generalized linear models: binomial GLM for play prediction from kinematic features; Poisson GLM and unique $R^2$ (k-fold CV) for LFP power (`fitglm`, `cvpartition`)
-- Linear mixed-effects models for session/animal nested data (`fitlme`)
+**Neural networks**
+- Convolutional autoencoder in PyTorch (`Conv1d` encoder, `ConvTranspose1d` decoder, MSE reconstruction)
+- Training on variable-length multivariate sequences; saved embeddings and `autoencoder.pth`
+- Notebook: `Figure 1/LDA analysis/Convolutional classification.ipynb`
 
-**Statistics and time series**
-- Permutation and circular-shift shuffles; surrogate spike trains
-- Circular statistics: mean vector length, pairwise phase consistency (PPC), Rayleigh tests, von Mises mixture
-- Mutual information and cross-correlation between simultaneously recorded animals
-- Hierarchical clustering and MDS of behavior centroids
-- Nonlinear curve fits (double exponential, sine)
+**Machine learning**
+- Linear discriminant analysis (LDA) for multi-class behavior classification — `Figure 1/Figure 1 LDA.m`
+- UMAP embeddings of high-dimensional feature space — `run_umap`
+- Hidden Markov models (sticky HMM, Gaussian emissions, AIC/BIC model selection) — `Figure 1/HMM modeling/`
+- Generalized linear models (binomial and Poisson) and unique $R^2$ with k-fold CV — `fitglm`, `cvpartition`
+- Linear mixed-effects models for nested observations — `fitlme`
 
-**Signal processing (neural and behavioral)**
+**Statistics**
+- Permutation tests and circular-shift / label shuffles
+- Circular statistics: mean vector length, pairwise phase consistency (PPC), Rayleigh tests, von Mises mixtures
+- Mutual information between paired time series
+- Hierarchical clustering and multidimensional scaling (MDS)
+- Nonlinear curve fitting (exponential, sine)
+
+**Time series and signal processing**
 - FIR bandpass filtering, Hilbert envelopes, spectrograms
-- Spike–LFP phase locking, cycle-aligned PSTHs, cross-frequency coupling
-- Spike coincidence / surprise, kernel rate, autocorrelograms
-- Neuropixels LFP and spike pipelines (`readNPY`, channel maps, area limits)
+- Cross-correlation and kernel rate estimation
+- Event-aligned averages (PSTHs) and coincidence / surprise counts
 
-**MATLAB toolboxes used.** Statistics and Machine Learning, Signal Processing, Image Processing, Curve Fitting. External: CircStat, npy-matlab.
-
----
 
 ## Repository structure
 
