@@ -754,4 +754,40 @@ disp('Saving example-plot checkpoint')
 save(example_checkpoint, vars_example{:}, '-v7.3');
 disp(['Saved: ', example_checkpoint])
 
+%% Saving variables for ploting sections A1 to A7
+% Checkpoint for Figure 3/Fig A1-A7 behavior modulation.m
+checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
+if ~exist(checkpoint_folder, 'dir')
+    mkdir(checkpoint_folder);
+end
+a17_file = [checkpoint_folder, '\activation_index_A1_A7.mat'];
+
+if ~exist('time2use', 'var') || isempty(time2use)
+    time2use = warped_time;
+end
+
+% Short behavior names as a row (same as Play_map A1: labels(play_index_order)').
+labels = cell(1, numel(psth_list));
+labels{1} = 'PlayBout';
+for i = 2:numel(psth_list)
+    nm = psth_list{i};
+    if numel(nm) >= 11
+        labels{i} = nm(11:end);
+    else
+        labels{i} = nm;
+    end
+end
+
+disp('Saving A1–A7 checkpoint')
+save(a17_file, ...
+    'all_activation_order', ...
+    'area_list', ...
+    'psth_list', ...
+    'labels', ...
+    'time2use', ...
+    'warped_time', ...
+    'n_perm', ...
+    '-v7.3');
+disp(['Saved: ', a17_file])
+
 
