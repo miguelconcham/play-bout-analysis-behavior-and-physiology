@@ -6,6 +6,37 @@ This repository contains **code only**. Experimental data are archived separatel
 
 **GitHub:** [play-bout-analysis-behavior-and-physiology](https://github.com/miguelconcham/play-bout-analysis-behavior-and-physiology)
 
+## Methods and tools
+
+This repository is a working example of end-to-end analysis: from raw Neuropixels, video, and USV data to paper figures. The stack below is what the code actually uses.
+
+**Languages.** MATLAB and Python (Jupyter, NumPy, PyTorch, [`ssm`](https://github.com/lindermanlab/ssm)).
+
+**Machine learning and representation learning**
+- Linear discriminant analysis (LDA) for play / bite / exploratory and fine-grained behavior classes (`Figure 1/Figure 1 LDA.m`)
+- UMAP embeddings of motion–USV features (`run_umap`)
+- Convolutional autoencoder (PyTorch `Conv1d` / `ConvTranspose1d`, MSE reconstruction) that trains on variable-length behavior snippets and saves embeddings and `autoencoder.pth` (`Figure 1/LDA analysis/Convolutional classification.ipynb`)
+- Hidden Markov models (sticky HMM, Gaussian emissions, AIC/BIC model selection) for engaged vs unengaged play states (`Figure 1/HMM modeling/`)
+- Generalized linear models: binomial GLM for play prediction from kinematic features; Poisson GLM and unique $R^2$ (k-fold CV) for LFP power (`fitglm`, `cvpartition`)
+- Linear mixed-effects models for session/animal nested data (`fitlme`)
+
+**Statistics and time series**
+- Permutation and circular-shift shuffles; surrogate spike trains
+- Circular statistics: mean vector length, pairwise phase consistency (PPC), Rayleigh tests, von Mises mixture
+- Mutual information and cross-correlation between simultaneously recorded animals
+- Hierarchical clustering and MDS of behavior centroids
+- Nonlinear curve fits (double exponential, sine)
+
+**Signal processing (neural and behavioral)**
+- FIR bandpass filtering, Hilbert envelopes, spectrograms
+- Spike–LFP phase locking, cycle-aligned PSTHs, cross-frequency coupling
+- Spike coincidence / surprise, kernel rate, autocorrelograms
+- Neuropixels LFP and spike pipelines (`readNPY`, channel maps, area limits)
+
+**MATLAB toolboxes used.** Statistics and Machine Learning, Signal Processing, Image Processing, Curve Fitting. External: CircStat, npy-matlab.
+
+---
+
 ## Repository structure
 
 ```
@@ -17,7 +48,7 @@ play bout analysis behavior and physiology/
 │   ├── Figure 1 Play Bouts.m
 │   ├── Figure 1 LDA.m
 │   ├── Figure 1 HMM.m
-│   ├── LDA analysis/
+│   ├── LDA analysis/              # Features + CNN autoencoder notebook
 │   └── HMM modeling/
 ├── Figure 2/
 │   ├── Figure 2.m                     # Main Figure 2 + Supp Fig 4 plotting
@@ -69,6 +100,7 @@ Panel letters below match the uploaded files in `Paper figures/`. In the Nature 
 | LDA / UMAP figures | `Figure 1/Figure 1 LDA.m` |
 | HMM example + summary panels | `Figure 1/Figure 1 HMM.m` |
 | Build HMM inputs | `Figure 1/HMM modeling/CreateHMMFIiles.m` |
+| Train CNN autoencoder (PyTorch) | `Figure 1/LDA analysis/Convolutional classification.ipynb` |
 | Fit HMMs in Python | `Figure 1/HMM modeling/python hmm estimate.txt` |
 
 HMM pipeline order: `Figure 1/HMM modeling/README.md`.
