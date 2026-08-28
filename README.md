@@ -28,9 +28,11 @@ What this repository actually implements.
 
 **Machine learning**
 - Linear discriminant analysis (LDA) for multi-class behavior classification — `Figure 1/Figure 1 LDA.m`
+- Support vector machines (RBF `fitcsvm`; Classification Learner `SVM_model`) for play probability / play score from the 14 motion–USV features (HMM engaged vs unengaged) and for behavior from population rates — `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m`, `Complementary figures/spike_train_parsing_phase_lock.m`
 - UMAP embeddings of high-dimensional feature space — `run_umap`
 - Hidden Markov models (sticky HMM, Gaussian emissions, AIC/BIC model selection) — `Figure 1/HMM modeling/`
 - Generalized linear models (binomial and Poisson) and unique $R^2$ with k-fold CV — `fitglm`, `cvpartition`
+- Neighborhood component analysis (NCA) for feature weights — `fscnca`
 - Linear mixed-effects models for nested observations — `fitlme`
 
 **Statistics**

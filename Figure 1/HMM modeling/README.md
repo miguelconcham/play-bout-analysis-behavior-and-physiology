@@ -40,7 +40,7 @@ Loads the HMM state sequences from Python and performs all downstream analyses. 
 - **Behavior peri-event analysis (section 9):** Builds PSTH-style matrices of behavior occurrence aligned to HMM state onsets and offsets (2- and 3-state models).
 - **Variable peri-event analysis (section 10):** Builds peri-event matrices of each continuous behavioral variable aligned to HMM state onsets/offsets; computes mean responses and response indices.
 - **State re-assignment (sections 11-11.B):** Visualizes the 3-state assignment ordered by HMM state duration; auto-reassigns state labels so the state with the most play-behavior overlap gets the highest label, then allows manual correction.
-- **GLM play prediction (sections 12-14):** Fits a binomial GLM (logistic regression) predicting play-bout presence from the 14 behavioral variables; estimates play probability for each HMM state.
+- **Play score (sections 12-14):** SVM (Classification Learner `SVM_model.predictFcn`) and binomial GLM (`fitglm`) predicting play-bout presence from the 14 behavioral variables; classifier scores are the play probability / play level for each time bin (HMM engaged vs unengaged). The saved `prediction_struct` currently stores the GLM; SVM calls remain in the script as the alternative they trained.
 - **Call analysis (section 16):** Builds peri-event matrices of ultrasonic call occurrence and acoustic properties (frequency, slope, sinuosity, etc.) aligned to HMM state onsets/offsets.
 
 ## Saved Outputs (per animal and partner)
