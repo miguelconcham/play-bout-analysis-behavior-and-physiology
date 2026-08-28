@@ -13,6 +13,7 @@ Figure 1/outputs/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+*.pkl
 
 # OS
 .DS_Store
