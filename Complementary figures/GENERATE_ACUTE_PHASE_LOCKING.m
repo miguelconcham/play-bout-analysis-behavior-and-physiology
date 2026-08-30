@@ -15,6 +15,9 @@ function acute_struct = GENERATE_ACUTE_PHASE_LOCKING(npx_data_dir, Hd_freq, savi
 %   MVL/PPC + surrogate p-values, PSTH at oscillation peaks and troughs.
 % Breathing: same stats/PSTHs on z-scored breathing, independent of Hd_freq.
 % Spike times are mapped to audio with predict(PAG_NPX, spikes/30000).
+% Green windows last 2-10 s (start = last call + 3 s, end = next stim).
+% PSTH events are inset by the PSTH half-window on both sides so a peak
+% near the left green border does not get an empty pre-event count.
 %
 % Example
 %   acute_struct = GENERATE_ACUTE_PHASE_LOCKING(pwd, Hd_freq, saving_folder);
@@ -51,6 +54,7 @@ psth_range = round(1.25 * [-1 1] ./ Hd_freq.CutoffFrequency1, 2);
 psth_edges = psth_range(1):psth_bins:psth_range(2);
 psth_time = psth_edges(2:end) - 0.5 * psth_bins;
 n_psth_bins = numel(psth_edges) - 1;
+peak_margin_left = -psth_range(1);
 peak_margin_right = psth_range(2);
 phase_stat_names = {'PreferedAngle', 'MVL', 'MVLPval', 'PPC', 'PPCPval', 'MeanRate'};
 freq_range = [Hd_freq.CutoffFrequency1 Hd_freq.CutoffFrequency2];
@@ -71,6 +75,9 @@ experiment_2analyze = str2double(session_tok{2});
 disp(['Session: date=', num2str(date_2analyze), ...
     ', experiment=', num2str(experiment_2analyze), ...
     ', freq=', num2str(freq_range(1)), '-', num2str(freq_range(2)), ' Hz'])
+disp(['Green windows: ', num2str(min_interval_length), '-', num2str(max_interval_length), ...
+    ' s after ', num2str(call_free_interval), ' s quiet. PSTH inset L/R = ', ...
+    num2str(peak_margin_left), '/', num2str(peak_margin_right), ' s'])
 
 %% Population tables (stim, calls, synch, breathing)
 load([files_folder, 'MERGED_SESSIONS.mat']);
@@ -136,7 +143,8 @@ end
 valid_lfp_indexes = valid_lfp_indexes(:);
 
 plot_interval_stack(LFP(1, :), lfp_time_audio, valid_intervals, order, ...
-    CALL_BEG_END, range2plot, peak_margin_right, saving_folder, 'LFP_period_selection', false);
+    CALL_BEG_END, range2plot, peak_margin_left, peak_margin_right, ...
+    saving_folder, 'LFP_period_selection', false);
 
 %% LFP phase locking and peak/trough PSTH (one band = Hd_freq)
 lfp_phase_stats = nan(n_neu, 6);
@@ -174,8 +182,8 @@ for ch_i = 1:numel(channels_with_neurons)
         'MinPeakDistance', peak_distance_samp);
     peak_audio = predict(LFP_synch_model, lfp_time(peak_idx));
     trough_audio = predict(LFP_synch_model, lfp_time(trough_idx));
-    peak_audio = peak_audio(times_in_intervals(peak_audio, valid_intervals, peak_margin_right));
-    trough_audio = trough_audio(times_in_intervals(trough_audio, valid_intervals, peak_margin_right));
+    peak_audio = peak_audio(times_in_intervals(peak_audio, valid_intervals, peak_margin_right, peak_margin_left));
+    trough_audio = trough_audio(times_in_intervals(trough_audio, valid_intervals, peak_margin_right, peak_margin_left));
     t_lfp_green = lfp_time(green_lfp);
     ph_lfp_green = phase_u(green_lfp);
 
@@ -214,12 +222,12 @@ std_amp_br = std(breathinv_values);
     'MinPeakDistance', breath_peak_distance * breath_fs);
 peak_times_all = breathing_time_audio(breathing_peaks);
 trough_times_all = breathing_time_audio(breathing_troughs);
-in_green_peaks = times_in_intervals(peak_times_all, valid_intervals, peak_margin_right);
-in_green_troughs = times_in_intervals(trough_times_all, valid_intervals, peak_margin_right);
+in_green_peaks = times_in_intervals(peak_times_all, valid_intervals, peak_margin_right, peak_margin_left);
+in_green_troughs = times_in_intervals(trough_times_all, valid_intervals, peak_margin_right, peak_margin_left);
 
 plot_interval_stack(breathinv_values, breathing_time_audio, valid_intervals, order, ...
-    CALL_BEG_END, range2plot, peak_margin_right, saving_folder, 'Breathing_period_selection', ...
-    true, peak_times_all);
+    CALL_BEG_END, range2plot, peak_margin_left, peak_margin_right, saving_folder, ...
+    'Breathing_period_selection', true, peak_times_all, trough_times_all);
 
 breathing_peaks = breathing_peaks(in_green_peaks);
 breathing_troughs = breathing_troughs(in_green_troughs);
@@ -276,6 +284,8 @@ acute_struct.phase_stat_names = phase_stat_names;
 acute_struct.psth_time = psth_time;
 acute_struct.psth_edges = psth_edges;
 acute_struct.psth_range = psth_range;
+acute_struct.peak_margin_left = peak_margin_left;
+acute_struct.peak_margin_right = peak_margin_right;
 acute_struct.n_rand = n_rand;
 acute_struct.lfp_phase_stats = lfp_phase_stats;
 acute_struct.lfp_psth_peak = lfp_psth_peak;
@@ -286,10 +296,19 @@ acute_struct.breathing_psth_trough = breathing_psth_trough;
 end
 
 function plot_interval_stack(signal, t_audio, valid_intervals, order, CALL_BEG_END, ...
-    range2plot, peak_margin_right, saving_folder, fig_stem, show_peaks, peak_times_all)
+    range2plot, peak_margin_left, peak_margin_right, saving_folder, fig_stem, ...
+    show_peaks, peak_times_all, trough_times_all)
 % Stacked traces aligned to stim onset; green = analysis window.
-    if nargin < 10
+% Red dots = peaks, blue dots = troughs (optional). Dotted lines mark the
+% PSTH inset (events too close to either green border are not used for PSTH).
+    if nargin < 11
         show_peaks = false;
+    end
+    if nargin < 13
+        trough_times_all = [];
+    end
+    if nargin < 7 || isempty(peak_margin_left)
+        peak_margin_left = 0;
     end
     signal = signal(:);
     t_audio = t_audio(:);
@@ -317,35 +336,58 @@ function plot_interval_stack(signal, t_audio, valid_intervals, order, CALL_BEG_E
             peak_y = (peak_amp - seg_min) / seg_rng + j - 1;
             kept_here = false(size(peak_t));
             if ~isempty(peak_t)
-                kept_here = times_in_intervals(peak_t, valid_intervals(order(j), :), peak_margin_right);
+                kept_here = times_in_intervals(peak_t, valid_intervals(order(j), :), peak_margin_right, peak_margin_left);
             end
             plot(peak_t(kept_here) - stim_start, peak_y(kept_here), '.r', 'MarkerSize', 10)
             plot(peak_t(~kept_here) - stim_start, peak_y(~kept_here), '.', 'Color', [0.6 0.6 0.6], 'MarkerSize', 8)
+        end
+        if ~isempty(trough_times_all)
+            troughs_in_plot = trough_times_all > stim_start + range2plot(1) ...
+                & trough_times_all < stim_start + range2plot(2);
+            trough_t = trough_times_all(troughs_in_plot);
+            trough_amp = interp1(t_audio, signal, trough_t);
+            trough_y = (trough_amp - seg_min) / seg_rng + j - 1;
+            kept_tr = false(size(trough_t));
+            if ~isempty(trough_t)
+                kept_tr = times_in_intervals(trough_t, valid_intervals(order(j), :), peak_margin_right, peak_margin_left);
+            end
+            plot(trough_t(kept_tr) - stim_start, trough_y(kept_tr), '.b', 'MarkerSize', 10)
+            plot(trough_t(~kept_tr) - stim_start, trough_y(~kept_tr), '.', 'Color', [0.5 0.6 0.85], 'MarkerSize', 8)
         end
         if ~isempty(last_calls)
             plot([last_calls'; last_calls'] - stim_start, [0 1] + j - 1, 'r')
         end
         fill([interval_start stim_start stim_start interval_start] - stim_start, ...
             [0 0 1 1] + j - 1, 'g', 'FaceAlpha', .5, 'Edgecolor', 'none')
+        left_cut = interval_start - stim_start + peak_margin_left;
+        plot([left_cut left_cut], [0 1] + j - 1, ':k')
         plot([-peak_margin_right -peak_margin_right], [0 1] + j - 1, ':k')
     end
     axis tight
     xlabel('Time from stim onset (s)')
-    title(strrep(fig_stem, '_', ' '))
+    if ~isempty(trough_times_all)
+        title({strrep(fig_stem, '_', ' '), 'red = peaks,  blue = troughs'})
+    else
+        title(strrep(fig_stem, '_', ' '))
+    end
     if ~isempty(saving_folder)
         saveas(gcf, fullfile(saving_folder, [fig_stem, '.jpg']))
         saveas(gcf, fullfile(saving_folder, [fig_stem, '.svg']))
     end
 end
 
-function mask = times_in_intervals(t, intervals, right_margin)
+function mask = times_in_intervals(t, intervals, right_margin, left_margin)
     if nargin < 3
         right_margin = 0;
+    end
+    if nargin < 4
+        left_margin = 0;
     end
     t = t(:);
     mask = false(size(t));
     for k = 1:size(intervals, 1)
-        mask = mask | (t >= intervals(k, 1) & t <= intervals(k, 2) - right_margin);
+        mask = mask | (t >= intervals(k, 1) + left_margin ...
+            & t <= intervals(k, 2) - right_margin);
     end
 end
 
