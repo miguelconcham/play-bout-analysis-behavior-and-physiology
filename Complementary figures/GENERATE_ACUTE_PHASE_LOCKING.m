@@ -31,7 +31,8 @@ end
 
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 files_folder = [data_root, '\Acute data\population analysis\'];
-
+load([files_folder, 'MERGED_SESSIONS.mat']);
+load([files_folder, 'NEW_ALL_CALLS_TOGETHER.mat']);
 sr_LFP = 2500;
 if nargin < 2 || isempty(Hd_freq)
     Hd_freq = designfilt('bandpassfir', ...

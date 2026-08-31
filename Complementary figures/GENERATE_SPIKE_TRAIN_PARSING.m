@@ -180,6 +180,7 @@ config.angle_hist_edges_centers = angle_hist_edges_centers;
 config.autocorr_range = autocorr_range;
 config.autocorr_bin_size = autocorr_bin_size;
 config.autocorr_bin_edges = autocorr_bin_edges;
+config.acg_edge_corrected = true;
 config.treshold = treshold;
 config.min_run_length = min_run_length;
 config.min_run_spikes = min_run_spikes;
@@ -289,6 +290,10 @@ for ch_i = 1:n_channels
             this_run_spikes = this_neuron_spikes(this_neuron_spikes >= run_start & this_neuron_spikes <= run_end);
             run_spk         = this_neuron_spikes >= run_start & this_neuron_spikes <= run_end;
             spike_osc_power(j) = mean(this_osc_power(run_spk), 'omitnan');
+            all_lags = autocorrelogram(this_run_spikes, autocorr_range);
+            acg_counts = histcounts(all_lags, autocorr_bin_edges);
+            this_neuron_autoccorrelograms(j, :) = edge_correct_acg( ...
+                acg_counts, autocorr_bin_edges, run_end - run_start);
 
             this_run_psth         = nan(numel(this_run_peaks), numel(hist_edges_centers));
             this_run_psth_samples = min(n_psth_samples, 2^numel(this_run_peaks));
@@ -307,8 +312,6 @@ for ch_i = 1:n_channels
                         this_run_psth(peak_n, :) = histcounts(spikes2plot, hist_edges);
                     end
                 end
-                all_lags = autocorrelogram(this_run_spikes, autocorr_range);
-                this_neuron_autoccorrelograms(j, :) = histcounts(all_lags, autocorr_bin_edges);
                 if size(this_run_psth, 1) > 1
                     mean_response = movmean(mean(this_run_psth), smooth_window) / bin_size;
                     raw_response  = mean(this_run_psth) / bin_size;

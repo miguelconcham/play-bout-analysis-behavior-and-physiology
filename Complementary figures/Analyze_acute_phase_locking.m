@@ -42,6 +42,8 @@ breath_psth_peak   = [];
 breath_psth_trough = [];
 cluster_ids        = [];
 session_label      = {};
+date_list          = [];
+exp_list           = [];
 for ns = 1:numel(acute_struct)
     if ~isequal(acute_struct(ns).psth_time, psth_time)
         warning('Session %s has a different PSTH time base; skipped.', acute_struct(ns).session_folder);
@@ -56,6 +58,8 @@ for ns = 1:numel(acute_struct)
     breath_psth_trough = [breath_psth_trough; acute_struct(ns).breathing_psth_trough]; %#ok<AGROW>
     cluster_ids      = [cluster_ids; double(acute_struct(ns).clusters_list(:))]; %#ok<AGROW>
     session_label    = [session_label; repmat({acute_struct(ns).session_folder}, n, 1)]; %#ok<AGROW>
+    date_list        = [date_list; repmat(acute_struct(ns).date, n, 1)]; %#ok<AGROW>
+    exp_list         = [exp_list; repmat(acute_struct(ns).experiment, n, 1)]; %#ok<AGROW>
 end
 
 i_ang  = find(strcmp(phase_stat_names, 'PreferedAngle'), 1);
@@ -79,6 +83,56 @@ disp(['Neurons with LFP stats: ', num2str(sum(valid)), ' / ', num2str(numel(vali
 disp(['Delta locked (PPC p<', num2str(alpha), '): ', num2str(sum(delta_lock))])
 disp(['  trough: ', num2str(sum(trough_lock)), '   peak: ', num2str(sum(peak_lock))])
 disp(['Breathing locked: ', num2str(sum(breath_lock))])
+
+%% Match NeuronSummary (DATE + EXP + ID)
+% Focus plots on Superior Colliculus, PAG subdivisions, and Raphe.
+brain_region = strings(numel(cluster_ids), 1);
+brain_area   = strings(numel(cluster_ids), 1);
+focus_groups = {};
+ns_file = fullfile(data_root, 'Acute data', 'population analysis', 'NeuronSummary.xlsx');
+if ~exist(ns_file, 'file')
+    warning('Analyze_acute_phase_locking:NeuronSummary', ...
+        'No NeuronSummary.xlsx in population analysis; skipping region splits.')
+else
+    NS = readtable(ns_file);
+    n_matched = 0;
+    for i = 1:numel(cluster_ids)
+        hit = NS.DATE == date_list(i) & NS.EXP == exp_list(i) & NS.ID == cluster_ids(i);
+        if ~any(hit)
+            brain_region(i) = "unmatched";
+            brain_area(i) = "unmatched";
+            continue
+        end
+        rows = find(hit);
+        brain_region(i) = strtrim(string(NS.BRAIN_REGION(rows(1))));
+        brain_area(i)   = strtrim(string(NS.AREA(rows(1))));
+        n_matched = n_matched + 1;
+    end
+    brain_region(brain_region == "Ohters") = "Others";
+    brain_region(brain_region == "Rhape")  = "Raphe";
+    brain_region(ismember(lower(brain_region), ["vlpag"])) = "VlPAG";
+    brain_region(ismember(lower(brain_region), ["dlpag"])) = "DlPAG";
+    brain_region(ismember(lower(brain_region), ["sc", "supcol", "superior colliculus"])) = "SupCol";
+    brain_region(brain_region == "") = "unlabeled";
+    disp(['NeuronSummary matched: ', num2str(n_matched), ' / ', num2str(numel(cluster_ids))])
+    disp('BRAIN_REGION counts among matched cells:')
+    [g, names] = findgroups(brain_region);
+    disp(table(names, splitapply(@numel, g, g), 'VariableNames', {'region', 'n'}))
+
+    is_sc    = brain_region == "SupCol";
+    is_pag   = contains(brain_region, "PAG", 'IgnoreCase', true);
+    is_raphe = ismember(brain_region, ["Raphe", "DR"]);
+    focus_groups = {
+        'Superior Colliculus', is_sc
+        'all PAG',             is_pag
+        'Raphe',               is_raphe
+        };
+    pag_subs = unique(brain_region(is_pag));
+    pag_subs = pag_subs(pag_subs ~= "" & pag_subs ~= "unmatched");
+    for ir = 1:numel(pag_subs)
+        focus_groups(end + 1, :) = {char(pag_subs(ir)), brain_region == pag_subs(ir)}; %#ok<SAGROW>
+    end
+end
 
 %% Preferred-angle distribution (locked cells)
 figure('Name', 'Acute delta preferred phase')
@@ -114,70 +168,32 @@ plot_entrainment_psth_stack(psth_time, psth_trough, delta_lock, unlocked, lfp_an
 % Primary comparison: trough-locked vs everyone else (a "random" neuron).
 % 2x2 counts; Fisher's exact is preferred with modest n (3 acute sessions).
 % Chi-square is shown as well. Also report trough vs peak among delta-locked.
+breathing_test = report_breathing_lock_proportions( ...
+    valid, trough_lock, peak_lock, delta_lock, breath_lock, '');
+N_trough_vs_rest = breathing_test.N_trough_vs_rest;
+p_fisher = breathing_test.p_fisher;
+p_fisher_right = breathing_test.p_fisher_right;
+odds_ratio = breathing_test.odds_ratio;
+p_chi = breathing_test.p_chi2;
+chi2_tr = breathing_test.chi2;
+p_fisher_tp = breathing_test.p_fisher_trough_vs_peak;
+vals = breathing_test.proportions.p;
+cis = [breathing_test.proportions.ci_lo, breathing_test.proportions.ci_hi];
 
-n_all     = sum(valid);
-n_trough  = sum(trough_lock);
-n_peak    = sum(peak_lock);
-n_delta   = sum(delta_lock);
-
-p_all     = sum(breath_lock & valid) / max(n_all, 1);
-p_trough  = sum(breath_lock & trough_lock) / max(n_trough, 1);
-p_peak    = sum(breath_lock & peak_lock) / max(n_peak, 1);
-p_delta   = sum(breath_lock & delta_lock) / max(n_delta, 1);
-
-[phat_all, ci_all] = binofit_safe(sum(breath_lock & valid), n_all);
-[phat_tr, ci_tr]   = binofit_safe(sum(breath_lock & trough_lock), n_trough);
-[phat_pk, ci_pk]   = binofit_safe(sum(breath_lock & peak_lock), n_peak);
-[phat_del, ci_del] = binofit_safe(sum(breath_lock & delta_lock), n_delta);
-
-N_trough_vs_rest = [sum(trough_lock & breath_lock), sum(trough_lock & ~breath_lock); ...
-                    sum(~trough_lock & valid & breath_lock), sum(~trough_lock & valid & ~breath_lock)];
-p_fisher = NaN;
-p_fisher_right = NaN;
-p_chi = NaN;
-chi2_tr = NaN;
-odds_ratio = NaN;
-if all(sum(N_trough_vs_rest, 2) > 0) && all(sum(N_trough_vs_rest, 1) > 0)
-    [~, p_fisher, stats_fisher] = fishertest(N_trough_vs_rest);
-    [~, p_fisher_right] = fishertest(N_trough_vs_rest, 'Tail', 'right');
-    odds_ratio = stats_fisher.OddsRatio;
-    [~, chi2_tr, p_chi] = crosstab(trough_lock(valid), breath_lock(valid));
+%% Breathing-lock proportions: Superior Colliculus, PAG, Raphe
+breathing_test_by_region = struct();
+for ig = 1:size(focus_groups, 1)
+    in_reg = focus_groups{ig, 2}(:);
+    n_reg = sum(in_reg & valid);
+    if n_reg < 5
+        disp(sprintf('  skip breathing-lock %s (n=%d < 5)', focus_groups{ig, 1}, n_reg))
+        continue
+    end
+    breathing_test_by_region.(matlab.lang.makeValidName(focus_groups{ig, 1})) = ...
+        report_breathing_lock_proportions( ...
+        valid & in_reg, trough_lock & in_reg, peak_lock & in_reg, ...
+        delta_lock & in_reg, breath_lock & in_reg, focus_groups{ig, 1});
 end
-
-N_trough_vs_peak = [sum(trough_lock & breath_lock), sum(trough_lock & ~breath_lock); ...
-                    sum(peak_lock & breath_lock), sum(peak_lock & ~breath_lock)];
-p_fisher_tp = NaN;
-if all(sum(N_trough_vs_peak, 2) > 0) && all(sum(N_trough_vs_peak, 1) > 0)
-    [~, p_fisher_tp] = fishertest(N_trough_vs_peak);
-end
-
-disp('--- Breathing lock enrichment ---')
-disp(['  all neurons:          ', pct_str(p_all, sum(breath_lock & valid), n_all)])
-disp(['  delta-locked:         ', pct_str(p_delta, sum(breath_lock & delta_lock), n_delta)])
-disp(['  trough (delta-lock):  ', pct_str(p_trough, sum(breath_lock & trough_lock), n_trough)])
-disp(['  peak (delta-lock):    ', pct_str(p_peak, sum(breath_lock & peak_lock), n_peak)])
-disp('2x2 trough vs rest (rows: trough / rest; cols: breath+ / breath-):')
-disp(N_trough_vs_rest)
-disp(['  Fisher two-sided p = ', num2str(p_fisher), '   OR = ', num2str(odds_ratio)])
-disp(['  Fisher right-tail p (trough more often breath-locked) = ', num2str(p_fisher_right)])
-disp(['  Chi-square p = ', num2str(p_chi), '   chi2 = ', num2str(chi2_tr)])
-disp(['  Fisher trough vs peak p = ', num2str(p_fisher_tp)])
-
-figure('Name', 'Breathing lock proportions')
-vals = [phat_all; phat_del; phat_tr; phat_pk];
-cis  = [ci_all; ci_del; ci_tr; ci_pk];
-b = bar(vals, 'FaceColor', [0.4 0.4 0.4], 'EdgeColor', 'none');
-hold on
-errorbar(1:4, vals, vals - cis(:, 1), cis(:, 2) - vals, 'k', 'LineStyle', 'none', 'LineWidth', 1)
-set(gca, 'XTick', 1:4, 'XTickLabel', { ...
-    sprintf('All (n=%d)', n_all), ...
-    sprintf('Delta-locked (n=%d)', n_delta), ...
-    sprintf('Trough (n=%d)', n_trough), ...
-    sprintf('Peak (n=%d)', n_peak)})
-ylabel('Proportion breathing-locked')
-ylim([0 1])
-title({['Fisher (trough vs rest) p = ', num2str(p_fisher, '%.3g')], ...
-       ['Chi-square p = ', num2str(p_chi, '%.3g'), '  |  trough vs peak p = ', num2str(p_fisher_tp, '%.3g')]})
 
 %% Breathing peak- and trough-aligned PSTHs
 % GENERATE peak vs trough PSTHs are complementary when cells are split by
@@ -225,23 +241,28 @@ plot_breathing_peak_vs_trough(psth_time, breath_psth_peak, breath_psth_trough, .
 % the same breathing lock as that panel (trough-pref or peak-pref), so the
 % comparison is breath-lock-matched. Peak- and trough-aligned figures share
 % the same y-axis.
-plot_lfp_breath_lock_combos(psth_time, breath_psth_peak, breath_psth_trough, ...
+y_lim_combo = plot_lfp_breath_lock_combos(psth_time, breath_psth_peak, breath_psth_trough, ...
     unlocked, trough_lock, peak_lock, br_trough_pref, br_peak_pref, ...
     smooth_n, x_lim);
 
+%% LFP × breathing lock combinations: Superior Colliculus, PAG, Raphe
+min_n_region = 5;
+for ig = 1:size(focus_groups, 1)
+    in_reg = focus_groups{ig, 2}(:) & valid;
+    if sum(in_reg) < min_n_region
+        disp(sprintf('  skip combo %s (n=%d < %d)', focus_groups{ig, 1}, sum(in_reg), min_n_region))
+        continue
+    end
+    disp(sprintf('  combo %s: n=%d valid', focus_groups{ig, 1}, sum(in_reg)))
+    plot_lfp_breath_lock_combos(psth_time, breath_psth_peak, breath_psth_trough, ...
+        unlocked & in_reg, trough_lock & in_reg, peak_lock & in_reg, ...
+        br_trough_pref & in_reg, br_peak_pref & in_reg, ...
+        smooth_n, x_lim, y_lim_combo, focus_groups{ig, 1}, true);
+end
+
 %% Store counts used in the test
-breathing_test = struct();
 breathing_test.alpha = alpha;
-breathing_test.N_trough_vs_rest = N_trough_vs_rest;
-breathing_test.p_fisher = p_fisher;
-breathing_test.p_fisher_right = p_fisher_right;
-breathing_test.odds_ratio = odds_ratio;
-breathing_test.p_chi2 = p_chi;
-breathing_test.chi2 = chi2_tr;
-breathing_test.p_fisher_trough_vs_peak = p_fisher_tp;
-breathing_test.proportions = table(vals, cis(:, 1), cis(:, 2), ...
-    'VariableNames', {'p', 'ci_lo', 'ci_hi'}, ...
-    'RowNames', {'all', 'delta_locked', 'trough', 'peak'});
+breathing_test.by_region = breathing_test_by_region;
 
 
 function plot_entrainment_psth_stack(psth_time, psth, locked, unlocked, angles, ...
@@ -410,6 +431,95 @@ function [p, ci] = binofit_safe(k, n)
 end
 
 
+function out = report_breathing_lock_proportions(valid, trough_lock, peak_lock, delta_lock, breath_lock, name_tag)
+    n_all     = sum(valid);
+    n_trough  = sum(trough_lock);
+    n_peak    = sum(peak_lock);
+    n_delta   = sum(delta_lock);
+
+    p_all     = sum(breath_lock & valid) / max(n_all, 1);
+    p_trough  = sum(breath_lock & trough_lock) / max(n_trough, 1);
+    p_peak    = sum(breath_lock & peak_lock) / max(n_peak, 1);
+    p_delta   = sum(breath_lock & delta_lock) / max(n_delta, 1);
+
+    [phat_all, ci_all] = binofit_safe(sum(breath_lock & valid), n_all);
+    [phat_tr, ci_tr]   = binofit_safe(sum(breath_lock & trough_lock), n_trough);
+    [phat_pk, ci_pk]   = binofit_safe(sum(breath_lock & peak_lock), n_peak);
+    [phat_del, ci_del] = binofit_safe(sum(breath_lock & delta_lock), n_delta);
+
+    N_trough_vs_rest = [sum(trough_lock & breath_lock), sum(trough_lock & ~breath_lock); ...
+                        sum(~trough_lock & valid & breath_lock), sum(~trough_lock & valid & ~breath_lock)];
+    p_fisher = NaN;
+    p_fisher_right = NaN;
+    p_chi = NaN;
+    chi2_tr = NaN;
+    odds_ratio = NaN;
+    if all(sum(N_trough_vs_rest, 2) > 0) && all(sum(N_trough_vs_rest, 1) > 0)
+        [~, p_fisher, stats_fisher] = fishertest(N_trough_vs_rest);
+        [~, p_fisher_right] = fishertest(N_trough_vs_rest, 'Tail', 'right');
+        odds_ratio = stats_fisher.OddsRatio;
+        [~, chi2_tr, p_chi] = crosstab(trough_lock(valid), breath_lock(valid));
+    end
+
+    N_trough_vs_peak = [sum(trough_lock & breath_lock), sum(trough_lock & ~breath_lock); ...
+                        sum(peak_lock & breath_lock), sum(peak_lock & ~breath_lock)];
+    p_fisher_tp = NaN;
+    if all(sum(N_trough_vs_peak, 2) > 0) && all(sum(N_trough_vs_peak, 1) > 0)
+        [~, p_fisher_tp] = fishertest(N_trough_vs_peak);
+    end
+
+    if nargin < 6 || isempty(name_tag)
+        hdr = '--- Breathing lock enrichment ---';
+        fig_name = 'Breathing lock proportions';
+        title_prefix = '';
+    else
+        hdr = ['--- Breathing lock enrichment  |  ', name_tag, ' ---'];
+        fig_name = ['Breathing lock proportions  |  ', name_tag];
+        title_prefix = [name_tag, '  |  '];
+    end
+    disp(hdr)
+    disp(['  all neurons:          ', pct_str(p_all, sum(breath_lock & valid), n_all)])
+    disp(['  delta-locked:         ', pct_str(p_delta, sum(breath_lock & delta_lock), n_delta)])
+    disp(['  trough (delta-lock):  ', pct_str(p_trough, sum(breath_lock & trough_lock), n_trough)])
+    disp(['  peak (delta-lock):    ', pct_str(p_peak, sum(breath_lock & peak_lock), n_peak)])
+    disp('2x2 trough vs rest (rows: trough / rest; cols: breath+ / breath-):')
+    disp(N_trough_vs_rest)
+    disp(['  Fisher two-sided p = ', num2str(p_fisher), '   OR = ', num2str(odds_ratio)])
+    disp(['  Fisher right-tail p (trough more often breath-locked) = ', num2str(p_fisher_right)])
+    disp(['  Chi-square p = ', num2str(p_chi), '   chi2 = ', num2str(chi2_tr)])
+    disp(['  Fisher trough vs peak p = ', num2str(p_fisher_tp)])
+
+    figure('Name', fig_name)
+    vals = [phat_all; phat_del; phat_tr; phat_pk];
+    cis  = [ci_all; ci_del; ci_tr; ci_pk];
+    bar(vals, 'FaceColor', [0.4 0.4 0.4], 'EdgeColor', 'none');
+    hold on
+    errorbar(1:4, vals, vals - cis(:, 1), cis(:, 2) - vals, 'k', 'LineStyle', 'none', 'LineWidth', 1)
+    set(gca, 'XTick', 1:4, 'XTickLabel', { ...
+        sprintf('All (n=%d)', n_all), ...
+        sprintf('Delta-locked (n=%d)', n_delta), ...
+        sprintf('Trough (n=%d)', n_trough), ...
+        sprintf('Peak (n=%d)', n_peak)})
+    ylabel('Proportion breathing-locked')
+    ylim([0 1])
+    title({[title_prefix, 'Fisher (trough vs rest) p = ', num2str(p_fisher, '%.3g')], ...
+           ['Chi-square p = ', num2str(p_chi, '%.3g'), '  |  trough vs peak p = ', num2str(p_fisher_tp, '%.3g')]})
+
+    out = struct();
+    out.name = name_tag;
+    out.N_trough_vs_rest = N_trough_vs_rest;
+    out.p_fisher = p_fisher;
+    out.p_fisher_right = p_fisher_right;
+    out.odds_ratio = odds_ratio;
+    out.p_chi2 = p_chi;
+    out.chi2 = chi2_tr;
+    out.p_fisher_trough_vs_peak = p_fisher_tp;
+    out.proportions = table(vals, cis(:, 1), cis(:, 2), ...
+        'VariableNames', {'p', 'ci_lo', 'ci_hi'}, ...
+        'RowNames', {'all', 'delta_locked', 'trough', 'peak'});
+end
+
+
 function Z = zscore_rows_smooth(X, smooth_n)
     Z = nan(size(X));
     if isempty(X)
@@ -434,10 +544,20 @@ function Z = zscore_rows_smooth(X, smooth_n)
 end
 
 
-function plot_lfp_breath_lock_combos(psth_time, psth_peak, psth_trough, ...
-    lfp_unlocked, lfp_trough, lfp_peak, br_trough, br_peak, smooth_n, x_lim)
+function y_lim_share = plot_lfp_breath_lock_combos(psth_time, psth_peak, psth_trough, ...
+    lfp_unlocked, lfp_trough, lfp_peak, br_trough, br_peak, smooth_n, x_lim, ...
+    y_lim_in, name_suffix, do_plot)
 % Four LFP × breathing lock combinations. Gray = LFP-unlocked with the same
 % breathing preference as that panel.
+    if nargin < 11
+        y_lim_in = [];
+    end
+    if nargin < 12 || isempty(name_suffix)
+        name_suffix = '';
+    end
+    if nargin < 13 || isempty(do_plot)
+        do_plot = true;
+    end
     z_peak = zscore_rows_smooth(psth_peak, smooth_n);
     z_trough = zscore_rows_smooth(psth_trough, smooth_n);
     gray = [0.62 0.62 0.62];
@@ -451,26 +571,40 @@ function plot_lfp_breath_lock_combos(psth_time, psth_peak, psth_trough, ...
         };
     align = {z_peak, z_trough};
     align_name = {'peak', 'trough'};
-    y_all = [];
-    for a = 1:2
-        Z = align{a};
-        for c = 1:4
-            mu_u = mean(Z(combos{c, 2} & all(isfinite(Z), 2), :), 1, 'omitnan');
-            mu_c = mean(Z(combos{c, 1} & all(isfinite(Z), 2), :), 1, 'omitnan');
-            y_all = [y_all; mu_u(:); mu_c(:)]; %#ok<AGROW>
+    if isempty(y_lim_in)
+        y_all = [];
+        for a = 1:2
+            Z = align{a};
+            for c = 1:4
+                mu_u = mean(Z(combos{c, 2} & all(isfinite(Z), 2), :), 1, 'omitnan');
+                mu_c = mean(Z(combos{c, 1} & all(isfinite(Z), 2), :), 1, 'omitnan');
+                y_all = [y_all; mu_u(:); mu_c(:)]; %#ok<AGROW>
+            end
         end
-    end
-    y_all = y_all(isfinite(y_all));
-    if isempty(y_all)
-        y_lim_share = [-1 1];
+        y_all = y_all(isfinite(y_all));
+        if isempty(y_all)
+            y_lim_share = [-1 1];
+        else
+            pad = 0.1 * max(range(y_all), 1);
+            y_lim_share = [min(y_all) - pad, max(y_all) + pad];
+        end
     else
-        pad = 0.1 * max(range(y_all), 1);
-        y_lim_share = [min(y_all) - pad, max(y_all) + pad];
+        y_lim_share = y_lim_in;
+    end
+    if ~do_plot
+        return
+    end
+    if isempty(name_suffix)
+        fig_tag = '';
+        title_tag = '';
+    else
+        fig_tag = ['  ', name_suffix];
+        title_tag = [name_suffix, '  |  '];
     end
     axs = gobjects(2, 4);
     for a = 1:2
         Z = align{a};
-        figure('Name', ['LFP × breath lock  breathing-', align_name{a}, ' aligned'], ...
+        figure('Name', ['LFP × breath lock  breathing-', align_name{a}, ' aligned', fig_tag], ...
             'units', 'normalized', 'outerposition', [0.08 0.12 0.72 0.78])
         for c = 1:4
             axs(a, c) = subplot(2, 2, c);
@@ -493,8 +627,8 @@ function plot_lfp_breath_lock_combos(psth_time, psth_peak, psth_trough, ...
                 legend({'LFP unlocked, same breath lock', 'LFP + breath lock'}, 'Location', 'best')
             end
         end
-        sgtitle(sprintf(['Breathing %s-aligned.  Gray = LFP-unlocked with the ' ...
-            'same breathing lock as the panel'], align_name{a}))
+        sgtitle(sprintf(['%sBreathing %s-aligned.  Gray = LFP-unlocked with the ' ...
+            'same breathing lock as the panel'], title_tag, align_name{a}))
     end
     linkaxes(axs(:), 'y');
 end

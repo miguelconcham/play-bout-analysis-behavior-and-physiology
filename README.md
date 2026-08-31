@@ -2,7 +2,7 @@
 
 MATLAB and Python code for large-scale behavioral and neural time-series analysis. The methods below are grouped for a data-science read of the stack; paper-figure scripts follow later.
 
-This repository contains **code only**. Experimental data are archived separately (see [Data availability](#data-availability)). Publication figures live in [`Paper figures/`](Paper%20figures/).
+This repository contains **code only**. Experimental data are archived separately (see [Data availability](#data-availability)). Publication figures live in [`Paper figures/`](Paper%20figures/). **Which script to run for each analysis** (paper and extra) is in [`ANALYSES.md`](ANALYSES.md).
 
 **GitHub:** [play-bout-analysis-behavior-and-physiology](https://github.com/miguelconcham/play-bout-analysis-behavior-and-physiology)
 
@@ -54,15 +54,18 @@ What this repository actually implements.
 
 ```
 play bout analysis behavior and physiology/
+├── ANALYSES.md                        # Catalog: analysis → script to run
 ├── Paper figures/                     # Paper PDFs + PNG previews used below
-├── Complementary figures/             # LIF model, spike-train parsing, acute phase locking
+├── Complementary figures/             # LIF, parsing, acute locking, stim/call PSTHs
 │   ├── LIF neuron model.ipynb
 │   ├── GENERATE_SPIKE_TRAIN_PARSING.m
 │   ├── Estimate_spike_train_parsing.m
 │   ├── Analyze_spike_train_parsing.m
 │   ├── GENERATE_ACUTE_PHASE_LOCKING.m
 │   ├── Estimate_acute_phase_locking.m
-│   └── Analyze_acute_phase_locking.m
+│   ├── Analyze_acute_phase_locking.m
+│   ├── GENERATE_STIM_CALL_RESPONSES.m
+│   └── Estimate_stim_call_responses.m
 ├── Custom functions/                  # Shared helpers (play_bout, kernel_rate, ppc, …)
 ├── Figure 1/
 │   ├── Figure 1 Play Bouts.m
@@ -220,7 +223,7 @@ Rebuild MI / CCG structs from two-animal recordings with `Figure 6/Supplementary
 
 ## Complementary figures
 
-Same GENERATE → Estimate → Analyze layout as Figure 2/3, for analyses that are not numbered paper panels.
+Same GENERATE → Estimate → Analyze layout as Figure 2/3, for analyses that are not numbered paper panels. Full run table: [`ANALYSES.md`](ANALYSES.md).
 
 ### LIF neuron model
 
@@ -243,7 +246,7 @@ Per-neuron firing runs on PAG LFP, band set by `Hd_freq` (default delta `[1 6]` 
 Estimate_spike_train_parsing.m  →  GENERATE_SPIKE_TRAIN_PARSING  →  per-session .mat  →  Analyze_spike_train_parsing.m
 ```
 
-`GENERATE_SPIKE_TRAIN_PARSING` stores run tables with cycle PSTHs, sine fits, MVL/PPC vs circularly shifted trains, and count autocorrelograms. Early sessions may sit in one pooled `spike_train_parsing_structure.mat`; later sessions are one `.mat` per animal. `Analyze_spike_train_parsing.m` loads both, keeps delta-locked cells from `delta_all_neurons_v2.mat`, splits runs into low vs high PPC, sums then normalizes autocorrelograms, and compares them (paired signrank on lag-window mass).
+`GENERATE_SPIKE_TRAIN_PARSING` stores run tables with cycle PSTHs, sine fits, MVL/PPC vs circularly shifted trains, and count autocorrelograms. Analyze loads the pooled file plus later per-animal `.mat`s one session at a time (files are several GB). It keeps delta-locked cells from `delta_all_neurons_v2.mat`, splits runs into low vs high PPC, overlap-pools autocorrelograms (`sum counts / sum (T-|lag|)`), and compares them to session-unlocked cells (also split by run PPC). Paired signrank on lag-window mass.
 
 ### Acute phase locking
 
@@ -253,7 +256,17 @@ Green-window LFP and breathing phase locking on acute NPX sessions (`Data/Acute 
 Estimate_acute_phase_locking.m  →  GENERATE_ACUTE_PHASE_LOCKING  →  acute_phase_locking_<band>.mat  →  Analyze_acute_phase_locking.m
 ```
 
-`Analyze_acute_phase_locking.m` plots preferred-phase histograms and Fig 3-style peak/trough PSTH heatmaps (no area split), then tests whether delta trough-locked cells are more often breathing-locked than the rest of the population (Fisher's exact; chi-square reported alongside).
+`Analyze_acute_phase_locking.m` plots preferred-phase histograms and Fig 3-style peak/trough PSTH heatmaps, tests whether delta trough-locked cells are more often breathing-locked (Fisher; chi-square alongside), and repeats the LFP × breathing 2×2 and the proportion test for Superior Colliculus, PAG, and Raphe (`NeuronSummary.xlsx`).
+
+### Acute stim / call responses
+
+Call onset/offset and green-window spike PSTHs on the same acute sessions.
+
+```
+Estimate_stim_call_responses.m  →  GENERATE_STIM_CALL_RESPONSES  →  stim_call_responses_<band>.mat
+```
+
+Calls whose onset falls within `stim_blank` (default 100 ms) after StimEnd are dropped. Session-wide 10 ms rate is z-scored after NaN-ing samples within `stim_blank` of StimEnd. Output identity fields match `GENERATE_ACUTE_PHASE_LOCKING` so the two can be joined later.
 
 ---
 
@@ -394,7 +407,7 @@ Example traces also need `Data/Synch data/<animal>/` and `Data/NPX data/NPX raw 
 - `Data/Analysis results/spike train parsing/` — pooled and per-animal parsing structs
 - `Data/Analysis results/phase locking data/delta_all_neurons_v2.mat` — delta-lock labels used by `Analyze_spike_train_parsing.m`
 - `Data/Acute data/` — acute sessions (`YYYYMMDD_N`) plus `population analysis/`
-- `Data/Analysis results/acute phase locking/` — pooled `acute_phase_locking_*.mat` and interval figures
+- `Data/Analysis results/acute phase locking/` — pooled `acute_phase_locking_*.mat`, `stim_call_responses_*.mat`, and interval figures
 - `Complementary figures/sim_shared_grid.pkl` and `sim_NOT_shared_grid.pkl` — LIF grid checkpoints (local only; not in git)
 
 ### Where to download data
