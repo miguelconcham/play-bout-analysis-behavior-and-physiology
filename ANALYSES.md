@@ -49,6 +49,10 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | LFP phase of coincident spikes | Fig 3j | `Figure 3/Supporting codes/Estiamte_phase_coincidence.m` | `Figure 3/Supporting codes/ANALYZE_phase_coincidence.m`; `Figure 3/Fig 3j.m` |
 | Coincidence-phase extra plots | extra (former supp) | `Estiamte_phase_coincidence.m` | `Figure 3/Former Supplementary Figure Phase of coincident events.m` |
 | Rate + coincidence phase (shift-o-gram) | extra | `Figure 3/Supporting codes/Estimate rate coincidence phase.m` | same script (Estimate also plots) |
+| Cross-area neuronal responses / co-modulation (warped) | Fig 4a–c; Ext. Data Fig. 6a–b | (loads `delta_all_neurons_v2.mat`) | `Figure 4/Figure_4_Panels_abc_Extended_Fig_6_ab_v2.m` |
+| Entrainment comparison stacked layout | Ext. Data Fig. 6c | (loads `delta_all_neurons_v2.mat`) | `Figure 4/Extended_Fig_6_c_v2.m` |
+| Pounce / entrainment comparison | Fig 5b,d | (loads `delta_all_neurons_v2.mat`) | `Figure 5/Figure_5_Panels_bd_v1.m` |
+| Early / late / sustained pounce responses (entrained) | Fig 5e | (loads `delta_all_neurons_v2.mat`) | `Figure 5/Figure_5_Panel_e_v1.m` |
 | Dual-animal delta mutual information | Fig 6b–e,g–h,i | `Figure 6/Supplementary codes/Estiamte animal aynch all animals.m` | `Figure 6/Figure 6 Basic MI.m`; `Figure 6/Fig 6i.m` |
 | Dual-animal LFP cross-correlation | Fig 6f | `Figure 6/Supplementary codes/Estiamte animal aynch all animals_cross_correlograms.m` | `Figure 6/Fig 6f.m` |
 | Acute NPX: LFP × breathing phase locking | extra | `Complementary figures/Estimate_acute_phase_locking.m` | `Complementary figures/Analyze_acute_phase_locking.m` |
