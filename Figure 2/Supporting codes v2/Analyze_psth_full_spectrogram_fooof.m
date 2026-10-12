@@ -172,6 +172,69 @@ ylabel('\Delta (after − before)')
 title('Full spectrum vs periodic-only change')
 box off
 
+%% Extra analysis: LME on periodic difference (animal as random intercept)
+% Same pattern as Analyze_psth_full_spectrogram.m:
+%   Power ~ 1 + (1|Animal)
+% One observation per session; sessions nested in animals via session_animal.
+A = periodic_diff;
+
+beta_est    = nan(nFreq, 1);
+SE          = nan(nFreq, 1);
+CI_low_95   = nan(nFreq, 1);
+CI_high_95  = nan(nFreq, 1);
+CI_low_99   = nan(nFreq, 1);
+CI_high_99  = nan(nFreq, 1);
+pValue      = nan(nFreq, 1);
+
+for freq_n = 1:nFreq
+    tbl = table(A(:, freq_n), categorical(session_animal), ...
+        'VariableNames', {'Power', 'Animal'});
+    lme = fitlme(tbl, 'Power ~ 1 + (1|Animal)');
+
+    coef  = lme.Coefficients;
+    ci_95 = coefCI(lme, 'Alpha', 0.05);
+    ci_99 = coefCI(lme, 'Alpha', 0.01);
+
+    beta_est(freq_n)   = coef.Estimate(1);
+    SE(freq_n)         = coef.SE(1);
+    CI_low_95(freq_n)  = ci_95(1, 1);
+    CI_high_95(freq_n) = ci_95(1, 2);
+    CI_low_99(freq_n)  = ci_99(1, 1);
+    CI_high_99(freq_n) = ci_99(1, 2);
+    pValue(freq_n)     = coef.pValue(1);
+end
+
+sigFreq = find(pValue < 0.01);
+fprintf('LME significant frequencies (p < 0.01): %d bins\n', numel(sigFreq));
+
+%% Plot LME intercept estimate for periodic Δ (extra; does not replace SEM plot)
+figure('Name', 'FOOOF periodic LME (animal random intercept)');
+hold on
+plot(f, beta_est, 'k', 'LineWidth', 2);
+yline(0, 'k--');
+if ~isempty(sigFreq)
+    plot(f(sigFreq), beta_est(sigFreq), 'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 5);
+end
+xlabel('Frequency (Hz)')
+ylabel('LME estimate of \Delta periodic power')
+title('Periodic \Delta: LME intercept + (1|Animal), p < 0.01 marked')
+box off
+
+%% Plot LME estimate vs session-mean periodic difference
+figure('Name', 'FOOOF periodic LME vs session mean');
+hold on
+plot(f, beta_est, 'k', 'LineWidth', 2)
+plot(f, mean_periodic_diff, ':k')
+if ~isempty(sigFreq)
+    plot(f(sigFreq), beta_est(sigFreq), 'ro', 'MarkerFaceColor', 'r')
+end
+yline(0, 'k--');
+legend({'LME estimate', 'Session-mean \Delta', 'p < 0.01'}, 'Location', 'best')
+xlabel('Frequency (Hz)')
+ylabel('\Delta periodic power')
+title('LME vs session-mean periodic difference')
+box off
+
 %% Package results (in-memory; save manually if desired)
 fooof_play_results = struct();
 fooof_play_results.f = f;
@@ -199,10 +262,23 @@ fooof_play_results.peak_params_after = peak_params_after;
 fooof_play_results.periodic_diff = periodic_diff;
 fooof_play_results.fooof_before = fooof_before;  % full FOOOF structs
 fooof_play_results.fooof_after = fooof_after;
+
+% LME outputs (animal as random intercept), same layout as full-spectrogram Analyze
+fooof_play_results.lme.beta_est = beta_est;
+fooof_play_results.lme.SE = SE;
+fooof_play_results.lme.CI_low_95 = CI_low_95;
+fooof_play_results.lme.CI_high_95 = CI_high_95;
+fooof_play_results.lme.CI_low_99 = CI_low_99;
+fooof_play_results.lme.CI_high_99 = CI_high_99;
+fooof_play_results.lme.pValue = pValue;
+fooof_play_results.lme.sigFreq = sigFreq;
+fooof_play_results.lme.formula = 'Power ~ 1 + (1|Animal)';
+
 fooof_play_results.note = [ ...
     'Onset PSTH (play_bout_onset); time from hist_range/bin_size; ' ...
     'joint z-score of log10 mean spectra [before; after] per session; ' ...
-    'FOOOF on 10.^z; stores peak_fit, flat_spectrum, aperiodic_fit, peak_params'];
+    'FOOOF on 10.^z; stores peak_fit, flat_spectrum, aperiodic_fit, peak_params; ' ...
+    'extra LME on periodic_diff with animal random intercept'];
 
 disp('FOOOF periodic before/after (onset) analysis complete.')
 disp('Results stored in workspace variable: fooof_play_results')
