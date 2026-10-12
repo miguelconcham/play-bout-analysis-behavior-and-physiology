@@ -59,6 +59,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Acute NPX: call and green-window spike PSTHs | extra | `Complementary figures/Estimate_stim_call_responses.m` | outputs in `stim_call_responses_*.mat` (no Analyze yet) |
 | Firing-run parsing, per-run PPC, run ACGs | extra | `Complementary figures/Estimate_spike_train_parsing.m` | `Complementary figures/Analyze_spike_train_parsing.m` |
 | LIF network with shared vs private oscillation | extra | `Complementary figures/LIF neuron model.ipynb` (Estimate grid cells) | same notebook (Analyze cells) |
+| 1D CSD (kCSD / finite-difference) on LFP stacks | extra | `CSD analysis/CSD_1D_general.ipynb` or `CSD analysis/csd_1d_pipeline.py` | same (saves `csd_1d_*.npy` + plots) |
 
 ---
 
