@@ -3,7 +3,7 @@
 % then per-animal files). Keep delta-locked neurons from the all_neurons
 % table, split each cell's runs into low vs high PPC, edge-correct run
 % autocorrelograms (counts / (T-|lag|); NaN if lag >= run length), sum,
-% normalize, and compare. Existing GENERATE files without
+% blank lag-0 bins, normalize, and compare. Existing GENERATE files without
 % config.acg_edge_corrected are corrected here.
 
 %% Paths and parameters
@@ -20,6 +20,7 @@ min_runs      = 1;       % minimum runs in each PPC group to keep the cell
 lag_win       = [0.15 0.40];  % lags (s) used as a delta-side-peak summary
 smooth_half   = 0.04;    % s, ACG smoothing away from zero (as in parsing plots)
 skip_abs_lag  = 0.02;    % s, do not smooth near zero lag
+acg_refractory_s = 0.005;  % s; blank lag-0 / refractory bins before normalize + plot
 
 %% Load delta-locked labels (same table as Fig 3)
 load(fullfile(phase_folder, 'delta_all_neurons_v2.mat'), 'all_neurons');
@@ -246,6 +247,15 @@ if row < 1
         'No delta-locked cells with low/high PPC runs. Check ppc_low_max / ppc_high_min and that parsing files exist.');
     return
 end
+
+% Blank the lag-0 bin(s) before normalize so the 0-lag peak is not plotted
+% and does not steal mass from the rest of the ACG. 10 ms bins straddle 0
+% (centers at ±5 ms); those bins are included even if refractory < bin width.
+acg_low_raw  = blank_acg_zero_lag(acg_low_raw, centers, acg_refractory_s);
+acg_high_raw = blank_acg_zero_lag(acg_high_raw, centers, acg_refractory_s);
+acg_unlock_raw = blank_acg_zero_lag(acg_unlock_raw, centers, acg_refractory_s);
+acg_unlock_low_raw = blank_acg_zero_lag(acg_unlock_low_raw, centers, acg_refractory_s);
+acg_unlock_high_raw = blank_acg_zero_lag(acg_unlock_high_raw, centers, acg_refractory_s);
 
 acg_low_norm  = normalize_rows(acg_low_raw);
 acg_high_norm = normalize_rows(acg_high_raw);
@@ -527,6 +537,29 @@ function Y = normalize_rows(X)
 end
 
 
+function Y = blank_acg_zero_lag(X, centers, flank_s)
+% NaN bins that overlap lag 0 / the refractory so they are omitted from
+% normalize / mean / plot. 10 ms ACG bins straddle 0 (centers ±5 ms);
+% those two bins are blanked even when flank_s is smaller than bin width.
+    Y = X;
+    if isempty(X) || isempty(centers)
+        return
+    end
+    t = centers(:)';
+    dt = median(diff(t));
+    if ~isfinite(dt) || dt <= 0
+        dt = flank_s;
+    end
+    if nargin < 3 || isempty(flank_s)
+        flank_s = 0.005;
+    end
+    half = abs(dt) / 2;
+    lo = t - half;
+    hi = t + half;
+    Y(:, lo < flank_s & hi > -flank_s) = NaN;
+end
+
+
 function Y = smooth_acg_away_from_zero(X, centers, skip_abs_lag, smooth_n)
     Y = X;
     if isempty(X)
@@ -569,7 +602,26 @@ function plot_mean_sem(t, M, col, ls)
     mu = mean(M, 1, 'omitnan');
     n = sum(isfinite(M), 1);
     sem = std(M, 0, 1, 'omitnan') ./ sqrt(max(n, 1));
-    fill([t fliplr(t)], [mu - sem, fliplr(mu + sem)], col, 'FaceAlpha', 0.25, 'EdgeColor', 'none', 'HandleVisibility','off')
     hold on
+    fill_sem_finite(t, mu, sem, col)
     plot(t, mu, 'Color', col, 'LineStyle', ls, 'LineWidth', 2)
+end
+
+
+function fill_sem_finite(t, mu, sem, col)
+% Shade only contiguous finite runs so the lag-0 NaN gap is not filled in.
+    lo = mu - sem;
+    hi = mu + sem;
+    ok = isfinite(mu) & isfinite(lo) & isfinite(hi);
+    d = diff([false, ok, false]);
+    i1 = find(d == 1);
+    i2 = find(d == -1) - 1;
+    for k = 1:numel(i1)
+        sl = i1(k):i2(k);
+        if numel(sl) < 2
+            continue
+        end
+        fill([t(sl) fliplr(t(sl))], [lo(sl), fliplr(hi(sl))], col, ...
+            'FaceAlpha', 0.25, 'EdgeColor', 'none', 'HandleVisibility', 'off')
+    end
 end
