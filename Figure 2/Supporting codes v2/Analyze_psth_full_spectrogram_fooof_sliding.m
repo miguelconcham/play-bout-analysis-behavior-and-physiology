@@ -17,10 +17,12 @@
 %   fooof_sliding_results
 %     .f, .time, .t_win, .T, .dt, .session_list, .session_animal
 %     .aperiodic_fit   {session} -> [nFreq x nWin]
-%     .periodic_fit    {session} -> [nFreq x nWin]   (peak_fit)
+%     .periodic_fit    {session} -> [nFreq x nWin]   (Gaussian peak_fit)
+%     .periodic_data   {session} -> [nFreq x nWin]   (logP - aperiodic_fit)
 %     .full_fit        {session} -> [nFreq x nWin]
 %     .flat_spectrum   {session} -> [nFreq x nWin]
 %     .mean_power      {session} -> [nFreq x nWin]   (linear mean P)
+%     .log_power       {session} -> [nFreq x nWin]   (log10 mean P)
 %     .aperiodic_params{session} -> [nWin x nApParams]
 %         fixed: [offset, exponent]
 %         knee : [offset, knee, exponent]
@@ -99,6 +101,8 @@ fprintf('Sliding FOOOF: T = %g s, dt = %g s, %d centers from %.2f to %.2f s\n', 
 %% Preallocate per-session containers
 aperiodic_fit_all   = cell(nSessions, 1);
 periodic_fit_all    = cell(nSessions, 1);
+periodic_data_all   = cell(nSessions, 1);  % logP - aperiodic_fit (data, not Gaussian)
+log_power_all       = cell(nSessions, 1);
 full_fit_all        = cell(nSessions, 1);
 flat_spectrum_all   = cell(nSessions, 1);
 mean_power_all      = cell(nSessions, 1);
@@ -120,6 +124,8 @@ for i = 1:nSessions
 
     ap_fit = nan(nFreq, nWin);
     pk_fit = nan(nFreq, nWin);
+    pk_data = nan(nFreq, nWin);
+    log_P = nan(nFreq, nWin);
     fl_fit = nan(nFreq, nWin);
     ft_fit = nan(nFreq, nWin);
     mean_P = nan(nFreq, nWin);
@@ -156,7 +162,10 @@ for i = 1:nSessions
 
         fooof_win{w} = out;
         ap_fit(:, w) = out.aperiodic_fit(:);
-        pk_fit(:, w) = out.peak_fit(:);
+        pk_fit(:, w) = out.peak_fit(:);   % Gaussian periodic model
+        log_P(:, w) = out.log_power(:);
+        % Aperiodic-corrected spectrum (real data residual, not Gaussian)
+        pk_data(:, w) = out.log_power(:) - out.aperiodic_fit(:);
         fl_fit(:, w) = out.flat_spectrum(:);
         ft_fit(:, w) = out.full_fit(:);
 
@@ -171,6 +180,8 @@ for i = 1:nSessions
 
     aperiodic_fit_all{i} = ap_fit;
     periodic_fit_all{i} = pk_fit;
+    periodic_data_all{i} = pk_data;
+    log_power_all{i} = log_P;
     full_fit_all{i} = ft_fit;
     flat_spectrum_all{i} = fl_fit;
     mean_power_all{i} = mean_P;
@@ -201,7 +212,9 @@ fooof_sliding_results.settings.MinPeakHeight = min_peak_height;
 fooof_sliding_results.settings.PeakThreshold = peak_threshold;
 
 fooof_sliding_results.aperiodic_fit = aperiodic_fit_all;
-fooof_sliding_results.periodic_fit = periodic_fit_all;
+fooof_sliding_results.periodic_fit = periodic_fit_all;     % Gaussian peak_fit
+fooof_sliding_results.periodic_data = periodic_data_all;   % logP - aperiodic_fit
+fooof_sliding_results.log_power = log_power_all;
 fooof_sliding_results.full_fit = full_fit_all;
 fooof_sliding_results.flat_spectrum = flat_spectrum_all;
 fooof_sliding_results.mean_power = mean_power_all;
@@ -216,9 +229,10 @@ fooof_sliding_results.fooof_out = fooof_out_all;
 
 fooof_sliding_results.note = [ ...
     'Sliding centered window FOOOF on raw mean onset spectrogram; ' ...
-    'parameters saved per session and per t_win center'];
+    'parameters saved per session and per t_win center; ' ...
+    'periodic_data = log_power - aperiodic_fit at each window'];
 
-%% Quick look: aperiodic params + baseline-z-scored periodic delta power
+%% Quick look: aperiodic params + baseline-z-scored aperiodic-corrected delta power
 ap_offset = nan(nSessions, nWin);
 ap_exponent = nan(nSessions, nWin);
 for i = 1:nSessions
@@ -233,7 +247,8 @@ for i = 1:nSessions
     ap_exponent(i, :) = ap(:, nApParams).';  % last col = exponent (fixed or knee)
 end
 
-% Mean periodic (peak_fit) power in delta_band, then baseline z-score
+% Mean aperiodic-corrected spectrum in delta_band, then baseline z-score
+% (data - aperiodic, NOT the Gaussian peak_fit)
 delta_freq_idx = f >= delta_band(1) & f <= delta_band(2);
 if ~any(delta_freq_idx)
     error('delta_band [%g %g] does not overlap frequency vector f.', ...
@@ -247,7 +262,7 @@ end
 
 periodic_delta = nan(nSessions, nWin);
 for i = 1:nSessions
-    pk = periodic_fit_all{i};   % [nFreq x nWin], log10 peak fit
+    pk = periodic_data_all{i};   % [nFreq x nWin], logP - aperiodic_fit
     if isempty(pk)
         continue
     end
@@ -301,20 +316,20 @@ if any(h_per)
     plot(t_win(h_per == 1), mean(periodic_delta(:, h_per == 1), 1, 'omitnan'), '.r')
 end
 xlabel('Window center (s from play-bout onset)')
-ylabel(sprintf('Periodic %g–%g Hz (z)', delta_band(1), delta_band(2)))
-title(sprintf('Periodic delta power (baseline z-score [%g %g] s)', ...
+ylabel(sprintf('Data−aperiodic %g–%g Hz (z)', delta_band(1), delta_band(2)))
+title(sprintf('Aperiodic-corrected delta power (baseline z [%g %g] s)', ...
     baseline_range_z(1), baseline_range_z(2)))
 box off
 
-%% Quick look: example session periodic fit heatmap
+%% Quick look: example session aperiodic-corrected spectrum heatmap
 example_sess = 1;
-figure('Name', 'Sliding FOOOF periodic fit (example session)');
-imagesc(t_win, f, periodic_fit_all{example_sess})
+figure('Name', 'Sliding FOOOF aperiodic-corrected spectrum (example session)');
+imagesc(t_win, f, periodic_data_all{example_sess})
 axis xy
 colorbar
 xlabel('Window center (s)')
 ylabel('Frequency (Hz)')
-title(sprintf('Periodic (peak) fit — session %d', session_list(example_sess)))
+title(sprintf('logP − aperiodic (session %d)', session_list(example_sess)))
 
 %% Optional save
 if save_results
@@ -325,6 +340,7 @@ end
 
 disp('Sliding-window FOOOF complete.')
 disp('Results in workspace: fooof_sliding_results')
-disp('  aperiodic_params{session}(win,:)  and  peak_params{session}{win}')
-disp('  periodic_delta_z: baseline-z-scored mean periodic power in delta_band')
+disp('  periodic_data{session}: [nFreq x nWin] = logP - aperiodic_fit')
+disp('  periodic_fit{session}:  Gaussian peak_fit (still stored)')
+disp('  periodic_delta_z: baseline-z-scored mean(periodic_data) in delta_band')
 disp('  indexed by t_win (window centers)')
