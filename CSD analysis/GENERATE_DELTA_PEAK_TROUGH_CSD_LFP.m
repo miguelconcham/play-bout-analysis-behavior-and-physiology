@@ -1,9 +1,10 @@
 function results = GENERATE_DELTA_PEAK_TROUGH_CSD_LFP(npx_data_dir, Hd_delta, t1, t2)
 %GENERATE_DELTA_PEAK_TROUGH_CSD_LFP  Raw LFP snippets around delta extrema.
 %
-% Detect delta peaks/troughs on the LPAG-center channel during Partners
-% session intervals, cut raw (unreferenced) LFP on [t1, t2], and return
-% one result per shank that has LPAG:
+% Detect delta peaks/troughs on the LPAG-center channel during play_session
+% intervals (behavior Type == 'Partners session', same as Fig 6 GENERATE_*),
+% cut raw (unreferenced) LFP on [t1, t2], and return one result per shank
+% that has LPAG:
 %   - NPX1: one shank (full channel count)
 %   - NPX2: one result per ProbeNum with LPAG (reduced channel list)
 %
@@ -12,7 +13,7 @@ function results = GENERATE_DELTA_PEAK_TROUGH_CSD_LFP(npx_data_dir, Hd_delta, t1
 % Inputs
 %   npx_data_dir  session folder under Data/NPX data/NPX raw data
 %   Hd_delta      FIR bandpass filter object (designfilt), e.g. 1–5 Hz
-%   t1, t2        seconds around extremum (t1 < 0 < t2), e.g. -0.25, 0.25
+%   t1, t2        seconds around extremum (t1 < 0 < t2), e.g. -0.5, 0.5
 %
 % Output
 %   results       struct array with fields for peak/trough stacks + coords
@@ -35,7 +36,8 @@ animal_code_params = strsplit(animal_code, ' ');
 animal_batch       = animal_code_params{1};
 repeated_animal    = animal_code_params{3};
 
-%% Behavior + Partners session (play session) intervals
+%% Behavior + play_session intervals (Type 'Partners session' in behavior txt)
+% Same convention as GENERATE_STRUCUTRE_animal_synch.m / Fig 3 phase coupling.
 load(fullfile(synch_directory, animal_code, 'synch_model_video2NPX.mat'), 'synch_model_video2NPX');
 
 Behavior_file = fullfile(behavior_data, [animal_code, '.txt']);
@@ -50,11 +52,11 @@ Behavior(ismember(Behavior.Animal, 'Reversal'), :) = [];
 Behavior.Start = predict(synch_model_video2NPX, Behavior.Start);
 Behavior.End   = predict(synch_model_video2NPX, Behavior.End);
 
-play_session = Behavior(strcmp(Behavior.Type2, 'Partners session'), :);
-play_session = play_session(:, {'Start', 'End'});
+% play_session: Start/End of partner play blocks (may be multiple rows)
+play_session = Behavior{ismember(Behavior.Type, 'Partners session'), {'Start', 'End'}};
 if isempty(play_session)
     warning('GENERATE_DELTA_PEAK_TROUGH_CSD_LFP:NoPlaySession', ...
-        '%s: no Partners session intervals — skipping', animal_code);
+        '%s: no play_session (Type ''Partners session'') — skipping', animal_code);
     results = [];
     return
 end
@@ -262,13 +264,14 @@ end
 end
 
 function idx = local_keep_in_sessions(idx, lfp_time, play_session, pre_samp, post_samp, n_time_total)
+% play_session is an N×2 numeric array [Start End] in seconds (NPX time).
 if isempty(idx)
     return
 end
 t = lfp_time(idx);
 in_sess = false(size(t));
 for s = 1:size(play_session, 1)
-    in_sess = in_sess | (t >= play_session.Start(s) & t <= play_session.End(s));
+    in_sess = in_sess | (t >= play_session(s, 1) & t <= play_session(s, 2));
 end
 ok_edge = idx > pre_samp & idx + post_samp - 1 <= n_time_total;
 idx = idx(in_sess(:) & ok_edge(:));

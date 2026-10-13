@@ -1,32 +1,35 @@
 %% Estimate_delta_peak_trough_csd
 % Loop NPX sessions, cut raw LFP around delta peaks/troughs (LPAG center,
-% Partners session only), and write CSD-ready .npy folders.
+% play_session = Type 'Partners session' in the behavior txt), write npy.
 %
 % Output layout under Data/Analysis results/delta peak trough CSD/:
-%   NPX1:  <animal>/peak/   and  <animal>/trough/
-%   NPX2:  <animal>/probe<N>/peak/   and  .../trough/
-% Each folder contains: lfp.npy, x_coords.npy, y_coords.npy, T0.npy
-% plus meta.mat (detection channel, event counts, fs, window).
+%   peak/<animal>/                 (NPX1)
+%   peak/<animal>/probe<N>/        (NPX2 shank)
+%   trough/<animal>/
+%   trough/<animal>/probe<N>/
+% Each leaf folder: lfp.npy, x_coords.npy, y_coords.npy, T0.npy, fs.npy, meta.mat
 
 data_root     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 npx_Raw_Data  = fullfile(data_root, 'NPX data', 'NPX raw data');
 saving_folder = fullfile(data_root, 'Analysis results', 'delta peak trough CSD');
+peak_root     = fullfile(saving_folder, 'peak');
+trough_root   = fullfile(saving_folder, 'trough');
 
 repo_root = fileparts(mfilename('fullpath'));
 repo_root = fileparts(repo_root);
 run(fullfile(repo_root, 'add_repo_paths.m'));
 addpath(fullfile(repo_root, 'CSD analysis'));
 
-if ~exist(saving_folder, 'dir')
-    mkdir(saving_folder);
-end
+if ~exist(saving_folder, 'dir'); mkdir(saving_folder); end
+if ~exist(peak_root, 'dir');     mkdir(peak_root);     end
+if ~exist(trough_root, 'dir');   mkdir(trough_root);   end
 
 %% Fixed parameters
 sr           = 2500;
 filter_order = 2000;
 freq_delta   = [1 5];
-t1           = -0.25;   % s
-t2           =  0.25;   % s
+t1           = -0.50;   % s  (±500 ms; can subsample later in Python)
+t2           =  0.50;   % s
 
 Hd_delta = designfilt('bandpassfir', ...
     'FilterOrder', filter_order, ...
@@ -61,28 +64,28 @@ for fn = 1:numel(animal_list)
     end
 
     if isempty(results)
-        summary(end + 1, :) = {animal_name, 'SKIP', 'no LPAG or no play session', 0, 0}; %#ok<AGROW>
+        summary(end + 1, :) = {animal_name, 'SKIP', 'no LPAG or no play_session', 0, 0}; %#ok<AGROW>
         continue
     end
 
     for j = 1:numel(results)
         r = results(j);
         if r.npx_type == 1
-            base = fullfile(saving_folder, r.animal_code);
+            peak_dir   = fullfile(peak_root, r.animal_code);
+            trough_dir = fullfile(trough_root, r.animal_code);
         else
-            base = fullfile(saving_folder, r.animal_code, r.shank_label);
+            peak_dir   = fullfile(peak_root, r.animal_code, r.shank_label);
+            trough_dir = fullfile(trough_root, r.animal_code, r.shank_label);
         end
 
-        peak_dir   = fullfile(base, 'peak');
-        trough_dir = fullfile(base, 'trough');
         if ~exist(peak_dir, 'dir');   mkdir(peak_dir);   end
         if ~exist(trough_dir, 'dir'); mkdir(trough_dir); end
 
         local_save_csd_folder(peak_dir, r.lfp_peak, r.x_coords, r.y_coords, r.T0, r);
         local_save_csd_folder(trough_dir, r.lfp_trough, r.x_coords, r.y_coords, r.T0, r);
 
-        disp(sprintf('  saved %s  peak=%d  trough=%d  n_chan=%d', ...
-            base, r.n_events_peak, r.n_events_trough, numel(r.channel_ids)));
+        disp(sprintf('  saved peak/trough for %s (%s)  peak=%d  trough=%d  n_chan=%d', ...
+            r.animal_code, r.shank_label, r.n_events_peak, r.n_events_trough, numel(r.channel_ids)));
         summary(end + 1, :) = {r.animal_code, r.shank_label, 'OK', ...
             r.n_events_peak, r.n_events_trough}; %#ok<AGROW>
     end
@@ -90,7 +93,7 @@ end
 toc
 
 save(fullfile(saving_folder, 'estimate_summary.mat'), 'summary', 't1', 't2', 'freq_delta', 'Hd_delta');
-disp(['Done. Outputs in ', saving_folder])
+disp(['Done. Outputs in ', saving_folder, ' (folders: peak/ and trough/)'])
 
 %% -------------------------------------------------------------------------
 function local_save_csd_folder(folder, lfp_stack, x, y, T0, meta_src)

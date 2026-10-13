@@ -718,8 +718,8 @@ def run_many(
 
 DELTA_CSD_DEFAULTS: Dict[str, Any] = {
     "fs": 2500.0,
-    "t_pre": 250.0,   # ms  (matches MATLAB t1=-0.25)
-    "t_post": 250.0,  # ms  (matches MATLAB t2=+0.25)
+    "t_pre": 500.0,   # ms  (matches MATLAB t1=-0.50)
+    "t_post": 500.0,  # ms  (matches MATLAB t2=+0.50)
     "step_ms": 5.0,
     "ref_chan": None,          # no re-reference
     "baseline_correct": False, # keep option open via normalize later
@@ -747,17 +747,14 @@ def discover_delta_csd_datasets(
     """
     Walk the MATLAB export tree and build DATASETS entries.
 
-    Expected layouts
-    ----------------
-    NPX1 (one shank, full channel count)::
+    Expected layout (top-level peak/ and trough/ folders)::
 
-        <root>/<animal>/peak/
-        <root>/<animal>/trough/
+        <root>/peak/<animal>/                 # NPX1
+        <root>/peak/<animal>/probe2/          # NPX2 shank
+        <root>/trough/<animal>/
+        <root>/trough/<animal>/probe3/
 
-    NPX2 (one folder per probe/shank, reduced n_chan)::
-
-        <root>/<animal>/probe2/peak/
-        <root>/<animal>/probe3/trough/
+    Also accepts the older leaf layout ``.../<animal>/peak/`` if present.
     """
     root = os.fspath(root)
     found: List[Dict[str, Any]] = []
@@ -766,13 +763,17 @@ def discover_delta_csd_datasets(
 
     required = ("lfp.npy", "x_coords.npy", "y_coords.npy", "T0.npy")
     for dirpath, _dirnames, filenames in os.walk(root):
-        base = os.path.basename(dirpath)
-        if base not in alignments:
-            continue
         if not all(f in filenames for f in required):
             continue
-        rel = os.path.relpath(dirpath, root)
-        name = rel.replace("\\", "/").replace("/", "_")
+        rel = os.path.relpath(dirpath, root).replace("\\", "/")
+        parts = rel.split("/")
+        # New layout: peak|trough is the first path component
+        # Old layout: peak|trough is the last path component
+        if not parts:
+            continue
+        if parts[0] not in alignments and parts[-1] not in alignments:
+            continue
+        name = rel.replace("/", "_")
         found.append({"name": name, "folder": dirpath})
     found.sort(key=lambda d: d["name"])
     return found

@@ -15,19 +15,19 @@
 1. Detection channel = **center of LPAG** (same geometry rule as Fig 2 PSTHs). **No LPAG → skip session/shank.**
 2. **NPX1:** one folder with the full channel list. **NPX2:** one folder **per probe/shank** that has LPAG (reduced `n_chan`).
 3. **No re-referencing.**
-4. Window **t1 = −0.25 s, t2 = +0.25 s.**
+4. Window **t1 = −0.50 s, t2 = +0.50 s** (±500 ms; subsample later in Python if needed).
 5. **No baseline correction** in the export (Python can enable later; `normalize` hook reserved).
-6. Events restricted to **`Partners session`** intervals in the behavior file (not the whole recording).
+6. Events restricted to **`play_session`**: rows with `Type == 'Partners session'` in the behavior txt (same as Fig 6 / phase-coupling GENERATEs).
 
 ### Output tree
 
 `Data/Analysis results/delta peak trough CSD/`
 
 ```
-<animal>/peak/                 # NPX1
-<animal>/trough/
-<animal>/probe2/peak/          # NPX2 example
-<animal>/probe3/trough/
+peak/<animal>/                 # NPX1
+peak/<animal>/probe2/          # NPX2 shank
+trough/<animal>/
+trough/<animal>/probe3/
 ```
 
 Each leaf folder:
