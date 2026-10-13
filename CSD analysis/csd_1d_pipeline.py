@@ -74,6 +74,12 @@ class DatasetConfig:
     ref_chan: Union[int, str, None] = "deepest"
     ref_rng_seed: Optional[int] = 0  # used when several deepest channels exist
 
+    # Epoch handling
+    baseline_correct: bool = True
+    # Reserved for later (delta authenticity CSD currently uses "none")
+    # Options: "none" | "zscore_channel" | "zscore_trial"
+    normalize: str = "none"
+
     # 1D kCSD
     compute_kcsd: bool = True
     y_scale: str = "mm"  # "mm" -> (y-ymin)/1000; "unit" -> [0,1]
@@ -106,19 +112,42 @@ def _as_config(cfg: Union[DatasetConfig, Dict[str, Any]]) -> DatasetConfig:
     return DatasetConfig(**cfg)
 
 
-def load_raw(folder: PathLike) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+def load_raw(
+    folder: PathLike,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, Optional[float]]:
+    """
+    Load a CSD-ready folder.
+
+    Supports both layouts produced by Estimate_delta_peak_trough_csd:
+      - NPX1: one shank, full channel count in lfp.npy
+      - NPX2: one probe/shank folder with reduced n_chan
+    Optional ``fs.npy`` overrides the config sampling rate when present.
+    """
     folder = os.fspath(folder)
     lfp = np.load(os.path.join(folder, "lfp.npy"))
     x = np.load(os.path.join(folder, "x_coords.npy")).flatten()
     y = np.load(os.path.join(folder, "y_coords.npy")).flatten()
-    t0 = int(np.load(os.path.join(folder, "T0.npy")))
+    t0 = int(np.asarray(np.load(os.path.join(folder, "T0.npy"))).reshape(-1)[0])
+    fs_file = os.path.join(folder, "fs.npy")
+    fs_loaded: Optional[float] = None
+    if os.path.isfile(fs_file):
+        fs_loaded = float(np.asarray(np.load(fs_file)).reshape(-1)[0])
     if lfp.ndim != 3:
         raise ValueError(f"lfp.npy must be (n_stim, n_chan, n_time); got {lfp.shape}")
     if not (lfp.shape[1] == len(x) == len(y)):
         raise ValueError(
             f"Channel mismatch: lfp n_chan={lfp.shape[1]}, x={len(x)}, y={len(y)}"
         )
-    return lfp, x, y, t0
+    return lfp, x, y, t0, fs_loaded
+
+
+def probe_geometry_kind(x: np.ndarray) -> str:
+    """Return 'NPX1_single_shank', 'NPX2_single_shank', or 'multi_column'."""
+    ux = np.unique(x[~np.isnan(x)])
+    if ux.size <= 2:
+        # NPX1 has two x columns on one shank tip; NPX2 shank also has two sites/row
+        return "single_shank"
+    return "multi_column"
 
 
 def _resolve_ref_chan(
@@ -201,6 +230,22 @@ def prepare_channels(
     return lfp, x, y, meta
 
 
+def apply_normalize(evoked: np.ndarray, mode: str) -> np.ndarray:
+    """Optional post-average normalization (hook for later delta CSD work)."""
+    mode = (mode or "none").lower()
+    if mode in ("none", "", "off"):
+        return evoked
+    if mode == "zscore_channel":
+        mu = evoked.mean(axis=1, keepdims=True)
+        sd = evoked.std(axis=1, keepdims=True)
+        sd = np.where(sd < 1e-12, 1.0, sd)
+        return (evoked - mu) / sd
+    raise ValueError(
+        f"Unknown normalize={mode!r}; use 'none' or 'zscore_channel' "
+        "(more modes can be added later)."
+    )
+
+
 def epoch_and_average(
     lfp: np.ndarray,
     t0: int,
@@ -208,6 +253,9 @@ def epoch_and_average(
     t_pre: float,
     t_post: float,
     step_ms: float,
+    *,
+    baseline_correct: bool = True,
+    normalize: str = "none",
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Returns
@@ -215,7 +263,7 @@ def epoch_and_average(
     evoked : (n_chan, n_time_win)
     time_ms : (n_time_win,)
     time_indices : indices into the window used for CSD frames
-    epochs_bc : (n_stim, n_chan, n_time_win) baseline-corrected epochs
+    epochs : (n_stim, n_chan, n_time_win) (baseline-corrected if requested)
     """
     pre_samp = int(round(t_pre * fs / 1000.0))
     post_samp = int(round(t_post * fs / 1000.0))
@@ -229,13 +277,15 @@ def epoch_and_average(
         )
 
     epochs = lfp[:, :, start:end]
-    baseline = epochs[:, :, :pre_samp].mean(axis=2, keepdims=True)
-    epochs_bc = epochs - baseline
-    evoked = epochs_bc.mean(axis=0)
+    if baseline_correct and pre_samp > 0:
+        baseline = epochs[:, :, :pre_samp].mean(axis=2, keepdims=True)
+        epochs = epochs - baseline
+    evoked = epochs.mean(axis=0)
+    evoked = apply_normalize(evoked, normalize)
     time_ms = (np.arange(evoked.shape[1]) - pre_samp) / fs * 1000.0
     step = max(1, int(round(step_ms * fs / 1000.0)))
     time_indices = np.arange(0, evoked.shape[1], step)
-    return evoked, time_ms, time_indices, epochs_bc
+    return evoked, time_ms, time_indices, epochs
 
 
 def _normalize_y(y_ch: np.ndarray, y_scale: str) -> np.ndarray:
@@ -476,17 +526,31 @@ def run_dataset(cfg: Union[DatasetConfig, Dict[str, Any]]) -> Dict[str, Any]:
     print(f"\n=== {name} ===")
     print(f"folder: {cfg.folder}")
 
-    lfp, x, y, t0 = load_raw(cfg.folder)
+    lfp, x, y, t0, fs_loaded = load_raw(cfg.folder)
+    if fs_loaded is not None:
+        cfg.fs = fs_loaded
     lfp, x, y, meta = prepare_channels(lfp, x, y, cfg)
+    meta["geometry"] = probe_geometry_kind(x)
+    meta["n_events"] = int(lfp.shape[0])
+    meta["baseline_correct"] = bool(cfg.baseline_correct)
+    meta["normalize"] = cfg.normalize
     print(
-        f"channels: {meta['n_chan']} "
+        f"channels: {meta['n_chan']} ({meta['geometry']}, n_events={meta['n_events']}) "
         f"(removed {meta['channels_removed']}, "
         f"range [{meta['chan_start']}:{meta['chan_end']}), "
-        f"ref={meta['ref_chan_after_removal']})"
+        f"ref={meta['ref_chan_after_removal']}, "
+        f"baseline={cfg.baseline_correct}, normalize={cfg.normalize})"
     )
 
     evoked, time_ms, time_indices, epochs_bc = epoch_and_average(
-        lfp, t0, cfg.fs, cfg.t_pre, cfg.t_post, cfg.step_ms
+        lfp,
+        t0,
+        cfg.fs,
+        cfg.t_pre,
+        cfg.t_post,
+        cfg.step_ms,
+        baseline_correct=cfg.baseline_correct,
+        normalize=cfg.normalize,
     )
     # Spacing within each shank (unique x); global sort is misleading for NPX.
     spacings = []
@@ -606,11 +670,15 @@ def merge_config(
     overrides: Union[DatasetConfig, Dict[str, Any]],
 ) -> DatasetConfig:
     """Merge ``overrides`` on top of ``defaults`` (dict keys only overwrite)."""
-    base = asdict(_as_config(defaults))
     if isinstance(overrides, DatasetConfig):
-        # Full DatasetConfig replaces entirely when passed as object
         return overrides
+    if isinstance(defaults, DatasetConfig):
+        base = asdict(defaults)
+    else:
+        base = dict(defaults)
     base.update(overrides)
+    if "folder" not in base or not base["folder"]:
+        raise ValueError("merged config needs a 'folder'")
     return DatasetConfig(**base)
 
 
@@ -642,6 +710,72 @@ def run_many(
                 {"name": cfg.resolved_name(), "error": str(exc), "config": asdict(cfg)}
             )
     return results
+
+
+# ---------------------------------------------------------------------------
+# Delta peak/trough CSD folders (from Estimate_delta_peak_trough_csd.m)
+# ---------------------------------------------------------------------------
+
+DELTA_CSD_DEFAULTS: Dict[str, Any] = {
+    "fs": 2500.0,
+    "t_pre": 250.0,   # ms  (matches MATLAB t1=-0.25)
+    "t_post": 250.0,  # ms  (matches MATLAB t2=+0.25)
+    "step_ms": 5.0,
+    "ref_chan": None,          # no re-reference
+    "baseline_correct": False, # keep option open via normalize later
+    "normalize": "none",
+    "channels_remove": (),
+    "chan_start": None,
+    "chan_end": None,
+    "compute_kcsd": True,
+    "compute_fd": True,
+    "y_scale": "mm",
+    "h": 0.25,
+    "n_src_factor": 4.0,
+    "smooth_sigma_time": 0.0,
+    "save": True,
+    "save_plots": True,
+    "plot": False,
+}
+
+
+def discover_delta_csd_datasets(
+    root: PathLike,
+    *,
+    alignments: Sequence[str] = ("peak", "trough"),
+) -> List[Dict[str, Any]]:
+    """
+    Walk the MATLAB export tree and build DATASETS entries.
+
+    Expected layouts
+    ----------------
+    NPX1 (one shank, full channel count)::
+
+        <root>/<animal>/peak/
+        <root>/<animal>/trough/
+
+    NPX2 (one folder per probe/shank, reduced n_chan)::
+
+        <root>/<animal>/probe2/peak/
+        <root>/<animal>/probe3/trough/
+    """
+    root = os.fspath(root)
+    found: List[Dict[str, Any]] = []
+    if not os.path.isdir(root):
+        return found
+
+    required = ("lfp.npy", "x_coords.npy", "y_coords.npy", "T0.npy")
+    for dirpath, _dirnames, filenames in os.walk(root):
+        base = os.path.basename(dirpath)
+        if base not in alignments:
+            continue
+        if not all(f in filenames for f in required):
+            continue
+        rel = os.path.relpath(dirpath, root)
+        name = rel.replace("\\", "/").replace("/", "_")
+        found.append({"name": name, "folder": dirpath})
+    found.sort(key=lambda d: d["name"])
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -733,10 +867,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     p = argparse.ArgumentParser(description="Run 1D CSD on one or more LFP folders")
     p.add_argument("--folder", action="append", default=[], help="Dataset folder (repeatable)")
+    p.add_argument(
+        "--delta-root",
+        default=None,
+        help="Root from Estimate_delta_peak_trough_csd (auto-discovers peak/trough folders)",
+    )
     p.add_argument("--chan-start", type=int, default=None)
     p.add_argument("--chan-end", type=int, default=None)
     p.add_argument("--remove", type=int, action="append", default=[], help="Bad channel index")
     p.add_argument("--ref", default="deepest", help="int | deepest | shallowest | none")
+    p.add_argument("--no-baseline", action="store_true", help="Disable pre-event baseline")
+    p.add_argument("--normalize", default="none", help="none | zscore_channel")
     p.add_argument("--no-kcsd", action="store_true")
     p.add_argument("--no-fd", action="store_true")
     p.add_argument("--no-save", action="store_true")
@@ -748,8 +889,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         run_many(EXAMPLE_DATASETS, stop_on_error=False)
         return 0
 
+    if args.delta_root:
+        datasets = discover_delta_csd_datasets(args.delta_root)
+        if not datasets:
+            p.error(f"No peak/trough CSD folders under {args.delta_root}")
+        print(f"Discovered {len(datasets)} delta CSD folders")
+        run_many(datasets, defaults=DELTA_CSD_DEFAULTS, stop_on_error=False)
+        return 0
+
     if not args.folder:
-        p.error("Provide --folder at least once, or --examples")
+        p.error("Provide --folder, --delta-root, or --examples")
 
     ref: Union[int, str, None]
     if args.ref.lower() == "none":
@@ -767,6 +916,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             chan_end=args.chan_end,
             channels_remove=tuple(args.remove),
             ref_chan=ref,
+            baseline_correct=not args.no_baseline,
+            normalize=args.normalize,
             compute_kcsd=not args.no_kcsd,
             compute_fd=not args.no_fd,
             save=not args.no_save,

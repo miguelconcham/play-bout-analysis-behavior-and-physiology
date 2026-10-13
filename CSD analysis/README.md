@@ -1,40 +1,78 @@
-# CSD analysis (1D)
+# CSD analysis
 
-Generalized pipeline from the session notebooks (`CSD 1D 230516`, `230606`, `230608`, `250320`, …).
+## 1) Delta peak / trough → CSD-ready LFP (MATLAB)
 
-## Files
+**Aim:** test whether delta extrema look like laminar brain generators (sink–source) vs common-mode artifact.
 
 | File | Role |
 |------|------|
-| `csd_1d_pipeline.py` | Load → preprocess → 1D kCSD / FD CSD → save |
-| `CSD_1D_general.ipynb` | Edit a `DATASETS` list and run many sessions |
+| `GENERATE_DELTA_PEAK_TROUGH_CSD_LFP.m` | One session: LPAG-center detection, Partners-session events, raw ±250 ms cuts |
+| `Estimate_delta_peak_trough_csd.m` | Fixed params, loop animals, write `.npy` |
+| `write_csd_npy.m` | MATLAB → NumPy `.npy` writer |
 
-## Per-folder inputs
+### Rules baked into GENERATE
+
+1. Detection channel = **center of LPAG** (same geometry rule as Fig 2 PSTHs). **No LPAG → skip session/shank.**
+2. **NPX1:** one folder with the full channel list. **NPX2:** one folder **per probe/shank** that has LPAG (reduced `n_chan`).
+3. **No re-referencing.**
+4. Window **t1 = −0.25 s, t2 = +0.25 s.**
+5. **No baseline correction** in the export (Python can enable later; `normalize` hook reserved).
+6. Events restricted to **`Partners session`** intervals in the behavior file (not the whole recording).
+
+### Output tree
+
+`Data/Analysis results/delta peak trough CSD/`
 
 ```
-lfp.npy          (n_stim, n_chan, n_time)
-x_coords.npy     (n_chan,)
-y_coords.npy     (n_chan,)
-T0.npy           scalar onset sample
+<animal>/peak/                 # NPX1
+<animal>/trough/
+<animal>/probe2/peak/          # NPX2 example
+<animal>/probe3/trough/
 ```
 
-## Run on new datasets
+Each leaf folder:
 
-1. Open `CSD_1D_general.ipynb`
-2. Fill `DATASETS` with each folder + any overrides (`chan_start` / `chan_end`, `channels_remove`, `ref_chan`, …)
-3. Run all cells
+- `lfp.npy` `(n_events, n_chan, n_time)` raw snippets  
+- `x_coords.npy`, `y_coords.npy`  
+- `T0.npy` sample index of the extremum inside the snippet  
+- `fs.npy`, `meta.mat`
 
-Or from a terminal (on a machine that can see the data):
+Run on a machine with the experimentFS `Data` share:
+
+```matlab
+Estimate_delta_peak_trough_csd
+```
+
+---
+
+## 2) 1D CSD in Python
+
+| File | Role |
+|------|------|
+| `csd_1d_pipeline.py` | Load → (optional) ref/baseline → 1D kCSD / FD CSD |
+| `CSD_1D_general.ipynb` | Batch notebook |
+
+### Delta defaults (NPX1 + NPX2 shank folders)
+
+```python
+from csd_1d_pipeline import DELTA_CSD_DEFAULTS, discover_delta_csd_datasets, run_many
+
+root = r"\\experimentfs.bccn-berlin.pri\...\Data\Analysis results\delta peak trough CSD"
+datasets = discover_delta_csd_datasets(root)
+run_many(datasets, defaults=DELTA_CSD_DEFAULTS)
+```
+
+Or CLI:
 
 ```bash
-pip install numpy scipy matplotlib kcsd
-python "csd_1d_pipeline.py" --folder "/path/to/ds1" --folder "/path/to/ds2" --ref deepest
+python csd_1d_pipeline.py --delta-root "/path/to/delta peak trough CSD"
 ```
 
-`EXAMPLE_DATASETS` inside `csd_1d_pipeline.py` mirrors the settings used in the uploaded Lombard session notebooks.
+`DELTA_CSD_DEFAULTS` sets `ref_chan=None`, `baseline_correct=False`, `t_pre=t_post=250` ms.  
+Set `normalize='zscore_channel'` later if you want scaling without baseline subtraction.
 
-## Fixes vs session notebooks
+Both geometries load the same four files; NPX2 simply has fewer channels (one shank). The loader reports `single_shank` vs `multi_column` from unique `x`.
 
-- Bad-channel removal, referencing, and channel-range slicing stay index-aligned (older notebooks subtracted a reference on the full probe then sliced `x`/`y` only).
-- Channels are sorted by depth before 1D kCSD.
-- Finite-difference CSD is available even if `kcsd` is not installed (`compute_kcsd=False`).
+### Lombard / stim CSD notebooks
+
+`EXAMPLE_DATASETS` still mirrors the older session-specific stim notebooks (those used referencing / baseline).
