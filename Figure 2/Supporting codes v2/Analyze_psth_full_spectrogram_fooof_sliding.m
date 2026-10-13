@@ -66,6 +66,10 @@ max_n_peaks      = Inf;
 min_peak_height  = 0;
 peak_threshold   = 2;
 
+% Periodic delta-band summary (subplot 3)
+delta_band = [1 5];              % Hz — mean periodic power in this band
+baseline_range_z = [-5 -2];      % s (window centers) for baseline z-score
+
 save_results = false;
 save_name = sprintf('fooof_sliding_T%g_dt%g.mat', T, dt);
 
@@ -214,7 +218,7 @@ fooof_sliding_results.note = [ ...
     'Sliding centered window FOOOF on raw mean onset spectrogram; ' ...
     'parameters saved per session and per t_win center'];
 
-%% Quick look: mean aperiodic offset / exponent across sessions
+%% Quick look: aperiodic params + baseline-z-scored periodic delta power
 ap_offset = nan(nSessions, nWin);
 ap_exponent = nan(nSessions, nWin);
 for i = 1:nSessions
@@ -223,27 +227,83 @@ for i = 1:nSessions
         continue
     end
     ap_offset(i, :) = ap(:, 1).';
+    % Session-wise z-score of offset (as in local modified version)
+    ap_offset(i, :) = (ap_offset(i, :) - mean(ap_offset(i, :), 'omitnan')) / ...
+        std(ap_offset(i, :), 0, 'omitnan');
     ap_exponent(i, :) = ap(:, nApParams).';  % last col = exponent (fixed or knee)
 end
 
-figure('Name', 'Sliding FOOOF aperiodic params');
-subplot(2, 1, 1)
+% Mean periodic (peak_fit) power in delta_band, then baseline z-score
+delta_freq_idx = f >= delta_band(1) & f <= delta_band(2);
+if ~any(delta_freq_idx)
+    error('delta_band [%g %g] does not overlap frequency vector f.', ...
+        delta_band(1), delta_band(2));
+end
+baseline_idx_z = t_win >= baseline_range_z(1) & t_win < baseline_range_z(2);
+if ~any(baseline_idx_z)
+    error('baseline_range_z [%g %g] has no window centers in t_win.', ...
+        baseline_range_z(1), baseline_range_z(2));
+end
+
+periodic_delta = nan(nSessions, nWin);
+for i = 1:nSessions
+    pk = periodic_fit_all{i};   % [nFreq x nWin], log10 peak fit
+    if isempty(pk)
+        continue
+    end
+    periodic_delta(i, :) = mean(pk(delta_freq_idx, :), 1, 'omitnan');
+    base = periodic_delta(i, baseline_idx_z);
+    mu_b = mean(base, 'omitnan');
+    sd_b = std(base, 0, 'omitnan');
+    if ~(isfinite(sd_b) && sd_b > 0)
+        sd_b = 1;
+    end
+    periodic_delta(i, :) = (periodic_delta(i, :) - mu_b) / sd_b;
+end
+
+fooof_sliding_results.delta_band = delta_band;
+fooof_sliding_results.baseline_range_z = baseline_range_z;
+fooof_sliding_results.ap_offset_z = ap_offset;
+fooof_sliding_results.ap_exponent = ap_exponent;
+fooof_sliding_results.periodic_delta_z = periodic_delta;
+
+figure('Name', 'Sliding FOOOF aperiodic params + periodic delta');
+subplot(3, 1, 1)
 hold on
 plot(t_win, ap_offset.', 'Color', [0.8 0.8 0.8])
 plot(t_win, mean(ap_offset, 1, 'omitnan'), 'k', 'LineWidth', 2)
 xline(0, ':k')
-ylabel('Offset')
+h_off = ttest(ap_offset);   % column-wise vs 0
+if any(h_off)
+    plot(t_win(h_off == 1), mean(ap_offset(:, h_off == 1), 1, 'omitnan'), '.r')
+end
+ylabel('Offset (z)')
 title(sprintf('Aperiodic offset (T = %g s, dt = %g s)', T, dt))
 box off
 
-subplot(2, 1, 2)
+subplot(3, 1, 2)
 hold on
 plot(t_win, ap_exponent.', 'Color', [0.8 0.8 0.8])
 plot(t_win, mean(ap_exponent, 1, 'omitnan'), 'k', 'LineWidth', 2)
 xline(0, ':k')
-xlabel('Window center (s from play-bout onset)')
 ylabel('Exponent')
 title('Aperiodic exponent')
+box off
+
+subplot(3, 1, 3)
+hold on
+plot(t_win, periodic_delta.', 'Color', [0.8 0.8 0.8])
+plot(t_win, mean(periodic_delta, 1, 'omitnan'), 'k', 'LineWidth', 2)
+xline(0, ':k')
+yline(0, ':k')
+h_per = ttest(periodic_delta);
+if any(h_per)
+    plot(t_win(h_per == 1), mean(periodic_delta(:, h_per == 1), 1, 'omitnan'), '.r')
+end
+xlabel('Window center (s from play-bout onset)')
+ylabel(sprintf('Periodic %g–%g Hz (z)', delta_band(1), delta_band(2)))
+title(sprintf('Periodic delta power (baseline z-score [%g %g] s)', ...
+    baseline_range_z(1), baseline_range_z(2)))
 box off
 
 %% Quick look: example session periodic fit heatmap
@@ -266,4 +326,5 @@ end
 disp('Sliding-window FOOOF complete.')
 disp('Results in workspace: fooof_sliding_results')
 disp('  aperiodic_params{session}(win,:)  and  peak_params{session}{win}')
+disp('  periodic_delta_z: baseline-z-scored mean periodic power in delta_band')
 disp('  indexed by t_win (window centers)')
