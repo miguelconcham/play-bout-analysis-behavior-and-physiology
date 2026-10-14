@@ -18,29 +18,33 @@ function results = GENERATE_DELTA_PEAK_TROUGH_CSD_LFP(npx_data_dir, Hd_delta, t1
 % Output
 %   results       struct array with fields for peak/trough stacks + coords
 
-data_root       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
-synch_directory = fullfile(data_root, 'Synch data');
-area_limit_table = fullfile(data_root, 'Area_limits_GoodLooking.xlsx');
-behavior_data   = fullfile(data_root, 'Behavior backups');
-area2analyse    = 'PAG';
-sr_LFP          = 2500;
+data_root        = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+% Synch models live in Data\Synch data\<animal>\ — NOT inside the NPX folder
+synch_directory  = [data_root, '\Synch data'];
+area_limit_table = [data_root, '\Area_limits_GoodLooking.xlsx'];
+behavior_data    = [data_root, '\Behavior backups'];
+area2analyse     = 'PAG';
+sr_LFP           = 2500;
 hard_coded_x_coords_NPX2 = [8 40; 258 290; 508 540; 758 790];
 
 if t1 >= 0 || t2 <= 0
     error('GENERATE_DELTA_PEAK_TROUGH_CSD_LFP:window', 'Need t1 < 0 < t2');
 end
 
-animal_code        = strsplit(npx_data_dir, '\');
+% Animal folder name from NPX path (strip trailing filesep)
+animal_code        = strsplit(npx_data_dir, {filesep, '/'});
+animal_code        = animal_code(~cellfun(@isempty, animal_code));
 animal_code        = animal_code{end};
 animal_code_params = strsplit(animal_code, ' ');
 animal_batch       = animal_code_params{1};
 repeated_animal    = animal_code_params{3};
 
 %% Behavior + play_session intervals (Type 'Partners session' in behavior txt)
-% Same convention as GENERATE_STRUCUTRE_animal_synch.m / Fig 3 phase coupling.
-load(fullfile(synch_directory, animal_code, 'synch_model_video2NPX.mat'), 'synch_model_video2NPX');
+% Synch file: Data\Synch data\<animal_code>\synch_model_video2NPX.mat
+% (same path as GENERATE_PHASE_COUPLING_STRUCTURE / GENERATE_PSTH_PLAY_BOUT)
+load([synch_directory, '\', animal_code, '\synch_model_video2NPX.mat'], 'synch_model_video2NPX');
 
-Behavior_file = fullfile(behavior_data, [animal_code, '.txt']);
+Behavior_file = [behavior_data, '\', animal_code, '.txt'];
 Behavior = readtable(Behavior_file);
 Behavior(:, 2) = [];
 Behavior.Properties.VariableNames = {'Animal', 'Start', 'End', 'Length', 'Type'};
