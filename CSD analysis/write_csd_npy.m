@@ -29,44 +29,50 @@ end
 
 shape = size(A);
 if iscolumn(A)
-    shape_np = [numel(A)];
+    shape_np = numel(A);
 elseif isrow(A)
     shape_np = [1, numel(A)];
 else
     shape_np = shape;
 end
 
-shape_str = ['(' strjoin(arrayfun(@num2str, shape_np, 'UniformOutput', false), ', ')];
-if numel(shape_np) == 1
-    shape_str = [shape_str, ',)'];
-else
-    shape_str = [shape_str, ')'];
+% Build shape text as char (avoid string arrays — fwrite rejects them)
+parts = cell(1, numel(shape_np));
+for k = 1:numel(shape_np)
+    parts{k} = num2str(shape_np(k));
 end
+if numel(shape_np) == 1
+    shape_str = ['(' parts{1} ',)'];
+else
+    shape_str = ['(' strjoin(parts, ', ') ')'];
+end
+shape_str = char(shape_str);
+dtype = char(dtype);
 
 header_dict = sprintf( ...
-    "{'descr': '<%s', 'fortran_order': True, 'shape': %s, }", ...
+    '{''descr'': ''<%s'', ''fortran_order'': True, ''shape'': %s, }', ...
     dtype, shape_str);
+header_dict = char(header_dict);
 
-magic = [147 78 85 77 80 89]; % \x93NUMPY
-major = uint8(1);
-minor = uint8(0);
+% npy v1.0: magic(6) + ver(2) + header_len(uint16) + header, 16-byte aligned
 header_len_pos = 10;
 pad_len = 64 - mod(header_len_pos + 2 + numel(header_dict) + 1, 64);
 if pad_len == 64
     pad_len = 0;
 end
-header = [header_dict, repmat(' ', 1, pad_len), sprintf('\n')];
+header = [header_dict, repmat(char(' '), 1, pad_len), char(10)];
+header = char(header(:).');  % 1 x N char row
 header_len = uint16(numel(header));
 
 fid = fopen(filename, 'wb');
 if fid < 0
     error('write_csd_npy:io', 'Could not open %s for writing', filename);
 end
-fwrite(fid, magic, 'uint8');
-fwrite(fid, major, 'uint8');
-fwrite(fid, minor, 'uint8');
+fwrite(fid, uint8([147 78 85 77 80 89]), 'uint8'); % \x93NUMPY
+fwrite(fid, uint8(1), 'uint8');  % major
+fwrite(fid, uint8(0), 'uint8');  % minor
 fwrite(fid, header_len, 'uint16');
-fwrite(fid, header, 'char');
+fwrite(fid, uint8(header), 'uint8');  % safe binary write (not 'char'/string)
 fwrite(fid, A(:), class(A));
 fclose(fid);
 end
