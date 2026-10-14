@@ -282,44 +282,108 @@ fooof_sliding_results.ap_offset_z = ap_offset;
 fooof_sliding_results.ap_exponent = ap_exponent;
 fooof_sliding_results.periodic_delta_z = periodic_delta;
 
-figure('Name', 'Sliding FOOOF aperiodic params + periodic delta');
+%% Quick look figure: mean ± t-test CI + top significance bars (p < 0.05)
+alpha_sig = 0.05;
+
+[~, p_off, ci_off] = ttest(ap_offset);
+[~, p_exp, ci_exp] = ttest(ap_exponent);
+[~, p_del, ci_del] = ttest(periodic_delta);
+
+fooof_sliding_results.ttest.ap_offset.p = p_off;
+fooof_sliding_results.ttest.ap_offset.ci = ci_off;
+fooof_sliding_results.ttest.ap_exponent.p = p_exp;
+fooof_sliding_results.ttest.ap_exponent.ci = ci_exp;
+fooof_sliding_results.ttest.periodic_delta.p = p_del;
+fooof_sliding_results.ttest.periodic_delta.ci = ci_del;
+
+figure('Name', 'Sliding FOOOF aperiodic params + periodic delta (ttest CI)');
 subplot(3, 1, 1)
-hold on
-plot(t_win, ap_offset.', 'Color', [0.8 0.8 0.8])
-plot(t_win, mean(ap_offset, 1, 'omitnan'), 'k', 'LineWidth', 2)
-xline(0, ':k')
-h_off = ttest(ap_offset);   % column-wise vs 0
-if any(h_off)
-    plot(t_win(h_off == 1), mean(ap_offset(:, h_off == 1), 1, 'omitnan'), '.r')
-end
+plot_trace_ci_sigbars(t_win, ap_offset, ...
+    mean(ap_offset, 1, 'omitnan'), ci_off, p_off, alpha_sig);
 ylabel('Offset (z)')
 title(sprintf('Aperiodic offset (T = %g s, dt = %g s)', T, dt))
-box off
 
 subplot(3, 1, 2)
-hold on
-plot(t_win, ap_exponent.', 'Color', [0.8 0.8 0.8])
-plot(t_win, mean(ap_exponent, 1, 'omitnan'), 'k', 'LineWidth', 2)
-xline(0, ':k')
+plot_trace_ci_sigbars(t_win, ap_exponent, ...
+    mean(ap_exponent, 1, 'omitnan'), ci_exp, p_exp, alpha_sig);
 ylabel('Exponent')
 title('Aperiodic exponent')
-box off
 
 subplot(3, 1, 3)
-hold on
-plot(t_win, periodic_delta.', 'Color', [0.8 0.8 0.8])
-plot(t_win, mean(periodic_delta, 1, 'omitnan'), 'k', 'LineWidth', 2)
-xline(0, ':k')
-yline(0, ':k')
-h_per = ttest(periodic_delta);
-if any(h_per)
-    plot(t_win(h_per == 1), mean(periodic_delta(:, h_per == 1), 1, 'omitnan'), '.r')
-end
+plot_trace_ci_sigbars(t_win, periodic_delta, ...
+    mean(periodic_delta, 1, 'omitnan'), ci_del, p_del, alpha_sig);
 xlabel('Window center (s from play-bout onset)')
 ylabel(sprintf('Data−aperiodic %g–%g Hz (z)', delta_band(1), delta_band(2)))
 title(sprintf('Aperiodic-corrected delta power (baseline z [%g %g] s)', ...
     baseline_range_z(1), baseline_range_z(2)))
-box off
+
+%% Extra: LME mean ± CI with animal as random intercept (session nested in animal)
+% Same pattern as Figure 2 / Analyze_psth_full_spectrogram:
+%   Power ~ 1 + (1|Animal)
+% Applied at each window center to:
+%   1) aperiodic offset (z)
+%   2) aperiodic exponent
+%   3) aperiodic-corrected delta power (z)
+
+measures = {ap_offset, ap_exponent, periodic_delta};
+measure_names = {'ap_offset', 'ap_exponent', 'periodic_delta'};
+measure_ylabels = { ...
+    'Offset (z)', ...
+    'Exponent', ...
+    sprintf('Data−aperiodic %g–%g Hz (z)', delta_band(1), delta_band(2))};
+measure_titles = { ...
+    'LME aperiodic offset', ...
+    'LME aperiodic exponent', ...
+    'LME aperiodic-corrected delta power'};
+
+lme_results = struct();
+
+figure('Name', 'Sliding FOOOF LME (animal random intercept)');
+for m = 1:numel(measures)
+    A = measures{m};
+    beta_est = nan(1, nWin);
+    SE = nan(1, nWin);
+    CI_low = nan(1, nWin);
+    CI_high = nan(1, nWin);
+    pValue = nan(1, nWin);
+
+    for w = 1:nWin
+        y = A(:, w);
+        ok = isfinite(y);
+        if nnz(ok) < 3
+            continue
+        end
+        tbl = table(y(ok), categorical(session_animal(ok)), ...
+            'VariableNames', {'Power', 'Animal'});
+        lme = fitlme(tbl, 'Power ~ 1 + (1|Animal)');
+        coef = lme.Coefficients;
+        ci95 = coefCI(lme, 'Alpha', 0.05);
+        beta_est(w) = coef.Estimate(1);
+        SE(w) = coef.SE(1);
+        CI_low(w) = ci95(1, 1);
+        CI_high(w) = ci95(1, 2);
+        pValue(w) = coef.pValue(1);
+    end
+
+    lme_results.(measure_names{m}).beta_est = beta_est;
+    lme_results.(measure_names{m}).SE = SE;
+    lme_results.(measure_names{m}).CI_low_95 = CI_low;
+    lme_results.(measure_names{m}).CI_high_95 = CI_high;
+    lme_results.(measure_names{m}).pValue = pValue;
+    lme_results.(measure_names{m}).formula = 'Power ~ 1 + (1|Animal)';
+
+    subplot(3, 1, m)
+    plot_lme_ci_sigbars(t_win, beta_est, CI_low, CI_high, pValue, alpha_sig);
+    ylabel(measure_ylabels{m})
+    title(measure_titles{m})
+    if m == numel(measures)
+        xlabel('Window center (s from play-bout onset)')
+    end
+end
+
+fooof_sliding_results.lme = lme_results;
+fooof_sliding_results.lme.session_animal = session_animal;
+fooof_sliding_results.lme.alpha = alpha_sig;
 
 %% Quick look: example session aperiodic-corrected spectrum heatmap
 example_sess = 1;
@@ -343,4 +407,78 @@ disp('Results in workspace: fooof_sliding_results')
 disp('  periodic_data{session}: [nFreq x nWin] = logP - aperiodic_fit')
 disp('  periodic_fit{session}:  Gaussian peak_fit (still stored)')
 disp('  periodic_delta_z: baseline-z-scored mean(periodic_data) in delta_band')
+disp('  ttest / lme summaries stored under fooof_sliding_results.ttest and .lme')
 disp('  indexed by t_win (window centers)')
+
+%% ========================================================================
+% Local helpers
+% ========================================================================
+function plot_trace_ci_sigbars(t_win, session_mat, mean_trace, ci, p, alpha_sig)
+% Session traces (grey), mean (black), t-test CI shade, top sig bars (p < alpha).
+
+hold on
+plot(t_win, session_mat.', 'Color', [0.8 0.8 0.8])
+ok = isfinite(ci(1, :)) & isfinite(ci(2, :));
+if any(ok)
+    fill([t_win(ok) fliplr(t_win(ok))], ...
+        [ci(1, ok) fliplr(ci(2, ok))], ...
+        'k', 'EdgeColor', 'none', 'FaceAlpha', 0.2);
+end
+plot(t_win, mean_trace, 'k', 'LineWidth', 2)
+xline(0, ':k')
+yline(0, ':k')
+axis tight
+add_top_sig_bars(t_win, p < alpha_sig)
+box off
+end
+
+function plot_lme_ci_sigbars(t_win, beta_est, CI_low, CI_high, pValue, alpha_sig)
+% LME intercept estimate ± 95% CI, top sig bars (p < alpha).
+
+hold on
+ok = isfinite(CI_low) & isfinite(CI_high) & isfinite(beta_est);
+if any(ok)
+    fill([t_win(ok) fliplr(t_win(ok))], ...
+        [CI_low(ok) fliplr(CI_high(ok))], ...
+        'k', 'EdgeColor', 'none', 'FaceAlpha', 0.2);
+end
+plot(t_win, beta_est, 'k', 'LineWidth', 2)
+xline(0, ':k')
+yline(0, ':k')
+axis tight
+add_top_sig_bars(t_win, pValue < alpha_sig)
+box off
+end
+
+function add_top_sig_bars(t_win, sig)
+% Shaded rectangles for contiguous significant periods in upper 10% of ylim.
+
+if ~any(sig)
+    return
+end
+sig = sig(:).';
+sig(~isfinite(sig)) = false;
+y_lim = ylim;
+y_lo = y_lim(1) + 0.9 * (y_lim(2) - y_lim(1));
+y_hi = y_lim(2);
+
+d = diff([false, logical(sig), false]);
+starts = find(d == 1);
+ends = find(d == -1) - 1;
+for j = 1:numel(starts)
+    i0 = starts(j);
+    i1 = ends(j);
+    if i0 == i1
+        % single bin: give a small width from neighboring spacing
+        if numel(t_win) > 1
+            half = median(diff(t_win)) / 2;
+        else
+            half = 0.05;
+        end
+        x = [t_win(i0)-half, t_win(i0)+half, t_win(i0)+half, t_win(i0)-half];
+    else
+        x = t_win([i0 i1 i1 i0]);
+    end
+    fill(x, [y_lo y_lo y_hi y_hi], 'k', 'EdgeColor', 'none', 'FaceAlpha', 0.55);
+end
+end
