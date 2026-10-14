@@ -15,8 +15,14 @@ saving_folder = fullfile(data_root, 'Analysis results', 'delta peak trough CSD')
 peak_root     = fullfile(saving_folder, 'peak');
 trough_root   = fullfile(saving_folder, 'trough');
 
-repo_root = fileparts(mfilename('fullpath'));
-repo_root = fileparts(repo_root);
+% Path to THIS script. mfilename works when the .m file is run from disk;
+% if empty (e.g. unsaved editor / pasted into Command Window), edit the
+% fallback UNC path below.
+this_file = mfilename('fullpath');
+if isempty(this_file)
+    this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\CSD analysis\Estimate_delta_peak_trough_csd.m';
+end
+repo_root = fileparts(fileparts(this_file));  % .../CSD analysis -> repo root
 run(fullfile(repo_root, 'add_repo_paths.m'));
 addpath(fullfile(repo_root, 'CSD analysis'));
 
