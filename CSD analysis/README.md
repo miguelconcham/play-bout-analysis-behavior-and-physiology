@@ -45,34 +45,34 @@ Estimate_delta_peak_trough_csd
 
 ---
 
-## 2) 1D CSD in Python
+## 2) Visualize evoked LFP (MATLAB, before Python CSD)
 
 | File | Role |
 |------|------|
-| `csd_1d_pipeline.py` | Load → (optional) ref/baseline → 1D kCSD / FD CSD |
-| `CSD_1D_general.ipynb` | Batch notebook |
+| `Plot_delta_peak_trough_evoked.m` | Load saved npy; one figure/session with peak \| trough subplots |
+| `read_csd_npy.m` | Reader for files written by `write_csd_npy` |
 
-### Delta defaults (NPX1 + NPX2 shank folders)
+Edit `root_folder` at the top (defaults to your `.../delta peak trough CSD` path), then run.
+
+## 3) 1D CSD in Python
+
+| File | Role |
+|------|------|
+| `csd_1d_pipeline.py` | Load → CSD; `run_delta_csd_from_root(folder)` is the one-call entry |
+| `CSD_1D_general.ipynb` | Set `DELTA_ROOT` and run |
 
 ```python
-from csd_1d_pipeline import DELTA_CSD_DEFAULTS, discover_delta_csd_datasets, run_many
-
-root = r"\\experimentfs.bccn-berlin.pri\...\Data\Analysis results\delta peak trough CSD"
-datasets = discover_delta_csd_datasets(root)
-run_many(datasets, defaults=DELTA_CSD_DEFAULTS)
+from csd_1d_pipeline import run_delta_csd_from_root
+run_delta_csd_from_root(
+    r"\\experimentfs.home.bccn-berlin.de\...\Data\Analysis results\delta peak trough CSD"
+)
 ```
 
-Or CLI:
+Or CLI (positional path is enough):
 
 ```bash
-python csd_1d_pipeline.py --delta-root "/path/to/delta peak trough CSD"
+python csd_1d_pipeline.py "\\experimentfs.home.bccn-berlin.de\...\delta peak trough CSD"
 ```
 
-`DELTA_CSD_DEFAULTS` sets `ref_chan=None`, `baseline_correct=False`, `t_pre=t_post=250` ms.  
-Set `normalize='zscore_channel'` later if you want scaling without baseline subtraction.
-
-Both geometries load the same four files; NPX2 simply has fewer channels (one shank). The loader reports `single_shank` vs `multi_column` from unique `x`.
-
-### Lombard / stim CSD notebooks
-
-`EXAMPLE_DATASETS` still mirrors the older session-specific stim notebooks (those used referencing / baseline).
+Defaults: `ref_chan=None`, `baseline_correct=False`, `t_pre=t_post=500` ms.  
+Optional later: `normalize='zscore_channel'`.

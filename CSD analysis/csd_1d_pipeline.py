@@ -779,6 +779,47 @@ def discover_delta_csd_datasets(
     return found
 
 
+def run_delta_csd_from_root(
+    root: PathLike,
+    *,
+    stop_on_error: bool = False,
+    plot: Optional[bool] = None,
+    **overrides: Any,
+) -> List[Dict[str, Any]]:
+    """
+    One-call entry: pass the Estimate output folder and run CSD on every
+    peak/ and trough/ leaf dataset found underneath.
+
+    Example
+    -------
+    run_delta_csd_from_root(
+        r"\\\\experimentfs.home.bccn-berlin.de\\\\...\\\\delta peak trough CSD"
+    )
+    """
+    root = os.fspath(root)
+    if not os.path.isdir(root):
+        raise FileNotFoundError(f"Delta CSD root not found: {root}")
+
+    datasets = discover_delta_csd_datasets(root)
+    if not datasets:
+        raise FileNotFoundError(
+            f"No peak/trough folders with lfp.npy under {root}. "
+            "Expected <root>/peak/<session>/ and <root>/trough/<session>/."
+        )
+
+    defaults = dict(DELTA_CSD_DEFAULTS)
+    defaults.update(overrides)
+    if plot is not None:
+        defaults["plot"] = plot
+
+    print(f"Delta CSD root: {root}")
+    print(f"Discovered {len(datasets)} dataset folder(s)")
+    for d in datasets:
+        print(f"  - {d['name']}")
+
+    return run_many(datasets, defaults=defaults, stop_on_error=stop_on_error)
+
+
 # ---------------------------------------------------------------------------
 # Example session table matching the uploaded notebooks
 # ---------------------------------------------------------------------------
@@ -863,15 +904,26 @@ EXAMPLE_DATASETS: List[Dict[str, Any]] = [
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    """CLI: python csd_1d_pipeline.py --folder PATH [options]"""
+    """CLI: python csd_1d_pipeline.py <delta-root>   OR   --delta-root PATH"""
     import argparse
 
-    p = argparse.ArgumentParser(description="Run 1D CSD on one or more LFP folders")
-    p.add_argument("--folder", action="append", default=[], help="Dataset folder (repeatable)")
+    p = argparse.ArgumentParser(
+        description=(
+            "Run 1D CSD. Preferred: pass the Estimate output folder "
+            "(.../delta peak trough CSD) as a positional path or --delta-root."
+        )
+    )
+    p.add_argument(
+        "delta_root_positional",
+        nargs="?",
+        default=None,
+        help="Estimate output folder containing peak/ and trough/",
+    )
+    p.add_argument("--folder", action="append", default=[], help="Single dataset folder (repeatable)")
     p.add_argument(
         "--delta-root",
         default=None,
-        help="Root from Estimate_delta_peak_trough_csd (auto-discovers peak/trough folders)",
+        help="Same as positional: root from Estimate_delta_peak_trough_csd",
     )
     p.add_argument("--chan-start", type=int, default=None)
     p.add_argument("--chan-end", type=int, default=None)
@@ -890,16 +942,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         run_many(EXAMPLE_DATASETS, stop_on_error=False)
         return 0
 
-    if args.delta_root:
-        datasets = discover_delta_csd_datasets(args.delta_root)
-        if not datasets:
-            p.error(f"No peak/trough CSD folders under {args.delta_root}")
-        print(f"Discovered {len(datasets)} delta CSD folders")
-        run_many(datasets, defaults=DELTA_CSD_DEFAULTS, stop_on_error=False)
+    delta_root = args.delta_root or args.delta_root_positional
+    if delta_root:
+        overrides: Dict[str, Any] = {}
+        if args.no_kcsd:
+            overrides["compute_kcsd"] = False
+        if args.no_fd:
+            overrides["compute_fd"] = False
+        if args.no_save:
+            overrides["save"] = False
+        if args.normalize:
+            overrides["normalize"] = args.normalize
+        run_delta_csd_from_root(
+            delta_root,
+            stop_on_error=False,
+            plot=args.plot if args.plot else None,
+            **overrides,
+        )
         return 0
 
     if not args.folder:
-        p.error("Provide --folder, --delta-root, or --examples")
+        p.error(
+            "Provide the delta CSD root folder (positional or --delta-root), "
+            "or --folder / --examples"
+        )
 
     ref: Union[int, str, None]
     if args.ref.lower() == "none":
