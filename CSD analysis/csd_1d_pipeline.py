@@ -26,8 +26,10 @@ try:
 except ImportError as exc:
     raise ImportError(
         "SciPy failed to import — usually a NumPy/SciPy version mismatch.\n"
-        "In the same environment as this notebook/kernel, run:\n"
-        "  python -m pip install -U \"numpy>=1.23\" \"scipy>=1.10\" matplotlib kcsd\n"
+        "If you also use `icsd` (needs numpy<1.23), install the pinned stack:\n"
+        "  python -m pip install -U -r requirements.txt\n"
+        "  # numpy>=1.21,<1.23  and  scipy>=1.9,<1.10  and  kcsd\n"
+        "Do NOT upgrade to scipy 1.10+ while keeping numpy 1.22 / icsd.\n"
         "Then restart the kernel.\n"
         f"Original error: {exc}"
     ) from exc
