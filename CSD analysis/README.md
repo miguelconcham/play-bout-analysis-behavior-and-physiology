@@ -74,5 +74,5 @@ Or CLI (positional path is enough):
 python csd_1d_pipeline.py "\\experimentfs.home.bccn-berlin.de\...\delta peak trough CSD"
 ```
 
-Defaults: `ref_chan=None`, `baseline_correct=False`, `t_pre=t_post=500` ms.  
+Defaults: `ref_chan=None`, **`baseline_correct=True`**, window **−500 … +500 ms** (`t_pre=t_post=500`).  
 Optional later: `normalize='zscore_channel'`.

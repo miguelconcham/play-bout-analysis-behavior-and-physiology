@@ -761,14 +761,15 @@ SHARE_NOTEBOOK_KCSD: Dict[str, Any] = {
     "plot": True,
 }
 
-# Delta peak/trough exports: same kCSD maths as the share notebook,
-# but no re-ref / no baseline (authenticity analysis).
+# Delta peak/trough exports: same kCSD maths as the share notebook.
+# Time window is -500 … +500 ms around T0 (matches MATLAB Estimate cuts),
+# with baseline correction from the pre-T0 half of that window.
 DELTA_CSD_DEFAULTS: Dict[str, Any] = {
     **SHARE_NOTEBOOK_KCSD,
-    "t_pre": 500.0,   # ms  (MATLAB t1=-0.50)
-    "t_post": 500.0,  # ms  (MATLAB t2=+0.50)
-    "ref_chan": None,
-    "baseline_correct": False,
+    "t_pre": 500.0,   # ms before T0  →  -500 ms
+    "t_post": 500.0,  # ms after T0   →  +500 ms
+    "ref_chan": None,  # still no re-reference for authenticity analysis
+    "baseline_correct": True,
     "normalize": "none",
     "channels_remove": (),
     "chan_start": None,
