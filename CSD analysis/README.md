@@ -74,5 +74,17 @@ Or CLI (positional path is enough):
 python csd_1d_pipeline.py "\\experimentfs.home.bccn-berlin.de\...\delta peak trough CSD"
 ```
 
-Defaults: `ref_chan=None`, **`baseline_correct=True`**, window **−500 … +500 ms** (`t_pre=t_post=500`).  
-Optional later: `normalize='zscore_channel'`.
+Defaults for delta (`DELTA_CSD_DEFAULTS`, used by `run_delta_csd_from_root`):  
+`ref_chan=None`, **`baseline_correct=True`**, window **−500 … +500 ms**.
+
+Do not confuse with `DatasetConfig` class fields `t_pre=200` / `t_post=800` — those are only the generic Lombard/stim defaults and are **overridden** for delta runs.
+
+### Saved outputs (per session folder)
+
+Under `<session>/`:
+- `csd_1d_array.npy` — stacked CSD `(n_y, n_time, n_x)`
+- `csd_1d_x.npy`, `csd_1d_time.npy`
+- `csd_1d/csd_x{X}.npy`, `y_x{X}.npy`, `V_x{X}.npy`, `time.npy`
+- `csd_1d/figures/kcsd_x{X}.png` — one PNG per shank column
+
+Also copied to `<DELTA_ROOT>/csd_figures/<session_name>/`.

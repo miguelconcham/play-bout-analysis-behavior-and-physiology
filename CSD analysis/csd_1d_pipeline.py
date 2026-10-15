@@ -80,10 +80,12 @@ class DatasetConfig:
     folder: str
     name: Optional[str] = None
 
-    # Timing
+    # Timing — these are GENERIC defaults (Lombard/stim style -200/+800 ms).
+    # For delta peak/trough runs, run_delta_csd_from_root() overlays
+    # DELTA_CSD_DEFAULTS which sets t_pre=t_post=500 (-500…+500 ms).
     fs: float = 2500.0
-    t_pre: float = 200.0  # ms
-    t_post: float = 800.0  # ms
+    t_pre: float = 200.0  # ms (overridden to 500 for delta)
+    t_post: float = 800.0  # ms (overridden to 500 for delta)
     step_ms: float = 5.0  # ms between CSD frames
 
     # Channel selection (applied after bad-channel removal)
@@ -570,6 +572,10 @@ def run_dataset(cfg: Union[DatasetConfig, Dict[str, Any]]) -> Dict[str, Any]:
         f"ref={meta['ref_chan_after_removal']}, "
         f"baseline={cfg.baseline_correct}, normalize={cfg.normalize})"
     )
+    print(
+        f"time window: {-cfg.t_pre:.0f} … +{cfg.t_post:.0f} ms around T0 "
+        f"(t_pre={cfg.t_pre}, t_post={cfg.t_post})"
+    )
 
     evoked, time_ms, time_indices, epochs_bc = epoch_and_average(
         lfp,
@@ -632,26 +638,35 @@ def run_dataset(cfg: Union[DatasetConfig, Dict[str, Any]]) -> Dict[str, Any]:
                 smooth_sigma_time=cfg.smooth_sigma_time,
                 sort_by_depth=cfg.sort_by_depth,
             )
-            print(f"Saved kCSD → {save_folder}")
-        if cfg.plot or cfg.save_plots:
-            ux = float(sorted(csd_dict.keys())[0])
-            y_ch = column_y(x, y, ux, sort_by_depth=cfg.sort_by_depth)
-            plot_path = None
-            if cfg.save_plots:
-                plot_path = os.path.join(
-                    cfg.folder, cfg.output_subdir, f"kcsd_example_x{ux}.png"
-                )
-                os.makedirs(os.path.dirname(plot_path), exist_ok=True)
-            plot_column(
-                csd_dict[ux],
-                time_ms,
-                time_indices,
-                y_ch,
-                title=f"{name} — 1D kCSD x={ux}",
-                cbar_label="kCSD (a.u.)",
-                save_path=plot_path,
-                show=cfg.plot,
+            print(f"Saved kCSD matrices → {save_folder}")
+            print(
+                f"  (per-column csd_x*.npy, stacked csd_1d_array.npy "
+                f"shape n_y × n_time × n_x, plus csd_1d_time.npy)"
             )
+        if cfg.plot or cfg.save_plots:
+            fig_dir = os.path.join(cfg.folder, cfg.output_subdir, "figures")
+            if cfg.save_plots:
+                os.makedirs(fig_dir, exist_ok=True)
+            # Save/show one figure per shank column (unique x)
+            for ux in sorted(csd_dict.keys()):
+                ux = float(ux)
+                y_ch = column_y(x, y, ux, sort_by_depth=cfg.sort_by_depth)
+                plot_path = None
+                if cfg.save_plots:
+                    plot_path = os.path.join(fig_dir, f"kcsd_x{ux}.png")
+                plot_column(
+                    csd_dict[ux],
+                    time_ms,
+                    time_indices,
+                    y_ch,
+                    title=f"{name} — 1D kCSD x={ux}",
+                    cbar_label="kCSD (a.u.)",
+                    save_path=plot_path,
+                    # only show the first column interactively to avoid many popups
+                    show=cfg.plot and ux == float(sorted(csd_dict.keys())[0]),
+                )
+            if cfg.save_plots:
+                print(f"Saved kCSD figures → {fig_dir}")
 
     if cfg.compute_fd:
         print("Computing finite-difference CSD …")
@@ -669,26 +684,28 @@ def run_dataset(cfg: Union[DatasetConfig, Dict[str, Any]]) -> Dict[str, Any]:
             save_fd_outputs(cfg.folder, csd_fd, output_subdir=cfg.output_subdir)
             print(f"Saved FD CSD → {os.path.join(cfg.folder, cfg.output_subdir)}")
         if cfg.plot or cfg.save_plots:
-            ux = float(sorted(csd_fd.keys())[0])
-            y_ch = column_y(x, y, ux, sort_by_depth=cfg.sort_by_depth)
-            # FD uses full time axis
-            fd_indices = np.arange(csd_fd[ux].shape[1])
-            plot_path = None
+            fig_dir = os.path.join(cfg.folder, cfg.output_subdir, "figures")
             if cfg.save_plots:
-                plot_path = os.path.join(
-                    cfg.folder, cfg.output_subdir, f"fd_example_x{ux}.png"
+                os.makedirs(fig_dir, exist_ok=True)
+            for ux in sorted(csd_fd.keys()):
+                ux = float(ux)
+                y_ch = column_y(x, y, ux, sort_by_depth=cfg.sort_by_depth)
+                fd_indices = np.arange(csd_fd[ux].shape[1])
+                plot_path = None
+                if cfg.save_plots:
+                    plot_path = os.path.join(fig_dir, f"fd_x{ux}.png")
+                plot_column(
+                    csd_fd[ux],
+                    time_ms,
+                    fd_indices,
+                    y_ch,
+                    title=f"{name} — FD CSD x={ux}",
+                    cbar_label="CSD (A/m^3)",
+                    save_path=plot_path,
+                    show=cfg.plot and ux == float(sorted(csd_fd.keys())[0]),
                 )
-                os.makedirs(os.path.dirname(plot_path), exist_ok=True)
-            plot_column(
-                csd_fd[ux],
-                time_ms,
-                fd_indices,
-                y_ch,
-                title=f"{name} — FD CSD x={ux}",
-                cbar_label="CSD (A/m^3)",
-                save_path=plot_path,
-                show=cfg.plot,
-            )
+            if cfg.save_plots:
+                print(f"Saved FD figures → {fig_dir}")
 
     print(f"Done: {name}")
     return result
@@ -766,7 +783,7 @@ SHARE_NOTEBOOK_KCSD: Dict[str, Any] = {
 # with baseline correction from the pre-T0 half of that window.
 DELTA_CSD_DEFAULTS: Dict[str, Any] = {
     **SHARE_NOTEBOOK_KCSD,
-    "t_pre": 500.0,   # ms before T0  →  -500 ms
+    "t_pre": 500.0,   # ms before T0  →  -500 ms   << look here for delta window
     "t_post": 500.0,  # ms after T0   →  +500 ms
     "ref_chan": None,  # still no re-reference for authenticity analysis
     "baseline_correct": True,
@@ -774,6 +791,8 @@ DELTA_CSD_DEFAULTS: Dict[str, Any] = {
     "channels_remove": (),
     "chan_start": None,
     "chan_end": None,
+    "save": True,
+    "save_plots": True,  # PNG under <session>/csd_1d/figures/
     "plot": False,
 }
 
@@ -852,11 +871,50 @@ def run_delta_csd_from_root(
         defaults["plot"] = plot
 
     print(f"Delta CSD root: {root}")
+    print(
+        f"Effective window: -{defaults['t_pre']:.0f} … +{defaults['t_post']:.0f} ms | "
+        f"baseline_correct={defaults['baseline_correct']} | "
+        f"ref_chan={defaults.get('ref_chan')} | "
+        f"save_plots={defaults.get('save_plots')}"
+    )
+    print(
+        "(Note: DatasetConfig class defaults t_pre=200/t_post=800 are NOT used here; "
+        "DELTA_CSD_DEFAULTS overrides them.)"
+    )
     print(f"Discovered {len(datasets)} dataset folder(s)")
     for d in datasets:
         print(f"  - {d['name']}")
 
-    return run_many(datasets, defaults=defaults, stop_on_error=stop_on_error)
+    results = run_many(datasets, defaults=defaults, stop_on_error=stop_on_error)
+
+    # Also collect a flat copy of all PNGs under <root>/csd_figures/
+    if defaults.get("save_plots", True):
+        fig_root = os.path.join(root, "csd_figures")
+        os.makedirs(fig_root, exist_ok=True)
+        n_copied = 0
+        for r in results:
+            if "error" in r:
+                continue
+            src_dir = os.path.join(r["config"]["folder"], r["config"]["output_subdir"], "figures")
+            if not os.path.isdir(src_dir):
+                continue
+            dest_dir = os.path.join(fig_root, r["name"])
+            os.makedirs(dest_dir, exist_ok=True)
+            for fn in os.listdir(src_dir):
+                if not fn.lower().endswith(".png"):
+                    continue
+                src = os.path.join(src_dir, fn)
+                dst = os.path.join(dest_dir, fn)
+                try:
+                    import shutil
+
+                    shutil.copy2(src, dst)
+                    n_copied += 1
+                except OSError as exc:
+                    print(f"Could not copy {src} → {dst}: {exc}")
+        print(f"Copied {n_copied} figure(s) → {fig_root}")
+
+    return results
 
 
 # ---------------------------------------------------------------------------
