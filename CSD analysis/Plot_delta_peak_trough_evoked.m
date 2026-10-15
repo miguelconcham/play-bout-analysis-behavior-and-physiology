@@ -3,6 +3,10 @@
 % and plot trial-averaged evoked responses: peak | trough as two subplots,
 % one figure per session (animal, or animal/probeN for NPX2).
 %
+% Memory: sessions are processed one at a time. For each session the peak
+% stack is loaded → averaged → cleared, then the trough stack, then plot.
+% Large arrays are not kept across sessions.
+%
 % Edit root_folder if needed, then run this script.
 
 %% User settings
@@ -10,9 +14,10 @@ root_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-
 % Fallback if you still use the .pri host:
 % root_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\delta peak trough CSD';
 
-save_figures = false;   % set true to write PNGs next to this script / into root_folder/figures
-clim_uV      = [];      % e.g. [-200 200]; empty = autoscale per panel
-sort_by_depth = true;
+save_figures   = false;  % true → PNG under root_folder/figures, then close figure
+close_after    = false;  % true → close each figure after plotting (saves RAM/UI)
+clim_uV        = [];     % e.g. [-200 200]; empty = autoscale per panel
+sort_by_depth  = true;
 
 %% Paths
 this_file = mfilename('fullpath');
@@ -33,6 +38,7 @@ if isempty(sessions)
     error('Plot_delta_peak_trough_evoked:Empty', 'No session folders with lfp.npy under %s', peak_root);
 end
 disp(['Found ', num2str(numel(sessions)), ' session(s) under peak/']);
+disp('Loading one session at a time (peak then trough), then clearing.');
 
 for s = 1:numel(sessions)
     rel = sessions{s};
@@ -48,8 +54,11 @@ for s = 1:numel(sessions)
         continue
     end
 
-    [ev_peak, t_ms_p, y_p, n_p, meta_p] = local_load_evoked(peak_dir, sort_by_depth);
-    [ev_tr, t_ms_t, y_t, n_t, meta_t]   = local_load_evoked(trough_dir, sort_by_depth);
+    disp(['[', num2str(s), '/', num2str(numel(sessions)), '] ', rel, ' — peak']);
+    [ev_peak, t_ms_p, y_p, n_p] = local_load_evoked(peak_dir, sort_by_depth);
+
+    disp(['[', num2str(s), '/', num2str(numel(sessions)), '] ', rel, ' — trough']);
+    [ev_tr, t_ms_t, y_t, n_t] = local_load_evoked(trough_dir, sort_by_depth);
 
     fig = figure('Name', rel, 'Color', 'w', 'Position', [80 80 1200 500]);
     tiledlayout(1, 2, 'Padding', 'compact', 'TileSpacing', 'compact');
@@ -66,6 +75,7 @@ for s = 1:numel(sessions)
     xlabel('Time (ms)');
 
     sgtitle(rel, 'Interpreter', 'none');
+    drawnow;
 
     if save_figures
         out_dir = fullfile(root_folder, 'figures');
@@ -74,19 +84,13 @@ for s = 1:numel(sessions)
         saveas(fig, fullfile(out_dir, [out_name, '_evoked.png']));
     end
 
-    % keep meta in base workspace for inspection of last session
-    assignin('base', 'last_delta_plot', struct( ...
-        'session', rel, ...
-        'peak_dir', peak_dir, ...
-        'trough_dir', trough_dir, ...
-        'evoked_peak', ev_peak, ...
-        'evoked_trough', ev_tr, ...
-        'time_ms_peak', t_ms_p, ...
-        'time_ms_trough', t_ms_t, ...
-        'y_peak', y_p, ...
-        'y_trough', y_t, ...
-        'meta_peak', meta_p, ...
-        'meta_trough', meta_t));
+    % Drop large arrays before the next session
+    clear ev_peak ev_tr t_ms_p t_ms_t y_p y_t n_p n_t
+
+    if close_after || save_figures
+        close(fig);
+        clear fig
+    end
 end
 
 disp('Done plotting peak/trough evoked LFP.');
@@ -119,8 +123,10 @@ end
 sessions = sort(sessions);
 end
 
-function [evoked, time_ms, y, n_events, meta] = local_load_evoked(folder, sort_by_depth)
-lfp = double(read_csd_npy(fullfile(folder, 'lfp.npy')));  % (n_events, n_chan, n_time)
+function [evoked, time_ms, y, n_events] = local_load_evoked(folder, sort_by_depth)
+% Load one lfp.npy, average over events immediately, clear the stack.
+
+lfp = read_csd_npy(fullfile(folder, 'lfp.npy'));  % keep native (usually single)
 x   = double(read_csd_npy(fullfile(folder, 'x_coords.npy'))); x = x(:);
 y   = double(read_csd_npy(fullfile(folder, 'y_coords.npy'))); y = y(:);
 T0  = double(read_csd_npy(fullfile(folder, 'T0.npy'))); T0 = T0(1);
@@ -129,29 +135,22 @@ if exist(fullfile(folder, 'fs.npy'), 'file')
 else
     fs = 2500;
 end
-meta = struct();
-if exist(fullfile(folder, 'meta.mat'), 'file')
-    S = load(fullfile(folder, 'meta.mat'), 'meta');
-    meta = S.meta;
-end
 
 if ndims(lfp) ~= 3
     error('Expected lfp.npy as (n_events, n_chan, n_time), got %s', mat2str(size(lfp)));
 end
+
 n_events = size(lfp, 1);
-evoked = squeeze(mean(lfp, 1));  % (n_chan, n_time)
+evoked = double(squeeze(mean(lfp, 1)));  % (n_chan, n_time) only
+clear lfp   % free the full event stack before returning
 
 if sort_by_depth
     [y, ord] = sort(y);
     evoked = evoked(ord, :);
-    x = x(ord);
 end
 
 n_time = size(evoked, 2);
 time_ms = ((0:n_time - 1) - T0) / fs * 1000;
-meta.x = x;
-meta.fs = fs;
-meta.T0 = T0;
 end
 
 function local_plot_panel(evoked, time_ms, y, clim_uV)
