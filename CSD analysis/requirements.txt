@@ -1,13 +1,11 @@
-# CSD analysis — compatible with icsd (numpy<1.23) and kCSD
-#
-# Your broken combo was: numpy 1.22.4 + scipy 1.10.1
-# SciPy 1.10 needs a newer NumPy ABI; icsd blocks NumPy >= 1.23.
-# Use SciPy 1.9.x instead (works with NumPy 1.22 + kCSD + icsd).
-#
-# In the notebook kernel / env:
+# Install into conda env kCSD_env (the kernel that runs this notebook):
+#   conda activate kCSD_env
 #   python -m pip install -U -r requirements.txt
 #
+# Pins keep kcsd working (needs scipy.integrate.simps OR our direct KCSD1D import)
+# and avoid NumPy 2.x breakages seen with older stacks.
 numpy>=1.21,<1.23
-scipy>=1.9,<1.10
+scipy>=1.9,<1.14
 matplotlib>=3.5
 kcsd>=2.0
+ipykernel>=6.0

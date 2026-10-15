@@ -35,26 +35,36 @@ except ImportError as exc:
     ) from exc
 
 
-def _import_kcsd1d():
-    """Import KCSD1D; patch SciPy≥1.14 ``simps``→``simpson`` for older kcsd."""
-    try:
-        from kcsd import KCSD1D as cls
-        return cls
-    except ImportError:
-        pass
-    try:
-        import scipy.integrate as _integrate
+def _patch_scipy_simps() -> None:
+    """kcsd validation imports ``simps``; SciPy≥1.14 renamed it to ``simpson``."""
+    import scipy.integrate as _integrate
 
-        if not hasattr(_integrate, "simps") and hasattr(_integrate, "simpson"):
-            _integrate.simps = _integrate.simpson  # type: ignore[attr-defined]
+    if not hasattr(_integrate, "simps") and hasattr(_integrate, "simpson"):
+        _integrate.simps = _integrate.simpson  # type: ignore[attr-defined]
+
+
+def _import_kcsd1d():
+    """
+    Import KCSD1D using only the ``kcsd`` package (kCSD_env).
+
+    Prefer ``kcsd.KCSD.KCSD1D`` so we never import ``kcsd.validation``
+    (that path breaks on SciPy≥1.14 because of ``simps``). Fall back to
+    ``from kcsd import KCSD1D`` after patching ``simps``.
+    """
+    # 1) Direct class import — works even if scipy.simps is missing
+    try:
+        from kcsd.KCSD import KCSD1D as cls
+        return cls
+    except Exception:
+        pass
+
+    # 2) Package import with simps shim (matches older notebooks)
+    try:
+        _patch_scipy_simps()
         from kcsd import KCSD1D as cls
         return cls
     except Exception:
-        try:
-            from kcsd.KCSD import KCSD1D as cls
-            return cls
-        except Exception:
-            return None
+        return None
 
 
 KCSD1D = _import_kcsd1d()
@@ -93,16 +103,16 @@ class DatasetConfig:
     # Options: "none" | "zscore_channel" | "zscore_trial"
     normalize: str = "none"
 
-    # 1D kCSD
+    # 1D kCSD — defaults match the working "CSD to share" notebook
     compute_kcsd: bool = True
-    y_scale: str = "mm"  # "mm" -> (y-ymin)/1000; "unit" -> [0,1]
-    h: float = 0.25
-    n_src_factor: float = 4.0  # n_src = max(10, factor * n_ch)
-    smooth_sigma_time: float = 0.0  # 0 disables temporal Gaussian on V
+    y_scale: str = "unit"  # (y-ymin)/(ymax-ymin), as in the share notebook
+    h: float = 0.1
+    n_src_factor: float = 2.0  # n_src = factor * n_ch  (share notebook: 2*n_ch)
+    smooth_sigma_time: float = 1.0  # gaussian_filter1d over time
     sort_by_depth: bool = True
 
-    # Finite-difference CSD (always available; no kCSD dependency)
-    compute_fd: bool = True
+    # Finite-difference CSD (optional; share notebook uses kCSD only)
+    compute_fd: bool = False
     tissue_sigma: float = 0.3  # S/m
     lfp_in_uV: bool = True
     sigma_spatial_ch: float = 1.0
@@ -352,17 +362,23 @@ def compute_kcsd_1d_columns(
         n_time_sel = len(time_indices)
         csd_stack = np.zeros((n_ch, n_time_sel))
 
+        # Same as share notebook: unit-normalize depth, smooth V, KCSD1D, interp back
         y_norm = _normalize_y(y_ch, y_scale)
         if smooth_sigma_time and smooth_sigma_time > 0:
             v_s = gaussian_filter1d(v_ch, sigma=float(smooth_sigma_time), axis=1)
         else:
             v_s = v_ch
 
-        n_src = max(10, int(round(n_src_factor * n_ch)))
+        n_src = max(2, int(round(n_src_factor * n_ch)))  # share notebook: 2 * n_ch
 
         for ti_idx, ti in enumerate(time_indices):
             v_t = v_s[:, ti][:, None]
-            k = KCSD1D(ele_pos=y_norm, pots=v_t, h=h, n_src_init=n_src)
+            k = KCSD1D(
+                ele_pos=y_norm,
+                pots=v_t,
+                h=h,
+                n_src_init=n_src,
+            )
             csd_grid = np.asarray(k.values(estimate="CSD"))
             if csd_grid.ndim == 2:
                 csd_grid = csd_grid[:, 0]
@@ -729,25 +745,34 @@ def run_many(
 # Delta peak/trough CSD folders (from Estimate_delta_peak_trough_csd.m)
 # ---------------------------------------------------------------------------
 
-DELTA_CSD_DEFAULTS: Dict[str, Any] = {
+# kCSD settings copied from the working "CSD to share to cursor.ipynb"
+SHARE_NOTEBOOK_KCSD: Dict[str, Any] = {
     "fs": 2500.0,
-    "t_pre": 500.0,   # ms  (matches MATLAB t1=-0.50)
-    "t_post": 500.0,  # ms  (matches MATLAB t2=+0.50)
     "step_ms": 5.0,
-    "ref_chan": None,          # no re-reference
-    "baseline_correct": False, # keep option open via normalize later
+    "compute_kcsd": True,
+    "compute_fd": False,       # share notebook only runs 1D kCSD
+    "y_scale": "unit",
+    "h": 0.1,
+    "n_src_factor": 2.0,
+    "smooth_sigma_time": 1.0,
+    "sort_by_depth": True,
+    "save": True,
+    "save_plots": True,
+    "plot": True,
+}
+
+# Delta peak/trough exports: same kCSD maths as the share notebook,
+# but no re-ref / no baseline (authenticity analysis).
+DELTA_CSD_DEFAULTS: Dict[str, Any] = {
+    **SHARE_NOTEBOOK_KCSD,
+    "t_pre": 500.0,   # ms  (MATLAB t1=-0.50)
+    "t_post": 500.0,  # ms  (MATLAB t2=+0.50)
+    "ref_chan": None,
+    "baseline_correct": False,
     "normalize": "none",
     "channels_remove": (),
     "chan_start": None,
     "chan_end": None,
-    "compute_kcsd": True,
-    "compute_fd": True,
-    "y_scale": "mm",
-    "h": 0.25,
-    "n_src_factor": 4.0,
-    "smooth_sigma_time": 0.0,
-    "save": True,
-    "save_plots": True,
     "plot": False,
 }
 
