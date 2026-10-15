@@ -19,8 +19,19 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
-from scipy.interpolate import interp1d
-from scipy.ndimage import gaussian_filter1d
+
+try:
+    from scipy.interpolate import interp1d
+    from scipy.ndimage import gaussian_filter1d
+except ImportError as exc:
+    raise ImportError(
+        "SciPy failed to import — usually a NumPy/SciPy version mismatch.\n"
+        "In the same environment as this notebook/kernel, run:\n"
+        "  python -m pip install -U \"numpy>=1.23\" \"scipy>=1.10\" matplotlib kcsd\n"
+        "Then restart the kernel.\n"
+        f"Original error: {exc}"
+    ) from exc
+
 
 def _import_kcsd1d():
     """Import KCSD1D; patch SciPy≥1.14 ``simps``→``simpson`` for older kcsd."""
