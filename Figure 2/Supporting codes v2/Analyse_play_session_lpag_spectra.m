@@ -33,6 +33,7 @@ welch_aperiodic_parameters = nan(n_sessions, 2);
 welch_r_squared = nan(n_sessions, 1);
 welch_fit_error = nan(n_sessions, 1);
 welch_peak_parameters = cell(n_sessions, 1);
+welch_gaussian_parameters = cell(n_sessions, 1);
 
 fourier_log_power = nan(n_sessions, n_frequency);
 fourier_aperiodic_fit = nan(n_sessions, n_frequency);
@@ -42,6 +43,7 @@ fourier_aperiodic_parameters = nan(n_sessions, 2);
 fourier_r_squared = nan(n_sessions, 1);
 fourier_fit_error = nan(n_sessions, 1);
 fourier_peak_parameters = cell(n_sessions, 1);
+fourier_gaussian_parameters = cell(n_sessions, 1);
 
 session_name = cell(n_sessions, 1);
 recording_index = nan(n_sessions, 1);
@@ -88,6 +90,8 @@ for recording_n = 1:n_recordings
             this_session.welch.fooof.error;
         welch_peak_parameters{output_session_n} = ...
             this_session.welch.fooof.peak_params;
+        welch_gaussian_parameters{output_session_n} = ...
+            this_session.welch.fooof.gaussian_params;
 
         fourier_log_power(output_session_n, :) = ...
             this_session.fourier.log10_mean_power(:).';
@@ -105,8 +109,48 @@ for recording_n = 1:n_recordings
             this_session.fourier.fooof.error;
         fourier_peak_parameters{output_session_n} = ...
             this_session.fourier.fooof.peak_params;
+        fourier_gaussian_parameters{output_session_n} = ...
+            this_session.fourier.fooof.gaussian_params;
     end
 end
+
+%% Remove the aperiodic fit and fitted theta Gaussian components
+% The repository defines theta as 6-12 Hz. FOOOF components are additive
+% in log10-power space, so subtraction is performed in that domain.
+theta_range = [6 12];
+welch_theta_gaussian_fit = zeros(n_sessions, n_frequency);
+fourier_theta_gaussian_fit = zeros(n_sessions, n_frequency);
+
+for session_n = 1:n_sessions
+    this_gaussians = welch_gaussian_parameters{session_n};
+    theta_gaussians = this_gaussians( ...
+        this_gaussians(:, 1) >= theta_range(1) & ...
+        this_gaussians(:, 1) <= theta_range(2), :);
+    for gaussian_n = 1:size(theta_gaussians, 1)
+        welch_theta_gaussian_fit(session_n, :) = ...
+            welch_theta_gaussian_fit(session_n, :) + ...
+            theta_gaussians(gaussian_n, 2) .* exp( ...
+            -(frequency - theta_gaussians(gaussian_n, 1)).^2 ./ ...
+            (2 * theta_gaussians(gaussian_n, 3).^2));
+    end
+
+    this_gaussians = fourier_gaussian_parameters{session_n};
+    theta_gaussians = this_gaussians( ...
+        this_gaussians(:, 1) >= theta_range(1) & ...
+        this_gaussians(:, 1) <= theta_range(2), :);
+    for gaussian_n = 1:size(theta_gaussians, 1)
+        fourier_theta_gaussian_fit(session_n, :) = ...
+            fourier_theta_gaussian_fit(session_n, :) + ...
+            theta_gaussians(gaussian_n, 2) .* exp( ...
+            -(frequency - theta_gaussians(gaussian_n, 1)).^2 ./ ...
+            (2 * theta_gaussians(gaussian_n, 3).^2));
+    end
+end
+
+welch_aperiodic_theta_subtracted = welch_log_power - ...
+    welch_aperiodic_fit - welch_theta_gaussian_fit;
+fourier_aperiodic_theta_subtracted = fourier_log_power - ...
+    fourier_aperiodic_fit - fourier_theta_gaussian_fit;
 
 %% Collect every fitted Gaussian peak in one analysis-ready table
 % FOOOF peak_params columns are center frequency, peak power, bandwidth.
@@ -378,10 +422,16 @@ group_welch_log_power = nan(n_group_sessions, n_frequency);
 group_welch_aperiodic_fit = nan(n_group_sessions, n_frequency);
 group_welch_gaussian = nan(n_group_sessions, n_frequency);
 group_welch_raw = nan(n_group_sessions, n_frequency);
+group_welch_theta_fit = nan(n_group_sessions, n_frequency);
+group_welch_aperiodic_theta_subtracted = ...
+    nan(n_group_sessions, n_frequency);
 group_fourier_log_power = nan(n_group_sessions, n_frequency);
 group_fourier_aperiodic_fit = nan(n_group_sessions, n_frequency);
 group_fourier_gaussian = nan(n_group_sessions, n_frequency);
 group_fourier_raw = nan(n_group_sessions, n_frequency);
+group_fourier_theta_fit = nan(n_group_sessions, n_frequency);
+group_fourier_aperiodic_theta_subtracted = ...
+    nan(n_group_sessions, n_frequency);
 group_n_channels = nan(n_group_sessions, 1);
 group_n_windows = nan(n_group_sessions, 1);
 
@@ -397,6 +447,10 @@ for group_n = 1:n_group_sessions
         mean(welch_gaussian_periodic(in_group, :), 1, 'omitnan');
     group_welch_raw(group_n, :) = ...
         mean(welch_raw_residual(in_group, :), 1, 'omitnan');
+    group_welch_theta_fit(group_n, :) = ...
+        mean(welch_theta_gaussian_fit(in_group, :), 1, 'omitnan');
+    group_welch_aperiodic_theta_subtracted(group_n, :) = mean( ...
+        welch_aperiodic_theta_subtracted(in_group, :), 1, 'omitnan');
     group_fourier_log_power(group_n, :) = ...
         mean(fourier_log_power(in_group, :), 1, 'omitnan');
     group_fourier_aperiodic_fit(group_n, :) = ...
@@ -405,6 +459,10 @@ for group_n = 1:n_group_sessions
         mean(fourier_gaussian_periodic(in_group, :), 1, 'omitnan');
     group_fourier_raw(group_n, :) = ...
         mean(fourier_raw_residual(in_group, :), 1, 'omitnan');
+    group_fourier_theta_fit(group_n, :) = ...
+        mean(fourier_theta_gaussian_fit(in_group, :), 1, 'omitnan');
+    group_fourier_aperiodic_theta_subtracted(group_n, :) = mean( ...
+        fourier_aperiodic_theta_subtracted(in_group, :), 1, 'omitnan');
 end
 
 group_session_summary = table(group_name, group_n_channels, ...
@@ -421,6 +479,7 @@ group_session_summary = table(group_name, group_n_channels, ...
 analysis_results = struct();
 analysis_results.frequency = frequency;
 analysis_results.delta_range = [1 4];
+analysis_results.theta_range = theta_range;
 analysis_results.channel_session_summary = session_summary;
 analysis_results.session_summary = group_session_summary;
 analysis_results.gaussian_peak_table = gaussian_peak_table;
@@ -434,13 +493,21 @@ analysis_results.welch.raw_aperiodic_subtracted = welch_raw_residual;
 analysis_results.welch.aperiodic_parameters = ...
     welch_aperiodic_parameters;
 analysis_results.welch.peak_parameters = welch_peak_parameters;
+analysis_results.welch.gaussian_parameters = welch_gaussian_parameters;
 analysis_results.welch.r_squared = welch_r_squared;
 analysis_results.welch.fit_error = welch_fit_error;
+analysis_results.welch.theta_gaussian_fit = welch_theta_gaussian_fit;
+analysis_results.welch.aperiodic_theta_subtracted = ...
+    welch_aperiodic_theta_subtracted;
 analysis_results.welch.session_mean_log_power = group_welch_log_power;
 analysis_results.welch.session_mean_aperiodic_fit = ...
     group_welch_aperiodic_fit;
 analysis_results.welch.session_mean_gaussian = group_welch_gaussian;
 analysis_results.welch.session_mean_raw_residual = group_welch_raw;
+analysis_results.welch.session_mean_theta_gaussian_fit = ...
+    group_welch_theta_fit;
+analysis_results.welch.session_mean_aperiodic_theta_subtracted = ...
+    group_welch_aperiodic_theta_subtracted;
 
 analysis_results.fourier.log_power = fourier_log_power;
 analysis_results.fourier.aperiodic_fit = fourier_aperiodic_fit;
@@ -451,14 +518,24 @@ analysis_results.fourier.raw_aperiodic_subtracted = ...
 analysis_results.fourier.aperiodic_parameters = ...
     fourier_aperiodic_parameters;
 analysis_results.fourier.peak_parameters = fourier_peak_parameters;
+analysis_results.fourier.gaussian_parameters = ...
+    fourier_gaussian_parameters;
 analysis_results.fourier.r_squared = fourier_r_squared;
 analysis_results.fourier.fit_error = fourier_fit_error;
+analysis_results.fourier.theta_gaussian_fit = ...
+    fourier_theta_gaussian_fit;
+analysis_results.fourier.aperiodic_theta_subtracted = ...
+    fourier_aperiodic_theta_subtracted;
 analysis_results.fourier.session_mean_log_power = group_fourier_log_power;
 analysis_results.fourier.session_mean_aperiodic_fit = ...
     group_fourier_aperiodic_fit;
 analysis_results.fourier.session_mean_gaussian = ...
     group_fourier_gaussian;
 analysis_results.fourier.session_mean_raw_residual = group_fourier_raw;
+analysis_results.fourier.session_mean_theta_gaussian_fit = ...
+    group_fourier_theta_fit;
+analysis_results.fourier.session_mean_aperiodic_theta_subtracted = ...
+    group_fourier_aperiodic_theta_subtracted;
 
 analysis_results.welch.group_mean_gaussian = ...
     mean(group_welch_gaussian, 1, 'omitnan');
@@ -517,6 +594,46 @@ title('Direct Fourier periodogram')
 legend([session_lines(1), mean_line, aperiodic_line], ...
     {'Sessions', 'Mean spectrum', 'Mean aperiodic fit'}, ...
     'Location', 'best')
+box off
+
+%% Plot spectra after removing aperiodic and theta Gaussian components
+figure('Name', 'Aperiodic- and theta-subtracted LPAG spectra');
+subplot(1, 2, 1)
+session_lines = plot(frequency, ...
+    group_welch_aperiodic_theta_subtracted.', ...
+    'Color', [0.8 0.8 0.8]);
+hold on
+mean_line = plot(frequency, mean( ...
+    group_welch_aperiodic_theta_subtracted, 1, 'omitnan'), ...
+    'k', 'LineWidth', 2);
+yline(0, ':k')
+xline(theta_range(1), '--', 'Color', [0.4 0.4 0.4]);
+xline(theta_range(2), '--', 'Color', [0.4 0.4 0.4]);
+xlabel('Frequency (Hz)')
+ylabel('Residual log_{10} power')
+title(sprintf('Welch: aperiodic and %g-%g Hz theta removed', ...
+    theta_range(1), theta_range(2)))
+legend([session_lines(1), mean_line], ...
+    {'Sessions', 'Mean residual'}, 'Location', 'best')
+box off
+
+subplot(1, 2, 2)
+session_lines = plot(frequency, ...
+    group_fourier_aperiodic_theta_subtracted.', ...
+    'Color', [0.8 0.8 0.8]);
+hold on
+mean_line = plot(frequency, mean( ...
+    group_fourier_aperiodic_theta_subtracted, 1, 'omitnan'), ...
+    'k', 'LineWidth', 2);
+yline(0, ':k')
+xline(theta_range(1), '--', 'Color', [0.4 0.4 0.4]);
+xline(theta_range(2), '--', 'Color', [0.4 0.4 0.4]);
+xlabel('Frequency (Hz)')
+ylabel('Residual log_{10} power')
+title(sprintf('Fourier: aperiodic and %g-%g Hz theta removed', ...
+    theta_range(1), theta_range(2)))
+legend([session_lines(1), mean_line], ...
+    {'Sessions', 'Mean residual'}, 'Location', 'best')
 box off
 
 %% Plot both periodic estimates
