@@ -1250,25 +1250,31 @@ staked_aic = [staked_aic,a(:,2)];
 staked_BIC = [staked_BIC,a(:,3)];
 end
 
+% Information criteria scale with recording length.  Express each session
+% relative to its own best-fitting state count before combining sessions.
+% The preferred model in each session therefore has delta AIC/BIC = 0.
+delta_aic = staked_aic - min(staked_aic,[],1);
+delta_BIC = staked_BIC - min(staked_BIC,[],1);
+
 figure
 
 subplot(1,3,1)
-plot(2:5,staked_aic, 'k:')
+plot(2:5,delta_aic, 'k:')
 xticks(2:5)
 hold on
-plot(2:5,mean(staked_aic'), 'k')
+plot(2:5,mean(delta_aic,2), 'k', 'LineWidth',1.5)
 xlim([1.5 5.5])
 xlabel('Number of States')
-ylabel('AIC')
+ylabel('\Delta AIC')
 set(gca, 'FontSize',12)
 set(gca,'TickDir','out');
 
 subplot(1,3,2)
-plot(2:5,staked_BIC, 'k:')
+plot(2:5,delta_BIC, 'k:')
 xlabel('Number of States')
-ylabel('BIC')
+ylabel('\Delta BIC')
 hold on
-plot(2:5,mean(staked_BIC'), 'k')
+plot(2:5,mean(delta_BIC,2), 'k', 'LineWidth',1.5)
 set(gca, 'FontSize',12)
 xlim([1.5 5.5])
 xticks(2:5)
