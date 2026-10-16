@@ -69,6 +69,24 @@ class PairedBaselineTests(unittest.TestCase):
             out["offset_epochs"][1, 0], [294.0, 494.0, 34.0, 38.0]
         )
 
+        chunked = epoch_paired_with_onset_baseline(
+            onset,
+            offset,
+            t0_onset=5,
+            t0_offset=5,
+            fs=1000.0,
+            t_pre=2.0,
+            t_post=2.0,
+            step_ms=1.0,
+            onset_baseline_window_ms=(-2.0, 0.0),
+            retain_epochs=False,
+            event_chunk_size=1,
+        )
+        self.assertIsNone(chunked["onset_epochs"])
+        self.assertIsNone(chunked["offset_epochs"])
+        np.testing.assert_allclose(chunked["onset_evoked"], out["onset_evoked"])
+        np.testing.assert_allclose(chunked["offset_evoked"], out["offset_evoked"])
+
     def test_loader_rejects_mismatched_event_ids(self):
         with tempfile.TemporaryDirectory() as root:
             onset_folder = os.path.join(root, "onset")
@@ -121,6 +139,7 @@ class PairedBaselineTests(unittest.TestCase):
                 compute_fd=False,
                 save=True,
                 save_plots=False,
+                retain_epochs=True,
             )
 
             self.assertEqual(result["meta"]["baseline_source"], "onset")

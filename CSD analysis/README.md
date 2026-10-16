@@ -6,7 +6,7 @@
 
 | File | Role |
 |------|------|
-| `GENERATE_DELTA_PEAK_TROUGH_CSD_LFP.m` | One session: LPAG-center detection, Partners-session events, raw ±250 ms cuts |
+| `GENERATE_DELTA_PEAK_TROUGH_CSD_LFP.m` | One session: LPAG-center detection, Partners-session events, raw ±500 ms cuts |
 | `Estimate_delta_peak_trough_csd.m` | Fixed params, loop animals, write `.npy` |
 | `write_csd_npy.m` | MATLAB → NumPy `.npy` writer |
 
@@ -93,7 +93,40 @@ Also copied to `<DELTA_ROOT>/csd_figures/<session_name>/`.
 
 ## 4) Behavior / play-bout onset and offset with one shared baseline
 
-`behavior_aligned_kcsd.py` handles paired onset and offset exports. It uses
+### MATLAB export
+
+Run:
+
+```matlab
+Estimate_behavior_aligned_csd
+```
+
+It calls `GENERATE_BEHAVIOR_ALIGNED_CSD_LFP` once per NPX session and writes:
+
+- all 14 individual behaviors with implanted and partner events pooled;
+- categories:
+  - play: `Pounce`, `CC`, `Boxing`, `Evasion`, `Pin`, `Escape`, `CB`, `CD`;
+  - aggression: `PounceI`, `Bite`;
+  - exploration: `Grooming`, `Rearing`, `Sniffing`, `Scratching`;
+- `self_play` (implanted animal) and `other_play` (partners);
+- whole play bouts from `play_bout.m`.
+
+Only complete ±500 ms onset/offset pairs inside a `Partners session` are
+exported. A pair is excluded when any genuine behavior annotation from either
+animal overlaps its −500…0 ms onset baseline. Exact duplicate annotations are
+removed. Neighboring behaviors and overlapping onset/offset windows are
+flagged in `events.mat`, while groups with fewer than five events are retained
+but marked as low-count.
+
+Every leaf contains raw `lfp.npy`, matching `event_ids.npy`, geometry/timing
+arrays, `meta.mat`, and `events.mat` content inside `meta.mat`. It also contains
+`evoked_lfp.npy`: the raw-voltage LFP PSTH after the event's onset baseline was
+subtracted from both onset and offset trials. No band-pass filtering or
+rereferencing is applied.
+
+### Python paired kCSD
+
+`behavior_aligned_kcsd.py` handles the paired onset and offset exports. It uses
 raw, unfiltered LFP and deliberately keeps baseline preparation outside the
 general kCSD estimator:
 
@@ -152,4 +185,6 @@ Defaults are raw LFP, no rereference, ±500 ms response epochs, onset baseline
 Outputs are written beneath each alignment leaf in
 `csd_1d_onset_baseline/`. `paired_baseline_metadata.json` records the baseline
 source/window and pairing method; `onset_baseline.npy` stores the actual
-event-by-channel baseline values.
+event-by-channel baseline values. Trial matrices are memory-mapped and averaged
+in event chunks by default; pass `retain_epochs=True` only when trial-level
+arrays must remain in the returned Python object.

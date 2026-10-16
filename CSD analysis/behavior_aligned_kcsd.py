@@ -61,6 +61,8 @@ BEHAVIOR_ALIGNED_CSD_DEFAULTS: Dict[str, Any] = {
     # This window is relative to behavior/play-bout onset, not offset.
     "onset_baseline_window_ms": (-500.0, 0.0),
     "output_subdir": "csd_1d_onset_baseline",
+    # Batch root runs should not retain every trial matrix in Python RAM.
+    "retain_epochs": False,
 }
 
 
@@ -76,8 +78,10 @@ def load_paired_raw(
     offset_folder: PathLike,
 ) -> Dict[str, Any]:
     """Load and validate paired raw onset/offset LFP stacks."""
-    onset, x_on, y_on, t0_on, fs_on = load_raw(onset_folder)
-    offset, x_off, y_off, t0_off, fs_off = load_raw(offset_folder)
+    # Memory-map trial stacks: channel preparation/epoching reads from disk
+    # without first materializing both complete arrays in RAM.
+    onset, x_on, y_on, t0_on, fs_on = load_raw(onset_folder, mmap_mode="r")
+    offset, x_off, y_off, t0_off, fs_off = load_raw(offset_folder, mmap_mode="r")
 
     if onset.shape[:2] != offset.shape[:2]:
         raise ValueError(
@@ -154,7 +158,9 @@ def epoch_paired_with_onset_baseline(
     onset_baseline_window_ms: Tuple[float, float] = (-500.0, 0.0),
     baseline_correct: bool = True,
     normalize: str = "none",
-) -> Dict[str, np.ndarray]:
+    retain_epochs: bool = True,
+    event_chunk_size: int = 8,
+) -> Dict[str, Any]:
     """
     Epoch paired alignments and apply the onset baseline to both.
 
@@ -196,27 +202,53 @@ def epoch_paired_with_onset_baseline(
         "onset baseline",
     )
 
-    onset_epochs = onset_lfp[:, :, onset_start:onset_end].astype(float, copy=True)
-    offset_epochs = offset_lfp[:, :, offset_start:offset_end].astype(float, copy=True)
-    if onset_epochs.shape[2] != offset_epochs.shape[2]:
+    onset_view = onset_lfp[:, :, onset_start:onset_end]
+    offset_view = offset_lfp[:, :, offset_start:offset_end]
+    if onset_view.shape[2] != offset_view.shape[2]:
         raise ValueError(
-            f"Onset/offset epoch lengths differ: {onset_epochs.shape[2]} vs "
-            f"{offset_epochs.shape[2]}"
+            f"Onset/offset epoch lengths differ: {onset_view.shape[2]} vs "
+            f"{offset_view.shape[2]}"
         )
 
+    work_dtype = np.result_type(onset_lfp.dtype, offset_lfp.dtype, np.float32)
     onset_baseline = onset_lfp[:, :, baseline_start:baseline_end].mean(
         axis=2, keepdims=True
-    )
-    if baseline_correct:
-        onset_epochs -= onset_baseline
-        offset_epochs -= onset_baseline
+    ).astype(work_dtype, copy=False)
+    if retain_epochs:
+        onset_epochs = onset_view.astype(work_dtype, copy=True)
+        offset_epochs = offset_view.astype(work_dtype, copy=True)
+        if baseline_correct:
+            onset_epochs -= onset_baseline
+            offset_epochs -= onset_baseline
+        onset_evoked = onset_epochs.mean(axis=0)
+        offset_evoked = offset_epochs.mean(axis=0)
+    else:
+        if event_chunk_size < 1:
+            raise ValueError("event_chunk_size must be at least 1")
+        epoch_shape = onset_view.shape[1:]
+        onset_sum = np.zeros(epoch_shape, dtype=np.float64)
+        offset_sum = np.zeros(epoch_shape, dtype=np.float64)
+        for first in range(0, onset_view.shape[0], event_chunk_size):
+            last = min(first + event_chunk_size, onset_view.shape[0])
+            onset_chunk = onset_view[first:last].astype(work_dtype, copy=True)
+            offset_chunk = offset_view[first:last].astype(work_dtype, copy=True)
+            if baseline_correct:
+                baseline_chunk = onset_baseline[first:last]
+                onset_chunk -= baseline_chunk
+                offset_chunk -= baseline_chunk
+            onset_sum += onset_chunk.sum(axis=0, dtype=np.float64)
+            offset_sum += offset_chunk.sum(axis=0, dtype=np.float64)
+        onset_evoked = onset_sum / onset_view.shape[0]
+        offset_evoked = offset_sum / offset_view.shape[0]
+        onset_epochs = None
+        offset_epochs = None
 
-    onset_evoked = apply_normalize(onset_epochs.mean(axis=0), normalize)
-    offset_evoked = apply_normalize(offset_epochs.mean(axis=0), normalize)
+    onset_evoked = apply_normalize(onset_evoked, normalize)
+    offset_evoked = apply_normalize(offset_evoked, normalize)
     pre_samples = int(round(float(t_pre) * fs / 1000.0))
-    time_ms = (np.arange(onset_epochs.shape[2]) - pre_samples) / fs * 1000.0
+    time_ms = (np.arange(onset_view.shape[2]) - pre_samples) / fs * 1000.0
     step = max(1, int(round(step_ms * fs / 1000.0)))
-    time_indices = np.arange(0, onset_epochs.shape[2], step)
+    time_indices = np.arange(0, onset_view.shape[2], step)
 
     return {
         "onset_evoked": onset_evoked,
@@ -298,7 +330,9 @@ def run_behavior_aligned_kcsd(
     kCSD itself remains unchanged and receives the two prepared evoked LFPs.
     """
     valid_overrides = set(DatasetConfig.__dataclass_fields__) | {
-        "onset_baseline_window_ms"
+        "onset_baseline_window_ms",
+        "retain_epochs",
+        "event_chunk_size",
     }
     unknown = sorted(set(overrides) - valid_overrides)
     if unknown:
@@ -307,6 +341,8 @@ def run_behavior_aligned_kcsd(
     settings = dict(BEHAVIOR_ALIGNED_CSD_DEFAULTS)
     settings.update(overrides)
     baseline_window = tuple(settings.pop("onset_baseline_window_ms"))
+    retain_epochs = bool(settings.pop("retain_epochs"))
+    event_chunk_size = int(settings.pop("event_chunk_size", 8))
     if (
         len(baseline_window) != 2
         or baseline_window[0] >= baseline_window[1]
@@ -332,12 +368,18 @@ def run_behavior_aligned_kcsd(
         cfg.fs = float(paired["fs_loaded"])
 
     n_events = paired["onset"].shape[0]
-    combined = np.concatenate((paired["onset"], paired["offset"]), axis=0)
-    combined, x, y, channel_meta = prepare_channels(
-        combined, paired["x"], paired["y"], cfg
+    onset, x, y, channel_meta = prepare_channels(
+        paired["onset"], paired["x"], paired["y"], cfg
     )
-    onset = combined[:n_events]
-    offset = combined[n_events:]
+    offset, x_offset, y_offset, offset_channel_meta = prepare_channels(
+        paired["offset"], paired["x"], paired["y"], cfg
+    )
+    if not np.array_equal(x, x_offset, equal_nan=True) or not np.array_equal(
+        y, y_offset, equal_nan=True
+    ):
+        raise RuntimeError("Onset/offset channel preparation produced different geometry")
+    if channel_meta != offset_channel_meta:
+        raise RuntimeError("Onset/offset channel preparation settings differ")
 
     prepared = epoch_paired_with_onset_baseline(
         onset,
@@ -351,6 +393,8 @@ def run_behavior_aligned_kcsd(
         onset_baseline_window_ms=baseline_window,
         baseline_correct=cfg.baseline_correct,
         normalize=cfg.normalize,
+        retain_epochs=retain_epochs,
+        event_chunk_size=event_chunk_size,
     )
 
     resolved_name = name or os.path.relpath(
@@ -363,6 +407,8 @@ def run_behavior_aligned_kcsd(
         "baseline_source": "onset",
         "onset_baseline_window_ms": list(baseline_window),
         "baseline_correct": bool(cfg.baseline_correct),
+        "retain_epochs": retain_epochs,
+        "event_chunk_size": event_chunk_size,
         "pairing": paired["pairing"],
         "n_events": int(n_events),
         "geometry": probe_geometry_kind(x),
@@ -375,12 +421,19 @@ def run_behavior_aligned_kcsd(
         "event_ids": paired["event_ids"],
         "x": x,
         "y": y,
-        **prepared,
+        "onset_evoked": prepared["onset_evoked"],
+        "offset_evoked": prepared["offset_evoked"],
+        "onset_baseline": prepared["onset_baseline"],
+        "time_ms": prepared["time_ms"],
+        "time_indices": prepared["time_indices"],
         "onset_csd_kcsd": None,
         "offset_csd_kcsd": None,
         "onset_csd_fd": None,
         "offset_csd_fd": None,
     }
+    if retain_epochs:
+        result["onset_epochs"] = prepared["onset_epochs"]
+        result["offset_epochs"] = prepared["offset_epochs"]
 
     if cfg.compute_kcsd:
         csd_kwargs = {

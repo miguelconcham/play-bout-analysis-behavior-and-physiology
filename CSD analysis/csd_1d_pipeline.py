@@ -139,6 +139,8 @@ def _as_config(cfg: Union[DatasetConfig, Dict[str, Any]]) -> DatasetConfig:
 
 def load_raw(
     folder: PathLike,
+    *,
+    mmap_mode: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, Optional[float]]:
     """
     Load a CSD-ready folder.
@@ -149,7 +151,7 @@ def load_raw(
     Optional ``fs.npy`` overrides the config sampling rate when present.
     """
     folder = os.fspath(folder)
-    lfp = np.load(os.path.join(folder, "lfp.npy"))
+    lfp = np.load(os.path.join(folder, "lfp.npy"), mmap_mode=mmap_mode)
     x = np.load(os.path.join(folder, "x_coords.npy")).flatten()
     y = np.load(os.path.join(folder, "y_coords.npy")).flatten()
     t0 = int(np.asarray(np.load(os.path.join(folder, "T0.npy"))).reshape(-1)[0])
@@ -225,9 +227,12 @@ def prepare_channels(
         if 0 <= ch < keep.size:
             keep[ch] = False
     removed = np.where(~keep)[0].tolist()
-    lfp = lfp[:, keep, :]
-    x = x[keep]
-    y = y[keep]
+    # Preserve memory-mapped LFP when no bad channels are removed. Boolean
+    # indexing would eagerly copy the complete event stack into RAM.
+    if removed:
+        lfp = lfp[:, keep, :]
+        x = x[keep]
+        y = y[keep]
     meta["channels_removed"] = removed
 
     ref_idx = _resolve_ref_chan(y, cfg.ref_chan, cfg.ref_rng_seed)
