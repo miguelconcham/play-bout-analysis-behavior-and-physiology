@@ -226,8 +226,11 @@ removed, and equal pseudo-pre and pseudo-post groups are randomly assigned.
 Label-swapped complements make this null symmetric. It supports a model of PPC
 change from accidental delta-power and spike-count differences when there is
 no true condition effect. No PPC-significance shuffle from the original
-pipeline is run. Hardcoded sensitivity parameters are at the top of the
-Analyze script.
+pipeline is run. Instead, trough-locked cells are selected from the existing
+Figure 3 labels (`EntireSession.PPCPval < 0.01` and preferred angle outside
+±π/2). The overall result averages residual PPC change within animal, reports
+an animal-bootstrap confidence interval, and uses a one-sided animal-level
+sign-flip test. Hardcoded sensitivity parameters are at the top of the Analyze script.
 Results are saved under
 `Data/Analysis results/phase locking power control/`.
 

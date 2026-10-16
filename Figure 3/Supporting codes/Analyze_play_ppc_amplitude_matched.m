@@ -14,6 +14,9 @@ saving_folder = fullfile(data_root, 'Analysis results', ...
 load(fullfile(saving_folder, ...
     'phase_locking_power_control_all_sessions.mat'), ...
     'power_control_struct');
+phase_label_file = fullfile(data_root, 'Analysis results', ...
+    'phase locking data', 'delta_all_neurons_v2.mat');
+load(phase_label_file, 'all_neurons');
 
 %% Hardcoded matching and reliability parameters
 EPOCH_SECONDS = 1;
@@ -23,6 +26,9 @@ N_DRAWS = 500;
 MIN_SPIKES_PER_CONDITION = 20;
 MIN_RELIABLE_MATCHED_DRAWS = 50;
 MAX_ABS_POWER_SMD = 0.10;
+LOCKING_ALPHA = 0.01;
+N_ANIMAL_BOOTSTRAP = 10000;
+N_SIGN_FLIP = 100000;
 RANDOM_SEED = 73491;
 rng(RANDOM_SEED, 'twister');
 
@@ -68,6 +74,27 @@ for ss = 1:numel(power_control_struct)
             neuron = session_data.neurons(nn);
             identity = {animal, session, neuron.cluster_id, ...
                 string(neuron.area), channel};
+            label_index = string(all_neurons.session) == session & ...
+                all_neurons.cluster_id == neuron.cluster_id;
+            if sum(label_index) ~= 1
+                excluded_rows(end+1,:) = [identity, ... %#ok<SAGROW>
+                    {"Missing or duplicate original Figure 3 label", ...
+                    matching_capacity, 0}];
+                continue
+            end
+            if string(all_neurons.area(label_index)) ~= string(neuron.area)
+                excluded_rows(end+1,:) = [identity, ... %#ok<SAGROW>
+                    {"Area mismatch with original Figure 3 label", ...
+                    matching_capacity, 0}];
+                continue
+            end
+            original_ppc_p = all_neurons.EntireSession.PPCPval(label_index);
+            original_angle = all_neurons.EntireSession.PreferedAngle(label_index);
+            is_trough_locked = original_ppc_p < LOCKING_ALPHA && ...
+                (original_angle < -pi/2 || original_angle > pi/2);
+            if ~is_trough_locked
+                continue
+            end
             if matching_capacity < 2
                 excluded_rows(end+1,:) = [identity, ... %#ok<SAGROW>
                     {"Fewer than two power-matchable epochs", matching_capacity, 0}];
@@ -140,8 +167,7 @@ for ss = 1:numel(power_control_struct)
             neuron_key = session + "_ch" + string(channel) + ...
                 "_cl" + string(neuron.cluster_id);
             channel_key = session + "_ch" + string(channel);
-            cell_type = preferred_phase_type( ...
-                neuron.entire_preferred_angle);
+            cell_type = "Trough";
             summary_rows(end+1,:) = {animal, session, neuron_key, ... %#ok<SAGROW>
                 channel_key, neuron.cluster_id, string(neuron.area), ...
                 cell_type, channel, numel(valid_play), ...
@@ -266,6 +292,53 @@ if height(model_table) >= 100
     end
 end
 
+%% Overall trough-locked-cell result, using animals as replicates
+valid_result = isfinite(matched_summary.PPCDifference) & ...
+    isfinite(matched_summary.ModelExpectedPPCDifference) & ...
+    isfinite(matched_summary.ModelResidual);
+if any(valid_result)
+    [animal_group, animal_name] = findgroups( ...
+        matched_summary.Animal(valid_result));
+    n_neurons = splitapply(@numel, ...
+        matched_summary.ModelResidual(valid_result), animal_group);
+    animal_observed = splitapply(@(x) mean(x,'omitnan'), ...
+        matched_summary.PPCDifference(valid_result), animal_group);
+    animal_expected = splitapply(@(x) mean(x,'omitnan'), ...
+        matched_summary.ModelExpectedPPCDifference(valid_result), animal_group);
+    animal_residual = splitapply(@(x) mean(x,'omitnan'), ...
+        matched_summary.ModelResidual(valid_result), animal_group);
+    animal_summary = table(animal_name, n_neurons, animal_observed, ...
+        animal_expected, animal_residual, ...
+        'VariableNames', {'Animal','NNeurons','ObservedPPCDifference', ...
+        'ExpectedNullPPCDifference','ResidualPPCDifference'});
+
+    bootstrap_mean = nan(N_ANIMAL_BOOTSTRAP,1);
+    n_animals = height(animal_summary);
+    for bb = 1:N_ANIMAL_BOOTSTRAP
+        sampled = randi(n_animals,n_animals,1);
+        bootstrap_mean(bb) = mean(animal_residual(sampled),'omitnan');
+    end
+    residual_ci = prctile(bootstrap_mean,[2.5 97.5]);
+    residual_p = one_sided_sign_flip(animal_residual,N_SIGN_FLIP);
+    overall_result = table(n_animals, sum(n_neurons), ...
+        mean(animal_observed,'omitnan'), ...
+        mean(animal_expected,'omitnan'), ...
+        mean(animal_residual,'omitnan'), residual_ci(1), residual_ci(2), ...
+        residual_p, ...
+        'VariableNames', {'NAnimals','NNeurons', ...
+        'ObservedPPCDifference','ExpectedNullPPCDifference', ...
+        'ResidualPPCDifference','ResidualCI95Low','ResidualCI95High', ...
+        'OneSidedSignFlipP'});
+else
+    animal_summary = table;
+    overall_result = table(NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN, ...
+        'VariableNames', {'NAnimals','NNeurons', ...
+        'ObservedPPCDifference','ExpectedNullPPCDifference', ...
+        'ResidualPPCDifference','ResidualCI95Low','ResidualCI95High', ...
+        'OneSidedSignFlipP'});
+end
+disp(overall_result)
+
 %% Diagnostics
 figure('Name', 'Amplitude-matched play PPC control');
 subplot(1,3,1)
@@ -300,12 +373,15 @@ analysis_parameters = struct( ...
     'min_spikes_per_condition', MIN_SPIKES_PER_CONDITION, ...
     'min_reliable_matched_draws', MIN_RELIABLE_MATCHED_DRAWS, ...
     'max_abs_power_smd', MAX_ABS_POWER_SMD, ...
+    'locking_alpha_from_original_analysis', LOCKING_ALPHA, ...
+    'n_animal_bootstrap', N_ANIMAL_BOOTSTRAP, ...
+    'n_sign_flip', N_SIGN_FLIP, ...
     'random_seed', RANDOM_SEED);
 save(fullfile(saving_folder, ...
     'play_ppc_amplitude_matched_analysis.mat'), ...
     'matched_summary', 'matched_draw_table', 'null_draw_table', ...
     'excluded_neurons', 'ppc_power_spike_model', ...
-    'analysis_parameters', '-v7.3');
+    'animal_summary', 'overall_result', 'analysis_parameters', '-v7.3');
 
 %% Local functions
 function [pairs, caliper_db] = nearest_power_pairs( ...
@@ -492,12 +568,28 @@ value = (abs(resultant).^2-n)./(n.*(n-1));
 value(n < 2) = NaN;
 end
 
-function label = preferred_phase_type(angle_value)
-if ~isfinite(angle_value)
-    label = "Unknown";
-elseif angle_value < -pi/2 || angle_value > pi/2
-    label = "Trough";
+function p_value = one_sided_sign_flip(values, n_random)
+values = values(isfinite(values));
+n = numel(values);
+if n == 0
+    p_value = NaN;
+    return
+end
+observed_mean = mean(values);
+if n <= 15
+    n_assignments = 2^n;
+    null_mean = nan(n_assignments,1);
+    for ii = 0:n_assignments-1
+        signs = 2*bitget(ii,1:n)-1;
+        null_mean(ii+1) = mean(signs(:).*values(:));
+    end
+    p_value = sum(null_mean >= observed_mean) / n_assignments;
 else
-    label = "Peak";
+    null_mean = nan(n_random,1);
+    for ii = 1:n_random
+        signs = 2*(rand(n,1) > 0.5)-1;
+        null_mean(ii) = mean(signs.*values(:));
+    end
+    p_value = (1+sum(null_mean >= observed_mean))/(n_random+1);
 end
 end
