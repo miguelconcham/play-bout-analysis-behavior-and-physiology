@@ -89,20 +89,32 @@ cluster_info.ch = cluster_info.ch + 1;
 
 mat_file = fullfile(npx_data_dir, ['LFP_', area_name, '.mat']);
 dat_file = fullfile(npx_data_dir, ['LFP_', area_name, '.dat']);
-if isfile(mat_file)
+if npx_type == 2
+    if ~isfile(mat_file)
+        error(['Session was identified as NPX2, but %s is missing. ' ...
+            'The NPX1 binary fallback is intentionally disabled.'], mat_file);
+    end
     loaded = load(mat_file, 'LFP');
-    lfp = double(loaded.LFP);
-elseif isfile(dat_file)
-    file_id = fopen(dat_file, 'r');
-    cleanup = onCleanup(@() fclose(file_id));
-    lfp = fread(file_id, 'int16');
-    lfp = reshape(lfp, 384, []);
-    clear cleanup
+    lfp = loaded.LFP;
+    clear loaded
+    if isempty(lfp) || size(lfp,1) ~= 384
+        error('NPX2 LFP must be a nonempty 384-by-N array in %s.', mat_file);
+    end
+    n_lfp_samples = size(lfp,2);
 else
-    error('No LFP_PAG.mat or LFP_PAG.dat found in %s.', npx_data_dir);
+    if ~isfile(dat_file)
+        error('Session was identified as NPX1, but %s is missing.', dat_file);
+    end
+    file_info = dir(dat_file);
+    bytes_per_sample = 2; % int16
+    n_lfp_samples = file_info.bytes / (384*bytes_per_sample);
+    if n_lfp_samples < 1 || n_lfp_samples ~= floor(n_lfp_samples)
+        error('NPX1 LFP binary is empty or not divisible by 384 int16 channels.');
+    end
+    lfp = []; % NPX1 channels are streamed from disk inside the channel loop.
 end
 
-lfp_time = (1:size(lfp,2)) / sr_lfp;
+lfp_time = (1:n_lfp_samples) / sr_lfp;
 [bout_table, rejected_bouts] = make_strict_pairs(play_bouts, ...
     lfp_time(1), lfp_time(end), options.min_bout_duration);
 
@@ -142,7 +154,13 @@ for cc = 1:numel(channels_with_spikes)
     fprintf('Power-control analysis: channel %d (%d/%d)\n', ...
         channel, cc, numel(channels_with_spikes));
 
-    filtered_lfp = filtfilt(Hd_delta.Coefficients, 1, double(lfp(channel,:)));
+    if npx_type == 2
+        raw_lfp_channel = double(lfp(channel,:));
+    else
+        raw_lfp_channel = double(read_npx1_lfp_channel( ...
+            dat_file, channel, n_lfp_samples));
+    end
+    filtered_lfp = filtfilt(Hd_delta.Coefficients, 1, raw_lfp_channel);
     analytic_lfp = hilbert(filtered_lfp);
     amplitude = abs(analytic_lfp);
     phase = angle(analytic_lfp);
@@ -362,5 +380,24 @@ for ee = 1:height(epoch_table)
     phase_cells{ee} = interpolate_circular_phase( ...
         lfp_time, phase, epoch_spikes);
     spike_count(ee) = numel(epoch_spikes);
+end
+end
+
+function channel_data = read_npx1_lfp_channel( ...
+    dat_file, channel, n_samples)
+file_id = fopen(dat_file, 'r', 'ieee-le');
+if file_id < 0
+    error('Could not open NPX1 LFP binary: %s', dat_file);
+end
+cleanup = onCleanup(@() fclose(file_id));
+status = fseek(file_id, 2*(channel-1), 'bof');
+if status ~= 0
+    error('Could not seek to channel %d in %s.', channel, dat_file);
+end
+[channel_data, count] = fread(file_id, n_samples, ...
+    '*int16', 2*(384-1));
+if count ~= n_samples
+    error('Read %d/%d samples for channel %d in %s.', ...
+        count, n_samples, channel, dat_file);
 end
 end
