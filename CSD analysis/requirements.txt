@@ -1,0 +1,11 @@
+# Install into conda env kCSD_env (the kernel that runs this notebook):
+#   conda activate kCSD_env
+#   python -m pip install -U -r requirements.txt
+#
+# Pins keep kcsd working (needs scipy.integrate.simps OR our direct KCSD1D import)
+# and avoid NumPy 2.x breakages seen with older stacks.
+numpy>=1.21,<1.23
+scipy>=1.9,<1.14
+matplotlib>=3.5
+kcsd>=2.0
+ipykernel>=6.0

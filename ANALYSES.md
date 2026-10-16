@@ -59,6 +59,9 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Acute NPX: call and green-window spike PSTHs | extra | `Complementary figures/Estimate_stim_call_responses.m` | outputs in `stim_call_responses_*.mat` (no Analyze yet) |
 | Firing-run parsing, per-run PPC, run ACGs | extra | `Complementary figures/Estimate_spike_train_parsing.m` | `Complementary figures/Analyze_spike_train_parsing.m` |
 | LIF network with shared vs private oscillation | extra | `Complementary figures/LIF neuron model.ipynb` (Estimate grid cells) | same notebook (Analyze cells) |
+| Delta peak/trough raw LFP snippets for CSD (LPAG center, Partners session) | extra | `CSD analysis/Estimate_delta_peak_trough_csd.m` (calls `GENERATE_DELTA_PEAK_TROUGH_CSD_LFP.m`) | writes `Data/Analysis results/delta peak trough CSD/{peak,trough}/...` |
+| Plot delta peak/trough evoked LFP (before CSD) | extra | — | `CSD analysis/Plot_delta_peak_trough_evoked.m` |
+| 1D CSD (kCSD / finite-difference) on LFP stacks | extra | `CSD analysis/CSD_1D_general.ipynb` or `python csd_1d_pipeline.py <delta-root>` | same (saves `csd_1d_*.npy` + plots) |
 
 ---
 

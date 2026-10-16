@@ -15,5 +15,6 @@ addpath(fullfile(repo_root, 'Figure 2', 'Supporting codes v2'));
 addpath(fullfile(repo_root, 'Figure 3', 'Supporting codes'));
 addpath(fullfile(repo_root, 'Figure 6', 'Supplementary codes'));
 addpath(fullfile(repo_root, 'Complementary figures'));
+addpath(fullfile(repo_root, 'CSD analysis'));
 
 disp(['Repo paths added from ', repo_root])
