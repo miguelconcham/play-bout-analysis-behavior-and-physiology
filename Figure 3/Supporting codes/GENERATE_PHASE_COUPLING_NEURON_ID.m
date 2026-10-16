@@ -1,7 +1,7 @@
 function phase_struct = GENERATE_PHASE_COUPLING_NEURON_ID(current_dir,Hd_freq1,bin_size_freq, id_list, plot_bool )
 
 
-data_root           = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root           = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 synch_directory     = [data_root, '\Synch data'];
 play_behaviors      = {'Pounce', 'CC','Boxing', 'Evasion','Pin', 'Escape', 'CB', 'CD'};
 chan_map_folder     = [data_root, '\NPX data\StarndarChannMap'];

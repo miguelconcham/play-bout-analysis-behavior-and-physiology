@@ -3,9 +3,9 @@
 % Run independently after Estiamte_activation_index_and_other_variables.m
 % has saved activation_index_A1_A7.mat.
 
-checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
+checkpoint_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
 a17_file = [checkpoint_folder, '\activation_index_A1_A7.mat'];
-figure_folder_peakandtrough = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Peak trough dyanmics';
+figure_folder_peakandtrough = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Peak trough dyanmics';
 if ~exist(figure_folder_peakandtrough, 'dir')
     mkdir(figure_folder_peakandtrough);
 end

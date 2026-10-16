@@ -1,7 +1,7 @@
 function pli_struct = GENERATE_COHERNECE_MAPS_STRUCT(current_dir,Hd_freq1,Hd_freq2 ,area2load)
 
 
-data_root           = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root           = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 chan_map_folder     = [data_root, '\NPX data\StarndarChannMap'];
 area_limit_table    = [data_root, '\Area_limits_GoodLooking.xlsx'];
 % npx_raw_data = 

@@ -7,7 +7,7 @@
 %   2. raw_aperiodic_subtracted: log10(PSD) - fitted aperiodic component
 % The second quantity is an aperiodic-adjusted raw periodic residual.
 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
+saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
 input_file = fullfile(saving_folder, ...
     'play_session_lpag_periodic_aperiodic_spectra.mat');
 

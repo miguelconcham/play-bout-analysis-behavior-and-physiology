@@ -5,9 +5,9 @@
 % under Data\.
 
 %% 1 Folders
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 saving_folder = [data_root, '\Analysis results\phase locking data'];
-figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 3 Updated';
+figures_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 3 Updated';
 
 %% 2 FIg 3a Peak and trough schematic
 % Sine wave split at 0: red = peak half-cycle, blue = trough half-cycle.
@@ -319,7 +319,7 @@ title('Seed Frequency used for estimating freq')
 %% plot saving line example %%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% figures_folder2 = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure call supplementary'
+% figures_folder2 = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure call supplementary'
 % print(gcf,'-vector','-dsvg',[figures_folder, '\phaselocking delt aall areas together theta.svg'])
 
 %% 7 (Fig 3c) Bimodal preferred-angle distribution
@@ -354,7 +354,7 @@ LR = 2*(LL2 - LL1);
 legend('Phase distribution','estiamted mean phase peak','estimated mean phase trough' )
 
 %% Run to estiamte estiatsitc only, its already saved dont run again unless needed
-% figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 7 Inputs';
+% figure_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 7 Inputs';
 % 
 % N = numel(this_Area_Angles);
 % nBoot = 10000;
@@ -380,7 +380,7 @@ legend('Phase distribution','estiamted mean phase peak','estimated mean phase tr
 % Overlay two-component circular mixture on the angle histogram; compare
 % observed LR to the saved bootstrap (LR_boot.mat = delta, LR_boot_theta = theta).
 figure_folder = [data_root, '\Figure codes\Figure 7 Inputs'];
-% figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 5 Inputs';
+% figures_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure 5 Inputs';
 load([figure_folder, '\LR_boot.mat'], 'LR_boot') % for delta
 % load([figure_folder, '\LR_boot_theta.mat'], 'LR_boot') % for theta
 anged_edges = -pi:(pi/32):pi;
@@ -474,14 +474,14 @@ xticklabels(group_names(x_tick_orde))
 
 
 %% saving if needed
-figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure coincident phases';
+figures_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure coincident phases';
 
 print(gcf,'-vector','-dsvg',[figures_folder, '\phaselocking delt  angle violin plots.svg'])
 
 
 
 %%
-figures_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure coincident phases';
+figures_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Figure coincident phases';
 
 print(gcf,'-vector','-dsvg',[figures_folder, '\phaselocking delta  phases percentiles and time equivalents.svg'])
 
@@ -771,7 +771,7 @@ end
 % peaks, and spike phase. NPX raw data are under Data\NPX data\NPX raw data.
 
 
-npx_Raw_Data    = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
+npx_Raw_Data    = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
 saving_folder   = [data_root, '\Analysis results\phase locking data'];
 animal_list = dir(npx_Raw_Data);
 animal_list(1:2) = [];

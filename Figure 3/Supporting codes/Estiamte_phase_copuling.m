@@ -1,8 +1,8 @@
 %% Paths, animals, and filter
-data_root     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root     = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 npx_Raw_Data  = [data_root, '\NPX data\NPX raw data'];
 saving_folder = [data_root, '\Analysis results\Theta psth'];
-run('\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\add_repo_paths.m');
+run('\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\add_repo_paths.m');
 if ~exist(saving_folder, 'dir')
     mkdir(saving_folder);
 end
@@ -124,7 +124,7 @@ save([saving_folder,'\gamma_couplig_structure_updated_with_non_playbouts_peak_pe
 save([saving_folder,'\gamma_couplig_animal_names_updated_with_non_playbouts_peak_peaks.mat'],'animal_names');
 
 %% load
-data_root     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root     = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 saving_folder = [data_root, '\Analysis results\Theta psth'];
 
 load([saving_folder,'\theta_phase_couplig_structure_updated_with_non_playbouts.mat'],'phase_struct');

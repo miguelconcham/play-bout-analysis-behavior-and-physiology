@@ -1,7 +1,7 @@
 %% 1 DATA LOADING and prealocting variables
-cd('\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology')
-figure_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Peak trough dyanmics';
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+cd('\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology')
+figure_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\Peak trough dyanmics';
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 saving_folder = [data_root, '\Analysis results\phase locking data'];
 
 load([saving_folder,'\theta_all_neurons_v2.mat'],'all_neurons');
@@ -215,13 +215,13 @@ for bf = thisrat
         mydate=['2023' aux_mydate];
     end
 
-    path_mati='\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Responses_Matrix\ModelCriterion\';
+    path_mati='\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Responses_Matrix\ModelCriterion\';
 
     load([path_mati 'ResponsesMatrix_PPB_p1andp2_' num2str(length_duration_threshold) 's_' playbout_tittle '_' mydate '_' behavior_files(bf).name(1:4) '_' MorL{bf_i} '.mat'],"initial_cluster","AREAS","RM_areas","all_psth_zscore", ...
         "pre_onset","post_onset","pre_offset","post_offset","all_psth_zscore_offset","all_this_psth","this_psth_shuffled","est_full","pval_full","mod_wrap", ...
         "good_clusters","depth_or_Chn","all_psth_FR","all_psth_FR_offset")
 
-    path_migue='\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Responses_Matrix\ModelCriterion_Onset_Miguel\';
+    path_migue='\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Responses_Matrix\ModelCriterion_Onset_Miguel\';
     load([path_migue 'ResponsesMatrix_PPB_p1andp2_' num2str(length_duration_threshold) 's_' playbout_tittle '_' mydate '_' behavior_files(bf).name(1:4) '_' MorL{bf_i} '.mat'] , vars_to_load{:})
 
 
@@ -679,7 +679,7 @@ play_song([],[],[])
 
 % 6 Saving — checkpoint for plotting 
 
-checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
+checkpoint_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
 checkpoint_file = [checkpoint_folder, '\activation_index_section6.mat'];
 
 
@@ -743,7 +743,7 @@ disp(['Also saved: ', checkpoint_folder, '\stacked_psth_by_area_celltype.mat'])
 % Needs the filled all_neurons_TD table from sections 1–4 (PSTHs, Exited /
 % Inhibited, delta/theta locking). After this save, section 9 can be run
 % on its own from a fresh MATLAB session.
-checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
+checkpoint_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
 
 example_checkpoint = [checkpoint_folder, '\activation_index_example_plot.mat'];
 vars_example = {'all_neurons_TD', 'psth_map'};
@@ -756,7 +756,7 @@ disp(['Saved: ', example_checkpoint])
 
 %% Saving variables for ploting sections A1 to A7
 % Checkpoint for Figure 3/Fig A1-A7 behavior modulation.m
-checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
+checkpoint_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
 if ~exist(checkpoint_folder, 'dir')
     mkdir(checkpoint_folder);
 end

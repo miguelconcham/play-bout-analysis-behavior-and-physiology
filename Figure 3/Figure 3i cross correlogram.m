@@ -5,14 +5,14 @@
 %
 % Needs Supporting codes/GENERATE_CROSS_CORR_EXAMPLE.m on the MATLAB path.
 
-addpath('\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 3\Supporting codes');
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+addpath('\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 3\Supporting codes');
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 
 %% 1 Load cross-correlograms
 % Per-session structs from Estimate cross correlogram all aniamls
 % (play, non-play, and percentile/shuffle CCGs). Local copies under Data\.
 
-npx_Raw_Data = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
+npx_Raw_Data = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
 cc_folder = [data_root, '\Analysis results\Cross_correlogram'];
 neuron_folder = [data_root, '\Analysis results\phase locking data'];
 
