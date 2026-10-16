@@ -13,12 +13,11 @@ function control_struct = GENERATE_PHASE_LOCKING_POWER_CONTROL(npx_data_dir, Hd_
 % LFP has already been converted.
 %
 % Required external functions are the same as the original pipeline:
-% play_bout, readNPY, circular_uniformize, and CircStat.
+% play_bout, readNPY, and circular_uniformize.
 
 if nargin < 3
     options = struct;
 end
-if ~isfield(options, 'n_rand'), options.n_rand = 1000; end
 if ~isfield(options, 'min_bout_duration')
     options.min_bout_duration = 0.25;
 end
@@ -192,23 +191,9 @@ for cc = 1:numel(channels_with_spikes)
         unit_spikes = spike_times(spike_clusters == cluster_id);
         finite_spikes = unit_spikes >= lfp_time(1) & unit_spikes <= lfp_time(end);
         unit_spikes = unit_spikes(finite_spikes);
-        all_phase = interpolate_circular_phase(lfp_time, phase, unit_spikes);
-
         neurons(nn).cluster_id = cluster_id;
         neurons(nn).channel = channel;
         neurons(nn).area = cluster_info.area{nn};
-        neurons(nn).entire_preferred_angle = circ_mean(all_phase(:));
-        neurons(nn).entire_ppc = compute_ppc_fast(all_phase);
-        if options.n_rand > 0 && numel(all_phase) >= 2
-            random_ppc = nan(options.n_rand,1);
-            for rr = 1:options.n_rand
-                sampled_phase = randsample(phase, numel(all_phase), false);
-                random_ppc(rr) = compute_ppc_fast(sampled_phase);
-            end
-            neurons(nn).entire_ppc_p = ...
-                (1 + sum(random_ppc >= neurons(nn).entire_ppc)) / ...
-                (options.n_rand + 1);
-        end
 
         neurons(nn).pre_phase = cell(n_bouts,1);
         neurons(nn).play_phase = cell(n_bouts,1);
