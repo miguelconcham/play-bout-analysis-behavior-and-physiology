@@ -7,6 +7,7 @@ from unittest.mock import patch
 import numpy as np
 
 from behavior_aligned_kcsd import (
+    average_kcsd_columns,
     discover_behavior_aligned_pairs,
     epoch_paired_with_onset_baseline,
     load_paired_raw,
@@ -171,6 +172,8 @@ class PairedBaselineTests(unittest.TestCase):
             lfp = np.zeros((2, 2, 10), dtype=np.float32)
             _write_leaf(onset_folder, lfp, event_ids=[1, 2])
             _write_leaf(offset_folder, lfp, event_ids=[1, 2])
+            np.save(os.path.join(onset_folder, "x_coords.npy"), np.zeros(2))
+            np.save(os.path.join(offset_folder, "x_coords.npy"), np.zeros(2))
 
             fake_csd = {0.0: np.zeros((2, 4))}
             with patch(
@@ -202,6 +205,39 @@ class PairedBaselineTests(unittest.TestCase):
                 ],
             )
 
+    def test_column_average_interpolates_staggered_depths(self):
+        x = np.array([0, 0, 1, 1], dtype=float)
+        y = np.array([0, 20, 10, 30], dtype=float)
+        evoked = np.array(
+            [
+                [0, 2],
+                [20, 22],
+                [110, 112],
+                [130, 132],
+            ],
+            dtype=float,
+        )
+        csd = {
+            0.0: np.array([[0, 2], [20, 22]], dtype=float),
+            1.0: np.array([[110, 112], [130, 132]], dtype=float),
+        }
+
+        averaged = average_kcsd_columns(csd, x, y, evoked)
+
+        np.testing.assert_allclose(averaged["y"], [10, 20])
+        # At y=10: first column interpolates to 10, second is 110.
+        # At y=20: first is 20, second interpolates to 120.
+        np.testing.assert_allclose(
+            averaged["csd_mean"], [[60, 62], [70, 72]]
+        )
+        np.testing.assert_allclose(
+            averaged["voltage_mean"], [[60, 62], [70, 72]]
+        )
+        np.testing.assert_array_equal(
+            averaged["n_columns_contributing"], [2, 2]
+        )
+        self.assertEqual(float(averaged["x_center"]), 0.5)
+
     def test_figure_organizer_creates_both_sort_orders_and_index(self):
         with tempfile.TemporaryDirectory() as root:
             onset_folder = os.path.join(
@@ -220,14 +256,16 @@ class PairedBaselineTests(unittest.TestCase):
                 os.makedirs(figure_dir)
                 with open(os.path.join(figure_dir, "kcsd_x8.0.png"), "wb") as stream:
                     stream.write(b"fake png")
+                with open(os.path.join(figure_dir, "kcsd_xmean.png"), "wb") as stream:
+                    stream.write(b"fake averaged png")
 
             result = organize_behavior_aligned_figures(root)
 
             expected_session_name = (
-                "B1_D1__category__play__probe2__x8.0.png"
+                "B1_D1__category__play__probe2__xmean.png"
             )
             expected_behavior_name = (
-                "category__play__B1_D1__probe2__x8.0.png"
+                "category__play__B1_D1__probe2__xmean.png"
             )
             self.assertTrue(
                 os.path.isfile(

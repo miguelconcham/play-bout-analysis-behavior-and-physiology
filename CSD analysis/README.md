@@ -202,6 +202,16 @@ for one probe column are solved in a single vectorized `KCSD1D` call; the
 previous frame-by-frame implementation produced the same values but was much
 slower for three-second epochs.
 
+For behavior datasets, kCSD is still fitted independently to each staggered
+electrode column. The column maps are then linearly interpolated onto their
+shared, non-extrapolated depth range and averaged with equal column weight:
+four columns for NPX1 and the two columns within each NPX2 probe. The primary
+image is `kcsd_xmean.png`; onset and offset use shared symmetric color limits.
+Per-column matrices remain saved for QC, while legacy per-column PNGs are
+removed by default. Averaged outputs include `csd_mean_columns.npy`,
+`csd_std_columns.npy`, `y_mean_columns.npy`, `V_mean_columns.npy`,
+`n_columns_contributing.npy`, and `x_center.npy`.
+
 ### Sorted figure copies
 
 After kCSD finishes, run the final Section C notebook cell or call:
@@ -226,4 +236,6 @@ Session-first names use
 `session__scope__behavior__probe__xpos.png`; behavior-first names use
 `scope__behavior__session__probe__xpos.png`. Including scope and probe avoids
 ambiguity and collisions between individual behaviors, pooled categories,
-self/other play, play bouts, and multi-probe sessions.
+self/other play, play bouts, and multi-probe sessions. New runs copy only the
+averaged `xmean` PNG; per-column PNGs are used only as a fallback for legacy
+results that do not yet contain an averaged image.

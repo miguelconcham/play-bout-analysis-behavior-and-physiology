@@ -38,6 +38,7 @@ from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
+from scipy.interpolate import interp1d
 
 from csd_1d_pipeline import (
     DELTA_CSD_DEFAULTS,
@@ -67,6 +68,9 @@ BEHAVIOR_ALIGNED_CSD_DEFAULTS: Dict[str, Any] = {
     "output_subdir": "csd_1d_onset_baseline",
     # Batch root runs should not retain every trial matrix in Python RAM.
     "retain_epochs": False,
+    # Behavior exploration uses one averaged-column image per physical probe.
+    "save_column_plots": False,
+    "save_mean_plot": True,
 }
 
 
@@ -282,6 +286,161 @@ def _save_pair_metadata(
         json.dump(metadata, stream, indent=2, sort_keys=True)
 
 
+def average_kcsd_columns(
+    csd: Dict[float, np.ndarray],
+    x: np.ndarray,
+    y: np.ndarray,
+    evoked: np.ndarray,
+) -> Dict[str, np.ndarray]:
+    """
+    Interpolate staggered x columns onto their overlapping depths and average.
+
+    Columns receive equal weight. The common depth axis is the union of
+    observed electrode depths inside the range covered by every column, so no
+    extrapolation is used.
+    """
+    if not csd:
+        raise ValueError("Cannot average an empty kCSD column dictionary")
+
+    column_data = []
+    for ux in sorted(csd):
+        indices = np.where(x == ux)[0]
+        y_column = np.asarray(y[indices], dtype=float)
+        order = np.argsort(y_column)
+        y_column = y_column[order]
+        csd_column = np.asarray(csd[ux], dtype=float)[order]
+        voltage_column = np.asarray(evoked[indices], dtype=float)[order]
+        if len(np.unique(y_column)) != len(y_column):
+            raise ValueError(f"Duplicate y coordinates within x={ux}")
+        column_data.append((float(ux), y_column, csd_column, voltage_column))
+
+    overlap_min = max(data[1].min() for data in column_data)
+    overlap_max = min(data[1].max() for data in column_data)
+    if overlap_min >= overlap_max:
+        raise ValueError(
+            "The probe columns have no overlapping y range and cannot be averaged"
+        )
+
+    common_y = np.unique(
+        np.concatenate(
+            [
+                data[1][(data[1] >= overlap_min) & (data[1] <= overlap_max)]
+                for data in column_data
+            ]
+        )
+    )
+    if common_y.size < 2:
+        raise ValueError("Fewer than two shared depth positions for column averaging")
+
+    csd_interpolated = []
+    voltage_interpolated = []
+    for _ux, y_column, csd_column, voltage_column in column_data:
+        csd_interpolated.append(
+            interp1d(y_column, csd_column, axis=0, bounds_error=True)(common_y)
+        )
+        voltage_interpolated.append(
+            interp1d(y_column, voltage_column, axis=0, bounds_error=True)(common_y)
+        )
+
+    csd_stack = np.stack(csd_interpolated, axis=0)
+    voltage_stack = np.stack(voltage_interpolated, axis=0)
+    n_columns = len(column_data)
+    if n_columns > 1:
+        csd_std = csd_stack.std(axis=0, ddof=1)
+    else:
+        csd_std = np.zeros_like(csd_stack[0])
+
+    return {
+        "csd_mean": csd_stack.mean(axis=0),
+        "csd_std": csd_std,
+        "voltage_mean": voltage_stack.mean(axis=0),
+        "y": common_y,
+        "x_center": np.asarray(
+            np.mean([data[0] for data in column_data]), dtype=float
+        ),
+        "n_columns_contributing": np.full(
+            common_y.shape, n_columns, dtype=np.int16
+        ),
+    }
+
+
+def _save_averaged_column_outputs(
+    folder: PathLike,
+    averaged: Dict[str, np.ndarray],
+    time_ms: np.ndarray,
+    time_indices: np.ndarray,
+    *,
+    output_subdir: str,
+) -> str:
+    output = os.path.join(os.fspath(folder), output_subdir)
+    os.makedirs(output, exist_ok=True)
+    np.save(os.path.join(output, "csd_mean_columns.npy"), averaged["csd_mean"])
+    np.save(os.path.join(output, "csd_std_columns.npy"), averaged["csd_std"])
+    np.save(os.path.join(output, "y_mean_columns.npy"), averaged["y"])
+    np.save(
+        os.path.join(output, "n_columns_contributing.npy"),
+        averaged["n_columns_contributing"],
+    )
+    np.save(os.path.join(output, "V_mean_columns.npy"), averaged["voltage_mean"])
+    np.save(os.path.join(output, "x_center.npy"), averaged["x_center"])
+    np.save(os.path.join(output, "time_mean_columns.npy"), time_ms[time_indices])
+    np.save(os.path.join(output, "time_voltage_mean_columns.npy"), time_ms)
+    return output
+
+
+def _plot_averaged_alignment(
+    label: str,
+    name: str,
+    folder: PathLike,
+    output_subdir: str,
+    averaged: Dict[str, np.ndarray],
+    time_ms: np.ndarray,
+    time_indices: np.ndarray,
+    *,
+    clim: Tuple[float, float],
+    show: bool,
+    save_plot: bool,
+) -> None:
+    save_path = None
+    if save_plot:
+        figure_dir = os.path.join(os.fspath(folder), output_subdir, "figures")
+        os.makedirs(figure_dir, exist_ok=True)
+        save_path = os.path.join(figure_dir, "kcsd_xmean.png")
+    plot_column(
+        averaged["csd_mean"],
+        time_ms,
+        time_indices,
+        averaged["y"],
+        title=f"{name} — {label} — mean across probe columns",
+        cbar_label="mean kCSD (a.u.)",
+        clim=clim,
+        save_path=save_path,
+        show=show,
+    )
+    if save_path is not None:
+        print(f"    Saved averaged figure: {save_path}", flush=True)
+
+
+def _remove_individual_column_figures(
+    folder: PathLike,
+    output_subdir: str,
+) -> int:
+    """Remove legacy per-x PNGs while retaining the averaged xmean image."""
+    figure_dir = os.path.join(os.fspath(folder), output_subdir, "figures")
+    if not os.path.isdir(figure_dir):
+        return 0
+    removed = 0
+    for name in os.listdir(figure_dir):
+        if (
+            name.startswith("kcsd_x")
+            and name.lower().endswith(".png")
+            and name != "kcsd_xmean.png"
+        ):
+            os.remove(os.path.join(figure_dir, name))
+            removed += 1
+    return removed
+
+
 def _plot_alignment(
     label: str,
     name: str,
@@ -340,6 +499,8 @@ def run_behavior_aligned_kcsd(
         "onset_baseline_window_ms",
         "retain_epochs",
         "event_chunk_size",
+        "save_column_plots",
+        "save_mean_plot",
     }
     unknown = sorted(set(overrides) - valid_overrides)
     if unknown:
@@ -350,6 +511,8 @@ def run_behavior_aligned_kcsd(
     baseline_window = tuple(settings.pop("onset_baseline_window_ms"))
     retain_epochs = bool(settings.pop("retain_epochs"))
     event_chunk_size = int(settings.pop("event_chunk_size", 8))
+    save_column_plots = bool(settings.pop("save_column_plots"))
+    save_mean_plot = bool(settings.pop("save_mean_plot"))
     if (
         len(baseline_window) != 2
         or baseline_window[0] >= baseline_window[1]
@@ -427,6 +590,8 @@ def run_behavior_aligned_kcsd(
         "baseline_correct": bool(cfg.baseline_correct),
         "retain_epochs": retain_epochs,
         "event_chunk_size": event_chunk_size,
+        "save_column_plots": save_column_plots,
+        "save_mean_plot": save_mean_plot,
         "pairing": paired["pairing"],
         "n_events": int(n_events),
         "geometry": probe_geometry_kind(x),
@@ -446,6 +611,8 @@ def run_behavior_aligned_kcsd(
         "time_indices": prepared["time_indices"],
         "onset_csd_kcsd": None,
         "offset_csd_kcsd": None,
+        "onset_csd_mean_columns": None,
+        "offset_csd_mean_columns": None,
         "onset_csd_fd": None,
         "offset_csd_fd": None,
     }
@@ -484,6 +651,19 @@ def run_behavior_aligned_kcsd(
         )
         result["onset_csd_kcsd"] = onset_csd
         result["offset_csd_kcsd"] = offset_csd
+        print("  Interpolating and averaging probe columns", flush=True)
+        onset_averaged = average_kcsd_columns(
+            onset_csd, x, y, prepared["onset_evoked"]
+        )
+        offset_averaged = average_kcsd_columns(
+            offset_csd, x, y, prepared["offset_evoked"]
+        )
+        result["onset_csd_mean_columns"] = onset_averaged
+        result["offset_csd_mean_columns"] = offset_averaged
+        metadata["n_columns_averaged"] = int(
+            onset_averaged["n_columns_contributing"][0]
+        )
+        metadata["x_center"] = float(onset_averaged["x_center"])
 
         if cfg.save:
             for alignment, folder, csd, evoked in (
@@ -503,8 +683,23 @@ def run_behavior_aligned_kcsd(
                     smooth_sigma_time=cfg.smooth_sigma_time,
                     sort_by_depth=cfg.sort_by_depth,
                 )
+            print("  Saving averaged-column matrices", flush=True)
+            _save_averaged_column_outputs(
+                onset_folder,
+                onset_averaged,
+                prepared["time_ms"],
+                prepared["time_indices"],
+                output_subdir=cfg.output_subdir,
+            )
+            _save_averaged_column_outputs(
+                offset_folder,
+                offset_averaged,
+                prepared["time_ms"],
+                prepared["time_indices"],
+                output_subdir=cfg.output_subdir,
+            )
 
-        if cfg.plot or cfg.save_plots:
+        if (cfg.plot or cfg.save_plots) and save_column_plots:
             _plot_alignment(
                 "onset",
                 resolved_name,
@@ -532,6 +727,54 @@ def run_behavior_aligned_kcsd(
                 sort_by_depth=cfg.sort_by_depth,
                 show=cfg.plot,
                 save_plots=cfg.save_plots,
+            )
+
+        if (cfg.plot or cfg.save_plots) and save_mean_plot:
+            if cfg.save_plots and not save_column_plots:
+                removed = sum(
+                    _remove_individual_column_figures(folder, cfg.output_subdir)
+                    for folder in (onset_folder, offset_folder)
+                )
+                if removed:
+                    print(
+                        f"  Removed {removed} legacy per-column PNGs; "
+                        "averaged xmean figures are the primary view",
+                        flush=True,
+                    )
+            shared_abs_max = max(
+                float(np.nanmax(np.abs(onset_averaged["csd_mean"]))),
+                float(np.nanmax(np.abs(offset_averaged["csd_mean"]))),
+            )
+            if not np.isfinite(shared_abs_max) or shared_abs_max <= 0:
+                shared_abs_max = 1.0
+            shared_clim = (-shared_abs_max, shared_abs_max)
+            print(
+                "  Saving averaged onset/offset figures with shared color limits",
+                flush=True,
+            )
+            _plot_averaged_alignment(
+                "onset",
+                resolved_name,
+                onset_folder,
+                cfg.output_subdir,
+                onset_averaged,
+                prepared["time_ms"],
+                prepared["time_indices"],
+                clim=shared_clim,
+                show=cfg.plot,
+                save_plot=cfg.save_plots,
+            )
+            _plot_averaged_alignment(
+                "offset",
+                resolved_name,
+                offset_folder,
+                cfg.output_subdir,
+                offset_averaged,
+                prepared["time_ms"],
+                prepared["time_indices"],
+                clim=shared_clim,
+                show=cfg.plot,
+                save_plot=cfg.save_plots,
             )
 
     if cfg.compute_fd:
@@ -668,11 +911,17 @@ def organize_behavior_aligned_figures(
                 missing_figure_folders += 1
                 continue
 
-            figure_names = sorted(
+            all_figure_names = sorted(
                 name
                 for name in os.listdir(figure_dir)
                 if name.lower().endswith(".png") and name.startswith("kcsd_x")
             )
+            # The averaged physical-probe view is the primary exploration
+            # image. Fall back to legacy column PNGs only for older runs.
+            if "kcsd_xmean.png" in all_figure_names:
+                figure_names = ["kcsd_xmean.png"]
+            else:
+                figure_names = all_figure_names
             for figure_name in figure_names:
                 source = os.path.join(figure_dir, figure_name)
                 xpos = _safe_figure_name_part(
@@ -807,6 +1056,7 @@ def run_behavior_aligned_kcsd_from_root(
 
 __all__: Sequence[str] = (
     "BEHAVIOR_ALIGNED_CSD_DEFAULTS",
+    "average_kcsd_columns",
     "discover_behavior_aligned_pairs",
     "epoch_paired_with_onset_baseline",
     "load_paired_raw",
