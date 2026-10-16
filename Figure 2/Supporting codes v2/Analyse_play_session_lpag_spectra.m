@@ -159,6 +159,190 @@ gaussian_peak_table = table(peak_method, peak_session_name, ...
     'RecordingIndex', 'SessionIndex', 'LPAGChannel', ...
     'CenterFrequency', 'PeakPower', 'Bandwidth'});
 
+%% Select the number of Gaussian clusters in Fourier peak centers
+% BIC is the primary selection criterion; lower values are better. This is
+% exploratory mixture-model evidence, not a formal test of a predefined
+% delta-band hypothesis. A distinct below-8-Hz cluster additionally
+% requires strong BIC improvement over one Gaussian, >=5% mixture weight,
+% and Ashman's D >= 2 from the nearest component centered above 8 Hz.
+fourier_peak_index = strcmp(gaussian_peak_table.Method, 'Fourier');
+fourier_centers = gaussian_peak_table.CenterFrequency(fourier_peak_index);
+fourier_centers = fourier_centers(isfinite(fourier_centers));
+
+gmm_threshold_hz = 8;
+gmm_minimum_component_weight = 0.05;
+gmm_minimum_ashman_d = 2;
+gmm_minimum_bic_improvement = 10;
+gmm_minimum_observations_per_component = 5;
+gmm_minimum_effective_membership = 3;
+
+fourier_center_gmm = struct();
+fourier_center_gmm.threshold_hz = gmm_threshold_hz;
+fourier_center_gmm.center_frequencies = fourier_centers;
+fourier_center_gmm.selection_criterion = 'minimum BIC';
+fourier_center_gmm.minimum_component_weight = ...
+    gmm_minimum_component_weight;
+fourier_center_gmm.minimum_ashman_d = gmm_minimum_ashman_d;
+fourier_center_gmm.minimum_bic_improvement = ...
+    gmm_minimum_bic_improvement;
+fourier_center_gmm.minimum_observations_per_component = ...
+    gmm_minimum_observations_per_component;
+fourier_center_gmm.minimum_effective_membership = ...
+    gmm_minimum_effective_membership;
+fourier_center_gmm.status = 'not fitted';
+
+best_gmm = [];
+if numel(fourier_centers) >= gmm_minimum_observations_per_component
+    max_components = min([10, numel(fourier_centers), ...
+        numel(unique(fourier_centers)), ...
+        floor(numel(fourier_centers) / ...
+        gmm_minimum_observations_per_component)]);
+    component_counts = (1:max_components).';
+    gmm_models = cell(max_components, 1);
+    gmm_aic = nan(max_components, 1);
+    gmm_bic = nan(max_components, 1);
+    gmm_negative_log_likelihood = nan(max_components, 1);
+    gmm_converged = false(max_components, 1);
+    gmm_minimum_effective_n = nan(max_components, 1);
+    gmm_eligible = false(max_components, 1);
+
+    previous_rng = rng;
+    rng(1, 'twister');
+    fit_options = statset('MaxIter', 2000, 'Display', 'off');
+    for component_n = component_counts.'
+        try
+            this_gmm = fitgmdist(fourier_centers, component_n, ...
+                'RegularizationValue', 1e-4, ...
+                'Replicates', 50, ...
+                'Options', fit_options);
+            gmm_models{component_n} = this_gmm;
+            gmm_aic(component_n) = this_gmm.AIC;
+            gmm_bic(component_n) = this_gmm.BIC;
+            gmm_negative_log_likelihood(component_n) = ...
+                this_gmm.NegativeLogLikelihood;
+            gmm_converged(component_n) = this_gmm.Converged;
+            this_posterior = posterior(this_gmm, fourier_centers);
+            gmm_minimum_effective_n(component_n) = ...
+                min(sum(this_posterior, 1));
+            gmm_eligible(component_n) = this_gmm.Converged && ...
+                gmm_minimum_effective_n(component_n) >= ...
+                gmm_minimum_effective_membership;
+        catch ME
+            warning('The %d-component Fourier-center GMM failed: %s', ...
+                component_n, ME.message);
+        end
+    end
+    rng(previous_rng);
+
+    valid_models = isfinite(gmm_bic) & gmm_converged & gmm_eligible;
+    if any(valid_models)
+        valid_indices = find(valid_models);
+        [~, best_valid_index] = min(gmm_bic(valid_models));
+        best_component_count = valid_indices(best_valid_index);
+        best_gmm = gmm_models{best_component_count};
+
+        component_mean = best_gmm.mu(:);
+        component_sd = sqrt(squeeze(best_gmm.Sigma));
+        component_sd = component_sd(:);
+        component_weight = best_gmm.ComponentProportion(:);
+        [component_mean, component_order] = sort(component_mean);
+        component_sd = component_sd(component_order);
+        component_weight = component_weight(component_order);
+
+        raw_assignment = cluster(best_gmm, fourier_centers);
+        sorted_index = zeros(best_component_count, 1);
+        sorted_index(component_order) = 1:best_component_count;
+        component_assignment = sorted_index(raw_assignment);
+        component_posterior = posterior(best_gmm, fourier_centers);
+        component_posterior = component_posterior(:, component_order);
+        n_assigned = accumarray(component_assignment, 1, ...
+            [best_component_count, 1]);
+
+        centered_below_8 = component_mean < gmm_threshold_hz;
+        entirely_below_8_95 = ...
+            component_mean + 1.96 * component_sd < gmm_threshold_hz;
+        nearest_high_ashman_d = nan(best_component_count, 1);
+        high_components = find(component_mean >= gmm_threshold_hz);
+        for component_n = find(centered_below_8).'
+            if ~isempty(high_components)
+                [~, nearest_high_index] = min(abs( ...
+                    component_mean(component_n) - ...
+                    component_mean(high_components)));
+                nearest_high_component = ...
+                    high_components(nearest_high_index);
+                nearest_high_ashman_d(component_n) = sqrt(2) * abs( ...
+                    component_mean(component_n) - ...
+                    component_mean(nearest_high_component)) / sqrt( ...
+                    component_sd(component_n).^2 + ...
+                    component_sd(nearest_high_component).^2);
+            end
+        end
+
+        if valid_models(1)
+            bic_improvement_over_one = ...
+                gmm_bic(1) - gmm_bic(best_component_count);
+        else
+            bic_improvement_over_one = NaN;
+        end
+        eligible_low_component = centered_below_8 & ...
+            component_weight >= gmm_minimum_component_weight & ...
+            nearest_high_ashman_d >= gmm_minimum_ashman_d;
+        has_distinct_below_8_cluster = best_component_count > 1 && ...
+            bic_improvement_over_one >= gmm_minimum_bic_improvement && ...
+            any(eligible_low_component);
+
+        component_table = table((1:best_component_count).', ...
+            component_mean, component_sd, component_weight, n_assigned, ...
+            centered_below_8, entirely_below_8_95, ...
+            nearest_high_ashman_d, eligible_low_component, ...
+            'VariableNames', {'Component', 'MeanHz', 'SDHz', 'Weight', ...
+            'NAssigned', 'CenterBelow8Hz', 'Entire95PctBelow8Hz', ...
+            'AshmanDToNearestHighComponent', ...
+            'EligibleDistinctBelow8HzComponent'});
+
+        model_selection_table = table(component_counts, gmm_aic, gmm_bic, ...
+            gmm_negative_log_likelihood, gmm_converged, ...
+            gmm_minimum_effective_n, gmm_eligible, ...
+            'VariableNames', {'NComponents', 'AIC', 'BIC', ...
+            'NegativeLogLikelihood', 'Converged', ...
+            'MinimumEffectiveN', 'Eligible'});
+
+        fourier_center_gmm.status = 'fitted';
+        fourier_center_gmm.n_observations = numel(fourier_centers);
+        fourier_center_gmm.max_components_tested = max_components;
+        fourier_center_gmm.model_selection = model_selection_table;
+        fourier_center_gmm.best_n_components = best_component_count;
+        fourier_center_gmm.best_component_table = component_table;
+        fourier_center_gmm.component_assignment = component_assignment;
+        fourier_center_gmm.component_posterior = component_posterior;
+        fourier_center_gmm.bic_improvement_over_one = ...
+            bic_improvement_over_one;
+        fourier_center_gmm.has_component_center_below_8 = ...
+            any(centered_below_8);
+        fourier_center_gmm.has_distinct_below_8_cluster = ...
+            has_distinct_below_8_cluster;
+
+        if has_distinct_below_8_cluster
+            fourier_center_gmm.conclusion = [ ...
+                'BIC and component separation support a distinct ' ...
+                'Gaussian cluster centered below 8 Hz.'];
+        elseif any(centered_below_8)
+            fourier_center_gmm.conclusion = [ ...
+                'The selected model has a component centered below 8 Hz, ' ...
+                'but it does not meet all distinct-cluster criteria.'];
+        else
+            fourier_center_gmm.conclusion = [ ...
+                'The selected model has no component centered below 8 Hz.'];
+        end
+    else
+        fourier_center_gmm.status = 'no eligible model fits';
+    end
+else
+    fourier_center_gmm.status = sprintf( ...
+        'fewer than %d finite Fourier center frequencies', ...
+        gmm_minimum_observations_per_component);
+end
+
 %% Delta-band summaries (1-4 Hz)
 delta_index = frequency >= 1 & frequency <= 4;
 welch_delta_gaussian = mean( ...
@@ -240,6 +424,7 @@ analysis_results.delta_range = [1 4];
 analysis_results.channel_session_summary = session_summary;
 analysis_results.session_summary = group_session_summary;
 analysis_results.gaussian_peak_table = gaussian_peak_table;
+analysis_results.fourier_center_gmm = fourier_center_gmm;
 analysis_results.animal_names = animal_names;
 
 analysis_results.welch.log_power = welch_log_power;
@@ -426,6 +611,74 @@ if ~isempty(gaussian_peak_table)
     box off
 else
     warning('No fitted Gaussian peaks were available for scatter plots.');
+end
+
+%% Plot Fourier-center Gaussian-mixture model selection and best fit
+if strcmp(fourier_center_gmm.status, 'fitted')
+    model_table = fourier_center_gmm.model_selection;
+    component_table = fourier_center_gmm.best_component_table;
+
+    figure('Name', 'Fourier Gaussian-center mixture model selection');
+    subplot(1, 2, 1)
+    hold on
+    plot(model_table.NComponents, model_table.BIC, '-ok', ...
+        'LineWidth', 1.5, 'MarkerFaceColor', 'k');
+    plot(model_table.NComponents, model_table.AIC, '-o', ...
+        'Color', [0.5 0.5 0.5], 'LineWidth', 1.5);
+    best_n_components = fourier_center_gmm.best_n_components;
+    best_row = model_table.NComponents == best_n_components;
+    plot(best_n_components, model_table.BIC(best_row), 'om', ...
+        'MarkerSize', 10, 'LineWidth', 2);
+    xlabel('Number of Gaussian components')
+    ylabel('Information criterion')
+    title(sprintf('Best BIC model: %d components', best_n_components))
+    legend({'BIC', 'AIC', 'Selected BIC'}, 'Location', 'best')
+    xticks(model_table.NComponents)
+    grid on
+    box off
+
+    subplot(1, 2, 2)
+    hold on
+    histogram(fourier_center_gmm.center_frequencies, ...
+        'Normalization', 'pdf', 'BinWidth', 1, ...
+        'FaceColor', [0.75 0.75 0.75], 'EdgeColor', 'none');
+    density_frequency = linspace(frequency(1), frequency(end), 1000).';
+    mixture_density = zeros(size(density_frequency));
+    component_colors = lines(height(component_table));
+    component_handles = gobjects(height(component_table), 1);
+    for component_n = 1:height(component_table)
+        this_density = component_table.Weight(component_n) * ...
+            exp(-0.5 * ((density_frequency - ...
+            component_table.MeanHz(component_n)) ./ ...
+            component_table.SDHz(component_n)).^2) ./ ...
+            (component_table.SDHz(component_n) * sqrt(2 * pi));
+        mixture_density = mixture_density + this_density;
+        component_handles(component_n) = plot(density_frequency, ...
+            this_density, ':', 'Color', component_colors(component_n, :), ...
+            'LineWidth', 1.5);
+    end
+    mixture_handle = plot(density_frequency, mixture_density, ...
+        'k', 'LineWidth', 2.5);
+    threshold_handle = xline(fourier_center_gmm.threshold_hz, ...
+        '--r', sprintf('%g Hz', fourier_center_gmm.threshold_hz), ...
+        'LineWidth', 1.5);
+    xlabel('Fourier Gaussian center frequency (Hz)')
+    ylabel('Probability density')
+    title('Selected Gaussian-mixture model')
+    component_labels = arrayfun(@(x) sprintf('Component %d', x), ...
+        component_table.Component, 'UniformOutput', false);
+    legend([component_handles; mixture_handle; threshold_handle], ...
+        [component_labels; {'Mixture'; 'Low-frequency threshold'}], ...
+        'Location', 'best')
+    xlim(frequency([1 end]))
+    box off
+
+    disp(fourier_center_gmm.model_selection)
+    disp(fourier_center_gmm.best_component_table)
+    disp(fourier_center_gmm.conclusion)
+else
+    warning('Fourier center GMM not plotted: %s.', ...
+        fourier_center_gmm.status);
 end
 
 %% Save analysis-ready summaries
