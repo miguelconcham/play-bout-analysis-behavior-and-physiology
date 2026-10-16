@@ -30,6 +30,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Reciprocal vs non-reciprocal play vs delta | Fig 2h, Supp 3a–f | `Estimate_psth_all_regressors.m` | `Figure 2/Reciprocity.m` |
 | First vs second play partner vs delta | Supp 3g–i | play-bout PSTH (`Estimate_psth_band_power.m`) | `Figure 2/Play partner.m` |
 | Delta PSTH per annotated behavior | extra (feeds Supp 3) | `Figure 2/Supporting codes v2/Estimate_psth_all_behaviors.m` | `Figure 2/Supporting codes v2/Analyze_psth_all_behaviors.m` |
+| Behavior/play-bout onset–offset raw LFP + paired-baseline kCSD | extra | `CSD analysis/Estimate_behavior_aligned_csd.m` | Python: `CSD analysis/behavior_aligned_kcsd.py` |
 | Call-locked LFP power PSTH | Supp 4e | `Figure 2/Supporting codes v2/Estimate_psth_calls_all_animals.m` | `Figure 2/Figure 2.m` (`%% 13`–`%% 17`); plots also inside Estimate |
 | Speed vs LFP band power | Supp 4b; extra | `Figure 2/Supporting codes v2/Estimate_speed_freq_relation.m` | `Figure 2/Supporting codes v2/Analyze_speed_freq_relation.m`; also `Figure 2.m` `%% 18`–`%% 21` |
 | Cross-frequency coupling (mid-PAG) | extra / CFC panel | `Figure 2/Supporting codes v2/Estimate_freq_coupling.m` | `Figure 2/Supporting codes v2/Analyze_freq_coupling.m`; `Figure 2/CrossFreq coupling.m` |
