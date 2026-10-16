@@ -205,6 +205,24 @@ The original (pre-v2) Figure 2 pipeline lives outside this repository, in the pa
 
 `Figure 3/Supporting codes/` holds GENERATE / Estimate / ANALYZE pipelines that build the `.mat` files those plots load. `Estiamte_activation_index_and_other_variables.m` section 8 writes the example-plot checkpoint used by `SuppFig4 ActivationIndex Example.m`.
 
+### Figure 3e delta-power control
+
+The referee-control pipeline is separate from the original Figure 3 files:
+
+```
+Estimate_phase_locking_power_control.m
+  → GENERATE_PHASE_LOCKING_POWER_CONTROL.m
+  → Analyze_phase_locking_power_control.m
+```
+
+It retains phases and delta power for strict one-to-one pre-play/play windows,
+matches bouts in log-power units (default: absolute difference no greater than
+one within-channel SD of play power), recomputes PPC, equalizes spike counts,
+samples alternative bout combinations, and repeats PPC after excluding the
+lowest-amplitude 20% of delta samples. Hardcoded sensitivity parameters are at
+the top of the Analyze script. Results are saved under
+`Data/Analysis results/phase locking power control/`.
+
 ---
 
 ## Figure 4 and Extended Data Fig. 6
