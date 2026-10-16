@@ -220,10 +220,14 @@ matches epochs one-to-one by nearest channel-specific log-delta power within
 a prespecified caliper, and initially targets 75% of the available play
 epochs with exactly equal pre-play time. If a neuron has too
 few spikes, the number of matched epochs is increased without relaxing power
-balance; neurons that remain underpowered are reported separately. A second
-fixed-duration random-sampling distribution supports a mixed model of PPC
-change from delta-power and spike-count changes. No PPC-significance shuffle is
-run. Hardcoded sensitivity parameters are at the top of the Analyze script.
+balance; neurons that remain underpowered are reported separately. For the
+null distribution, pre-play and play epochs are merged, their labels are
+removed, and equal pseudo-pre and pseudo-post groups are randomly assigned.
+Label-swapped complements make this null symmetric. It supports a model of PPC
+change from accidental delta-power and spike-count differences when there is
+no true condition effect. No PPC-significance shuffle from the original
+pipeline is run. Hardcoded sensitivity parameters are at the top of the
+Analyze script.
 Results are saved under
 `Data/Analysis results/phase locking power control/`.
 

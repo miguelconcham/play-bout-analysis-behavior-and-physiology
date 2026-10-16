@@ -5,7 +5,7 @@
 % Outputs:
 %   matched_summary       one row per neuron
 %   matched_draw_table    repeated amplitude-matched arrangements
-%   random_draw_table     fixed-duration random arrangements spanning power
+%   null_draw_table       merged-pool label randomizations under no condition
 %   ppc_power_spike_model PPC change ~ power change + spike-count terms
 
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -36,7 +36,7 @@ total_neurons = sum(arrayfun(@(x) numel(x.neurons), power_control_struct));
 summary_rows = {};
 excluded_rows = {};
 matched_blocks = cell(total_neurons,1);
-random_blocks = cell(total_neurons,1);
+null_blocks = cell(total_neurons,1);
 
 for ss = 1:numel(power_control_struct)
     session_data = power_control_struct(ss);
@@ -123,12 +123,12 @@ for ss = 1:numel(power_control_struct)
                 continue
             end
 
-            [random_pre_index, random_play_index] = random_draws( ...
-                valid_pre, valid_play, target_epochs, N_DRAWS);
-            random_metrics = evaluate_draws(neuron, ...
-                random_pre_index, random_play_index, ...
-                pre_power, play_power, ...
-                Inf, false);
+            valid_merged = [valid_pre; numel(pre_power)+valid_play];
+            [null_pre_index, null_post_index] = merged_null_draws( ...
+                valid_merged, target_epochs, N_DRAWS);
+            null_metrics = evaluate_null_draws(neuron, ...
+                null_pre_index, null_post_index, ...
+                pre_power, play_power);
 
             if size(reliable_values,1) > 1
                 ppc_draw_percentiles = prctile( ...
@@ -166,9 +166,9 @@ for ss = 1:numel(power_control_struct)
             matched_blocks{neuron_row} = [ ...
                 repmat(neuron_row,size(matched_metrics,1),1), ...
                 matched_metrics];
-            random_blocks{neuron_row} = [ ...
-                repmat(neuron_row,size(random_metrics,1),1), ...
-                random_metrics];
+            null_blocks{neuron_row} = [ ...
+                repmat(neuron_row,size(null_metrics,1),1), ...
+                null_metrics];
         end
     end
 end
@@ -191,14 +191,18 @@ summary_names = {'Animal','Session','NeuronKey','ChannelKey','ClusterID', ...
     'ModelExpectedPPCDifferenceCI95High','ModelResidual'};
 matched_summary = cell2table(summary_rows, 'VariableNames', summary_names);
 
-draw_names = {'NeuronRow','Draw','EpochCount','PrePowerDB','PlayPowerDB', ...
+matched_draw_names = {'NeuronRow','Draw','EpochCount','PrePowerDB','PlayPowerDB', ...
     'PowerDifferenceDB','PowerSMD','PreSpikeCount','PlaySpikeCount', ...
     'SpikeCountDifference','MeanSpikeCount','PrePPC','PlayPPC', ...
     'PPCDifference','Reliable'};
 matched_draw_table = array2table(vertcat(matched_blocks{:}), ...
-    'VariableNames', draw_names);
-random_draw_table = array2table(vertcat(random_blocks{:}), ...
-    'VariableNames', draw_names);
+    'VariableNames', matched_draw_names);
+null_draw_names = {'NeuronRow','Draw','EpochCount', ...
+    'PseudoPrePowerDB','PseudoPostPowerDB','PowerDifferenceDB','PowerSMD', ...
+    'PseudoPreSpikeCount','PseudoPostSpikeCount','SpikeCountDifference', ...
+    'MeanSpikeCount','PseudoPrePPC','PseudoPostPPC','PPCDifference','Reliable'};
+null_draw_table = array2table(vertcat(null_blocks{:}), ...
+    'VariableNames', null_draw_names);
 
 excluded_names = {'Animal','Session','ClusterID','Area','Channel', ...
     'Reason','MatchingCapacity','ReliableDraws'};
@@ -210,15 +214,17 @@ else
         'VariableNames', excluded_names);
 end
 
-%% Model PPC changes across fixed-duration random arrangements
+%% Model PPC changes under the merged-pool no-condition null
 % MeanSpikeCount is included because PPC variance depends on the available
 % spike count; SpikeCountDifference captures condition imbalance requested
-% in the proposed model. EpochCount records adaptive duration. Because draws
-% reuse epochs, use this model for conditional prediction; its nominal
-% coefficient p-values are not independent-resample inference.
+% in the proposed model. EpochCount records adaptive duration. Pre-play and
+% play labels are absent from these draws: equal-sized pseudo-conditions are
+% sampled from the merged epoch pool. Because draws reuse epochs, use this
+% model for conditional prediction; its nominal coefficient p-values are
+% not independent-resample inference.
 ppc_power_spike_model = [];
-model_rows = random_draw_table.Reliable == 1;
-model_table = random_draw_table(model_rows,:);
+model_rows = null_draw_table.Reliable == 1;
+model_table = null_draw_table(model_rows,:);
 if height(model_table) >= 100
     row_index = model_table.NeuronRow;
     model_table.Animal = categorical(matched_summary.Animal(row_index));
@@ -235,14 +241,22 @@ if height(model_table) >= 100
             matched_summary.SpikeCountDifference;
         prediction_table.MeanSpikeCount = matched_summary.MeanSpikeCount;
         prediction_table.EpochCount = matched_summary.EpochsPerCondition;
+        % predict requires the response column but ignores its values.
+        prediction_table.PPCDifference = zeros(height(matched_summary),1);
+        prediction_table.Animal = categorical(matched_summary.Animal, ...
+            categories(model_table.Animal));
+        prediction_table.NeuronKey = categorical(matched_summary.NeuronKey, ...
+            categories(model_table.NeuronKey));
+        predictable = ~isundefined(prediction_table.Animal) & ...
+            ~isundefined(prediction_table.NeuronKey);
         [expected_ppc, expected_ppc_ci] = predict( ...
-            ppc_power_spike_model, prediction_table, ...
+            ppc_power_spike_model, prediction_table(predictable,:), ...
             'Conditional', false, 'Alpha', 0.05, ...
             'Prediction', 'curve');
-        matched_summary.ModelExpectedPPCDifference = expected_ppc;
-        matched_summary.ModelExpectedPPCDifferenceCI95Low = ...
+        matched_summary.ModelExpectedPPCDifference(predictable) = expected_ppc;
+        matched_summary.ModelExpectedPPCDifferenceCI95Low(predictable) = ...
             expected_ppc_ci(:,1);
-        matched_summary.ModelExpectedPPCDifferenceCI95High = ...
+        matched_summary.ModelExpectedPPCDifferenceCI95High(predictable) = ...
             expected_ppc_ci(:,2);
         matched_summary.ModelResidual = matched_summary.PPCDifference - ...
             matched_summary.ModelExpectedPPCDifference;
@@ -268,15 +282,15 @@ xlabel('\Delta delta power (dB)')
 ylabel('\Delta PPC')
 
 subplot(1,3,3)
-reliable_random = random_draw_table(random_draw_table.Reliable == 1,:);
-plot(reliable_random.PowerDifferenceDB, ...
-    reliable_random.PPCDifference, '.', 'Color', [0.7 0.7 0.7])
+reliable_null = null_draw_table(null_draw_table.Reliable == 1,:);
+plot(reliable_null.PowerDifferenceDB, ...
+    reliable_null.PPCDifference, '.', 'Color', [0.7 0.7 0.7])
 hold on
 plot(matched_summary.PowerDifferenceDB, ...
     matched_summary.PPCDifference, 'r.')
 xlabel('\Delta delta power (dB)')
 ylabel('\Delta PPC')
-legend({'Random fixed-duration arrangements','Amplitude-matched estimate'})
+legend({'Merged-pool null arrangements','Amplitude-matched estimate'})
 
 analysis_parameters = struct( ...
     'epoch_seconds', EPOCH_SECONDS, ...
@@ -289,7 +303,7 @@ analysis_parameters = struct( ...
     'random_seed', RANDOM_SEED);
 save(fullfile(saving_folder, ...
     'play_ppc_amplitude_matched_analysis.mat'), ...
-    'matched_summary', 'matched_draw_table', 'random_draw_table', ...
+    'matched_summary', 'matched_draw_table', 'null_draw_table', ...
     'excluded_neurons', 'ppc_power_spike_model', ...
     'analysis_parameters', '-v7.3');
 
@@ -327,24 +341,66 @@ pre_index = reshape(pairs(selected_sets,1), size(selected_sets));
 play_index = reshape(pairs(selected_sets,2), size(selected_sets));
 end
 
-function [pre_index, play_index] = random_draws( ...
-    valid_pre, valid_play, target, n_draws)
-pre_sets = unique_subsets(numel(valid_pre), target, n_draws);
-play_sets = unique_subsets(numel(valid_play), target, n_draws);
-n_pre_sets = size(pre_sets,1);
-n_play_sets = size(play_sets,1);
-if n_pre_sets*n_play_sets <= n_draws
-    [pre_row, play_row] = ndgrid(1:n_pre_sets, 1:n_play_sets);
-    pre_sets = pre_sets(pre_row(:),:);
-    play_sets = play_sets(play_row(:),:);
-else
-    n_output = min(n_draws, max(n_pre_sets,n_play_sets));
-    pre_sets = pre_sets(mod((0:n_output-1),n_pre_sets)+1,:);
-    play_order = randperm(n_play_sets);
-    play_sets = play_sets(play_order(mod((0:n_output-1),n_play_sets)+1),:);
+function [pseudo_pre, pseudo_post] = merged_null_draws( ...
+    valid_merged, k, n_requested)
+n_epochs = numel(valid_merged);
+if 2*k > n_epochs
+    error('The merged epoch pool cannot supply two groups of %d epochs.', k);
 end
-pre_index = reshape(valid_pre(pre_sets), size(pre_sets));
-play_index = reshape(valid_play(play_sets), size(play_sets));
+
+% Number of oriented assignments: choose K pseudo-pre epochs, then K
+% pseudo-post epochs from those remaining.
+log_assignment_count = gammaln(n_epochs+1) - gammaln(k+1) - ...
+    gammaln(n_epochs-k+1) + gammaln(n_epochs-k+1) - ...
+    gammaln(k+1) - gammaln(n_epochs-2*k+1);
+
+if log_assignment_count <= log(n_requested)
+    pre_combinations = nchoosek(1:n_epochs, k);
+    local_pre = zeros(0,k);
+    local_post = zeros(0,k);
+    for rr = 1:size(pre_combinations,1)
+        remaining = setdiff(1:n_epochs, pre_combinations(rr,:));
+        post_combinations = nchoosek(remaining, k);
+        local_pre = [local_pre; repmat(pre_combinations(rr,:), ...
+            size(post_combinations,1),1)]; %#ok<AGROW>
+        local_post = [local_post; post_combinations]; %#ok<AGROW>
+    end
+else
+    % Draw unique unordered partitions, then add each label-swapped
+    % complement. This enforces a symmetric no-condition null.
+    n_base = floor(n_requested/2);
+    canonical_keys = zeros(0,2*k);
+    base_pre = zeros(0,k);
+    base_post = zeros(0,k);
+    while size(base_pre,1) < n_base
+        selected = randperm(n_epochs, 2*k);
+        this_pre = sort(selected(1:k));
+        this_post = sort(selected(k+1:end));
+        key = canonical_partition(this_pre, this_post);
+        if isempty(canonical_keys) || ~ismember(key, canonical_keys, 'rows')
+            canonical_keys(end+1,:) = key; %#ok<AGROW>
+            base_pre(end+1,:) = this_pre; %#ok<AGROW>
+            base_post(end+1,:) = this_post; %#ok<AGROW>
+        end
+    end
+    local_pre = [base_pre; base_post];
+    local_post = [base_post; base_pre];
+end
+
+pseudo_pre = reshape(valid_merged(local_pre), size(local_pre));
+pseudo_post = reshape(valid_merged(local_post), size(local_post));
+end
+
+function key = canonical_partition(first_group, second_group)
+forward = [first_group, second_group];
+reverse = [second_group, first_group];
+first_difference = find(forward ~= reverse, 1);
+if isempty(first_difference) || ...
+        forward(first_difference) < reverse(first_difference)
+    key = forward;
+else
+    key = reverse;
+end
 end
 
 function subsets = unique_subsets(population_size, subset_size, n_requested)
@@ -395,6 +451,36 @@ metrics = [(1:n_draws)', repmat(size(pre_index,2),n_draws,1), ...
     mean_pre_power, mean_play_power, mean_play_power-mean_pre_power, ...
     power_smd, n_pre, n_play, n_play-n_pre, (n_play+n_pre)/2, ...
     pre_ppc, play_ppc, play_ppc-pre_ppc, double(reliable)];
+end
+
+function metrics = evaluate_null_draws(neuron, pseudo_pre, pseudo_post, ...
+    pre_power, play_power)
+merged_power = [pre_power(:); play_power(:)];
+merged_count = [neuron.pre_epoch_spike_count(:); ...
+    neuron.play_epoch_spike_count(:)];
+merged_vector = [cellfun(@phase_vector, neuron.pre_epoch_phase); ...
+    cellfun(@phase_vector, neuron.play_epoch_phase)];
+
+n_pre = sum(merged_count(pseudo_pre),2);
+n_post = sum(merged_count(pseudo_post),2);
+r_pre = sum(merged_vector(pseudo_pre),2);
+r_post = sum(merged_vector(pseudo_post),2);
+pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
+post_ppc = ppc_from_sufficient_statistics(r_post, n_post);
+mean_pre_power = mean(merged_power(pseudo_pre),2,'omitnan');
+mean_post_power = mean(merged_power(pseudo_post),2,'omitnan');
+pooled_sd = sqrt((var(merged_power(pseudo_pre),0,2,'omitnan') + ...
+    var(merged_power(pseudo_post),0,2,'omitnan'))/2);
+power_smd = (mean_post_power-mean_pre_power)./pooled_sd;
+power_smd(pooled_sd == 0 & mean_post_power == mean_pre_power) = 0;
+reliable = isfinite(pre_ppc) & isfinite(post_ppc);
+
+n_draws = size(pseudo_pre,1);
+metrics = [(1:n_draws)', repmat(size(pseudo_pre,2),n_draws,1), ...
+    mean_pre_power, mean_post_power, ...
+    mean_post_power-mean_pre_power, power_smd, ...
+    n_pre, n_post, n_post-n_pre, (n_post+n_pre)/2, ...
+    pre_ppc, post_ppc, post_ppc-pre_ppc, double(reliable)];
 end
 
 function value = phase_vector(phase)
