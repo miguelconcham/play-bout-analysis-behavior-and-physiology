@@ -332,10 +332,17 @@ switch lower(mode)
         % FOOOF knee aperiodic:
         %
         %   L(F) = b - log10(k + F^chi)
+        %
+        % During unbounded optimization, (k + F^chi) can be <= 0, which
+        % makes log10 complex in MATLAB. Clamp to a tiny positive value so
+        % the model stays real-valued (same spirit as FOOOF suppressing
+        % invalid intermediate evaluations).
         offset   = params(1);
         knee     = params(2);
         exponent = params(3);
-        y = offset - log10(knee + f.^exponent);
+        ap_component = knee + f.^exponent;
+        ap_component = max(real(ap_component), realmin('double'));
+        y = offset - log10(ap_component);
 
     otherwise
         error('AperiodicMode must be ''fixed'' or ''knee''.');
@@ -470,8 +477,9 @@ switch lower(mode)
         ub = [ Inf  Inf];
 
     case 'knee'
+        % Keep the model real-valued if (knee + f^exp) dips non-positive.
         model = @(p, x) ...
-            p(1) - log10(p(2) + x.^p(3));
+            p(1) - log10(max(real(p(2) + x.^p(3)), realmin('double')));
 
         % FOOOF source uses unbounded parameters by default.
         %
