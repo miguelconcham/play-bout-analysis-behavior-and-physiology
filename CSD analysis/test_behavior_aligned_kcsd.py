@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -160,6 +161,44 @@ class PairedBaselineTests(unittest.TestCase):
                     os.path.join(output, "onset_baseline.npy")
                 )
                 np.testing.assert_allclose(saved_baseline, result["onset_baseline"])
+
+    def test_kcsd_progress_labels_include_behavior_dataset(self):
+        with tempfile.TemporaryDirectory() as root:
+            onset_folder = os.path.join(root, "behavior", "Pounce", "onset", "s1")
+            offset_folder = os.path.join(root, "behavior", "Pounce", "offset", "s1")
+            lfp = np.zeros((2, 2, 10), dtype=np.float32)
+            _write_leaf(onset_folder, lfp, event_ids=[1, 2])
+            _write_leaf(offset_folder, lfp, event_ids=[1, 2])
+
+            fake_csd = {0.0: np.zeros((2, 4))}
+            with patch(
+                "behavior_aligned_kcsd.compute_kcsd_1d_columns",
+                return_value=fake_csd,
+            ) as compute:
+                run_behavior_aligned_kcsd(
+                    onset_folder,
+                    offset_folder,
+                    name="behavior/Pounce/s1",
+                    t_pre=2.0,
+                    t_post=2.0,
+                    onset_baseline_window_ms=(-2.0, 0.0),
+                    compute_kcsd=True,
+                    compute_fd=False,
+                    save=False,
+                    save_plots=False,
+                    plot=False,
+                )
+
+            labels = [
+                call.kwargs["progress_label"] for call in compute.call_args_list
+            ]
+            self.assertEqual(
+                labels,
+                [
+                    "behavior/Pounce/s1 | onset",
+                    "behavior/Pounce/s1 | offset",
+                ],
+            )
 
 
 if __name__ == "__main__":

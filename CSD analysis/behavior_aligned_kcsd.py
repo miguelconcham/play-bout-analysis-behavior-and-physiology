@@ -458,22 +458,25 @@ def run_behavior_aligned_kcsd(
             "smooth_sigma_time": cfg.smooth_sigma_time,
             "sort_by_depth": cfg.sort_by_depth,
         }
-        print("  Computing onset kCSD", flush=True)
+        print(f"  Computing onset kCSD: {resolved_name}", flush=True)
         onset_csd = compute_kcsd_1d_columns(
             prepared["onset_evoked"],
             x,
             y,
             prepared["time_indices"],
-            progress_label="onset",
+            progress_label=f"{resolved_name} | onset",
             **csd_kwargs,
         )
-        print("  Computing offset kCSD (same onset baseline)", flush=True)
+        print(
+            f"  Computing offset kCSD: {resolved_name} (same onset baseline)",
+            flush=True,
+        )
         offset_csd = compute_kcsd_1d_columns(
             prepared["offset_evoked"],
             x,
             y,
             prepared["time_indices"],
-            progress_label="offset",
+            progress_label=f"{resolved_name} | offset",
             **csd_kwargs,
         )
         result["onset_csd_kcsd"] = onset_csd
