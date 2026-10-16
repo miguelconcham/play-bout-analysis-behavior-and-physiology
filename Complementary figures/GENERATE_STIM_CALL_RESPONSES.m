@@ -26,7 +26,7 @@ if nargin < 3 || isempty(saving_folder)
     saving_folder = '';
 end
 
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 files_folder = [data_root, '\Acute data\population analysis\'];
 load([files_folder, 'MERGED_SESSIONS.mat']);
 load([files_folder, 'NEW_ALL_CALLS_TOGETHER.mat']);

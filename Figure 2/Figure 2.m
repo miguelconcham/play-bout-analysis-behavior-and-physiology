@@ -2,7 +2,7 @@
 % PSTH / results file combinations (frequency band, behavior, calls, CV):
 %   Figure 2 Psth animal names and result combinations.txt
 
-this_file       = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Figure 2.m';
+this_file       = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Figure 2.m';
 repo_root       = fileparts(this_file);
 combo_file      = fullfile(repo_root, 'Figure 2 Psth animal names and result combinations.txt');
 data_root       = fullfile(repo_root, '..', 'Data');

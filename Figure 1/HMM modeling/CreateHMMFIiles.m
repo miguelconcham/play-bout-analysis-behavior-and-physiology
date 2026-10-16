@@ -1,4 +1,4 @@
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 behavior_folder = [data_root, '\Behavior backups'];
 behavior_files = dir(fullfile(behavior_folder, '*.txt'));
 dir_output = [data_root, '\HMM data\HMM raw data'];

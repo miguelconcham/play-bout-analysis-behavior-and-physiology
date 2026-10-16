@@ -4,7 +4,7 @@
 
 this_file = mfilename('fullpath');
 if isempty(this_file)
-    this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\add_repo_paths.m';
+    this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\add_repo_paths.m';
 end
 repo_root = fileparts(this_file);
 

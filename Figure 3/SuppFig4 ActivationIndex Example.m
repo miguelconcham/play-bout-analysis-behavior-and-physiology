@@ -1,6 +1,6 @@
 %% (Supp fig 4 a-c) EXAMPLE PLOT all neurons per area sorting images by activity in response_time
 % Run independently: execute this section only (loads the section-8 file).
-checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
+checkpoint_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
 example_checkpoint = [checkpoint_folder, '\activation_index_example_plot.mat'];
 disp('Loading example-plot checkpoint')
 load(example_checkpoint);

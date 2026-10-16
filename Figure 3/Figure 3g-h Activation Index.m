@@ -8,7 +8,7 @@
 % Load precomputed activation-index and per-neuron PSTHs
 % (all_psth_cell, all_activation_order, psth_list, area_list, cell_type_names, warped_time).
 
-checkpoint_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
+checkpoint_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\activation index';
 checkpoint_file = [checkpoint_folder, '\activation_index_section6.mat'];
 
 disp('Loading activation-index checkpoint')

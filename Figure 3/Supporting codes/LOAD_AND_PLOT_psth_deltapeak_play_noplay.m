@@ -1,6 +1,6 @@
 clear all
 
-saving_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth';
+saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth';
 
 % % %PSTH TO THE TROUGH
 % load([saving_folder,'\delta_phase_couplig_structure_updated_with_non_playbouts_trough_peaks.mat']);

@@ -7,8 +7,8 @@
 % Coincidence structs and delta locking labels are under Data\Analysis results.
 
 %% 1 Load coincidence events and delta locking labels
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
-coincidence_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Cross_correlogram';
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+coincidence_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Cross_correlogram';
 phase_folder = [data_root, '\Analysis results\phase locking data'];
 freq_tag = num2str([1 5]);   % delta band used when GENERATE saved the file
 

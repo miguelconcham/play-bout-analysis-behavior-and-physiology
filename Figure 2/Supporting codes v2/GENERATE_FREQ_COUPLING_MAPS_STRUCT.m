@@ -1,8 +1,8 @@
 function coupling_struct = GENERATE_FREQ_COUPLING_MAPS_STRUCT(current_dir, Hd_freq1, Hd_freq2)
 
 %% Session identifiers
-chan_map_folder  = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\StarndarChannMap';
-area_limit_table = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
+chan_map_folder  = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\StarndarChannMap';
+area_limit_table = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
 animal_code        = strsplit(current_dir, '\');
 animal_code        = animal_code{end};
 animal_code_params = strsplit(animal_code, ' ');

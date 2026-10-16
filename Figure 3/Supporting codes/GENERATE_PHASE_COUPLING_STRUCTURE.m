@@ -1,7 +1,7 @@
 function phase_struct = GENERATE_PHASE_COUPLING_STRUCTURE(npx_data_dir,Hd_freq1,bin_size_freq )
 
 
-data_root           = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root           = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 synch_directory     = [data_root, '\Synch data'];
 area2analyse        = 'PAG';
 area_limit_table    = [data_root, '\Area_limits_GoodLooking.xlsx'];

@@ -21,7 +21,7 @@ if nargin < 1 || isempty(npx_data_dir)
     error('GENERATE_SPIKE_TRAIN_PARSING:npx_data_dir', 'Provide the NPX session folder.');
 end
 
-data_root        = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root        = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 area_limit_table = [data_root, '\Area_limits_GoodLooking.xlsx'];
 area2analyse     = 'PAG';
 area2analyze     = 'PAG';

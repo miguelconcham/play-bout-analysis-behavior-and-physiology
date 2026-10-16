@@ -39,6 +39,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Phase reset (supplementary layout) | extra | `Estimate_phase_psth.m` | `Figure 2/Supporting codes v2/Analyze_phase_psth_SuppFig.m` |
 | Play-bout PSTH maps by channel / area | extra | `Figure 2/Supporting codes v2/Estimate_psth_area_maps.m` | `Figure 2/Supporting codes v2/Analyze_psth_area_maps.m` |
 | Full-spectrum spectrogram at play onset | extra | `Figure 2/Supporting codes v2/Estimate_psth_full_spectrogram.m` | `Figure 2/Supporting codes v2/Analyze_psth_full_spectrogram.m` |
+| Partner-session mid-LPAG Welch/Fourier spectra and periodic/aperiodic fits | extra | `Figure 2/Supporting codes v2/Estimate_play_session_lpag_spectra.m` | `Figure 2/Supporting codes v2/Analyse_play_session_lpag_spectra.m` |
 | Neuron–LFP phase locking (PPC, preferred phase, PSTH) | Fig 3a–e | `Figure 3/Supporting codes/Estiamte_phase_copuling.m` | `Figure 3/Figure 3a-e.m` |
 | Play vs non-play delta peak/trough PSTH | extra | after phase-coupling Estimate | `Figure 3/Supporting codes/LOAD_AND_PLOT_psth_deltapeak_play_noplay.m` |
 | Activation index and bout-aligned rates | Fig 3f–h, Supp 5a–d | `Figure 3/Supporting codes/Estiamte_activation_index_and_other_variables.m` | `Figure 3/Figure 3g-h Activation Index.m`; example: `Figure 3/SuppFig4 ActivationIndex Example.m` |
@@ -76,6 +77,7 @@ These are the supporting / complementary pipelines. Rebuild with Estimate, then 
 | Delta PSTH for every annotated behavior | `Figure 2/Supporting codes v2/Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
 | Channel-wise play-bout maps (LPAG vs VLPAG, etc.) | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Full spectrogram at play onset | `Estimate_psth_full_spectrogram.m` | `Analyze_psth_full_spectrogram.m` |
+| Partner-session mid-LPAG Welch/Fourier spectra + FOOOF | `Estimate_play_session_lpag_spectra.m` | `Analyse_play_session_lpag_spectra.m` |
 | Speed vs band-limited power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m` |
 | Delta–gamma (or other) phase–amplitude coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m` or `Figure 2/CrossFreq coupling.m` |
 | CFC as depth maps | `Estimate_freq_coupling_maps.m` | `Analyze_freq_coupling_maps.m` |
