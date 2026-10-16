@@ -1230,64 +1230,6 @@ hold on
 plot(bin_centers, distribution_random, 'k')
 xlabel('Value'); ylabel('CDF');
 
-%% Fig S2 B
-
-cd(hmm_raw_data)
-model_comp_data= dir('model_comp_*');
-
-
-staked_ll = [];
-staked_aic = [];
-staked_BIC = [];
-
-for j=1:numel(model_comp_data)
-
-    a = readNPY(model_comp_data(j).name);
-
-
-staked_ll = [staked_ll,a(:,1)];
-staked_aic = [staked_aic,a(:,2)];
-staked_BIC = [staked_BIC,a(:,3)];
-end
-
-figure
-
-subplot(1,3,1)
-plot(2:5,staked_aic, 'k:')
-xticks(2:5)
-hold on
-plot(2:5,mean(staked_aic'), 'k')
-xlim([1.5 5.5])
-xlabel('Number of States')
-ylabel('AIC')
-set(gca, 'FontSize',12)
-set(gca,'TickDir','out');
-
-subplot(1,3,2)
-plot(2:5,staked_BIC, 'k:')
-xlabel('Number of States')
-ylabel('BIC')
-hold on
-plot(2:5,mean(staked_BIC'), 'k')
-set(gca, 'FontSize',12)
-xlim([1.5 5.5])
-xticks(2:5)
-set(gca,'TickDir','out');
-
-
-subplot(1,3,3)
-plot(2:5,staked_ll, 'k:')
-hold on
-plot(2:5,mean(staked_ll'), 'k')
-xlabel('Number of States')
-ylabel('LL')
-set(gca, 'FontSize',12)
-xlim([1.5 5.5])
-xticks(2:5)
-set(gca,'TickDir','out');
-
-
-
 %% Fig 2E
 last_hmm_dir = analyssis_folder;
 

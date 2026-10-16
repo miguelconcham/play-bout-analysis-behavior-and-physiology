@@ -30,7 +30,7 @@ What this repository actually implements.
 - Linear discriminant analysis (LDA) for multi-class behavior classification — `Figure 1/Figure 1 LDA.m`
 - Support vector machines (RBF `fitcsvm`; Classification Learner `SVM_model`) for play probability / play score from the 14 motion–USV features (HMM engaged vs unengaged) and for behavior from population rates — `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m`, `Complementary figures/spike_train_parsing_phase_lock.m`
 - UMAP embeddings of high-dimensional feature space — `run_umap`
-- Hidden Markov models (sticky HMM, Gaussian emissions, AIC/BIC model selection) — `Figure 1/HMM modeling/`
+- Hidden Markov models (sticky HMM with Gaussian emissions) — `Figure 1/HMM modeling/`
 - Generalized linear models (binomial and Poisson) and unique $R^2$ with k-fold CV — `fitglm`, `cvpartition`
 - Neighborhood component analysis (NCA) for feature weights — `fscnca`
 - Linear mixed-effects models for nested observations — `fitlme`
@@ -316,8 +316,6 @@ Calls whose onset falls within `stim_blank` (default 100 ms) after StimEnd are d
 | Panel | What it is | Script | Section |
 |-------|------------|--------|---------|
 | a | HMM schematic | — (illustration) | — |
-| b | BIC vs number of states | `Figure 1/Figure 1 HMM.m` | `%% Fig S2 B` (AIC and BIC subplots) |
-| c | AIC vs number of states | `Figure 1/Figure 1 HMM.m` | `%% Fig S2 B` (AIC and BIC subplots) |
 | d | Behaviors aligned to high-activity onset/offset | `Figure 1/Figure 1 HMM.m` | `%% Fig S2D` |
 | e | High-activity state raster with play overlay | `Figure 1/Figure 1 HMM.m` | `%% Fig S2E` |
 | f | Call rate, engaged vs unengaged states | `Figure 1/Figure 1 HMM.m` | `%% Fig S2F` |
@@ -405,7 +403,7 @@ Phase of coincident events (not a numbered paper panel here): `Figure 3/Former S
 - `Analysis results/locomotive behaviors 2 partners/`
 - `Analysis results/Behavior classification/` — trained LDA models
 - `Analysis results/HMM 2 and 3 states 2 partners/`
-- `HMM data/HMM raw data/` — states, `model_comp_*.npy`, `PropAndTime.mat`
+- `HMM data/HMM raw data/` — state sequences, transition matrices, and `PropAndTime.mat`
 - `Synch data/` — including `B1D1 1013 Dual\synch_model_video2audio.mat` for Fig 1b
 - `CallDetectionBackup/` — example `.wav` + `_Stats.xlsx` (Fig 1b)
 

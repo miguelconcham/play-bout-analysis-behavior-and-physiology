@@ -30,7 +30,6 @@ Fits Hidden Markov Models to the feature matrices produced by `Create_HMM_inputs
 - Uses the `ssm` library to fit sticky HMMs with diagonal Gaussian emissions.
 - Fits models with K = 2, 3, 4, and 5 states (14-dimensional observations, 500 EM iterations).
 - Saves the most likely state sequence and transition matrix for each K.
-- Computes log-likelihood, AIC, and BIC for model comparison.
 
 ### 4. `Load_HMM_outputs_and_analyze.m` (MATLAB function)
 Loads the HMM state sequences from Python and performs all downstream analyses. Loops over each partner session for a given animal:
