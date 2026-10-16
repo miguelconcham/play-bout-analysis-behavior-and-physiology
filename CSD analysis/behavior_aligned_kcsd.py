@@ -28,8 +28,11 @@ and play-bout datasets use exactly the same processing code.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
+import re
+import shutil
 import time
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -594,6 +597,169 @@ def discover_behavior_aligned_pairs(root: PathLike) -> List[Dict[str, str]]:
     return found
 
 
+def _safe_figure_name_part(value: str) -> str:
+    """Make one metadata value safe and sortable in Windows filenames."""
+    value = re.sub(r'[<>:"/\\|?*]+', "_", str(value))
+    value = re.sub(r"\s+", "_", value.strip())
+    return value or "unknown"
+
+
+def organize_behavior_aligned_figures(
+    root: PathLike,
+    *,
+    output_folder_name: str = "sorted_figures",
+    csd_output_subdir: str = "csd_1d_onset_baseline",
+    refresh: bool = True,
+) -> Dict[str, Any]:
+    """
+    Copy every behavior kCSD PNG into session-first and behavior-first views.
+
+    Original figures are never changed. With ``refresh=True``, only the
+    generated ``sorted_figures`` folder is rebuilt, preventing stale copies.
+    """
+    root = os.path.abspath(os.fspath(root))
+    pairs = discover_behavior_aligned_pairs(root)
+    if not pairs:
+        raise FileNotFoundError(
+            f"No paired onset/offset CSD-ready folders found under {root}"
+        )
+
+    output_root = os.path.join(root, output_folder_name)
+    if refresh and os.path.isdir(output_root):
+        shutil.rmtree(output_root)
+    os.makedirs(output_root, exist_ok=True)
+
+    rows: List[Dict[str, str]] = []
+    destinations: Dict[str, str] = {}
+    missing_figure_folders = 0
+    print(
+        f"Organizing PNGs from {len(pairs)} paired datasets into {output_root}",
+        flush=True,
+    )
+
+    for pair_number, pair in enumerate(pairs, start=1):
+        parts = pair["name"].replace("\\", "/").split("/")
+        if len(parts) < 3:
+            print(
+                f"[{pair_number}/{len(pairs)}] Skipping unrecognized path: "
+                f"{pair['name']}",
+                flush=True,
+            )
+            continue
+        scope, behavior, session = parts[:3]
+        probe = parts[3] if len(parts) > 3 else "NPX1"
+        print(
+            f"[{pair_number}/{len(pairs)}] Sorting figures: "
+            f"{scope}/{behavior} | {session} | {probe}",
+            flush=True,
+        )
+
+        safe_scope = _safe_figure_name_part(scope)
+        safe_behavior = _safe_figure_name_part(behavior)
+        safe_session = _safe_figure_name_part(session)
+        safe_probe = _safe_figure_name_part(probe)
+
+        for alignment, leaf in (
+            ("onset", pair["onset_folder"]),
+            ("offset", pair["offset_folder"]),
+        ):
+            figure_dir = os.path.join(leaf, csd_output_subdir, "figures")
+            if not os.path.isdir(figure_dir):
+                missing_figure_folders += 1
+                continue
+
+            figure_names = sorted(
+                name
+                for name in os.listdir(figure_dir)
+                if name.lower().endswith(".png") and name.startswith("kcsd_x")
+            )
+            for figure_name in figure_names:
+                source = os.path.join(figure_dir, figure_name)
+                xpos = _safe_figure_name_part(
+                    os.path.splitext(figure_name)[0].removeprefix("kcsd_")
+                )
+                session_name = (
+                    f"{safe_session}__{safe_scope}__{safe_behavior}__"
+                    f"{safe_probe}__{xpos}.png"
+                )
+                behavior_name = (
+                    f"{safe_scope}__{safe_behavior}__{safe_session}__"
+                    f"{safe_probe}__{xpos}.png"
+                )
+                by_session = os.path.join(
+                    output_root, "by_session", alignment, session_name
+                )
+                by_behavior = os.path.join(
+                    output_root, "by_behavior", alignment, behavior_name
+                )
+
+                for destination in (by_session, by_behavior):
+                    prior_source = destinations.get(destination)
+                    if prior_source is not None and prior_source != source:
+                        raise RuntimeError(
+                            "Figure-name collision: "
+                            f"{prior_source} and {source} both map to {destination}"
+                        )
+                    destinations[destination] = source
+                    os.makedirs(os.path.dirname(destination), exist_ok=True)
+                    shutil.copy2(source, destination)
+                    print(
+                        f"    Saved sorted copy: "
+                        f"{os.path.relpath(destination, output_root)}",
+                        flush=True,
+                    )
+
+                rows.append(
+                    {
+                        "alignment": alignment,
+                        "scope": scope,
+                        "behavior": behavior,
+                        "session": session,
+                        "probe": probe,
+                        "xpos": xpos,
+                        "original_file": os.path.relpath(source, root),
+                        "by_session_file": os.path.relpath(by_session, root),
+                        "by_behavior_file": os.path.relpath(by_behavior, root),
+                    }
+                )
+
+    index_path = os.path.join(output_root, "figure_index.csv")
+    fieldnames = [
+        "alignment",
+        "scope",
+        "behavior",
+        "session",
+        "probe",
+        "xpos",
+        "original_file",
+        "by_session_file",
+        "by_behavior_file",
+    ]
+    with open(index_path, "w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(
+        f"Figure sorting complete: {len(rows)} source PNGs, "
+        f"{2 * len(rows)} copies, index={index_path}",
+        flush=True,
+    )
+    if missing_figure_folders:
+        print(
+            f"Note: {missing_figure_folders} alignment folders had no PNG "
+            "(for example, plotting may have been disabled).",
+            flush=True,
+        )
+    return {
+        "output_root": output_root,
+        "index_path": index_path,
+        "n_source_figures": len(rows),
+        "n_copies": 2 * len(rows),
+        "missing_figure_folders": missing_figure_folders,
+    }
+
+
 def run_behavior_aligned_kcsd_from_root(
     root: PathLike,
     *,
@@ -644,6 +810,7 @@ __all__: Sequence[str] = (
     "discover_behavior_aligned_pairs",
     "epoch_paired_with_onset_baseline",
     "load_paired_raw",
+    "organize_behavior_aligned_figures",
     "run_behavior_aligned_kcsd",
     "run_behavior_aligned_kcsd_from_root",
 )

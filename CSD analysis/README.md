@@ -201,3 +201,29 @@ per-dataset duration, and final success/failure count. All selected time frames
 for one probe column are solved in a single vectorized `KCSD1D` call; the
 previous frame-by-frame implementation produced the same values but was much
 slower for three-second epochs.
+
+### Sorted figure copies
+
+After kCSD finishes, run the final Section C notebook cell or call:
+
+```python
+from behavior_aligned_kcsd import organize_behavior_aligned_figures
+organize_behavior_aligned_figures(BEHAVIOR_ROOT)
+```
+
+This leaves source PNGs untouched and rebuilds:
+
+```text
+sorted_figures/
+  by_session/onset/
+  by_session/offset/
+  by_behavior/onset/
+  by_behavior/offset/
+  figure_index.csv
+```
+
+Session-first names use
+`session__scope__behavior__probe__xpos.png`; behavior-first names use
+`scope__behavior__session__probe__xpos.png`. Including scope and probe avoids
+ambiguity and collisions between individual behaviors, pooled categories,
+self/other play, play bouts, and multi-probe sessions.

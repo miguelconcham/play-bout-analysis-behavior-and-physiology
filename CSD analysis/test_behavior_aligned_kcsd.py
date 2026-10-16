@@ -1,3 +1,4 @@
+import csv
 import os
 import tempfile
 import unittest
@@ -9,6 +10,7 @@ from behavior_aligned_kcsd import (
     discover_behavior_aligned_pairs,
     epoch_paired_with_onset_baseline,
     load_paired_raw,
+    organize_behavior_aligned_figures,
     run_behavior_aligned_kcsd,
 )
 
@@ -199,6 +201,62 @@ class PairedBaselineTests(unittest.TestCase):
                     "behavior/Pounce/s1 | offset",
                 ],
             )
+
+    def test_figure_organizer_creates_both_sort_orders_and_index(self):
+        with tempfile.TemporaryDirectory() as root:
+            onset_folder = os.path.join(
+                root, "category", "play", "onset", "B1 D1", "probe2"
+            )
+            offset_folder = os.path.join(
+                root, "category", "play", "offset", "B1 D1", "probe2"
+            )
+            lfp = np.zeros((1, 2, 10), dtype=np.float32)
+            _write_leaf(onset_folder, lfp, event_ids=[1])
+            _write_leaf(offset_folder, lfp, event_ids=[1])
+            for folder in (onset_folder, offset_folder):
+                figure_dir = os.path.join(
+                    folder, "csd_1d_onset_baseline", "figures"
+                )
+                os.makedirs(figure_dir)
+                with open(os.path.join(figure_dir, "kcsd_x8.0.png"), "wb") as stream:
+                    stream.write(b"fake png")
+
+            result = organize_behavior_aligned_figures(root)
+
+            expected_session_name = (
+                "B1_D1__category__play__probe2__x8.0.png"
+            )
+            expected_behavior_name = (
+                "category__play__B1_D1__probe2__x8.0.png"
+            )
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        result["output_root"],
+                        "by_session",
+                        "onset",
+                        expected_session_name,
+                    )
+                )
+            )
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        result["output_root"],
+                        "by_behavior",
+                        "offset",
+                        expected_behavior_name,
+                    )
+                )
+            )
+            self.assertEqual(result["n_source_figures"], 2)
+            self.assertEqual(result["n_copies"], 4)
+            with open(result["index_path"], newline="", encoding="utf-8") as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["scope"], "category")
+            self.assertEqual(rows[0]["behavior"], "play")
+            self.assertEqual(rows[0]["probe"], "probe2")
 
 
 if __name__ == "__main__":
