@@ -1009,6 +1009,213 @@ def organize_behavior_aligned_figures(
     }
 
 
+def _load_and_average_saved_columns(
+    folder: PathLike,
+    *,
+    output_subdir: str,
+) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray]:
+    """Load existing per-column kCSD matrices; do not estimate kCSD again."""
+    output = os.path.join(os.fspath(folder), output_subdir)
+    if not os.path.isdir(output):
+        raise FileNotFoundError(f"Missing saved kCSD folder: {output}")
+
+    matches = []
+    for name in os.listdir(output):
+        match = re.fullmatch(r"csd_x(.+)\.npy", name)
+        if match:
+            try:
+                matches.append((float(match.group(1)), match.group(1)))
+            except ValueError:
+                continue
+    matches.sort()
+    if not matches:
+        raise FileNotFoundError(f"No saved csd_x*.npy matrices under {output}")
+
+    csd: Dict[float, np.ndarray] = {}
+    x_parts = []
+    y_parts = []
+    voltage_parts = []
+    voltage_time = None
+    for ux, tag in matches:
+        csd[ux] = np.load(os.path.join(output, f"csd_x{tag}.npy"))
+        y_column = np.load(os.path.join(output, f"y_x{tag}.npy")).reshape(-1)
+        voltage = np.load(os.path.join(output, f"V_x{tag}.npy"))
+        this_voltage_time = np.load(
+            os.path.join(output, f"time_voltage_x{tag}.npy")
+        ).reshape(-1)
+        if voltage_time is None:
+            voltage_time = this_voltage_time
+        elif not np.array_equal(voltage_time, this_voltage_time):
+            raise ValueError(f"Column voltage time axes differ under {output}")
+        if csd[ux].shape[0] != len(y_column) or voltage.shape[0] != len(y_column):
+            raise ValueError(f"Channel/depth mismatch for saved x={ux} under {output}")
+        x_parts.append(np.full(len(y_column), ux, dtype=float))
+        y_parts.append(y_column)
+        voltage_parts.append(voltage)
+
+    csd_time = np.load(os.path.join(output, "time.npy")).reshape(-1)
+    if any(matrix.shape[1] != len(csd_time) for matrix in csd.values()):
+        raise ValueError(f"Saved CSD time-axis mismatch under {output}")
+    assert voltage_time is not None
+    averaged = average_kcsd_columns(
+        csd,
+        np.concatenate(x_parts),
+        np.concatenate(y_parts),
+        np.concatenate(voltage_parts, axis=0),
+    )
+    return averaged, csd_time, voltage_time
+
+
+def _save_postprocessed_average(
+    folder: PathLike,
+    averaged: Dict[str, np.ndarray],
+    csd_time: np.ndarray,
+    voltage_time: np.ndarray,
+    *,
+    output_subdir: str,
+) -> None:
+    output = os.path.join(os.fspath(folder), output_subdir)
+    np.save(os.path.join(output, "csd_mean_columns.npy"), averaged["csd_mean"])
+    np.save(os.path.join(output, "csd_std_columns.npy"), averaged["csd_std"])
+    np.save(os.path.join(output, "y_mean_columns.npy"), averaged["y"])
+    np.save(
+        os.path.join(output, "n_columns_contributing.npy"),
+        averaged["n_columns_contributing"],
+    )
+    np.save(os.path.join(output, "V_mean_columns.npy"), averaged["voltage_mean"])
+    np.save(os.path.join(output, "x_center.npy"), averaged["x_center"])
+    np.save(os.path.join(output, "time_mean_columns.npy"), csd_time)
+    np.save(os.path.join(output, "time_voltage_mean_columns.npy"), voltage_time)
+
+
+def average_saved_behavior_kcsd_from_root(
+    root: PathLike,
+    *,
+    output_subdir: str = "csd_1d_onset_baseline",
+    save_plots: bool = True,
+    remove_column_plots: bool = True,
+    stop_on_error: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Average already-saved per-column matrices without rerunning kCSD.
+
+    This is the intended migration path for completed notebook runs.
+    """
+    root = os.path.abspath(os.fspath(root))
+    pairs = discover_behavior_aligned_pairs(root)
+    if not pairs:
+        raise FileNotFoundError(
+            f"No paired onset/offset CSD-ready folders found under {root}"
+        )
+
+    print(
+        f"Post-processing {len(pairs)} saved datasets; kCSD will NOT be rerun",
+        flush=True,
+    )
+    results: List[Dict[str, Any]] = []
+    for pair_number, pair in enumerate(pairs, start=1):
+        print(
+            f"\n[{pair_number}/{len(pairs)}] Averaging saved matrices: "
+            f"{pair['name']}",
+            flush=True,
+        )
+        try:
+            onset_average, onset_time, onset_voltage_time = (
+                _load_and_average_saved_columns(
+                    pair["onset_folder"], output_subdir=output_subdir
+                )
+            )
+            offset_average, offset_time, offset_voltage_time = (
+                _load_and_average_saved_columns(
+                    pair["offset_folder"], output_subdir=output_subdir
+                )
+            )
+            if not np.array_equal(onset_time, offset_time):
+                raise ValueError("Onset and offset saved CSD time axes differ")
+
+            _save_postprocessed_average(
+                pair["onset_folder"],
+                onset_average,
+                onset_time,
+                onset_voltage_time,
+                output_subdir=output_subdir,
+            )
+            _save_postprocessed_average(
+                pair["offset_folder"],
+                offset_average,
+                offset_time,
+                offset_voltage_time,
+                output_subdir=output_subdir,
+            )
+
+            shared_abs_max = max(
+                float(np.nanmax(np.abs(onset_average["csd_mean"]))),
+                float(np.nanmax(np.abs(offset_average["csd_mean"]))),
+            )
+            if not np.isfinite(shared_abs_max) or shared_abs_max <= 0:
+                shared_abs_max = 1.0
+            shared_clim = (-shared_abs_max, shared_abs_max)
+
+            removed = 0
+            if remove_column_plots:
+                removed = sum(
+                    _remove_individual_column_figures(folder, output_subdir)
+                    for folder in (pair["onset_folder"], pair["offset_folder"])
+                )
+            if save_plots:
+                selected_indices = np.arange(len(onset_time))
+                _plot_averaged_alignment(
+                    "onset",
+                    pair["name"],
+                    pair["onset_folder"],
+                    output_subdir,
+                    onset_average,
+                    onset_time,
+                    selected_indices,
+                    clim=shared_clim,
+                    show=False,
+                    save_plot=True,
+                )
+                _plot_averaged_alignment(
+                    "offset",
+                    pair["name"],
+                    pair["offset_folder"],
+                    output_subdir,
+                    offset_average,
+                    offset_time,
+                    selected_indices,
+                    clim=shared_clim,
+                    show=False,
+                    save_plot=True,
+                )
+            n_columns = int(onset_average["n_columns_contributing"][0])
+            print(
+                f"  Averaged {n_columns} columns; removed {removed} "
+                "individual-column PNGs",
+                flush=True,
+            )
+            results.append(
+                {
+                    "name": pair["name"],
+                    "n_columns": n_columns,
+                    "removed_column_plots": removed,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - batch post-processing continues
+            print(f"  ERROR: {exc}", flush=True)
+            if stop_on_error:
+                raise
+            results.append({"name": pair["name"], "error": str(exc)})
+
+    n_failed = sum("error" in result for result in results)
+    print(
+        f"\nSaved-matrix post-processing finished: "
+        f"{len(results) - n_failed} successful, {n_failed} failed",
+        flush=True,
+    )
+    return results
+
+
 def run_behavior_aligned_kcsd_from_root(
     root: PathLike,
     *,
@@ -1057,6 +1264,7 @@ def run_behavior_aligned_kcsd_from_root(
 __all__: Sequence[str] = (
     "BEHAVIOR_ALIGNED_CSD_DEFAULTS",
     "average_kcsd_columns",
+    "average_saved_behavior_kcsd_from_root",
     "discover_behavior_aligned_pairs",
     "epoch_paired_with_onset_baseline",
     "load_paired_raw",

@@ -8,6 +8,7 @@ import numpy as np
 
 from behavior_aligned_kcsd import (
     average_kcsd_columns,
+    average_saved_behavior_kcsd_from_root,
     discover_behavior_aligned_pairs,
     epoch_paired_with_onset_baseline,
     load_paired_raw,
@@ -295,6 +296,70 @@ class PairedBaselineTests(unittest.TestCase):
             self.assertEqual(rows[0]["scope"], "category")
             self.assertEqual(rows[0]["behavior"], "play")
             self.assertEqual(rows[0]["probe"], "probe2")
+
+    def test_saved_matrix_postprocessing_does_not_rerun_kcsd(self):
+        with tempfile.TemporaryDirectory() as root:
+            onset_folder = os.path.join(
+                root, "behavior", "Pounce", "onset", "session1"
+            )
+            offset_folder = os.path.join(
+                root, "behavior", "Pounce", "offset", "session1"
+            )
+            lfp = np.zeros((1, 4, 10), dtype=np.float32)
+            _write_leaf(onset_folder, lfp, event_ids=[1])
+            _write_leaf(offset_folder, lfp, event_ids=[1])
+
+            for folder, shift in ((onset_folder, 0.0), (offset_folder, 5.0)):
+                output = os.path.join(folder, "csd_1d_onset_baseline")
+                figure_dir = os.path.join(output, "figures")
+                os.makedirs(figure_dir)
+                np.save(
+                    os.path.join(output, "csd_x0.0.npy"),
+                    np.array([[0, 2], [20, 22]], dtype=float) + shift,
+                )
+                np.save(
+                    os.path.join(output, "csd_x1.0.npy"),
+                    np.array([[110, 112], [130, 132]], dtype=float) + shift,
+                )
+                np.save(os.path.join(output, "y_x0.0.npy"), [0, 20])
+                np.save(os.path.join(output, "y_x1.0.npy"), [10, 30])
+                np.save(
+                    os.path.join(output, "V_x0.0.npy"),
+                    np.array([[0, 2], [20, 22]], dtype=float) + shift,
+                )
+                np.save(
+                    os.path.join(output, "V_x1.0.npy"),
+                    np.array([[110, 112], [130, 132]], dtype=float) + shift,
+                )
+                np.save(os.path.join(output, "time_voltage_x0.0.npy"), [-1, 0])
+                np.save(os.path.join(output, "time_voltage_x1.0.npy"), [-1, 0])
+                np.save(os.path.join(output, "time.npy"), [-1, 0])
+                with open(
+                    os.path.join(figure_dir, "kcsd_x0.0.png"), "wb"
+                ) as stream:
+                    stream.write(b"legacy")
+                with open(
+                    os.path.join(figure_dir, "kcsd_x1.0.png"), "wb"
+                ) as stream:
+                    stream.write(b"legacy")
+
+            with patch(
+                "behavior_aligned_kcsd.compute_kcsd_1d_columns"
+            ) as compute:
+                results = average_saved_behavior_kcsd_from_root(root)
+            compute.assert_not_called()
+
+            self.assertNotIn("error", results[0])
+            for folder in (onset_folder, offset_folder):
+                output = os.path.join(folder, "csd_1d_onset_baseline")
+                np.testing.assert_allclose(
+                    np.load(os.path.join(output, "y_mean_columns.npy")),
+                    [10, 20],
+                )
+                self.assertEqual(
+                    os.listdir(os.path.join(output, "figures")),
+                    ["kcsd_xmean.png"],
+                )
 
 
 if __name__ == "__main__":

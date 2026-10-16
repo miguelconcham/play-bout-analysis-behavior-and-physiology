@@ -214,14 +214,21 @@ removed by default. Averaged outputs include `csd_mean_columns.npy`,
 
 ### Sorted figure copies
 
-After kCSD finishes, run the final Section C notebook cell or call:
+If per-column kCSD matrices are already saved, do **not** rerun kCSD. Run the
+final Section C notebook cell, which first averages the existing matrices:
 
 ```python
-from behavior_aligned_kcsd import organize_behavior_aligned_figures
+from behavior_aligned_kcsd import (
+    average_saved_behavior_kcsd_from_root,
+    organize_behavior_aligned_figures,
+)
+average_saved_behavior_kcsd_from_root(BEHAVIOR_ROOT)
 organize_behavior_aligned_figures(BEHAVIOR_ROOT)
 ```
 
-This leaves source PNGs untouched and rebuilds:
+The averaging function loads `csd_x*.npy`, writes the mean/std arrays and
+`kcsd_xmean.png`, and removes legacy individual-column PNGs. It never calls
+`KCSD1D`. The organizer then rebuilds:
 
 ```text
 sorted_figures/
