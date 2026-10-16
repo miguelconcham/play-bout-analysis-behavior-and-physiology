@@ -212,15 +212,18 @@ The referee-control pipeline is separate from the original Figure 3 files:
 ```
 Estimate_phase_locking_power_control.m
   → GENERATE_PHASE_LOCKING_POWER_CONTROL.m
-  → Analyze_phase_locking_power_control.m
+  → Analyze_play_ppc_amplitude_matched.m
 ```
 
-It retains phases and delta power for strict one-to-one pre-play/play windows,
-matches bouts in log-power units (default: absolute difference no greater than
-one within-channel SD of play power), recomputes PPC, equalizes spike counts,
-samples alternative bout combinations, and repeats PPC after excluding the
-lowest-amplitude 20% of delta samples. Hardcoded sensitivity parameters are at
-the top of the Analyze script. Results are saved under
+It divides play and duration-balanced pre-play periods into one-second epochs,
+matches epochs one-to-one by nearest channel-specific log-delta power within
+a prespecified caliper, and recomputes PPC over a fixed amount of time. If a neuron has too
+few spikes, the number of matched epochs is increased without relaxing power
+balance; neurons that remain underpowered are reported separately. A second
+fixed-duration random-sampling distribution supports a mixed model of PPC
+change from delta-power and spike-count changes. No PPC-significance shuffle is
+run. Hardcoded sensitivity parameters are at the top of the Analyze script.
+Results are saved under
 `Data/Analysis results/phase locking power control/`.
 
 ---

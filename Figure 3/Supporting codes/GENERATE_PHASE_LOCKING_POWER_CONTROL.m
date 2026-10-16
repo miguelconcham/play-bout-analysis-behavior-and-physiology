@@ -25,6 +25,9 @@ end
 if ~isfield(options, 'phase_method')
     options.phase_method = 'uniformized';
 end
+if ~isfield(options, 'epoch_duration')
+    options.epoch_duration = 1;
+end
 
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 synch_directory = fullfile(data_root, 'Synch data');
@@ -103,8 +106,19 @@ end
 lfp_time = (1:size(lfp,2)) / sr_lfp;
 [bout_table, rejected_bouts] = make_strict_pairs(play_bouts, ...
     lfp_time(1), lfp_time(end), options.min_bout_duration);
-if isempty(bout_table)
-    error('No valid one-to-one pre-play/play bout pairs for %s.', animal_code);
+
+% Preserve the original Figure 3 duration-balancing logic for the candidate
+% pools, then divide both conditions into complete fixed-duration epochs.
+% Equal numbers of these epochs are selected downstream, so analyzed time
+% is exactly equal even if clipping leaves different candidate-pool sizes.
+pre_play_periods = build_balanced_periods(play_bouts);
+pre_epoch_table = intervals_to_epochs(pre_play_periods, ...
+    options.epoch_duration, lfp_time(1), lfp_time(end));
+play_epoch_table = intervals_to_epochs(play_bouts, ...
+    options.epoch_duration, lfp_time(1), lfp_time(end));
+if isempty(pre_epoch_table) || isempty(play_epoch_table)
+    error('No complete %.3g-second pre-play/play epochs for %s.', ...
+        options.epoch_duration, animal_code);
 end
 
 channels_with_spikes = unique(cluster_info.ch)';
@@ -112,13 +126,17 @@ channel_data = repmat(struct( ...
     'channel', [], 'pre_power', [], 'play_power', [], ...
     'pre_power_db', [], 'play_power_db', [], ...
     'power_difference_db', [], 'amplitude_reference', [], ...
+    'pre_epoch_power_db', [], 'play_epoch_power_db', [], ...
     'phase_method', ''), numel(channels_with_spikes), 1);
 neurons = repmat(struct( ...
     'cluster_id', [], 'channel', [], 'area', '', ...
     'entire_preferred_angle', NaN, 'entire_ppc', NaN, ...
     'entire_ppc_p', NaN, 'pre_phase', {{}}, 'play_phase', {{}}, ...
     'pre_amplitude', {{}}, 'play_amplitude', {{}}, ...
-    'pre_spike_count', [], 'play_spike_count', []), height(cluster_info), 1);
+    'pre_spike_count', [], 'play_spike_count', [], ...
+    'pre_epoch_phase', {{}}, 'play_epoch_phase', {{}}, ...
+    'pre_epoch_spike_count', [], 'play_epoch_spike_count', []), ...
+    height(cluster_info), 1);
 
 for cc = 1:numel(channels_with_spikes)
     channel = channels_with_spikes(cc);
@@ -161,6 +179,10 @@ for cc = 1:numel(channels_with_spikes)
     channel_data(cc).play_power_db = 10*log10(play_power);
     channel_data(cc).power_difference_db = ...
         channel_data(cc).play_power_db - channel_data(cc).pre_power_db;
+    channel_data(cc).pre_epoch_power_db = epoch_power_db( ...
+        amplitude, lfp_time, pre_epoch_table);
+    channel_data(cc).play_epoch_power_db = epoch_power_db( ...
+        amplitude, lfp_time, play_epoch_table);
     channel_data(cc).amplitude_reference = single(prctile(amplitude, 0:100));
     channel_data(cc).phase_method = options.phase_method;
 
@@ -210,6 +232,13 @@ for cc = 1:numel(channels_with_spikes)
             neurons(nn).pre_spike_count(bb) = numel(pre_spikes);
             neurons(nn).play_spike_count(bb) = numel(play_spikes);
         end
+
+        [neurons(nn).pre_epoch_phase, ...
+            neurons(nn).pre_epoch_spike_count] = phases_by_epoch( ...
+            unit_spikes, lfp_time, phase, pre_epoch_table);
+        [neurons(nn).play_epoch_phase, ...
+            neurons(nn).play_epoch_spike_count] = phases_by_epoch( ...
+            unit_spikes, lfp_time, phase, play_epoch_table);
     end
 end
 
@@ -218,6 +247,8 @@ control_struct.session = animal_code;
 control_struct.cluster_info = cluster_info;
 control_struct.bout_table = bout_table;
 control_struct.rejected_bouts = rejected_bouts;
+control_struct.pre_epoch_table = pre_epoch_table;
+control_struct.play_epoch_table = play_epoch_table;
 control_struct.channel_data = channel_data;
 control_struct.neurons = neurons;
 control_struct.channel_map = channel_map;
@@ -311,4 +342,40 @@ if isempty(event_time)
 end
 phasor = interp1(time, exp(1i*phase), event_time, 'linear');
 phase_at_events = angle(phasor);
+end
+
+function epoch_table = intervals_to_epochs(intervals, epoch_duration, first_time, last_time)
+intervals = sortrows(double(intervals(:,1:2)), 1);
+rows = zeros(0,3);
+for ii = 1:size(intervals,1)
+    interval_start = max(intervals(ii,1), first_time);
+    interval_end = min(intervals(ii,2), last_time);
+    n_epochs = floor((interval_end-interval_start) / epoch_duration);
+    if n_epochs < 1, continue; end
+    starts = interval_start + (0:n_epochs-1)' * epoch_duration;
+    rows = [rows; [repmat(ii,n_epochs,1), starts, starts+epoch_duration]]; %#ok<AGROW>
+end
+epoch_table = array2table(rows, ...
+    'VariableNames', {'SourceInterval','Start','End'});
+end
+
+function power_db = epoch_power_db(amplitude, lfp_time, epoch_table)
+power_db = nan(height(epoch_table),1);
+for ee = 1:height(epoch_table)
+    mask = lfp_time >= epoch_table.Start(ee) & lfp_time < epoch_table.End(ee);
+    power_db(ee) = 10*log10(mean(amplitude(mask).^2, 'omitnan'));
+end
+end
+
+function [phase_cells, spike_count] = phases_by_epoch( ...
+    spikes, lfp_time, phase, epoch_table)
+phase_cells = cell(height(epoch_table),1);
+spike_count = zeros(height(epoch_table),1);
+for ee = 1:height(epoch_table)
+    epoch_spikes = spikes(spikes >= epoch_table.Start(ee) & ...
+        spikes < epoch_table.End(ee));
+    phase_cells{ee} = interpolate_circular_phase( ...
+        lfp_time, phase, epoch_spikes);
+    spike_count(ee) = numel(epoch_spikes);
+end
 end

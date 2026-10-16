@@ -21,9 +21,10 @@ Hd_delta = designfilt('bandpassfir', ...
     'Window', 'hamming');
 
 % Hardcoded analysis parameters. Keep these with the saved output.
-generator_options.n_rand = 1000;
+generator_options.n_rand = 0; % no PPC significance test for this control
 generator_options.min_bout_duration = 0.25;
 generator_options.phase_method = 'uniformized'; % matches Figure 3 pipeline
+generator_options.epoch_duration = 1;
 
 animal_list = dir(npx_raw_data);
 animal_list = animal_list([animal_list.isdir]);

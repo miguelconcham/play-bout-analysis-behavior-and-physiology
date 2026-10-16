@@ -1,6 +1,8 @@
 %% Analyze PPC changes after controlling for paired delta power
 % PPC is the metric called "PLI" in some Figure 3 notes. This script keeps
 % the PPC name because that is what compute_ppc_fast actually estimates.
+% Legacy bout-caliper analysis. For the focused referee control, use
+% Analyze_play_ppc_amplitude_matched.m (1-s power-stratified epochs).
 
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 saving_folder = fullfile(data_root, 'Analysis results', 'phase locking power control');
@@ -16,7 +18,7 @@ AMPLITUDE_PERCENTILE = 20;
 N_EQUAL_COUNT_DRAWS = 200;
 N_MONTE_CARLO = 1000;
 ENTIRE_RECORDING_ALPHA = 0.01;
-LOCKED_CELLS_ONLY = true; % matches the population used for Figure 3e
+LOCKED_CELLS_ONLY = false; % no PPC significance selection in this control
 RANDOM_SEED = 73491;
 rng(RANDOM_SEED, 'twister');
 
