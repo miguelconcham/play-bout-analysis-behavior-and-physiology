@@ -111,9 +111,9 @@ It calls `GENERATE_BEHAVIOR_ALIGNED_CSD_LFP` once per NPX session and writes:
 - `self_play` (implanted animal) and `other_play` (partners);
 - whole play bouts from `play_bout.m`.
 
-Only complete ±500 ms onset/offset pairs inside a `Partners session` are
+Only complete −1…+2 s onset/offset pairs inside a `Partners session` are
 exported. A pair is excluded when any genuine behavior annotation from either
-animal overlaps its −500…0 ms onset baseline. Exact duplicate annotations are
+animal overlaps its −1…0 s onset baseline. Exact duplicate annotations are
 removed. Neighboring behaviors and overlapping onset/offset windows are
 flagged in `events.mat`, while groups with fewer than five events are retained
 but marked as low-count.
@@ -131,7 +131,7 @@ raw, unfiltered LFP and deliberately keeps baseline preparation outside the
 general kCSD estimator:
 
 1. Match onset and offset rows using `event_ids.npy`.
-2. Measure one event- and channel-specific baseline from −500 to 0 ms
+2. Measure one event- and channel-specific baseline from −1000 to 0 ms
    relative to onset.
 3. Subtract that same baseline from both the onset and offset epochs.
 4. Average corrected events and pass the two evoked voltages independently
@@ -180,8 +180,14 @@ results = run_behavior_aligned_kcsd_from_root(
 )
 ```
 
-Defaults are raw LFP, no rereference, ±500 ms response epochs, onset baseline
-−500…0 ms, and the same kCSD parameters as the delta peak/trough pipeline.
+Notebook users can open `CSD_1D_general.ipynb` and run all cells under
+**Section C: Behavior/play-bout onset and offset (self-locating)**. That
+section searches both experimentFS hostnames and does not depend on Jupyter's
+current working directory.
+
+Defaults are raw LFP, no rereference, −1000…+2000 ms response epochs, onset
+baseline −1000…0 ms, and the same spatial kCSD parameters as the delta
+peak/trough pipeline.
 Outputs are written beneath each alignment leaf in
 `csd_1d_onset_baseline/`. `paired_baseline_metadata.json` records the baseline
 source/window and pairing method; `onset_baseline.npy` stores the actual

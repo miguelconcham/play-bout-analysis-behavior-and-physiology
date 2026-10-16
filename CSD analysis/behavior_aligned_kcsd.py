@@ -55,11 +55,11 @@ PathLike = Union[str, os.PathLike]
 
 BEHAVIOR_ALIGNED_CSD_DEFAULTS: Dict[str, Any] = {
     **DELTA_CSD_DEFAULTS,
-    "t_pre": 500.0,
-    "t_post": 500.0,
+    "t_pre": 1000.0,
+    "t_post": 2000.0,
     "baseline_correct": True,
     # This window is relative to behavior/play-bout onset, not offset.
-    "onset_baseline_window_ms": (-500.0, 0.0),
+    "onset_baseline_window_ms": (-1000.0, 0.0),
     "output_subdir": "csd_1d_onset_baseline",
     # Batch root runs should not retain every trial matrix in Python RAM.
     "retain_epochs": False,
@@ -155,7 +155,7 @@ def epoch_paired_with_onset_baseline(
     t_post: float,
     step_ms: float,
     *,
-    onset_baseline_window_ms: Tuple[float, float] = (-500.0, 0.0),
+    onset_baseline_window_ms: Tuple[float, float] = (-1000.0, 0.0),
     baseline_correct: bool = True,
     normalize: str = "none",
     retain_epochs: bool = True,
@@ -326,7 +326,8 @@ def run_behavior_aligned_kcsd(
     Run paired onset/offset kCSD using one shared pre-onset baseline.
 
     ``overrides`` accepts the general ``DatasetConfig`` fields plus
-    ``onset_baseline_window_ms``.  The default is -500…0 ms relative to onset.
+    ``onset_baseline_window_ms``. The default is -1000…0 ms relative to onset;
+    response epochs run from -1000 to +2000 ms.
     kCSD itself remains unchanged and receives the two prepared evoked LFPs.
     """
     valid_overrides = set(DatasetConfig.__dataclass_fields__) | {

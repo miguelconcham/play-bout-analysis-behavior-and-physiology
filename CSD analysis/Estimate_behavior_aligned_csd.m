@@ -36,9 +36,10 @@ end
 
 %% Fixed analysis parameters
 % The Python paired loader uses the same defaults. Both snippets are raw;
-% baseline subtraction is applied later using only the onset pre-window.
-t1 = -0.50;
-t2 =  0.50;
+% baseline subtraction uses the onset pre-window (-1 to 0 s) for both.
+% Each onset/offset snippet is 3 s long: -1 to +2 s (7500 samples at 2.5 kHz).
+t1 = -1.00;
+t2 =  2.00;
 recommended_min_events = 5;
 
 %% Optional session exclusions
