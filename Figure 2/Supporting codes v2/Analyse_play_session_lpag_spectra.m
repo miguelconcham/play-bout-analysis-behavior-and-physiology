@@ -108,6 +108,57 @@ for recording_n = 1:n_recordings
     end
 end
 
+%% Collect every fitted Gaussian peak in one analysis-ready table
+% FOOOF peak_params columns are center frequency, peak power, bandwidth.
+peak_method = cell(0, 1);
+peak_session_name = cell(0, 1);
+peak_channel_session_index = zeros(0, 1);
+peak_recording_index = zeros(0, 1);
+peak_session_index = zeros(0, 1);
+peak_lpag_channel = zeros(0, 1);
+peak_center_frequency = zeros(0, 1);
+peak_power = zeros(0, 1);
+peak_bandwidth = zeros(0, 1);
+
+for session_n = 1:n_sessions
+    method_names = {'Welch', 'Fourier'};
+    method_peaks = {welch_peak_parameters{session_n}, ...
+        fourier_peak_parameters{session_n}};
+
+    for method_n = 1:numel(method_names)
+        this_peaks = method_peaks{method_n};
+        n_peaks = size(this_peaks, 1);
+        if n_peaks == 0
+            continue
+        end
+
+        peak_method = [peak_method; ...
+            repmat(method_names(method_n), n_peaks, 1)]; %#ok<AGROW>
+        peak_session_name = [peak_session_name; ...
+            repmat(session_name(session_n), n_peaks, 1)]; %#ok<AGROW>
+        peak_channel_session_index = [peak_channel_session_index; ...
+            repmat(session_n, n_peaks, 1)]; %#ok<AGROW>
+        peak_recording_index = [peak_recording_index; ...
+            repmat(recording_index(session_n), n_peaks, 1)]; %#ok<AGROW>
+        peak_session_index = [peak_session_index; ...
+            repmat(session_index(session_n), n_peaks, 1)]; %#ok<AGROW>
+        peak_lpag_channel = [peak_lpag_channel; ...
+            repmat(lpag_channel(session_n), n_peaks, 1)]; %#ok<AGROW>
+        peak_center_frequency = [peak_center_frequency; ...
+            this_peaks(:, 1)]; %#ok<AGROW>
+        peak_power = [peak_power; this_peaks(:, 2)]; %#ok<AGROW>
+        peak_bandwidth = [peak_bandwidth; this_peaks(:, 3)]; %#ok<AGROW>
+    end
+end
+
+gaussian_peak_table = table(peak_method, peak_session_name, ...
+    peak_channel_session_index, peak_recording_index, ...
+    peak_session_index, peak_lpag_channel, peak_center_frequency, ...
+    peak_power, peak_bandwidth, ...
+    'VariableNames', {'Method', 'Session', 'ChannelSessionIndex', ...
+    'RecordingIndex', 'SessionIndex', 'LPAGChannel', ...
+    'CenterFrequency', 'PeakPower', 'Bandwidth'});
+
 %% Delta-band summaries (1-4 Hz)
 delta_index = frequency >= 1 & frequency <= 4;
 welch_delta_gaussian = mean( ...
@@ -188,6 +239,7 @@ analysis_results.frequency = frequency;
 analysis_results.delta_range = [1 4];
 analysis_results.channel_session_summary = session_summary;
 analysis_results.session_summary = group_session_summary;
+analysis_results.gaussian_peak_table = gaussian_peak_table;
 analysis_results.animal_names = animal_names;
 
 analysis_results.welch.log_power = welch_log_power;
@@ -323,6 +375,58 @@ title('Direct Fourier periodogram')
 legend({'Raw residual SEM', 'Raw residual', 'Gaussian fit'}, ...
     'Location', 'best')
 box off
+
+%% Scatter fitted Gaussian centers to reveal frequency clustering
+if ~isempty(gaussian_peak_table)
+    welch_peak_index = strcmp(gaussian_peak_table.Method, 'Welch');
+    fourier_peak_index = strcmp(gaussian_peak_table.Method, 'Fourier');
+    marker_size = 20 + 5 * gaussian_peak_table.Bandwidth;
+
+    figure('Name', 'Distribution of fitted Gaussian center frequencies');
+    subplot(1, 2, 1)
+    hold on
+    welch_jitter = linspace(-0.15, 0.15, sum(welch_peak_index)).';
+    fourier_jitter = linspace(-0.15, 0.15, sum(fourier_peak_index)).';
+    scatter(1 + welch_jitter, ...
+        gaussian_peak_table.CenterFrequency(welch_peak_index), ...
+        marker_size(welch_peak_index), ...
+        gaussian_peak_table.PeakPower(welch_peak_index), 'filled', ...
+        'MarkerFaceAlpha', 0.65);
+    scatter(2 + fourier_jitter, ...
+        gaussian_peak_table.CenterFrequency(fourier_peak_index), ...
+        marker_size(fourier_peak_index), ...
+        gaussian_peak_table.PeakPower(fourier_peak_index), 'filled', ...
+        'MarkerFaceAlpha', 0.65);
+    xlim([0.5 2.5])
+    xticks([1 2])
+    xticklabels({'Welch', 'Fourier'})
+    ylabel('Gaussian center frequency (Hz)')
+    title('Center-frequency distribution')
+    colorbar_handle = colorbar;
+    ylabel(colorbar_handle, 'Peak power above aperiodic fit')
+    grid on
+    box off
+
+    subplot(1, 2, 2)
+    hold on
+    scatter(gaussian_peak_table.CenterFrequency(welch_peak_index), ...
+        gaussian_peak_table.ChannelSessionIndex(welch_peak_index), ...
+        marker_size(welch_peak_index), [0.2 0.45 0.85], 'o', ...
+        'filled', 'MarkerFaceAlpha', 0.55);
+    scatter(gaussian_peak_table.CenterFrequency(fourier_peak_index), ...
+        gaussian_peak_table.ChannelSessionIndex(fourier_peak_index), ...
+        marker_size(fourier_peak_index), [0.85 0.3 0.55], '^', ...
+        'filled', 'MarkerFaceAlpha', 0.55);
+    xlim(frequency([1 end]))
+    xlabel('Gaussian center frequency (Hz)')
+    ylabel('Channel-session fit index')
+    title('Centers across sessions')
+    legend({'Welch', 'Fourier'}, 'Location', 'best')
+    grid on
+    box off
+else
+    warning('No fitted Gaussian peaks were available for scatter plots.');
+end
 
 %% Save analysis-ready summaries
 output_file = fullfile(saving_folder, ...
