@@ -68,6 +68,11 @@ for j = 1:numel(psth_structure)
 end
 
 %% Scatter and binned play-minus-non-play difference
+power_diff = mean_powers_play - mean_powers_noplay;
+[~, p_diff, ci_diff] = ttest(power_diff);
+h_diff = p_diff < 0.05;
+mean_diff = mean(power_diff, 1, 'omitnan');
+
 [~, ~, samples2plot] = histcounts(data_together(:, 1), -5:.1:10);
 
 figure
@@ -95,9 +100,85 @@ title(num2str([c, p]))
 axis xy
 
 subplot(1, 2, 2)
-plot(variable_grid, mean_powers_play - mean_powers_noplay, ':k');
 hold on
-plot(variable_grid, mean(mean_powers_play - mean_powers_noplay), 'k');
+no_nan = ~any(isnan(ci_diff), 1);
+fill([variable_grid(no_nan) fliplr(variable_grid(no_nan))], ...
+    [ci_diff(1, no_nan) fliplr(ci_diff(2, no_nan))], ...
+    'k', 'FaceAlpha', .25, 'EdgeColor', 'none')
+plot(variable_grid, power_diff, ':k');
+plot(variable_grid, mean_diff, 'k', 'LineWidth', 1.5);
+yline(0, 'k:');
+axis tight
+y_lim = ylim;
+
+% Significance bars in the top 10% of the axis (above the 90th percentile of ylim)
+fill_lo = y_lim(1) + 0.9 * (y_lim(2) - y_lim(1));
+fill_hi = y_lim(2);
+start_end = [find(diff([0 h_diff 0]) == 1)' (find(diff([0 h_diff 0]) == -1) - 1)'];
+for j = 1:size(start_end, 1)
+    fill(variable_grid(start_end(j, [1 2 2 1])), [fill_lo fill_lo fill_hi fill_hi], ...
+        'k', 'EdgeColor', 'none', 'FaceAlpha', .35)
+end
+xlabel('Relative speed (z)')
+ylabel('Play − non-play power (z)')
+title('Binned difference ± 95% CI (ttest); black bar: p < 0.05')
+
+%% Mixed linear model of the play−non-play difference (repeated measures by animal)
+% For each relative-speed bin: Difference ~ 1 + (1|Animal)
+animal_labels = categorical(animal_names(:, 1));
+n_bins = numel(variable_grid);
+
+beta_est = nan(n_bins, 1);
+SE = nan(n_bins, 1);
+CI_low = nan(n_bins, 1);
+CI_high = nan(n_bins, 1);
+pValue = nan(n_bins, 1);
+
+for bin_n = 1:n_bins
+    y = power_diff(:, bin_n);
+    keep = ~isnan(y);
+    if nnz(keep) < 3 || numel(unique(animal_labels(keep))) < 2
+        continue
+    end
+
+    tbl = table(y(keep), animal_labels(keep), 'VariableNames', {'Difference', 'Animal'});
+    lme_diff = fitlme(tbl, 'Difference ~ 1 + (1|Animal)');
+
+    coef = lme_diff.Coefficients;
+    ci_lme = coefCI(lme_diff, 'Alpha', 0.05);
+
+    beta_est(bin_n) = coef.Estimate(1);
+    SE(bin_n) = coef.SE(1);
+    CI_low(bin_n) = ci_lme(1, 1);
+    CI_high(bin_n) = ci_lme(1, 2);
+    pValue(bin_n) = coef.pValue(1);
+end
+
+sig_bins = find(pValue < 0.05);
+fprintf('Speed bins with LME intercept p < 0.05: %d / %d\n', numel(sig_bins), n_bins);
+
+figure
+hold on
+no_nan_lme = ~isnan(CI_low) & ~isnan(CI_high);
+fill([variable_grid(no_nan_lme) fliplr(variable_grid(no_nan_lme))], ...
+    [CI_low(no_nan_lme)' fliplr(CI_high(no_nan_lme)')], ...
+    'k', 'FaceAlpha', .25, 'EdgeColor', 'none')
+plot(variable_grid, beta_est, 'k', 'LineWidth', 1.5)
+yline(0, 'k:');
+axis tight
+y_lim = ylim;
+fill_lo = y_lim(1) + 0.9 * (y_lim(2) - y_lim(1));
+fill_hi = y_lim(2);
+h_lme = pValue(:)' < 0.05;
+h_lme(isnan(pValue(:)')) = false;
+start_end = [find(diff([0 h_lme 0]) == 1)' (find(diff([0 h_lme 0]) == -1) - 1)'];
+for j = 1:size(start_end, 1)
+    fill(variable_grid(start_end(j, [1 2 2 1])), [fill_lo fill_lo fill_hi fill_hi], ...
+        'k', 'EdgeColor', 'none', 'FaceAlpha', .35)
+end
+xlabel('Relative speed (z)')
+ylabel('LME intercept (play − non-play)')
+title('Mixed model Difference ~ 1 + (1|Animal); black bar: p < 0.05')
 
 %% Full-dataset correlation
 selection_index = ~any(isnan(data_together(:, :)), 2) & data_together(:, 1) < 1 & abs(data_together(:, 2)) < 3;
