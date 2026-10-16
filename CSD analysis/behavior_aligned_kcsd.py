@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -312,6 +313,8 @@ def _plot_alignment(
             save_path=save_path,
             show=show and ux == first_x,
         )
+        if save_path is not None:
+            print(f"    Saved figure: {save_path}", flush=True)
 
 
 def run_behavior_aligned_kcsd(
@@ -353,6 +356,11 @@ def run_behavior_aligned_kcsd(
             "onset_baseline_window_ms must be (start, end) with start < end <= 0"
         )
 
+    resolved_name = name or os.path.relpath(
+        os.fspath(onset_folder), os.path.commonpath((onset_folder, offset_folder))
+    )
+    started = time.perf_counter()
+    print(f"  Loading paired raw LFP: {resolved_name}", flush=True)
     paired = load_paired_raw(onset_folder, offset_folder)
     if stop_on_missing_event_ids and paired["pairing"] != "event_ids":
         raise ValueError(
@@ -369,6 +377,11 @@ def run_behavior_aligned_kcsd(
         cfg.fs = float(paired["fs_loaded"])
 
     n_events = paired["onset"].shape[0]
+    print(
+        f"  Preparing {n_events} paired events "
+        f"({cfg.t_pre:g} ms before, {cfg.t_post:g} ms after)",
+        flush=True,
+    )
     onset, x, y, channel_meta = prepare_channels(
         paired["onset"], paired["x"], paired["y"], cfg
     )
@@ -397,9 +410,10 @@ def run_behavior_aligned_kcsd(
         retain_epochs=retain_epochs,
         event_chunk_size=event_chunk_size,
     )
-
-    resolved_name = name or os.path.relpath(
-        os.fspath(onset_folder), os.path.commonpath((onset_folder, offset_folder))
+    print(
+        f"  Evoked LFP ready: channels={len(y)}, "
+        f"CSD frames={len(prepared['time_indices'])}",
+        flush=True,
     )
     metadata: Dict[str, Any] = {
         "name": resolved_name,
@@ -444,20 +458,33 @@ def run_behavior_aligned_kcsd(
             "smooth_sigma_time": cfg.smooth_sigma_time,
             "sort_by_depth": cfg.sort_by_depth,
         }
+        print("  Computing onset kCSD", flush=True)
         onset_csd = compute_kcsd_1d_columns(
-            prepared["onset_evoked"], x, y, prepared["time_indices"], **csd_kwargs
+            prepared["onset_evoked"],
+            x,
+            y,
+            prepared["time_indices"],
+            progress_label="onset",
+            **csd_kwargs,
         )
+        print("  Computing offset kCSD (same onset baseline)", flush=True)
         offset_csd = compute_kcsd_1d_columns(
-            prepared["offset_evoked"], x, y, prepared["time_indices"], **csd_kwargs
+            prepared["offset_evoked"],
+            x,
+            y,
+            prepared["time_indices"],
+            progress_label="offset",
+            **csd_kwargs,
         )
         result["onset_csd_kcsd"] = onset_csd
         result["offset_csd_kcsd"] = offset_csd
 
         if cfg.save:
-            for folder, csd, evoked in (
-                (onset_folder, onset_csd, prepared["onset_evoked"]),
-                (offset_folder, offset_csd, prepared["offset_evoked"]),
+            for alignment, folder, csd, evoked in (
+                ("onset", onset_folder, onset_csd, prepared["onset_evoked"]),
+                ("offset", offset_folder, offset_csd, prepared["offset_evoked"]),
             ):
+                print(f"  Saving {alignment} matrices: {folder}", flush=True)
                 save_kcsd_outputs(
                     folder,
                     csd,
@@ -525,6 +552,10 @@ def run_behavior_aligned_kcsd(
                 prepared["onset_baseline"],
             )
 
+    print(
+        f"  Finished {resolved_name} in {time.perf_counter() - started:.1f} s",
+        flush=True,
+    )
     return result
 
 
@@ -573,8 +604,15 @@ def run_behavior_aligned_kcsd_from_root(
             f"No paired onset/offset CSD-ready folders found under {root}"
         )
 
+    print(f"Found {len(pairs)} paired datasets under {root}", flush=True)
+    batch_started = time.perf_counter()
     results: List[Dict[str, Any]] = []
-    for pair in pairs:
+    for pair_number, pair in enumerate(pairs, start=1):
+        pair_started = time.perf_counter()
+        print(
+            f"\n[{pair_number}/{len(pairs)}] Processing {pair['name']}",
+            flush=True,
+        )
         try:
             results.append(
                 run_behavior_aligned_kcsd(
@@ -585,9 +623,16 @@ def run_behavior_aligned_kcsd_from_root(
                 )
             )
         except Exception as exc:  # noqa: BLE001 - batch processing should continue
+            print(f"  ERROR after {time.perf_counter() - pair_started:.1f} s: {exc}", flush=True)
             if stop_on_error:
                 raise
             results.append({"name": pair["name"], "error": str(exc), **pair})
+    n_failed = sum("error" in result for result in results)
+    print(
+        f"\nBatch finished in {time.perf_counter() - batch_started:.1f} s: "
+        f"{len(results) - n_failed} successful, {n_failed} failed",
+        flush=True,
+    )
     return results
 
 

@@ -194,3 +194,10 @@ source/window and pairing method; `onset_baseline.npy` stores the actual
 event-by-channel baseline values. Trial matrices are memory-mapped and averaged
 in event chunks by default; pass `retain_epochs=True` only when trial-level
 arrays must remain in the returned Python object.
+
+During a batch run, the Python pipeline reports the current dataset number,
+event count, onset/offset stage, probe column, matrix destination, figure path,
+per-dataset duration, and final success/failure count. All selected time frames
+for one probe column are solved in a single vectorized `KCSD1D` call; the
+previous frame-by-frame implementation produced the same values but was much
+slower for three-second epochs.
