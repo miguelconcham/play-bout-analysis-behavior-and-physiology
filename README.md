@@ -316,12 +316,12 @@ Calls whose onset falls within `stim_blank` (default 100 ms) after StimEnd are d
 | Panel | What it is | Script | Section |
 |-------|------------|--------|---------|
 | a | HMM schematic | — (illustration) | — |
-| d | Behaviors aligned to high-activity onset/offset | `Figure 1/Figure 1 HMM.m` | `%% Fig S2D` |
-| e | High-activity state raster with play overlay | `Figure 1/Figure 1 HMM.m` | `%% Fig S2E` |
-| f | Call rate, engaged vs unengaged states | `Figure 1/Figure 1 HMM.m` | `%% Fig S2F` |
-| g | Engaged vs unengaged classification rates | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` | `%% 5` (`confusion_matrix` from HMM state vs play) |
-| h | Play probability around engaged vs unengaged states | `Figure 1/Figure 1 HMM.m` | `%% Fig S2H` |
-| i | Second engagement peak vs shuffled sequences | `Figure 1/Figure 1 HMM.m` | `%% Fig S2I` |
+| b | Behaviors aligned to high-activity onset/offset | `Figure 1/Figure 1 HMM.m` | `%% Fig S2D` |
+| c | High-activity state raster with play overlay | `Figure 1/Figure 1 HMM.m` | `%% Fig S2E` |
+| d | Call rate, engaged vs unengaged states | `Figure 1/Figure 1 HMM.m` | `%% Fig S2F` |
+| e | Engaged vs unengaged classification rates | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` | `%% 5` (`confusion_matrix` from HMM state vs play) |
+| f | Play probability around engaged vs unengaged states | `Figure 1/Figure 1 HMM.m` | `%% Fig S2H` |
+| g | Second engagement peak vs shuffled sequences | `Figure 1/Figure 1 HMM.m` | `%% Fig S2I` |
 
 State files are produced by `Figure 1/HMM modeling/python hmm estimate.txt`.
 
