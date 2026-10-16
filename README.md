@@ -217,7 +217,8 @@ Estimate_phase_locking_power_control.m
 
 It divides play and duration-balanced pre-play periods into one-second epochs,
 matches epochs one-to-one by nearest channel-specific log-delta power within
-a prespecified caliper, and recomputes PPC over a fixed amount of time. If a neuron has too
+a prespecified caliper, and initially targets 75% of the available play
+epochs with exactly equal pre-play time. If a neuron has too
 few spikes, the number of matched epochs is increased without relaxing power
 balance; neurons that remain underpowered are reported separately. A second
 fixed-duration random-sampling distribution supports a mixed model of PPC
