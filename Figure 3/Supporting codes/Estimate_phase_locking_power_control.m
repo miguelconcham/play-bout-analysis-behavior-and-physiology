@@ -42,10 +42,17 @@ for fn = 1:numel(animal_list)
     try
         this_control = GENERATE_PHASE_LOCKING_POWER_CONTROL( ...
             fullfile(npx_raw_data, animal_name), Hd_delta, generator_options);
-        power_control_struct(end+1) = this_control; %#ok<SAGROW>
+        % Save before aggregation. struct([]) has no fields, so the first
+        % subscripted assignment would otherwise discard a completed session.
         save(fullfile(saving_folder, ...
             [animal_name, '_phase_locking_power_control.mat']), ...
             'this_control', '-v7.3');
+        if isempty(power_control_struct)
+            power_control_struct = this_control;
+        else
+            power_control_struct(end+1) = orderfields( ...
+                this_control, power_control_struct); %#ok<SAGROW>
+        end
     catch exception
         warning('Power-control analysis failed for %s: %s', ...
             animal_name, exception.message);
