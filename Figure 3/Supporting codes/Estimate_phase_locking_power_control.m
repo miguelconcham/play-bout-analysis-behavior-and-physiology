@@ -24,6 +24,7 @@ Hd_delta = designfilt('bandpassfir', ...
 generator_options.min_bout_duration = 0.25;
 generator_options.phase_method = 'uniformized'; % matches Figure 3 pipeline
 generator_options.epoch_duration = 1;
+RECOMPUTE_EXISTING = false;
 
 animal_list = dir(npx_raw_data);
 animal_list = animal_list([animal_list.isdir]);
@@ -31,22 +32,30 @@ animal_list = animal_list(~ismember({animal_list.name}, {'.','..'}));
 animal2exclude = {''};
 animal_list = animal_list(~ismember({animal_list.name}, animal2exclude));
 
+% This run stores only sessions processed now. Existing per-session files and
+% phase_locking_power_control_all_sessions.mat are left unchanged.
 power_control_struct = struct([]);
 failed_sessions = table('Size', [0 2], ...
     'VariableTypes', {'string','string'}, ...
     'VariableNames', {'Animal','Message'});
+skipped_sessions = strings(0,1);
 
 for fn = 1:numel(animal_list)
     animal_name = animal_list(fn).name;
+    session_file = fullfile(saving_folder, ...
+        [animal_name, '_phase_locking_power_control.mat']);
     fprintf('\nSession %d/%d: %s\n', fn, numel(animal_list), animal_name);
+    if ~RECOMPUTE_EXISTING && isfile(session_file)
+        fprintf('Keeping existing file: %s\n', session_file);
+        skipped_sessions(end+1,1) = string(animal_name); %#ok<SAGROW>
+        continue
+    end
     try
         this_control = GENERATE_PHASE_LOCKING_POWER_CONTROL( ...
             fullfile(npx_raw_data, animal_name), Hd_delta, generator_options);
         % Save before aggregation. struct([]) has no fields, so the first
         % subscripted assignment would otherwise discard a completed session.
-        save(fullfile(saving_folder, ...
-            [animal_name, '_phase_locking_power_control.mat']), ...
-            'this_control', '-v7.3');
+        save(session_file, 'this_control', '-v7.3');
         if isempty(power_control_struct)
             power_control_struct = this_control;
         else
@@ -61,8 +70,11 @@ for fn = 1:numel(animal_list)
     end
 end
 
-save(fullfile(saving_folder, 'phase_locking_power_control_all_sessions.mat'), ...
-    'power_control_struct', 'failed_sessions', 'generator_options', ...
-    'delta_band', '-v7.3');
-fprintf('Saved %d sessions; %d failed.\n', ...
-    numel(power_control_struct), height(failed_sessions));
+retry_file = fullfile(saving_folder, ...
+    'phase_locking_power_control_retry_sessions.mat');
+save(retry_file, 'power_control_struct', 'failed_sessions', ...
+    'skipped_sessions', 'generator_options', 'delta_band', '-v7.3');
+fprintf(['Kept %d existing sessions; added %d; %d failed.\n' ...
+    'Original combined file was not modified.\nNew sessions: %s\n'], ...
+    numel(skipped_sessions), numel(power_control_struct), ...
+    height(failed_sessions), retry_file);
