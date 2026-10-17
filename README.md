@@ -205,6 +205,35 @@ The original (pre-v2) Figure 2 pipeline lives outside this repository, in the pa
 
 `Figure 3/Supporting codes/` holds GENERATE / Estimate / ANALYZE pipelines that build the `.mat` files those plots load. `Estiamte_activation_index_and_other_variables.m` section 8 writes the example-plot checkpoint used by `SuppFig4 ActivationIndex Example.m`.
 
+### Figure 3e delta-power control
+
+The referee-control pipeline is separate from the original Figure 3 files:
+
+```
+Estimate_phase_locking_power_control.m
+  → GENERATE_PHASE_LOCKING_POWER_CONTROL.m
+  → Analyze_play_ppc_amplitude_matched.m
+```
+
+It divides play and duration-balanced pre-play periods into one-second epochs,
+matches epochs one-to-one by nearest channel-specific log-delta power within
+a prespecified caliper, and initially targets 75% of the available play
+epochs with exactly equal pre-play time. If a neuron has too
+few spikes, the number of matched epochs is increased without relaxing power
+balance; neurons that remain underpowered are reported separately. For the
+null distribution, pre-play and play epochs are merged, their labels are
+removed, and equal pseudo-pre and pseudo-post groups are randomly assigned.
+Label-swapped complements make this null symmetric. It supports a model of PPC
+change from accidental delta-power and spike-count differences when there is
+no true condition effect. No PPC-significance shuffle from the original
+pipeline is run. Instead, trough-locked cells are selected from the existing
+Figure 3 labels (`EntireSession.PPCPval < 0.01` and preferred angle outside
+±π/2). The overall result averages residual PPC change within animal, reports
+an animal-bootstrap confidence interval, and uses a one-sided animal-level
+sign-flip test. Hardcoded sensitivity parameters are at the top of the Analyze script.
+Results are saved under
+`Data/Analysis results/phase locking power control/`.
+
 ---
 
 ## Figure 4 and Extended Data Fig. 6
