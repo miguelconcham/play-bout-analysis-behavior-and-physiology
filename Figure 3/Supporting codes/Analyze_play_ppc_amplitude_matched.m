@@ -5,11 +5,10 @@
 % Outputs:
 %   matched_summary       one row per neuron
 %   matched_draw_table    repeated amplitude-matched arrangements
-%   null_draw_table       play-free power-tail arrangements
-%   neuron_model_table    reliable null rows used to fit the model
+%   null_draw_table       play-free pre-play partitions under no condition
 %   ppc_power_spike_model PPC change ~ power change + spike-count terms
 
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 saving_folder = fullfile(data_root, 'Analysis results', ...
     'phase locking power control');
 session_files = dir(fullfile(saving_folder, '*_phase_locking_power_control.mat'));
@@ -20,11 +19,6 @@ power_control_struct = struct([]);
 for ii = 1:numel(session_files)
     loaded_session = load(fullfile(session_files(ii).folder, ...
         session_files(ii).name), 'this_control');
-    if ~isfield(loaded_session.this_control, 'nonplay_epoch_table')
-        error(['%s does not contain the session non-play pool. ' ...
-            'Re-run Estimate_phase_locking_power_control.m.'], ...
-            session_files(ii).name);
-    end
     if isempty(power_control_struct)
         power_control_struct = loaded_session.this_control;
     else
@@ -41,8 +35,6 @@ EPOCH_SECONDS = 1;
 POWER_CALIPER_SD = 0.25;
 TARGET_PLAY_FRACTION = 0.75;
 N_DRAWS = 500;
-N_TAIL_WIDTHS = 3;
-TAIL_WIDTH_FACTOR = 2;
 MIN_SPIKES_PER_CONDITION = 20;
 MIN_RELIABLE_MATCHED_DRAWS = 50;
 MAX_ABS_POWER_SMD = 0.10;
@@ -66,10 +58,10 @@ null_blocks = cell(total_neurons,1);
 
 for ss = 1:numel(power_control_struct)
     session_data = power_control_struct(ss);
-    if ~isfield(session_data, 'nonplay_epoch_table') || ...
-            ~isfield(session_data.neurons, 'nonplay_epoch_phase')
-        error(['Saved structures do not contain session-wide non-play epochs. ' ...
-            'Re-run Estimate_phase_locking_power_control.m; older files are rebuilt automatically.']);
+    if ~isfield(session_data, 'pre_epoch_table') || ...
+            ~isfield(session_data.neurons, 'pre_epoch_phase')
+        error(['Saved structures do not contain one-second epochs. Re-run ' ...
+            'Estimate_phase_locking_power_control.m with the updated GENERATE function.']);
     end
     if abs(session_data.options.epoch_duration-EPOCH_SECONDS) > eps
         error('Saved epoch duration is %.3g s, but analysis expects %.3g s.', ...
@@ -83,7 +75,6 @@ for ss = 1:numel(power_control_struct)
         channel = channel_data.channel;
         pre_power = channel_data.pre_epoch_power_db(:);
         play_power = channel_data.play_epoch_power_db(:);
-        nonplay_power = channel_data.nonplay_epoch_power_db(:);
         [power_pairs_index, power_caliper_db] = nearest_power_pairs( ...
             pre_power, play_power, POWER_CALIPER_SD);
         matching_capacity = size(power_pairs_index,1);
@@ -122,13 +113,12 @@ for ss = 1:numel(power_control_struct)
                 continue
             end
 
-            % Both null groups come from session non-play epochs. Half the
-            % pool is the largest group size that keeps those groups disjoint.
-            valid_nonplay = find(isfinite(nonplay_power));
-            nonplay_null_capacity = floor(numel(valid_nonplay)/2);
+            % Both null groups come from pre-play epochs, so each can contain
+            % at most half of that pool without reusing the same time.
+            nonplay_null_capacity = floor(numel(valid_pre)/2);
             if nonplay_null_capacity < 2
                 excluded_rows(end+1,:) = [identity, ... %#ok<SAGROW>
-                    {"Fewer than four session non-play epochs for a play-free null", ...
+                    {"Fewer than four pre-play epochs for a play-free null", ...
                     matching_capacity, 0}];
                 continue
             end
@@ -182,12 +172,11 @@ for ss = 1:numel(power_control_struct)
                 continue
             end
 
-            [null_pre_index, null_post_index, pool_width] = ...
-                power_contrast_draws(valid_nonplay, nonplay_power, ...
-                target_epochs, N_DRAWS, N_TAIL_WIDTHS, TAIL_WIDTH_FACTOR);
+            [null_pre_index, null_post_index] = merged_null_draws( ...
+                valid_pre, target_epochs, N_DRAWS);
             null_metrics = evaluate_null_draws(neuron, ...
-                null_pre_index, null_post_index, nonplay_power);
-            null_metrics(:,end+1) = pool_width;
+                null_pre_index, null_post_index, ...
+                pre_power, play_power);
 
             if size(reliable_values,1) > 1
                 ppc_draw_percentiles = prctile( ...
@@ -259,8 +248,7 @@ matched_draw_table = array2table(vertcat(matched_blocks{:}), ...
 null_draw_names = {'NeuronRow','Draw','EpochCount', ...
     'PseudoPrePowerDB','PseudoPostPowerDB','PowerDifferenceDB','PowerSMD', ...
     'PseudoPreSpikeCount','PseudoPostSpikeCount','SpikeCountDifference', ...
-    'MeanSpikeCount','PseudoPrePPC','PseudoPostPPC','PPCDifference', ...
-    'Reliable','PowerPoolWidth'};
+    'MeanSpikeCount','PseudoPrePPC','PseudoPostPPC','PPCDifference','Reliable'};
 null_draw_table = array2table(vertcat(null_blocks{:}), ...
     'VariableNames', null_draw_names);
 
@@ -274,28 +262,17 @@ else
         'VariableNames', excluded_names);
 end
 
-%% Model PPC changes under the play-free power-contrast null
+%% Model PPC changes under the play-free no-condition null
 % MeanSpikeCount is included because PPC variance depends on the available
 % spike count; SpikeCountDifference captures condition imbalance requested
 % in the proposed model. EpochCount records adaptive duration. Both
-% pseudo-conditions are sampled from session non-play epochs, with one group
-% drawn from a low-power tail and the other from the corresponding high-power
-% tail. Three widths stay within twice K, and draws are split equally across
-% widths that can supply distinct groups. Because draws reuse epochs, use
-% this model for conditional prediction;
+% pseudo-conditions are sampled from pre-play epochs only, so neither group
+% contains play and their play proportion cannot explain PPC differences.
+% Because draws reuse epochs, use this model for conditional prediction;
 % its nominal coefficient p-values are not independent-resample inference.
 ppc_power_spike_model = [];
 model_rows = null_draw_table.Reliable == 1;
 model_table = null_draw_table(model_rows,:);
-neuron_model_table = model_table;
-if ~isempty(model_table)
-    neuron_model_table.Animal = matched_summary.Animal(model_table.NeuronRow);
-    neuron_model_table.Session = matched_summary.Session(model_table.NeuronRow);
-    neuron_model_table.NeuronKey = string(matched_summary.NeuronKey(model_table.NeuronRow));
-    neuron_model_table.ClusterID = matched_summary.ClusterID(model_table.NeuronRow);
-    neuron_model_table.Area = matched_summary.Area(model_table.NeuronRow);
-    neuron_model_table.Channel = matched_summary.Channel(model_table.NeuronRow);
-end
 if height(model_table) >= 100
     row_index = model_table.NeuronRow;
     model_table.Animal = categorical(matched_summary.Animal(row_index));
@@ -408,15 +385,13 @@ plot(matched_summary.PowerDifferenceDB, ...
     matched_summary.PPCDifference, 'r.')
 xlabel('\Delta delta power (dB)')
 ylabel('\Delta PPC')
-legend({'Non-play power-contrast null','Amplitude-matched estimate'})
+legend({'Merged-pool null arrangements','Amplitude-matched estimate'})
 
 analysis_parameters = struct( ...
     'epoch_seconds', EPOCH_SECONDS, ...
     'power_caliper_sd', POWER_CALIPER_SD, ...
     'target_play_fraction', TARGET_PLAY_FRACTION, ...
     'n_draws', N_DRAWS, ...
-    'n_tail_widths', N_TAIL_WIDTHS, ...
-    'tail_width_factor', TAIL_WIDTH_FACTOR, ...
     'min_spikes_per_condition', MIN_SPIKES_PER_CONDITION, ...
     'min_reliable_matched_draws', MIN_RELIABLE_MATCHED_DRAWS, ...
     'max_abs_power_smd', MAX_ABS_POWER_SMD, ...
@@ -427,7 +402,7 @@ analysis_parameters = struct( ...
 save(fullfile(saving_folder, ...
     'play_ppc_amplitude_matched_analysis.mat'), ...
     'matched_summary', 'matched_draw_table', 'null_draw_table', ...
-    'neuron_model_table', 'excluded_neurons', 'ppc_power_spike_model', ...
+    'excluded_neurons', 'ppc_power_spike_model', ...
     'animal_summary', 'overall_result', 'analysis_parameters', '-v7.3');
 
 %% Local functions
@@ -464,135 +439,65 @@ pre_index = reshape(pairs(selected_sets,1), size(selected_sets));
 play_index = reshape(pairs(selected_sets,2), size(selected_sets));
 end
 
-function [pseudo_low, pseudo_high, pool_width] = power_contrast_draws( ...
-    epoch_index, power_db, k, n_requested, n_widths, width_factor)
-finite = isfinite(power_db(epoch_index));
-epoch_index = epoch_index(finite);
-[~, order] = sort(power_db(epoch_index), 'ascend');
-sorted_index = epoch_index(order);
-sorted_power = power_db(sorted_index);
-n_epochs = numel(sorted_index);
-half = floor(n_epochs/2);
-if k > half
-    error('Cannot form two disjoint groups of %d from %d epochs.', k, n_epochs);
+function [pseudo_pre, pseudo_post] = merged_null_draws( ...
+    valid_merged, k, n_requested)
+n_epochs = numel(valid_merged);
+if 2*k > n_epochs
+    error('The merged epoch pool cannot supply two groups of %d epochs.', k);
 end
 
-% Keep every pool inside the extreme tails. The widest pool is twice K,
-% or half the epochs when the session is shorter than that. Widths are
-% placed so the low-versus-high power gap moves in equal steps. If that
-% gap does not change, the widths are spaced by pool size so the sampled
-% epochs, and therefore the spike counts, can still differ. Each width that
-% can supply distinct groups receives the same number of draws.
-widest = min(half, max(k, round(width_factor * k)));
-sorted_power = sorted_power(:);
-candidate = (k:widest).';
-low_sum = cumsum(sorted_power);
-high_sum = cumsum(sorted_power(end:-1:1));
-power_gap = high_sum(candidate) ./ candidate - low_sum(candidate) ./ candidate;
-gap_targets = linspace(power_gap(1), power_gap(end), n_widths);
-widths = zeros(1, n_widths);
-for ii = 1:n_widths
-    [~, pick] = min(abs(power_gap - gap_targets(ii)));
-    widths(ii) = candidate(pick);
-end
-widths = unique(widths, 'stable');
-gap_span = power_gap(1) - power_gap(end);
-if ~(gap_span > max(1e-6, eps(power_gap(1))))
-    widths = unique(round(linspace(k, widest, n_widths)), 'stable');
-end
-n_base = max(1, floor(n_requested/2));
-quotas = equal_width_quotas(widths, k, n_base);
+% Number of oriented assignments: choose K pseudo-pre epochs, then K
+% pseudo-post epochs from those remaining.
+log_assignment_count = gammaln(n_epochs+1) - gammaln(k+1) - ...
+    gammaln(n_epochs-k+1) + gammaln(n_epochs-k+1) - ...
+    gammaln(k+1) - gammaln(n_epochs-2*k+1);
 
-low_rows = zeros(0,k);
-high_rows = zeros(0,k);
-width_rows = zeros(0,1);
-for ii = 1:numel(widths)
-    if quotas(ii) < 1
-        continue
+if log_assignment_count <= log(n_requested)
+    pre_combinations = nchoosek(1:n_epochs, k);
+    local_pre = zeros(0,k);
+    local_post = zeros(0,k);
+    for rr = 1:size(pre_combinations,1)
+        remaining = setdiff(1:n_epochs, pre_combinations(rr,:));
+        post_combinations = nchoosek(remaining, k);
+        local_pre = [local_pre; repmat(pre_combinations(rr,:), ...
+            size(post_combinations,1),1)]; %#ok<AGROW>
+        local_post = [local_post; post_combinations]; %#ok<AGROW>
     end
-    low_pool = sorted_index(1:widths(ii));
-    high_pool = sorted_index(n_epochs-widths(ii)+1:n_epochs);
-    [these_low, these_high] = sample_two_pools( ...
-        low_pool, high_pool, k, quotas(ii));
-    low_rows = [low_rows; these_low]; %#ok<AGROW>
-    high_rows = [high_rows; these_high]; %#ok<AGROW>
-    width_rows = [width_rows; repmat(widths(ii), size(these_low,1), 1)]; %#ok<AGROW>
-end
-pseudo_low = [low_rows; high_rows];
-pseudo_high = [high_rows; low_rows];
-pool_width = [width_rows; width_rows];
+else
+    % Draw unique unordered partitions, then add each label-swapped
+    % complement. This enforces a symmetric no-condition null.
+    n_base = floor(n_requested/2);
+    canonical_keys = zeros(0,2*k);
+    base_pre = zeros(0,k);
+    base_post = zeros(0,k);
+    while size(base_pre,1) < n_base
+        selected = randperm(n_epochs, 2*k);
+        this_pre = sort(selected(1:k));
+        this_post = sort(selected(k+1:end));
+        key = canonical_partition(this_pre, this_post);
+        if isempty(canonical_keys) || ~ismember(key, canonical_keys, 'rows')
+            canonical_keys(end+1,:) = key; %#ok<AGROW>
+            base_pre(end+1,:) = this_pre; %#ok<AGROW>
+            base_post(end+1,:) = this_post; %#ok<AGROW>
+        end
+    end
+    local_pre = [base_pre; base_post];
+    local_post = [base_post; base_pre];
 end
 
-function quotas = equal_width_quotas(widths, k, n_base)
-n_widths = numel(widths);
-capacity = repmat(n_base, n_widths, 1);
-for ii = 1:n_widths
-    log_pairs = 2 * (gammaln(widths(ii)+1) - gammaln(k+1) - ...
-        gammaln(widths(ii)-k+1));
-    if log_pairs <= log(n_base)
-        capacity(ii) = max(1, round(exp(log_pairs)));
-    end
-end
-quotas = zeros(n_widths, 1);
-open = true(n_widths, 1);
-left = n_base;
-while left > 0 && any(open)
-    open_idx = find(open);
-    n_open = numel(open_idx);
-    share = floor(left / n_open);
-    extra = mod(left, n_open);
-    give = zeros(n_widths, 1);
-    give(open_idx) = share;
-    if extra > 0
-        give(open_idx(1:extra)) = give(open_idx(1:extra)) + 1;
-    end
-    add = min(give, capacity - quotas);
-    add(~open) = 0;
-    if sum(add) < 1
-        break
-    end
-    quotas = quotas + add;
-    left = left - sum(add);
-    open = quotas < capacity;
-end
+pseudo_pre = reshape(valid_merged(local_pre), size(local_pre));
+pseudo_post = reshape(valid_merged(local_post), size(local_post));
 end
 
-function [low_sets, high_sets] = sample_two_pools(low_pool, high_pool, k, quota)
-log_one = gammaln(numel(low_pool)+1) - gammaln(k+1) - ...
-    gammaln(numel(low_pool)-k+1);
-if log_one <= log(2000)
-    low_combinations = nchoosek(low_pool(:)', k);
-    high_combinations = nchoosek(high_pool(:)', k);
-    n_pairs = size(low_combinations,1) * size(high_combinations,1);
-    if n_pairs <= quota
-        [low_row, high_row] = ndgrid(1:size(low_combinations,1), ...
-            1:size(high_combinations,1));
-        low_sets = low_combinations(low_row(:),:);
-        high_sets = high_combinations(high_row(:),:);
-        return
-    end
-    selected = randperm(n_pairs, quota);
-    [low_row, high_row] = ind2sub([size(low_combinations,1), ...
-        size(high_combinations,1)], selected);
-    low_sets = low_combinations(low_row(:),:);
-    high_sets = high_combinations(high_row(:),:);
-    return
-end
-
-low_sets = zeros(0,k);
-high_sets = zeros(0,k);
-seen = zeros(0,2*k);
-guard = 0;
-while size(low_sets,1) < quota && guard < max(100, 50*quota)
-    guard = guard + 1;
-    this_low = sort(low_pool(randperm(numel(low_pool), k)));
-    this_high = sort(high_pool(randperm(numel(high_pool), k)));
-    key = [this_low(:)', this_high(:)'];
-    if isempty(seen) || ~ismember(key, seen, 'rows')
-        seen = [seen; key]; %#ok<AGROW>
-        low_sets = [low_sets; this_low(:)']; %#ok<AGROW>
-        high_sets = [high_sets; this_high(:)']; %#ok<AGROW>
-    end
+function key = canonical_partition(first_group, second_group)
+forward = [first_group, second_group];
+reverse = [second_group, first_group];
+first_difference = find(forward ~= reverse, 1);
+if isempty(first_difference) || ...
+        forward(first_difference) < reverse(first_difference)
+    key = forward;
+else
+    key = reverse;
 end
 end
 
@@ -647,10 +552,12 @@ metrics = [(1:n_draws)', repmat(size(pre_index,2),n_draws,1), ...
 end
 
 function metrics = evaluate_null_draws(neuron, pseudo_pre, pseudo_post, ...
-    nonplay_power)
-merged_power = nonplay_power(:);
-merged_count = neuron.nonplay_epoch_spike_count(:);
-merged_vector = cellfun(@phase_vector, neuron.nonplay_epoch_phase);
+    pre_power, play_power)
+merged_power = [pre_power(:); play_power(:)];
+merged_count = [neuron.pre_epoch_spike_count(:); ...
+    neuron.play_epoch_spike_count(:)];
+merged_vector = [cellfun(@phase_vector, neuron.pre_epoch_phase); ...
+    cellfun(@phase_vector, neuron.play_epoch_phase)];
 
 n_pre = sum(merged_count(pseudo_pre),2);
 n_post = sum(merged_count(pseudo_post),2);

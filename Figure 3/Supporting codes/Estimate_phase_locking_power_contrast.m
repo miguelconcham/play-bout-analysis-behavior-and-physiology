@@ -1,0 +1,94 @@
+%% Estimate session non-play epochs for the power-contrast PPC null
+% Run add_repo_paths.m before this script. Results go to a separate folder
+% from Estimate_phase_locking_power_control.m, so the saved power-control
+% sessions are not read or overwritten.
+
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+npx_raw_data = fullfile(data_root, 'NPX data', 'NPX raw data');
+saving_folder = fullfile(data_root, 'Analysis results', 'phase locking power contrast');
+if ~isfolder(saving_folder)
+    mkdir(saving_folder);
+end
+
+sample_rate = 2500;
+filter_order = 2000;
+delta_band = [1 5];
+Hd_delta = designfilt('bandpassfir', ...
+    'FilterOrder', filter_order, ...
+    'CutoffFrequency1', delta_band(1), ...
+    'CutoffFrequency2', delta_band(2), ...
+    'SampleRate', sample_rate, ...
+    'DesignMethod', 'window', ...
+    'Window', 'hamming');
+
+% Hardcoded analysis parameters. Keep these with the saved output.
+generator_options.min_bout_duration = 0.25;
+generator_options.phase_method = 'uniformized'; % matches Figure 3 pipeline
+generator_options.epoch_duration = 1;
+RECOMPUTE_EXISTING = false;
+CONTROL_VERSION = 2;
+
+animal_list = dir(npx_raw_data);
+animal_list = animal_list([animal_list.isdir]);
+animal_list = animal_list(~ismember({animal_list.name}, {'.','..'}));
+animal2exclude = {''};
+animal_list = animal_list(~ismember({animal_list.name}, animal2exclude));
+
+% Existing contrast files in this folder are kept. The power-control folder
+% and phase_locking_power_control_all_sessions.mat are not used.
+power_control_struct = struct([]);
+failed_sessions = table('Size', [0 2], ...
+    'VariableTypes', {'string','string'}, ...
+    'VariableNames', {'Animal','Message'});
+skipped_sessions = strings(0,1);
+
+for fn = 1:numel(animal_list)
+    animal_name = animal_list(fn).name;
+    session_file = fullfile(saving_folder, ...
+        [animal_name, '_phase_locking_power_contrast.mat']);
+    fprintf('\nSession %d/%d: %s\n', fn, numel(animal_list), animal_name);
+    if ~RECOMPUTE_EXISTING && isfile(session_file) && ...
+            saved_control_version(session_file) >= CONTROL_VERSION
+        fprintf('Keeping existing file: %s\n', session_file);
+        skipped_sessions(end+1,1) = string(animal_name); %#ok<SAGROW>
+        continue
+    end
+    try
+        this_control = GENERATE_PHASE_LOCKING_POWER_CONTRAST( ...
+            fullfile(npx_raw_data, animal_name), Hd_delta, generator_options);
+        % Save before aggregation. struct([]) has no fields, so the first
+        % subscripted assignment would otherwise discard a completed session.
+        control_version = CONTROL_VERSION;
+        save(session_file, 'this_control', 'control_version', '-v7.3');
+        if isempty(power_control_struct)
+            power_control_struct = this_control;
+        else
+            power_control_struct(end+1) = orderfields( ...
+                this_control, power_control_struct); %#ok<SAGROW>
+        end
+    catch exception
+        warning('Power-control analysis failed for %s: %s', ...
+            animal_name, exception.message);
+        failed_sessions(end+1,:) = ...
+            {string(animal_name), string(getReport(exception, 'extended'))};
+    end
+end
+
+retry_file = fullfile(saving_folder, ...
+    'phase_locking_power_contrast_sessions.mat');
+save(retry_file, 'power_control_struct', 'failed_sessions', ...
+    'skipped_sessions', 'generator_options', 'delta_band', '-v7.3');
+fprintf(['Kept %d existing sessions; added %d; %d failed.\n' ...
+    'Power-control results were not modified.\nNew sessions: %s\n'], ...
+    numel(skipped_sessions), numel(power_control_struct), ...
+    height(failed_sessions), retry_file);
+
+function version = saved_control_version(session_file)
+contents = whos('-file', session_file);
+if ~any(strcmp({contents.name}, 'control_version'))
+    version = 0;
+    return
+end
+loaded = load(session_file, 'control_version');
+version = loaded.control_version;
+end

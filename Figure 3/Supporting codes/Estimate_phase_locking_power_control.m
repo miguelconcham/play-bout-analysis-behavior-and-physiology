@@ -2,7 +2,7 @@
 % Run add_repo_paths.m before this script. The output is intentionally
 % separate from the original Figure 3 phase_struct files.
 
-data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 npx_raw_data = fullfile(data_root, 'NPX data', 'NPX raw data');
 saving_folder = fullfile(data_root, 'Analysis results', 'phase locking power control');
 if ~isfolder(saving_folder)
@@ -25,7 +25,6 @@ generator_options.min_bout_duration = 0.25;
 generator_options.phase_method = 'uniformized'; % matches Figure 3 pipeline
 generator_options.epoch_duration = 1;
 RECOMPUTE_EXISTING = false;
-CONTROL_VERSION = 2;
 
 animal_list = dir(npx_raw_data);
 animal_list = animal_list([animal_list.isdir]);
@@ -46,8 +45,7 @@ for fn = 1:numel(animal_list)
     session_file = fullfile(saving_folder, ...
         [animal_name, '_phase_locking_power_control.mat']);
     fprintf('\nSession %d/%d: %s\n', fn, numel(animal_list), animal_name);
-    if ~RECOMPUTE_EXISTING && isfile(session_file) && ...
-            saved_control_version(session_file) >= CONTROL_VERSION
+    if ~RECOMPUTE_EXISTING && isfile(session_file)
         fprintf('Keeping existing file: %s\n', session_file);
         skipped_sessions(end+1,1) = string(animal_name); %#ok<SAGROW>
         continue
@@ -57,8 +55,7 @@ for fn = 1:numel(animal_list)
             fullfile(npx_raw_data, animal_name), Hd_delta, generator_options);
         % Save before aggregation. struct([]) has no fields, so the first
         % subscripted assignment would otherwise discard a completed session.
-        control_version = CONTROL_VERSION;
-        save(session_file, 'this_control', 'control_version', '-v7.3');
+        save(session_file, 'this_control', '-v7.3');
         if isempty(power_control_struct)
             power_control_struct = this_control;
         else
@@ -81,13 +78,3 @@ fprintf(['Kept %d existing sessions; added %d; %d failed.\n' ...
     'Original combined file was not modified.\nNew sessions: %s\n'], ...
     numel(skipped_sessions), numel(power_control_struct), ...
     height(failed_sessions), retry_file);
-
-function version = saved_control_version(session_file)
-contents = whos('-file', session_file);
-if ~any(strcmp({contents.name}, 'control_version'))
-    version = 0;
-    return
-end
-loaded = load(session_file, 'control_version');
-version = loaded.control_version;
-end

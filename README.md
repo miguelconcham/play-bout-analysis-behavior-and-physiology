@@ -207,7 +207,9 @@ The original (pre-v2) Figure 2 pipeline lives outside this repository, in the pa
 
 ### Figure 3e delta-power control
 
-The referee-control pipeline is separate from the original Figure 3 files:
+Both pipelines use `\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\...`.
+The earlier one is unchanged and keeps writing
+`Data/Analysis results/phase locking power control/`:
 
 ```
 Estimate_phase_locking_power_control.m
@@ -215,29 +217,26 @@ Estimate_phase_locking_power_control.m
   → Analyze_play_ppc_amplitude_matched.m
 ```
 
-It divides play and duration-balanced pre-play periods into one-second epochs,
-matches epochs one-to-one by nearest channel-specific log-delta power within
-a prespecified caliper, and initially targets 75% of the available play
-epochs with exactly equal pre-play time. If a neuron has too
-few spikes, the number of matched epochs is increased without relaxing power
-balance; neurons that remain underpowered are reported separately. For the
-null distribution, all non-play time inside each Partners session is used:
-before the first play bout, between bouts, and after the last bout. Epochs
-are sorted by delta power, and the two groups are drawn from a low-power
-tail and its high-power tail. Three tail widths stay within twice the group
-size, spaced so the power gap changes in equal steps, and each width that
-can supply distinct groups receives the same number of draws. Label swaps
-supply the opposite sign. The rows actually entered in the model are saved as
-`neuron_model_table`. It supports a model of PPC
-change from delta-power and spike-count differences when neither group
-contains play. No PPC-significance shuffle from the original
-pipeline is run. Instead, trough-locked cells are selected from the existing
-Figure 3 labels (`EntireSession.PPCPval < 0.01` and preferred angle outside
-±π/2). The overall result averages residual PPC change within animal, reports
-an animal-bootstrap confidence interval, and uses a one-sided animal-level
-sign-flip test. Hardcoded sensitivity parameters are at the top of the Analyze script.
-Results are saved under
-`Data/Analysis results/phase locking power control/`.
+It matches one-second play and pre-play epochs by log-delta power. Its null
+uses pre-play epochs only. Existing session files are skipped.
+
+The power-contrast pipeline is separate and writes
+`Data/Analysis results/phase locking power contrast/`:
+
+```
+Estimate_phase_locking_power_contrast.m
+  → GENERATE_PHASE_LOCKING_POWER_CONTRAST.m
+  → Analyze_play_ppc_power_contrast.m
+```
+
+Its null uses every non-play second inside each Partners session: before the
+first play bout, between bouts, and after the last bout. Three tail widths
+stay within twice the group size, spaced so the power gap changes in equal
+steps, and each width that can supply distinct groups receives the same
+number of draws. The rows entered in the model are saved as
+`neuron_model_table`. Trough-locked cells come from the existing Figure 3
+labels (`EntireSession.PPCPval < 0.01` and preferred angle outside ±π/2).
+The overall result averages residual PPC change within animal.
 
 ---
 
