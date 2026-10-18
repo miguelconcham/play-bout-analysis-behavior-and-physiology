@@ -221,9 +221,11 @@ a prespecified caliper, and initially targets 75% of the available play
 epochs with exactly equal pre-play time. If a neuron has too
 few spikes, the number of matched epochs is increased without relaxing power
 balance; neurons that remain underpowered are reported separately. For the
-null distribution, pre-play and play epochs are merged, their labels are
-removed, and equal pseudo-pre and pseudo-post groups are randomly assigned.
-Label-swapped complements make this null symmetric. It supports a model of PPC
+null distribution, only pre-play epochs are used. They are randomly divided
+into equal pseudo-groups, and label-swapped complements make the null
+symmetric. Play epochs are excluded so unequal play content cannot explain
+the null PPC differences. Because both groups draw from the same pre-play
+pool, each contains at most half of it. It supports a model of PPC
 change from accidental delta-power and spike-count differences when there is
 no true condition effect. No PPC-significance shuffle from the original
 pipeline is run. Instead, trough-locked cells are selected from the existing

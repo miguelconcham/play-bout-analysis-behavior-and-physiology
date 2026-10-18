@@ -5,7 +5,7 @@
 % Outputs:
 %   matched_summary       one row per neuron
 %   matched_draw_table    repeated amplitude-matched arrangements
-%   null_draw_table       merged-pool label randomizations under no condition
+%   null_draw_table       play-free pre-play partitions under no condition
 %   ppc_power_spike_model PPC change ~ power change + spike-count terms
 
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -101,9 +101,19 @@ for ss = 1:numel(power_control_struct)
                 continue
             end
 
+            % Both null groups come from pre-play epochs, so each can contain
+            % at most half of that pool without reusing the same time.
+            nonplay_null_capacity = floor(numel(valid_pre)/2);
+            if nonplay_null_capacity < 2
+                excluded_rows(end+1,:) = [identity, ... %#ok<SAGROW>
+                    {"Fewer than four pre-play epochs for a play-free null", ...
+                    matching_capacity, 0}];
+                continue
+            end
+            duration_limit = min(matching_capacity, nonplay_null_capacity);
             initial_target_epochs = max(2, ...
                 floor(TARGET_PLAY_FRACTION*numel(valid_play)));
-            target_epochs = min(initial_target_epochs, matching_capacity);
+            target_epochs = min(initial_target_epochs, duration_limit);
             expanded_for_spikes = false;
             expanded_for_balance = false;
             while true
@@ -124,13 +134,13 @@ for ss = 1:numel(power_control_struct)
                     median(reliable_metrics(:,8), 'omitnan') >= ...
                     MIN_SPIKES_PER_CONDITION;
                 if (enough_power_draws && enough_spikes) || ...
-                        target_epochs >= matching_capacity
+                        target_epochs >= duration_limit
                     break
                 end
                 expanded_for_spikes = expanded_for_spikes || ~enough_spikes;
                 expanded_for_balance = expanded_for_balance || ...
                     ~enough_power_draws;
-                target_epochs = min(matching_capacity, ...
+                target_epochs = min(duration_limit, ...
                     max(target_epochs+1, ceil(1.5*target_epochs)));
             end
 
@@ -150,9 +160,8 @@ for ss = 1:numel(power_control_struct)
                 continue
             end
 
-            valid_merged = [valid_pre; numel(pre_power)+valid_play];
             [null_pre_index, null_post_index] = merged_null_draws( ...
-                valid_merged, target_epochs, N_DRAWS);
+                valid_pre, target_epochs, N_DRAWS);
             null_metrics = evaluate_null_draws(neuron, ...
                 null_pre_index, null_post_index, ...
                 pre_power, play_power);
@@ -173,6 +182,7 @@ for ss = 1:numel(power_control_struct)
                 cell_type, channel, numel(valid_play), ...
                 initial_target_epochs, target_epochs, ...
                 target_epochs/numel(valid_play), matching_capacity, ...
+                nonplay_null_capacity, ...
                 power_caliper_db, sum(reliable_matched), ...
                 expanded_for_spikes, expanded_for_balance, ...
                 median(reliable_values(:,3), 'omitnan'), ...
@@ -206,7 +216,7 @@ end
 summary_names = {'Animal','Session','NeuronKey','ChannelKey','ClusterID', ...
     'Area','CellType','Channel','AvailablePlayEpochs', ...
     'InitialTargetEpochs','EpochsPerCondition','AnalyzedPlayFraction', ...
-    'MatchingCapacity', ...
+    'MatchingCapacity','NonPlayNullCapacity', ...
     'PowerCaliperDB','ReliableMatchedDraws','ExpandedForSpikes', ...
     'ExpandedForPowerBalance','PrePowerDB','PlayPowerDB', ...
     'PowerDifferenceDB','PreSpikeCount','PlaySpikeCount', ...
@@ -240,14 +250,14 @@ else
         'VariableNames', excluded_names);
 end
 
-%% Model PPC changes under the merged-pool no-condition null
+%% Model PPC changes under the play-free no-condition null
 % MeanSpikeCount is included because PPC variance depends on the available
 % spike count; SpikeCountDifference captures condition imbalance requested
-% in the proposed model. EpochCount records adaptive duration. Pre-play and
-% play labels are absent from these draws: equal-sized pseudo-conditions are
-% sampled from the merged epoch pool. Because draws reuse epochs, use this
-% model for conditional prediction; its nominal coefficient p-values are
-% not independent-resample inference.
+% in the proposed model. EpochCount records adaptive duration. Both
+% pseudo-conditions are sampled from pre-play epochs only, so neither group
+% contains play and their play proportion cannot explain PPC differences.
+% Because draws reuse epochs, use this model for conditional prediction;
+% its nominal coefficient p-values are not independent-resample inference.
 ppc_power_spike_model = [];
 model_rows = null_draw_table.Reliable == 1;
 model_table = null_draw_table(model_rows,:);
