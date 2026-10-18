@@ -221,13 +221,15 @@ a prespecified caliper, and initially targets 75% of the available play
 epochs with exactly equal pre-play time. If a neuron has too
 few spikes, the number of matched epochs is increased without relaxing power
 balance; neurons that remain underpowered are reported separately. For the
-null distribution, only pre-play epochs are used. They are randomly divided
-into equal pseudo-groups, and label-swapped complements make the null
-symmetric. Play epochs are excluded so unequal play content cannot explain
-the null PPC differences. Because both groups draw from the same pre-play
-pool, each contains at most half of it. It supports a model of PPC
-change from accidental delta-power and spike-count differences when there is
-no true condition effect. No PPC-significance shuffle from the original
+null distribution, all non-play time inside each Partners session is used:
+before the first play bout, between bouts, and after the last bout. Epochs
+are sorted by delta power, and the two groups are drawn from a low-power
+tail and its high-power tail. Several tail widths keep the power gaps large
+while still producing many distinct groups. Label swaps supply the opposite
+sign. The rows actually entered in the model are saved as
+`neuron_model_table`. It supports a model of PPC
+change from delta-power and spike-count differences when neither group
+contains play. No PPC-significance shuffle from the original
 pipeline is run. Instead, trough-locked cells are selected from the existing
 Figure 3 labels (`EntireSession.PPCPval < 0.01` and preferred angle outside
 ±π/2). The overall result averages residual PPC change within animal, reports

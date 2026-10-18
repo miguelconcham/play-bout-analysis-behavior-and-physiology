@@ -118,17 +118,20 @@ lfp_time = (1:n_lfp_samples) / sr_lfp;
 [bout_table, rejected_bouts] = make_strict_pairs(play_bouts, ...
     lfp_time(1), lfp_time(end), options.min_bout_duration);
 
-% Preserve the original Figure 3 duration-balancing logic for the candidate
-% pools, then divide both conditions into complete fixed-duration epochs.
-% Equal numbers of these epochs are selected downstream, so analyzed time
-% is exactly equal even if clipping leaves different candidate-pool sizes.
+% Duration-balanced pre-play remains the matched comparison pool. The null
+% pool is every non-play second inside each Partners session: before the
+% first bout, between bouts, and after the last bout.
 pre_play_periods = build_balanced_periods(play_bouts);
+nonplay_intervals = session_nonplay_intervals(behavior, play_bouts, ...
+    lfp_time(1), lfp_time(end));
 pre_epoch_table = intervals_to_epochs(pre_play_periods, ...
     options.epoch_duration, lfp_time(1), lfp_time(end));
 play_epoch_table = intervals_to_epochs(play_bouts, ...
     options.epoch_duration, lfp_time(1), lfp_time(end));
-if isempty(pre_epoch_table) || isempty(play_epoch_table)
-    error('No complete %.3g-second pre-play/play epochs for %s.', ...
+nonplay_epoch_table = intervals_to_epochs(nonplay_intervals, ...
+    options.epoch_duration, lfp_time(1), lfp_time(end));
+if isempty(pre_epoch_table) || isempty(play_epoch_table) || isempty(nonplay_epoch_table)
+    error('No complete %.3g-second play, pre-play, or session non-play epochs for %s.', ...
         options.epoch_duration, animal_code);
 end
 
@@ -138,6 +141,7 @@ channel_data = repmat(struct( ...
     'pre_power_db', [], 'play_power_db', [], ...
     'power_difference_db', [], 'amplitude_reference', [], ...
     'pre_epoch_power_db', [], 'play_epoch_power_db', [], ...
+    'nonplay_epoch_power_db', [], ...
     'phase_method', ''), numel(channels_with_spikes), 1);
 neurons = repmat(struct( ...
     'cluster_id', [], 'channel', [], 'area', '', ...
@@ -146,7 +150,8 @@ neurons = repmat(struct( ...
     'pre_amplitude', {{}}, 'play_amplitude', {{}}, ...
     'pre_spike_count', [], 'play_spike_count', [], ...
     'pre_epoch_phase', {{}}, 'play_epoch_phase', {{}}, ...
-    'pre_epoch_spike_count', [], 'play_epoch_spike_count', []), ...
+    'pre_epoch_spike_count', [], 'play_epoch_spike_count', [], ...
+    'nonplay_epoch_phase', {{}}, 'nonplay_epoch_spike_count', []), ...
     height(cluster_info), 1);
 
 for cc = 1:numel(channels_with_spikes)
@@ -200,6 +205,8 @@ for cc = 1:numel(channels_with_spikes)
         amplitude, lfp_time, pre_epoch_table);
     channel_data(cc).play_epoch_power_db = epoch_power_db( ...
         amplitude, lfp_time, play_epoch_table);
+    channel_data(cc).nonplay_epoch_power_db = epoch_power_db( ...
+        amplitude, lfp_time, nonplay_epoch_table);
     channel_data(cc).amplitude_reference = single(prctile(amplitude, 0:100));
     channel_data(cc).phase_method = options.phase_method;
 
@@ -242,6 +249,9 @@ for cc = 1:numel(channels_with_spikes)
         [neurons(nn).play_epoch_phase, ...
             neurons(nn).play_epoch_spike_count] = phases_by_epoch( ...
             unit_spikes, lfp_time, phase, play_epoch_table);
+        [neurons(nn).nonplay_epoch_phase, ...
+            neurons(nn).nonplay_epoch_spike_count] = phases_by_epoch( ...
+            unit_spikes, lfp_time, phase, nonplay_epoch_table);
     end
 end
 
@@ -252,6 +262,8 @@ control_struct.bout_table = bout_table;
 control_struct.rejected_bouts = rejected_bouts;
 control_struct.pre_epoch_table = pre_epoch_table;
 control_struct.play_epoch_table = play_epoch_table;
+control_struct.nonplay_intervals = nonplay_intervals;
+control_struct.nonplay_epoch_table = nonplay_epoch_table;
 control_struct.channel_data = channel_data;
 control_struct.neurons = neurons;
 control_struct.channel_map = channel_map;
@@ -260,6 +272,40 @@ control_struct.npx_type = npx_type;
 control_struct.sample_rate_lfp = sr_lfp;
 control_struct.delta_band = [Hd_delta.CutoffFrequency1, Hd_delta.CutoffFrequency2];
 control_struct.options = options;
+end
+
+function intervals = session_nonplay_intervals(behavior, play_bouts, first_time, last_time)
+sessions = behavior(strcmp(behavior.Type2, 'Partners session'), :);
+if isempty(sessions)
+    error('No Partners session intervals are available.');
+end
+play_bouts = sortrows(double(play_bouts(:,1:2)), 1);
+intervals = zeros(0,2);
+for ss = 1:height(sessions)
+    session_start = max(sessions.Start(ss), first_time);
+    session_end = min(sessions.End(ss), last_time);
+    if ~(session_end > session_start)
+        continue
+    end
+    overlaps = play_bouts(:,2) > session_start & play_bouts(:,1) < session_end;
+    these_bouts = play_bouts(overlaps,:);
+    these_bouts(:,1) = max(these_bouts(:,1), session_start);
+    these_bouts(:,2) = min(these_bouts(:,2), session_end);
+    these_bouts = these_bouts(these_bouts(:,2) > these_bouts(:,1), :);
+    cursor = session_start;
+    for bb = 1:size(these_bouts,1)
+        if these_bouts(bb,1) > cursor
+            intervals(end+1,:) = [cursor, these_bouts(bb,1)]; %#ok<AGROW>
+        end
+        cursor = max(cursor, these_bouts(bb,2));
+    end
+    if cursor < session_end
+        intervals(end+1,:) = [cursor, session_end]; %#ok<AGROW>
+    end
+end
+if isempty(intervals)
+    error('Partners sessions contain no non-play time outside play bouts.');
+end
 end
 
 function [pairs, rejected] = make_strict_pairs(play_bouts, first_time, last_time, min_duration)
