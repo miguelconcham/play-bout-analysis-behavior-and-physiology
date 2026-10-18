@@ -224,9 +224,10 @@ balance; neurons that remain underpowered are reported separately. For the
 null distribution, all non-play time inside each Partners session is used:
 before the first play bout, between bouts, and after the last bout. Epochs
 are sorted by delta power, and the two groups are drawn from a low-power
-tail and its high-power tail. Several tail widths keep the power gaps large
-while still producing many distinct groups. Label swaps supply the opposite
-sign. The rows actually entered in the model are saved as
+tail and its high-power tail. Three tail widths stay within twice the group
+size, spaced so the power gap changes in equal steps, and each width that
+can supply distinct groups receives the same number of draws. Label swaps
+supply the opposite sign. The rows actually entered in the model are saved as
 `neuron_model_table`. It supports a model of PPC
 change from delta-power and spike-count differences when neither group
 contains play. No PPC-significance shuffle from the original

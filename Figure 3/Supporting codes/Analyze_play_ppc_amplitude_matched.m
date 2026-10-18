@@ -5,7 +5,8 @@
 % Outputs:
 %   matched_summary       one row per neuron
 %   matched_draw_table    repeated amplitude-matched arrangements
-%   null_draw_table       play-free pre-play partitions under no condition
+%   null_draw_table       play-free power-tail arrangements
+%   neuron_model_table    reliable null rows used to fit the model
 %   ppc_power_spike_model PPC change ~ power change + spike-count terms
 
 data_root = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -40,6 +41,8 @@ EPOCH_SECONDS = 1;
 POWER_CALIPER_SD = 0.25;
 TARGET_PLAY_FRACTION = 0.75;
 N_DRAWS = 500;
+N_TAIL_WIDTHS = 3;
+TAIL_WIDTH_FACTOR = 2;
 MIN_SPIKES_PER_CONDITION = 20;
 MIN_RELIABLE_MATCHED_DRAWS = 50;
 MAX_ABS_POWER_SMD = 0.10;
@@ -181,7 +184,7 @@ for ss = 1:numel(power_control_struct)
 
             [null_pre_index, null_post_index, pool_width] = ...
                 power_contrast_draws(valid_nonplay, nonplay_power, ...
-                target_epochs, N_DRAWS);
+                target_epochs, N_DRAWS, N_TAIL_WIDTHS, TAIL_WIDTH_FACTOR);
             null_metrics = evaluate_null_draws(neuron, ...
                 null_pre_index, null_post_index, nonplay_power);
             null_metrics(:,end+1) = pool_width;
@@ -277,7 +280,9 @@ end
 % in the proposed model. EpochCount records adaptive duration. Both
 % pseudo-conditions are sampled from session non-play epochs, with one group
 % drawn from a low-power tail and the other from the corresponding high-power
-% tail. Because draws reuse epochs, use this model for conditional prediction;
+% tail. Three widths stay within twice K, and draws are split equally across
+% widths that can supply distinct groups. Because draws reuse epochs, use
+% this model for conditional prediction;
 % its nominal coefficient p-values are not independent-resample inference.
 ppc_power_spike_model = [];
 model_rows = null_draw_table.Reliable == 1;
@@ -410,6 +415,8 @@ analysis_parameters = struct( ...
     'power_caliper_sd', POWER_CALIPER_SD, ...
     'target_play_fraction', TARGET_PLAY_FRACTION, ...
     'n_draws', N_DRAWS, ...
+    'n_tail_widths', N_TAIL_WIDTHS, ...
+    'tail_width_factor', TAIL_WIDTH_FACTOR, ...
     'min_spikes_per_condition', MIN_SPIKES_PER_CONDITION, ...
     'min_reliable_matched_draws', MIN_RELIABLE_MATCHED_DRAWS, ...
     'max_abs_power_smd', MAX_ABS_POWER_SMD, ...
@@ -458,39 +465,51 @@ play_index = reshape(pairs(selected_sets,2), size(selected_sets));
 end
 
 function [pseudo_low, pseudo_high, pool_width] = power_contrast_draws( ...
-    epoch_index, power_db, k, n_requested)
+    epoch_index, power_db, k, n_requested, n_widths, width_factor)
 finite = isfinite(power_db(epoch_index));
 epoch_index = epoch_index(finite);
 [~, order] = sort(power_db(epoch_index), 'ascend');
 sorted_index = epoch_index(order);
+sorted_power = power_db(sorted_index);
 n_epochs = numel(sorted_index);
 half = floor(n_epochs/2);
 if k > half
     error('Cannot form two disjoint groups of %d from %d epochs.', k, n_epochs);
 end
 
-% Narrow pools maximize the power gap. Wider pools, up to each half of the
-% sorted distribution, supply many distinct groups with progressively
-% smaller but still systematic gaps. Five widths cover that range.
-widths = unique(round(linspace(k, half, 5)));
+% Keep every pool inside the extreme tails. The widest pool is twice K,
+% or half the epochs when the session is shorter than that. Widths are
+% placed so the low-versus-high power gap moves in equal steps. If that
+% gap does not change, the widths are spaced by pool size so the sampled
+% epochs, and therefore the spike counts, can still differ. Each width that
+% can supply distinct groups receives the same number of draws.
+widest = min(half, max(k, round(width_factor * k)));
+sorted_power = sorted_power(:);
+candidate = (k:widest).';
+low_sum = cumsum(sorted_power);
+high_sum = cumsum(sorted_power(end:-1:1));
+power_gap = high_sum(candidate) ./ candidate - low_sum(candidate) ./ candidate;
+gap_targets = linspace(power_gap(1), power_gap(end), n_widths);
+widths = zeros(1, n_widths);
+for ii = 1:n_widths
+    [~, pick] = min(abs(power_gap - gap_targets(ii)));
+    widths(ii) = candidate(pick);
+end
+widths = unique(widths, 'stable');
+gap_span = power_gap(1) - power_gap(end);
+if ~(gap_span > max(1e-6, eps(power_gap(1))))
+    widths = unique(round(linspace(k, widest, n_widths)), 'stable');
+end
 n_base = max(1, floor(n_requested/2));
-log_counts = zeros(size(widths));
-for ii = 1:numel(widths)
-    log_counts(ii) = 2 * (gammaln(widths(ii)+1) - gammaln(k+1) - ...
-        gammaln(widths(ii)-k+1));
-end
-weights = max(log_counts, eps);
-weights = weights / sum(weights);
-quotas = max(1, round(weights * n_base));
-while sum(quotas) > n_base && any(quotas > 1)
-    [~, widest] = max(quotas);
-    quotas(widest) = quotas(widest) - 1;
-end
+quotas = equal_width_quotas(widths, k, n_base);
 
 low_rows = zeros(0,k);
 high_rows = zeros(0,k);
 width_rows = zeros(0,1);
 for ii = 1:numel(widths)
+    if quotas(ii) < 1
+        continue
+    end
     low_pool = sorted_index(1:widths(ii));
     high_pool = sorted_index(n_epochs-widths(ii)+1:n_epochs);
     [these_low, these_high] = sample_two_pools( ...
@@ -502,6 +521,40 @@ end
 pseudo_low = [low_rows; high_rows];
 pseudo_high = [high_rows; low_rows];
 pool_width = [width_rows; width_rows];
+end
+
+function quotas = equal_width_quotas(widths, k, n_base)
+n_widths = numel(widths);
+capacity = repmat(n_base, n_widths, 1);
+for ii = 1:n_widths
+    log_pairs = 2 * (gammaln(widths(ii)+1) - gammaln(k+1) - ...
+        gammaln(widths(ii)-k+1));
+    if log_pairs <= log(n_base)
+        capacity(ii) = max(1, round(exp(log_pairs)));
+    end
+end
+quotas = zeros(n_widths, 1);
+open = true(n_widths, 1);
+left = n_base;
+while left > 0 && any(open)
+    open_idx = find(open);
+    n_open = numel(open_idx);
+    share = floor(left / n_open);
+    extra = mod(left, n_open);
+    give = zeros(n_widths, 1);
+    give(open_idx) = share;
+    if extra > 0
+        give(open_idx(1:extra)) = give(open_idx(1:extra)) + 1;
+    end
+    add = min(give, capacity - quotas);
+    add(~open) = 0;
+    if sum(add) < 1
+        break
+    end
+    quotas = quotas + add;
+    left = left - sum(add);
+    open = quotas < capacity;
+end
 end
 
 function [low_sets, high_sets] = sample_two_pools(low_pool, high_pool, k, quota)
