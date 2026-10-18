@@ -246,3 +246,36 @@ ambiguity and collisions between individual behaviors, pooled categories,
 self/other play, play bouts, and multi-probe sessions. New runs copy only the
 averaged `xmean` PNG; per-column PNGs are used only as a fallback for legacy
 results that do not yet contain an averaged image.
+
+### Area consistency across sessions
+
+After `csd_mean_columns.npy` exists, `area_csd_consistency.py` groups channels
+from the same anatomical structure and pools those maps across sessions. It
+does not estimate kCSD. The area table is `Data/Area_limits_GoodLooking.xlsx`,
+using the animal key and depth rules from `GENERATE_PSTH_AREA_MAPS.m`:
+
+- NPX1 depths must have `Probe_Area` PAG.
+- NPX2 depths must match the `probeN` folder's probe number.
+- A depth matches a row when `depth_start <= y < depth_end + 1`.
+- The narrowest matching span is kept. A remaining tie is left unassigned.
+
+Depth is converted to relative position inside the selected area,
+`(y - depth_start) / (depth_end - depth_start)`. Values are interpolated only
+inside depths the electrodes actually cover. Probes that contain the same area
+in one session are averaged first, with equal probe weight, so each session is
+one observation. Across sessions the outputs are the mean, SEM, fraction
+positive, fraction negative, and sign consistency of the **saved kCSD sign**.
+That sign is not relabeled as sink or source.
+
+```python
+from area_csd_consistency import summarize_area_csd_across_sessions
+summarize_area_csd_across_sessions(BEHAVIOR_ROOT, AREA_TABLE)
+```
+
+Results are written to `area_consistency/<scope>/<behavior>/<onset|offset>/<area>/`
+with `mean_csd.png`, `sign_consistency.png`, and the arrays behind them.
+`summary.csv` lists every area map. `stable_features.csv` keeps bins that have
+at least two sessions, high sign agreement, and a large absolute mean.
+Consistency images are blank where fewer than two sessions overlap. The
+`kCSD_env` kernel needs `openpyxl` (`python -m pip install openpyxl`) to read
+the spreadsheet.

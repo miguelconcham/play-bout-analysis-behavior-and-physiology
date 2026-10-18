@@ -9,3 +9,4 @@ scipy>=1.9,<1.14
 matplotlib>=3.5
 kcsd>=2.0
 ipykernel>=6.0
+openpyxl>=3.0
