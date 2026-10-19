@@ -8,9 +8,13 @@ import numpy as np
 
 from area_csd_consistency import (
     animal_key_from_session,
+    infer_saved_kcsd_clusters,
+    label_significant_clusters,
     load_area_limits,
+    organize_area_consistency_figures,
     resample_area_segment,
     select_area_for_depth,
+    smooth_csd_in_depth_and_time,
     summarize_area_csd_across_sessions,
     AreaLimit,
 )
@@ -125,14 +129,14 @@ class AreaRuleTests(unittest.TestCase):
 class AcrossSessionTests(unittest.TestCase):
     def test_probes_are_averaged_before_sessions_and_signs_are_scored(self):
         time_ms = np.array([-1000.0, 1000.0])
-        y = np.array([0.0, 100.0])
+        y = np.array([0.0, 400.0])
         s1 = "B1A2 20240101 RatA"
         s2 = "B1A2 20240202 RatB"
         rows = []
         for animal in ("Batch1RatA2", "Batch1RatB2"):
             for probe_num in (1, 2):
                 rows.append(
-                    _row("LPAG", probe_num, 0, 100, "PAG", animal=animal)
+                    _row("LPAG", probe_num, 0, 400, "PAG", animal=animal)
                 )
         with tempfile.TemporaryDirectory() as root:
             _write_mean(
@@ -367,6 +371,14 @@ class AcrossSessionTests(unittest.TestCase):
                     )
                 )
             )
+            sorted_onset = os.path.join(
+                root,
+                "area_consistency",
+                "by_behavior",
+                "onset",
+                "play__category__LPAG__mean_csd.png",
+            )
+            self.assertTrue(os.path.isfile(sorted_onset))
             self.assertEqual(result["color_limits"]["category/play/LPAG"], (-12.0, 12.0))
             self.assertEqual(result["n_missing_mean"], 1)
             self.assertTrue(
@@ -387,6 +399,146 @@ class AcrossSessionTests(unittest.TestCase):
                 if item["behavior"] == "aggression"
             )
             self.assertEqual(opposite_summary["n_stable_bins"], 0)
+
+    def test_sorted_copies_group_behaviors_in_onset_and_offset(self):
+        with tempfile.TemporaryDirectory() as root:
+            area_root = os.path.join(root, "area_consistency")
+            for alignment, behavior, area in (
+                ("onset", "Pounce", "LPAG"),
+                ("offset", "Pounce", "LPAG"),
+                ("onset", "Bite", "VTA"),
+            ):
+                folder = os.path.join(
+                    area_root, "behavior", behavior, alignment, area
+                )
+                os.makedirs(folder)
+                with open(os.path.join(folder, "mean_csd.png"), "wb") as stream:
+                    stream.write(b"png")
+            stale = os.path.join(area_root, "by_behavior", "onset", "old.png")
+            os.makedirs(os.path.dirname(stale))
+            with open(stale, "wb") as stream:
+                stream.write(b"old")
+
+            result = organize_area_consistency_figures(root)
+            onset = os.path.join(result["output_root"], "onset")
+            offset = os.path.join(result["output_root"], "offset")
+            self.assertEqual(
+                sorted(os.listdir(onset)),
+                [
+                    "Bite__behavior__VTA__mean_csd.png",
+                    "Pounce__behavior__LPAG__mean_csd.png",
+                ],
+            )
+            self.assertEqual(
+                sorted(os.listdir(offset)),
+                ["Pounce__behavior__LPAG__mean_csd.png"],
+            )
+            self.assertFalse(os.path.isfile(stale))
+            self.assertTrue(os.path.isfile(result["index_path"]))
+            with open(
+                os.path.join(
+                    area_root, "behavior", "Pounce", "onset", "LPAG", "mean_csd.png"
+                ),
+                "rb",
+            ) as stream:
+                self.assertEqual(stream.read(), b"png")
+
+    def test_short_depth_span_is_left_out_of_the_session_mean(self):
+        time_ms = np.array([0.0, 5.0, 10.0])
+        rows = [_row("LPAG", 1, 0, 1000, "PAG"), _row("LPAG", 2, 0, 1000, "PAG")]
+        with tempfile.TemporaryDirectory() as root:
+            session = "B1A2 20240101 RatA"
+            _write_mean(
+                os.path.join(root, "behavior", "Pounce", "onset", session, "probe1"),
+                99.0,
+                np.array([0.0, 100.0]),
+                time_ms,
+            )
+            _write_mean(
+                os.path.join(root, "behavior", "Pounce", "onset", session, "probe2"),
+                4.0,
+                np.array([0.0, 1000.0]),
+                time_ms,
+            )
+            result = summarize_area_csd_across_sessions(
+                root,
+                area_rows=rows,
+                save_plots=False,
+                min_depth_span_um=200.0,
+            )
+            self.assertEqual(result["n_groups"], 1)
+            group = result["groups"][0]
+            self.assertEqual(group["n_sessions"], 1)
+            saved = np.load(os.path.join(group["folder"], "mean_csd.npy"))
+            np.testing.assert_allclose(saved, 4.0)
+
+    def test_gaussian_keeps_the_interior_and_drops_unsupported_edges(self):
+        y = np.arange(0.0, 401.0, 20.0)
+        time_ms = np.arange(-500.0, 501.0, 5.0)
+        csd = np.ones((len(y), len(time_ms)))
+        smoothed = smooth_csd_in_depth_and_time(
+            y,
+            csd,
+            time_ms,
+            fwhm_um=100.0,
+            fwhm_ms=250.0,
+        )
+        self.assertIsNotNone(smoothed)
+        grid, values = smoothed
+        center_depth = int(np.argmin(np.abs(grid - 200.0)))
+        center_time = int(np.argmin(np.abs(time_ms - 0.0)))
+        self.assertAlmostEqual(values[center_depth, center_time], 1.0, places=5)
+        self.assertEqual(grid[0], 0.0)
+        self.assertEqual(grid[-1], 400.0)
+
+        # Three depths are narrower than the 100 µm kernel, so the one-sided
+        # edge samples fall to half support or below and are removed.
+        short_y = np.array([0.0, 20.0, 40.0])
+        short = smooth_csd_in_depth_and_time(
+            short_y,
+            np.ones((3, len(time_ms))),
+            time_ms,
+            fwhm_um=100.0,
+            fwhm_ms=0.0,
+        )
+        self.assertIsNotNone(short)
+        _short_grid, short_values = short
+        self.assertTrue(np.all(np.isnan(short_values[0])))
+        self.assertTrue(np.all(np.isnan(short_values[2])))
+        np.testing.assert_allclose(short_values[1], 1.0)
+
+    def test_clusters_keep_large_same_sign_blocks_only(self):
+        time_ms = np.arange(0.0, 100.0, 5.0)
+        relative_depth = np.linspace(0.0, 1.0, 41)
+        mean = np.zeros((len(relative_depth), len(time_ms)))
+        p_value = np.ones_like(mean)
+        n_sessions = np.full_like(mean, 5.0)
+        mean[0:4, 0:5] = 1.0
+        p_value[0:4, 0:5] = 0.01
+        mean[10, 10] = 1.0
+        p_value[10, 10] = 0.01
+        mean[20:24, 10:15] = -1.0
+        p_value[20:24, 10:15] = 0.01
+        mask, clusters = label_significant_clusters(
+            mean,
+            p_value,
+            n_sessions,
+            time_ms,
+            relative_depth,
+        )
+        self.assertEqual(mask[0, 0], 1)
+        self.assertEqual(mask[10, 10], 0)
+        self.assertEqual(mask[20, 10], -1)
+        self.assertEqual(len(clusters), 2)
+        self.assertEqual(
+            {cluster["saved_kcsd_sign"] for cluster in clusters},
+            {"positive", "negative"},
+        )
+
+        stack = np.ones((5, len(relative_depth), len(time_ms)))
+        inferred = infer_saved_kcsd_clusters(stack, time_ms, relative_depth)
+        self.assertTrue(np.all(inferred["mask"] == 1))
+        self.assertTrue(np.all(inferred["p"] == 0.0))
 
     def test_module_does_not_estimate_kcsd(self):
         code_dir = os.path.dirname(os.path.abspath(__file__))

@@ -10,6 +10,12 @@ across sessions.
 Polarity is reported exactly as stored (``RdBu_r`` in the existing figures).
 Positive and negative are not relabeled as source or sink.
 
+Each probe map is also smoothed with a Gaussian of 250 ms by 100 µm FWHM
+before a one-sample t-test across sessions. Clusters that pass a pointwise
+threshold are kept only when they span at least 25 ms and 10% of the
+relative-depth axis. A probe segment whose unique depths span less than
+200 µm is left out of that session.
+
 Area rules, matching the MATLAB generator:
 
 - Animal key: session folder ``<batch> <date> <repeated> ...``.
@@ -39,6 +45,19 @@ import numpy as np
 
 
 PathLike = Union[str, os.PathLike]
+
+# FWHM = 2 * sqrt(2 * ln 2) * sigma.
+_FWHM_PER_SIGMA = 2.0 * float(np.sqrt(2.0 * np.log(2.0)))
+DEFAULT_SMOOTH_FWHM_MS = 250.0
+DEFAULT_SMOOTH_FWHM_UM = 100.0
+DEFAULT_MIN_DEPTH_SPAN_UM = 200.0
+DEFAULT_MIN_SESSIONS_FOR_TTEST = 5
+DEFAULT_TTEST_ALPHA = 0.05
+DEFAULT_MIN_CLUSTER_DURATION_MS = 25.0
+DEFAULT_MIN_CLUSTER_DEPTH_FRACTION = 0.10
+DEFAULT_DEPTH_GRID_STEP_UM = 20.0
+_MIN_KERNEL_SUPPORT = 0.5
+_FOUR_CONNECTED = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
 
 _REQUIRED_COLUMNS = (
     "animalname",
@@ -225,13 +244,264 @@ def resample_area_segment(
     if not np.isfinite(span) or span <= 0:
         return None
     relative = (y - float(depth_start)) / span
-    finite = np.isfinite(relative) & np.all(np.isfinite(csd), axis=1)
-    if int(np.count_nonzero(finite)) < 2:
-        return None
-    resampled = _interpolate_rows(relative[finite], csd[finite], relative_depth)
-    if resampled is None or not np.any(np.isfinite(resampled)):
+    resampled = np.full((len(relative_depth), csd.shape[1]), np.nan, dtype=float)
+    any_finite = False
+    for time_index in range(csd.shape[1]):
+        good = np.isfinite(relative) & np.isfinite(csd[:, time_index])
+        if int(np.count_nonzero(good)) < 2:
+            continue
+        column = _interpolate_rows(
+            relative[good],
+            csd[good, time_index : time_index + 1],
+            relative_depth,
+        )
+        if column is None:
+            continue
+        resampled[:, time_index] = column[:, 0]
+        any_finite = True
+    if not any_finite:
         return None
     return resampled
+
+
+def smooth_csd_in_depth_and_time(
+    y: np.ndarray,
+    csd: np.ndarray,
+    time_ms: np.ndarray,
+    *,
+    fwhm_um: float = DEFAULT_SMOOTH_FWHM_UM,
+    fwhm_ms: float = DEFAULT_SMOOTH_FWHM_MS,
+    grid_step_um: float = DEFAULT_DEPTH_GRID_STEP_UM,
+    min_support: float = _MIN_KERNEL_SUPPORT,
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """
+    Gaussian-smooth one probe segment on a uniform micrometer grid.
+
+    Widths are full widths at half maximum. Samples are removed where half
+    or more of the kernel lies outside the observed depths or time range.
+    """
+    from scipy import ndimage
+
+    y = np.asarray(y, dtype=float).reshape(-1)
+    csd = np.asarray(csd, dtype=float)
+    time_ms = np.asarray(time_ms, dtype=float).reshape(-1)
+    if csd.shape != (len(y), len(time_ms)):
+        raise ValueError(
+            f"CSD shape {csd.shape} does not match y={len(y)} and time={len(time_ms)}"
+        )
+    order = np.argsort(y)
+    y = y[order]
+    csd = csd[order]
+    unique_y, inverse = np.unique(y, return_inverse=True)
+    if len(unique_y) < len(y):
+        totals = np.zeros((len(unique_y), csd.shape[1]), dtype=float)
+        counts = np.zeros(len(unique_y), dtype=float)
+        for index, group in enumerate(inverse):
+            totals[group] += csd[index]
+            counts[group] += 1.0
+        csd = totals / counts[:, None]
+        y = unique_y
+    if len(y) < 2 or y[-1] <= y[0]:
+        return None
+    step = float(grid_step_um)
+    if step <= 0:
+        raise ValueError("grid_step_um must be positive")
+    n_grid = max(2, int(round((y[-1] - y[0]) / step)) + 1)
+    grid = np.linspace(y[0], y[-1], n_grid)
+    on_grid = _interpolate_rows(y, csd, grid)
+    if on_grid is None:
+        return None
+    dy = float(grid[1] - grid[0])
+    dt = _axis_step(time_ms)
+    sigma_y = 0.0 if fwhm_um <= 0 or dy <= 0 else (fwhm_um / _FWHM_PER_SIGMA) / dy
+    sigma_t = 0.0 if fwhm_ms <= 0 or dt <= 0 else (fwhm_ms / _FWHM_PER_SIGMA) / dt
+    smoothed = _nan_aware_gaussian(
+        on_grid,
+        (sigma_y, sigma_t),
+        min_support=min_support,
+        ndimage=ndimage,
+    )
+    return grid, smoothed
+
+
+def infer_saved_kcsd_clusters(
+    stack: np.ndarray,
+    time_ms: np.ndarray,
+    relative_depth: np.ndarray,
+    *,
+    alpha: float = DEFAULT_TTEST_ALPHA,
+    min_sessions: int = DEFAULT_MIN_SESSIONS_FOR_TTEST,
+    min_duration_ms: float = DEFAULT_MIN_CLUSTER_DURATION_MS,
+    min_depth_fraction: float = DEFAULT_MIN_CLUSTER_DEPTH_FRACTION,
+) -> Dict[str, object]:
+    """One-sample t-test of smoothed session maps, then a cluster-size filter."""
+    t_stat, p_value, n_sessions, mean = one_sample_ttest_map(stack)
+    mask, clusters = label_significant_clusters(
+        mean,
+        p_value,
+        n_sessions,
+        time_ms,
+        relative_depth,
+        t_stat=t_stat,
+        alpha=alpha,
+        min_sessions=min_sessions,
+        min_duration_ms=min_duration_ms,
+        min_depth_fraction=min_depth_fraction,
+    )
+    return {
+        "mean": mean,
+        "t": t_stat,
+        "p": p_value,
+        "n_sessions": n_sessions,
+        "mask": mask,
+        "clusters": clusters,
+    }
+
+
+def one_sample_ttest_map(
+    stack: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """T-test each depth/time bin of session maps against zero."""
+    from scipy import stats
+
+    stack = np.asarray(stack, dtype=float)
+    finite = np.isfinite(stack)
+    n_sessions = np.sum(finite, axis=0).astype(float)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        mean = np.nanmean(stack, axis=0)
+        std = np.nanstd(stack, axis=0, ddof=1)
+    standard_error = np.full(mean.shape, np.nan, dtype=float)
+    comparable = n_sessions >= 2
+    standard_error[comparable] = std[comparable] / np.sqrt(n_sessions[comparable])
+    t_stat = np.full(mean.shape, np.nan, dtype=float)
+    finite_error = comparable & np.isfinite(standard_error) & (standard_error > 0)
+    t_stat[finite_error] = mean[finite_error] / standard_error[finite_error]
+    perfect = comparable & np.isfinite(standard_error) & (standard_error == 0) & (mean != 0)
+    t_stat[perfect] = np.sign(mean[perfect]) * np.inf
+    p_value = np.full(mean.shape, np.nan, dtype=float)
+    df = n_sessions - 1
+    testable = np.isfinite(t_stat) & (df >= 1)
+    if np.any(testable):
+        p_value[testable] = 2.0 * stats.t.sf(np.abs(t_stat[testable]), df[testable])
+    p_value[perfect] = 0.0
+    return t_stat, p_value, n_sessions, mean
+
+
+def label_significant_clusters(
+    mean: np.ndarray,
+    p_value: np.ndarray,
+    n_sessions: np.ndarray,
+    time_ms: np.ndarray,
+    relative_depth: np.ndarray,
+    *,
+    t_stat: Optional[np.ndarray] = None,
+    alpha: float = DEFAULT_TTEST_ALPHA,
+    min_sessions: int = DEFAULT_MIN_SESSIONS_FOR_TTEST,
+    min_duration_ms: float = DEFAULT_MIN_CLUSTER_DURATION_MS,
+    min_depth_fraction: float = DEFAULT_MIN_CLUSTER_DEPTH_FRACTION,
+) -> Tuple[np.ndarray, List[Dict[str, object]]]:
+    """
+    Keep 4-connected same-sign clusters whose bounding box is large enough.
+
+    Positive and negative bins are clustered separately. The duration and
+    depth tests use the inclusive bin width, so five 5 ms frames count as
+    25 ms and four relative-depth bins of 0.025 count as 0.10.
+    """
+    from scipy import ndimage
+
+    mean = np.asarray(mean, dtype=float)
+    p_value = np.asarray(p_value, dtype=float)
+    n_sessions = np.asarray(n_sessions, dtype=float)
+    time_ms = np.asarray(time_ms, dtype=float).reshape(-1)
+    relative_depth = np.asarray(relative_depth, dtype=float).reshape(-1)
+    significant = (p_value < alpha) & (n_sessions >= min_sessions) & np.isfinite(mean)
+    mask = np.zeros(mean.shape, dtype=np.int8)
+    clusters: List[Dict[str, object]] = []
+    dt = _axis_step(time_ms)
+    drel = _axis_step(relative_depth)
+    next_id = 1
+    for sign, selected in (
+        (1, significant & (mean > 0)),
+        (-1, significant & (mean < 0)),
+    ):
+        labeled, n_labels = ndimage.label(selected, structure=_FOUR_CONNECTED)
+        for label in range(1, int(n_labels) + 1):
+            depth_index, time_index = np.where(labeled == label)
+            duration_ms = (
+                float(time_ms[time_index.max()] - time_ms[time_index.min()]) + dt
+            )
+            depth_fraction = (
+                float(
+                    relative_depth[depth_index.max()]
+                    - relative_depth[depth_index.min()]
+                )
+                + drel
+            )
+            if duration_ms < min_duration_ms or depth_fraction < min_depth_fraction:
+                continue
+            mask[depth_index, time_index] = sign
+            values = mean[depth_index, time_index]
+            peak_offset = int(np.nanargmax(np.abs(values)))
+            peak_depth = int(depth_index[peak_offset])
+            peak_time = int(time_index[peak_offset])
+            clusters.append(
+                {
+                    "cluster_id": next_id,
+                    "saved_kcsd_sign": _sign_name(sign),
+                    "time_start_ms": float(time_ms[time_index.min()]),
+                    "time_end_ms": float(time_ms[time_index.max()]),
+                    "duration_ms": duration_ms,
+                    "relative_depth_start": float(relative_depth[depth_index.min()]),
+                    "relative_depth_end": float(relative_depth[depth_index.max()]),
+                    "depth_fraction": depth_fraction,
+                    "n_bins": int(depth_index.size),
+                    "n_sessions_min": int(np.min(n_sessions[depth_index, time_index])),
+                    "peak_mean": float(mean[peak_depth, peak_time]),
+                    "peak_t": (
+                        float(t_stat[peak_depth, peak_time])
+                        if t_stat is not None
+                        else np.nan
+                    ),
+                    "peak_p": float(p_value[peak_depth, peak_time]),
+                }
+            )
+            next_id += 1
+    return mask, clusters
+
+
+def _nan_aware_gaussian(values, sigma, *, min_support, ndimage):
+    """Smooth finite samples and drop bins whose kernel is mostly unsupported."""
+    valid = np.isfinite(values).astype(float)
+    filled = np.where(np.isfinite(values), values, 0.0)
+    sigma_values = np.atleast_1d(np.asarray(sigma, dtype=float))
+    if np.all(sigma_values == 0):
+        smoothed = np.array(filled, dtype=float, copy=True)
+        support = valid
+    else:
+        smoothed = ndimage.gaussian_filter(
+            filled, sigma=sigma, mode="constant", cval=0.0
+        )
+        support = ndimage.gaussian_filter(
+            valid, sigma=sigma, mode="constant", cval=0.0
+        )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        smoothed = np.divide(
+            smoothed,
+            support,
+            out=np.full(smoothed.shape, np.nan, dtype=float),
+            where=support > min_support,
+        )
+    return smoothed
+
+
+def _axis_step(values: np.ndarray) -> float:
+    diffs = np.diff(np.asarray(values, dtype=float))
+    positive = diffs[np.isfinite(diffs) & (diffs > 0)]
+    if positive.size == 0:
+        return 0.0
+    return float(np.median(positive))
 
 
 def summarize_area_csd_across_sessions(
@@ -246,6 +516,14 @@ def summarize_area_csd_across_sessions(
     min_sessions_for_consistency: int = 2,
     consistency_threshold: float = 0.8,
     magnitude_percentile: float = 75.0,
+    smooth_fwhm_ms: float = DEFAULT_SMOOTH_FWHM_MS,
+    smooth_fwhm_um: float = DEFAULT_SMOOTH_FWHM_UM,
+    min_depth_span_um: float = DEFAULT_MIN_DEPTH_SPAN_UM,
+    depth_grid_step_um: float = DEFAULT_DEPTH_GRID_STEP_UM,
+    min_sessions_for_ttest: int = DEFAULT_MIN_SESSIONS_FOR_TTEST,
+    ttest_alpha: float = DEFAULT_TTEST_ALPHA,
+    min_cluster_duration_ms: float = DEFAULT_MIN_CLUSTER_DURATION_MS,
+    min_cluster_depth_fraction: float = DEFAULT_MIN_CLUSTER_DEPTH_FRACTION,
     save_plots: bool = True,
     refresh: bool = True,
     stop_on_error: bool = False,
@@ -256,11 +534,22 @@ def summarize_area_csd_across_sessions(
     Requires ``csd_mean_columns.npy``. Per-column matrices are not refit and
     ``KCSD1D`` is never called. Run ``average_saved_behavior_kcsd_from_root``
     first when a completed kCSD run has not yet written the column average.
+
+    The unsmoothed mean and sign-consistency maps are always saved. A second
+    map smooths each probe in micrometers and milliseconds, tests session
+    means against zero, and outlines clusters that are long enough in time
+    and relative depth.
     """
     if n_relative_depths < 2:
         raise ValueError("n_relative_depths must be at least 2")
     if min_depths < 2:
         raise ValueError("min_depths must be at least 2")
+    if min_depth_span_um < 0:
+        raise ValueError("min_depth_span_um must be non-negative")
+    if not 0 < ttest_alpha < 1:
+        raise ValueError("ttest_alpha must be between 0 and 1")
+    if min_sessions_for_ttest < 2:
+        raise ValueError("min_sessions_for_ttest must be at least 2")
     root = os.path.abspath(os.fspath(root))
     rows = _coerce_area_rows(area_rows, area_table_path)
     rows_by_animal: Dict[str, List[AreaLimit]] = {}
@@ -304,6 +593,7 @@ def summarize_area_csd_across_sessions(
 
     relative_depth = np.linspace(0.0, 1.0, int(n_relative_depths))
     session_parts: Dict[Tuple[str, str, str, str, str], List[np.ndarray]] = {}
+    session_smoothed_parts: Dict[Tuple[str, str, str, str, str], List[np.ndarray]] = {}
     session_time: Dict[Tuple[str, str, str, str, str], np.ndarray] = {}
     skipped: List[Dict[str, str]] = []
 
@@ -324,6 +614,10 @@ def summarize_area_csd_across_sessions(
                 rows_by_animal,
                 relative_depth,
                 min_depths=min_depths,
+                min_depth_span_um=min_depth_span_um,
+                smooth_fwhm_ms=smooth_fwhm_ms,
+                smooth_fwhm_um=smooth_fwhm_um,
+                depth_grid_step_um=depth_grid_step_um,
             )
         except Exception as exc:
             if stop_on_error:
@@ -354,8 +648,12 @@ def summarize_area_csd_across_sessions(
                 continue
             session_parts.setdefault(key, []).append(matrix)
             session_time[key] = assignment["time_ms"]
+            smoothed = assignment["areas_smoothed"].get(area)
+            if smoothed is not None:
+                session_smoothed_parts.setdefault(key, []).append(smoothed)
 
     grouped: Dict[Tuple[str, str, str, str], List[Tuple[str, np.ndarray, np.ndarray]]] = {}
+    grouped_smoothed: Dict[Tuple[str, str, str, str], Dict[str, np.ndarray]] = {}
     for key, matrices in session_parts.items():
         scope, behavior, alignment, session, area = key
         session_mean = _nanmean_stack(np.stack(matrices, axis=0))
@@ -365,6 +663,12 @@ def summarize_area_csd_across_sessions(
         grouped.setdefault(group_key, []).append(
             (session, session_mean, session_time[key])
         )
+        if key in session_smoothed_parts:
+            smoothed_mean = _nanmean_stack(
+                np.stack(session_smoothed_parts[key], axis=0)
+            )
+            if np.any(np.isfinite(smoothed_mean)):
+                grouped_smoothed.setdefault(group_key, {})[session] = smoothed_mean
 
     output_root = os.path.join(root, output_folder_name)
     if refresh and os.path.isdir(output_root):
@@ -373,6 +677,7 @@ def summarize_area_csd_across_sessions(
 
     summaries = []
     stable_rows: List[Dict[str, object]] = []
+    cluster_rows: List[Dict[str, object]] = []
     plot_groups: Dict[Tuple[str, str, str], Dict[str, Dict[str, object]]] = {}
     for group_key in sorted(grouped):
         scope, behavior, alignment, area = group_key
@@ -391,9 +696,28 @@ def summarize_area_csd_across_sessions(
                 skipped.append({"leaf": session, "reason": reason})
         if not usable:
             continue
+        smoothed_by_session = grouped_smoothed.get(group_key, {})
+        smoothed_stack = np.stack(
+            [
+                smoothed_by_session.get(
+                    session, np.full(matrix.shape, np.nan, dtype=float)
+                )
+                for session, matrix in usable
+            ],
+            axis=0,
+        )
+        inference = infer_saved_kcsd_clusters(
+            smoothed_stack,
+            reference_time,
+            relative_depth,
+            alpha=ttest_alpha,
+            min_sessions=min_sessions_for_ttest,
+            min_duration_ms=min_cluster_duration_ms,
+            min_depth_fraction=min_cluster_depth_fraction,
+        )
         print(
             f"Processing {scope}/{behavior} {alignment} {area}: "
-            f"{len(usable)} sessions",
+            f"{len(usable)} sessions, {len(inference['clusters'])} clusters",
             flush=True,
         )
         stack = np.stack([matrix for _session, matrix in usable], axis=0)
@@ -407,6 +731,17 @@ def summarize_area_csd_across_sessions(
         )
         os.makedirs(folder, exist_ok=True)
         _save_group_arrays(folder, stats, relative_depth, reference_time)
+        _save_inference_arrays(folder, inference)
+        for cluster in inference["clusters"]:
+            cluster_rows.append(
+                {
+                    "scope": scope,
+                    "behavior": behavior,
+                    "alignment": alignment,
+                    "area": area,
+                    **cluster,
+                }
+            )
         with open(os.path.join(folder, "sessions.txt"), "w", encoding="utf-8") as stream:
             stream.write("".join(f"{session}\n" for session, _matrix in usable))
         summary, feature_rows = _group_tables(
@@ -423,6 +758,7 @@ def summarize_area_csd_across_sessions(
             magnitude_percentile=magnitude_percentile,
         )
         summary["folder"] = folder
+        summary["n_clusters"] = len(inference["clusters"])
         summaries.append(summary)
         stable_rows.extend(feature_rows)
         plot_groups.setdefault((scope, behavior, area), {})[alignment] = {
@@ -431,6 +767,14 @@ def summarize_area_csd_across_sessions(
             "consistency": stats["sign_consistency"],
             "n_sessions": stats["n_sessions"],
             "n_sessions_total": len(usable),
+            "smoothed_mean": inference["mean"],
+            "cluster_mask": inference["mask"],
+            "smooth_fwhm_ms": smooth_fwhm_ms,
+            "smooth_fwhm_um": smooth_fwhm_um,
+            "min_sessions_for_ttest": min_sessions_for_ttest,
+            "ttest_alpha": ttest_alpha,
+            "min_cluster_duration_ms": min_cluster_duration_ms,
+            "min_cluster_depth_fraction": min_cluster_depth_fraction,
         }
 
     color_limits = _shared_alignment_color_limits(plot_groups)
@@ -458,8 +802,33 @@ def summarize_area_csd_across_sessions(
             "saved_kcsd_sign_at_max_abs",
             "sign_consistency_at_max_abs",
             "n_stable_bins",
+            "n_clusters",
         ],
         summaries,
+    )
+    clusters_csv = os.path.join(output_root, "clusters.csv")
+    _write_csv(
+        clusters_csv,
+        [
+            "scope",
+            "behavior",
+            "alignment",
+            "area",
+            "cluster_id",
+            "saved_kcsd_sign",
+            "time_start_ms",
+            "time_end_ms",
+            "duration_ms",
+            "relative_depth_start",
+            "relative_depth_end",
+            "depth_fraction",
+            "n_bins",
+            "n_sessions_min",
+            "peak_mean",
+            "peak_t",
+            "peak_p",
+        ],
+        cluster_rows,
     )
     _write_csv(
         stable_csv,
@@ -481,13 +850,22 @@ def summarize_area_csd_across_sessions(
     )
     print(
         f"Area summary complete: {len(summaries)} area maps, "
-        f"{len(stable_rows)} stable bins, index={summary_csv}",
+        f"{len(stable_rows)} stable bins, {len(cluster_rows)} clusters, "
+        f"index={summary_csv}",
         flush=True,
+    )
+    sorted_figures = organize_area_consistency_figures(
+        root,
+        area_folder_name=output_folder_name,
+        refresh=True,
+        missing_ok=True,
     )
     return {
         "output_root": output_root,
         "summary_csv": summary_csv,
         "stable_features_csv": stable_csv,
+        "clusters_csv": clusters_csv,
+        "sorted_figures": sorted_figures,
         "n_groups": len(summaries),
         "n_missing_mean": len(discovered["missing_means"]),
         "missing_mean_folders": discovered["missing_means"],
@@ -495,6 +873,145 @@ def summarize_area_csd_across_sessions(
         "groups": summaries,
         "color_limits": color_limits,
     }
+
+
+def organize_area_consistency_figures(
+    root: PathLike,
+    *,
+    area_folder_name: str = "area_consistency",
+    output_folder_name: str = "by_behavior",
+    refresh: bool = True,
+    missing_ok: bool = False,
+) -> Dict[str, object]:
+    """
+    Copy merged area PNGs into one onset folder and one offset folder.
+
+    Original area folders stay in place. Filenames start with the behavior,
+    so a file browser lists the same behavior together:
+
+    ``by_behavior/onset/play__category__LPAG__mean_csd.png``
+    """
+    root = os.path.abspath(os.fspath(root))
+    area_root = os.path.join(root, area_folder_name)
+    if not os.path.isdir(area_root):
+        raise FileNotFoundError(
+            f"No merged area maps at {area_root}. Run "
+            "summarize_area_csd_across_sessions first."
+        )
+
+    sources = _discover_area_figures(area_root, output_folder_name)
+    if not sources:
+        message = (
+            "No mean_csd.png, sign_consistency.png, or "
+            f"smoothed_mean_clusters.png files under {area_root}"
+        )
+        if missing_ok:
+            print(message, flush=True)
+            return {
+                "output_root": os.path.join(area_root, output_folder_name),
+                "index_path": None,
+                "n_copies": 0,
+            }
+        raise FileNotFoundError(message)
+
+    output_root = os.path.join(area_root, output_folder_name)
+    if refresh and os.path.isdir(output_root):
+        shutil.rmtree(output_root)
+    os.makedirs(output_root, exist_ok=True)
+
+    rows: List[Dict[str, str]] = []
+    destinations: Dict[str, str] = {}
+    print(
+        f"Copying {len(sources)} merged area figures into {output_root}",
+        flush=True,
+    )
+    for source in sources:
+        relative = os.path.relpath(source["folder"], area_root).split(os.sep)
+        scope, behavior, alignment, area = relative
+        kind = source["kind"]
+        filename = (
+            f"{_safe_path_part(behavior)}__{_safe_path_part(scope)}__"
+            f"{_safe_path_part(area)}__{kind}.png"
+        )
+        destination = os.path.join(output_root, alignment, filename)
+        prior = destinations.get(destination)
+        if prior is not None and prior != source["path"]:
+            raise RuntimeError(
+                "Area-figure name collision: "
+                f"{prior} and {source['path']} both map to {destination}"
+            )
+        destinations[destination] = source["path"]
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copy2(source["path"], destination)
+        print(
+            f"  {alignment}: {filename}",
+            flush=True,
+        )
+        rows.append(
+            {
+                "alignment": alignment,
+                "scope": scope,
+                "behavior": behavior,
+                "area": area,
+                "kind": kind,
+                "original_file": os.path.relpath(source["path"], root),
+                "sorted_file": os.path.relpath(destination, root),
+            }
+        )
+
+    index_path = os.path.join(output_root, "figure_index.csv")
+    _write_csv(
+        index_path,
+        [
+            "alignment",
+            "scope",
+            "behavior",
+            "area",
+            "kind",
+            "original_file",
+            "sorted_file",
+        ],
+        rows,
+    )
+    print(
+        f"Merged area figures ready: {len(rows)} copies in onset/offset folders, "
+        f"index={index_path}",
+        flush=True,
+    )
+    return {
+        "output_root": output_root,
+        "index_path": index_path,
+        "n_copies": len(rows),
+    }
+
+
+def _discover_area_figures(
+    area_root: str,
+    output_folder_name: str,
+) -> List[Dict[str, str]]:
+    figure_names = {
+        "mean_csd.png": "mean_csd",
+        "sign_consistency.png": "sign_consistency",
+        "smoothed_mean_clusters.png": "smoothed_clusters",
+    }
+    found: List[Dict[str, str]] = []
+    for dirpath, _dirnames, filenames in os.walk(area_root):
+        relative_parts = os.path.relpath(dirpath, area_root).split(os.sep)
+        if relative_parts[0] == output_folder_name:
+            continue
+        if len(relative_parts) != 4 or relative_parts[2] not in {"onset", "offset"}:
+            continue
+        for filename, kind in figure_names.items():
+            if filename in filenames:
+                found.append(
+                    {
+                        "folder": dirpath,
+                        "path": os.path.join(dirpath, filename),
+                        "kind": kind,
+                    }
+                )
+    found.sort(key=lambda item: item["path"])
+    return found
 
 
 def _coerce_area_rows(
@@ -593,6 +1110,10 @@ def _segment_leaf(
     relative_depth: np.ndarray,
     *,
     min_depths: int,
+    min_depth_span_um: float,
+    smooth_fwhm_ms: float,
+    smooth_fwhm_um: float,
+    depth_grid_step_um: float,
 ) -> Dict[str, object]:
     csd = np.load(os.path.join(leaf, "csd_mean_columns.npy"))
     y = np.load(os.path.join(leaf, "y_mean_columns.npy")).reshape(-1)
@@ -633,13 +1154,21 @@ def _segment_leaf(
 
     areas: Dict[str, np.ndarray] = {}
     area_pieces: Dict[str, List[np.ndarray]] = {}
+    smoothed_pieces: Dict[str, List[np.ndarray]] = {}
+    n_short = 0
     for identity, indices in grouped.items():
         if len(indices) < min_depths:
             continue
         chosen = spans[identity]
+        y_segment = y[indices]
+        observed_span = float(np.nanmax(y_segment) - np.nanmin(y_segment))
+        if observed_span < min_depth_span_um:
+            n_short += 1
+            continue
+        csd_segment = csd[indices]
         resampled = resample_area_segment(
-            y[indices],
-            csd[indices],
+            y_segment,
+            csd_segment,
             chosen.depth_start,
             chosen.depth_end,
             relative_depth,
@@ -647,14 +1176,49 @@ def _segment_leaf(
         if resampled is None:
             continue
         area_pieces.setdefault(chosen.area, []).append(resampled)
+        smoothed = smooth_csd_in_depth_and_time(
+            y_segment,
+            csd_segment,
+            time_ms,
+            fwhm_um=smooth_fwhm_um,
+            fwhm_ms=smooth_fwhm_ms,
+            grid_step_um=depth_grid_step_um,
+        )
+        if smoothed is None:
+            continue
+        smoothed_y, smoothed_csd = smoothed
+        smoothed_relative = resample_area_segment(
+            smoothed_y,
+            smoothed_csd,
+            chosen.depth_start,
+            chosen.depth_end,
+            relative_depth,
+        )
+        if smoothed_relative is not None:
+            smoothed_pieces.setdefault(chosen.area, []).append(smoothed_relative)
     for area, pieces in area_pieces.items():
         areas[area] = _nanmean_stack(np.stack(pieces, axis=0))
+    areas_smoothed = {
+        area: _nanmean_stack(np.stack(pieces, axis=0))
+        for area, pieces in smoothed_pieces.items()
+    }
     if not areas:
-        return {
-            "status": "skip",
-            "reason": f"No area had at least {min_depths} depths in {parsed['session']}",
-        }
-    return {"status": "ok", "areas": areas, "time_ms": time_ms}
+        if n_short:
+            reason = (
+                f"No area spanned at least {min_depth_span_um:g} µm "
+                f"in {parsed['session']}"
+            )
+        else:
+            reason = (
+                f"No area had at least {min_depths} depths in {parsed['session']}"
+            )
+        return {"status": "skip", "reason": reason}
+    return {
+        "status": "ok",
+        "areas": areas,
+        "areas_smoothed": areas_smoothed,
+        "time_ms": time_ms,
+    }
 
 
 def _interpolate_rows(
@@ -738,6 +1302,32 @@ def _save_group_arrays(
     np.save(os.path.join(folder, "n_sessions.npy"), stats["n_sessions"])
     np.save(os.path.join(folder, "relative_depth.npy"), relative_depth)
     np.save(os.path.join(folder, "time_ms.npy"), time_ms)
+
+
+def _save_inference_arrays(folder: str, inference: Dict[str, object]) -> None:
+    np.save(os.path.join(folder, "smoothed_mean_csd.npy"), inference["mean"])
+    np.save(os.path.join(folder, "t_statistic.npy"), inference["t"])
+    np.save(os.path.join(folder, "p_value.npy"), inference["p"])
+    np.save(os.path.join(folder, "cluster_mask.npy"), inference["mask"])
+    _write_csv(
+        os.path.join(folder, "clusters.csv"),
+        [
+            "cluster_id",
+            "saved_kcsd_sign",
+            "time_start_ms",
+            "time_end_ms",
+            "duration_ms",
+            "relative_depth_start",
+            "relative_depth_end",
+            "depth_fraction",
+            "n_bins",
+            "n_sessions_min",
+            "peak_mean",
+            "peak_t",
+            "peak_p",
+        ],
+        inference["clusters"],
+    )
 
 
 def _group_tables(
@@ -835,6 +1425,18 @@ def _sign_name(value: float) -> str:
     return "zero"
 
 
+def _symmetric_limit(images: Sequence[np.ndarray]) -> Tuple[float, float]:
+    peak = 0.0
+    for image in images:
+        finite = np.abs(np.asarray(image, dtype=float))
+        finite = finite[np.isfinite(finite)]
+        if finite.size:
+            peak = max(peak, float(np.max(finite)))
+    if not np.isfinite(peak) or peak <= 0:
+        peak = 1.0
+    return (-peak, peak)
+
+
 def _shared_alignment_color_limits(
     plot_groups: Dict[Tuple[str, str, str], Dict[str, Dict[str, object]]],
 ) -> Dict[str, Tuple[float, float]]:
@@ -902,6 +1504,33 @@ def _write_area_figures(
                 clim=(0.0, 1.0),
                 save_path=os.path.join(folder, "sign_consistency.png"),
             )
+            smoothed_clim = _symmetric_limit(
+                [
+                    payload["smoothed_mean"]
+                    for payload in alignments.values()
+                    if payload.get("smoothed_mean") is not None
+                ]
+            )
+            _save_heatmap(
+                plt,
+                payload["smoothed_mean"],
+                time_ms,
+                relative_depth,
+                title=(
+                    f"{scope}/{behavior} — {alignment} — {area}\n"
+                    f"smoothed FWHM {payload['smooth_fwhm_ms']:g} ms x "
+                    f"{payload['smooth_fwhm_um']:g} µm; "
+                    f"clusters require n≥{payload['min_sessions_for_ttest']}, "
+                    f"p<{payload['ttest_alpha']:g}, "
+                    f"≥{payload['min_cluster_duration_ms']:g} ms and "
+                    f"≥{payload['min_cluster_depth_fraction']:.0%} of depth"
+                ),
+                cbar_label="smoothed kCSD (a.u.)",
+                cmap="RdBu_r",
+                clim=smoothed_clim,
+                save_path=os.path.join(folder, "smoothed_mean_clusters.png"),
+                contour=payload["cluster_mask"],
+            )
             print(f"  Saved area figures: {folder}", flush=True)
 
 
@@ -916,26 +1545,37 @@ def _save_heatmap(
     cmap: str,
     clim: Tuple[float, float],
     save_path: str,
+    contour: Optional[np.ndarray] = None,
 ) -> None:
     if not np.any(np.isfinite(image)):
         print(f"  No finite values to plot: {save_path}", flush=True)
         return
     fig, ax = plt.subplots(figsize=(10, 6))
+    extent = [
+        float(time_ms[0]),
+        float(time_ms[-1]),
+        float(relative_depth[0]),
+        float(relative_depth[-1]),
+    ]
     displayed = np.ma.masked_invalid(image)
     im = ax.imshow(
         displayed,
         origin="lower",
         aspect="auto",
-        extent=[
-            float(time_ms[0]),
-            float(time_ms[-1]),
-            float(relative_depth[0]),
-            float(relative_depth[-1]),
-        ],
+        extent=extent,
         cmap=cmap,
     )
     im.set_clim(*clim)
     fig.colorbar(im, ax=ax, label=cbar_label)
+    if contour is not None and np.any(np.asarray(contour) != 0):
+        ax.contour(
+            np.abs(np.asarray(contour)),
+            levels=[0.5],
+            origin="lower",
+            extent=extent,
+            colors="k",
+            linewidths=0.8,
+        )
     if time_ms[0] <= 0 <= time_ms[-1]:
         ax.axvline(0.0, color="k", linewidth=0.6)
     ax.set_xlabel("Time (ms)")

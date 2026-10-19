@@ -279,3 +279,29 @@ at least two sessions, high sign agreement, and a large absolute mean.
 Consistency images are blank where fewer than two sessions overlap. The
 `kCSD_env` kernel needs `openpyxl` (`python -m pip install openpyxl`) to read
 the spreadsheet.
+
+Before that average, each probe segment is smoothed with a Gaussian whose
+full width at half maximum is 250 ms and 100 µm. Samples are dropped where
+half or more of the kernel falls outside the observed depths or the saved
+time range. A segment whose unique depths span less than 200 µm is left out
+of the session. With at least five sessions, every remaining depth and time
+is compared with zero by a one-sample t-test. Positive and negative bins
+form separate clusters. A cluster is kept when its block is at least 25 ms
+long and covers at least 10% of the 0–1 depth axis. This is a size filter
+after an uncorrected pointwise p < 0.05 threshold. The unsmoothed mean and
+sign-consistency figures remain. `smoothed_mean_clusters.png` draws the kept
+clusters on the smoothed mean, and `clusters.csv` lists them.
+
+The same run copies those PNGs into two browsing folders. Filenames start with
+the behavior, so one folder lists every merged onset map and the other lists
+every merged offset map:
+
+```text
+area_consistency/by_behavior/onset/
+area_consistency/by_behavior/offset/
+area_consistency/by_behavior/figure_index.csv
+```
+
+`play__category__LPAG__mean_csd.png` is the across-session play map for LPAG.
+Original area folders are not changed. If the maps already exist, rerun only
+`organize_area_consistency_figures(BEHAVIOR_ROOT)`.
