@@ -412,11 +412,41 @@ xlabel('\Delta delta power (dB)')
 ylabel('\Delta PPC')
 legend({'Non-play power-contrast null','Amplitude-matched estimate'})
 
-%% Observed versus null-model PPC difference, Figure 3e areas
-% The prediction uses each neuron's matched power difference, spike-count
-% difference, mean spike count, and epoch count. SC is stored as SupCol.
+%% Power-balanced pre-play versus play PPC, Figure 3e areas
+% SC is stored as SupCol. This is the same comparison as the power-control plot.
 paper_areas = ["SupCol","DLPAG","LPAG","VLPAG","DR"];
 paper_labels = ["SC","DLPAG","LPAG","VLPAG","DR"];
+finite_level = isfinite(matched_summary.PrePPC) & isfinite(matched_summary.PlayPPC);
+level_rows = matched_summary(finite_level & ...
+    ismember(string(matched_summary.Area), paper_areas), :);
+pre_z = atanh(min(max(level_rows.PrePPC, -0.999), 0.999));
+play_z = atanh(min(max(level_rows.PlayPPC, -0.999), 0.999));
+level_areas = string(level_rows.Area);
+fprintf('Areas included in the power-balanced all-areas panel:\n');
+disp(unique(level_areas));
+level_limit = [min([-0.005; pre_z; play_z]), max([0.07; pre_z; play_z])];
+figure('Name', 'Power-balanced trough PPC, pre-play vs play');
+for an = 1:numel(paper_areas)
+    subplot(1, numel(paper_areas)+1, an)
+    in_area = level_areas == paper_areas(an);
+    plot_paired_ppc(pre_z(in_area), play_z(in_area), level_limit)
+    title(sprintf('%s n=%d p=%s', paper_labels(an), sum(in_area), ...
+        paired_signrank_text(pre_z(in_area), play_z(in_area))))
+    xlabel('Pre-play PPC (atanh)')
+    if an == 1
+        ylabel('Play PPC (atanh)')
+    end
+end
+subplot(1, numel(paper_areas)+1, numel(paper_areas)+1)
+plot_paired_ppc(pre_z, play_z, level_limit)
+xlabel('Pre-play PPC (atanh)')
+title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
+    height(level_rows), numel(unique(string(level_rows.Animal))), ...
+    paired_signrank_text(pre_z, play_z)))
+
+%% Observed versus null-model PPC difference, Figure 3e areas
+% The prediction uses each neuron's matched power difference, spike-count
+% difference, mean spike count, and epoch count.
 finite_difference = isfinite(matched_summary.PPCDifference) & ...
     isfinite(matched_summary.ModelExpectedPPCDifference);
 plot_rows = matched_summary(finite_difference & ...
