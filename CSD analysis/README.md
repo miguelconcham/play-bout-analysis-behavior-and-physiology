@@ -256,8 +256,10 @@ stores, at row `i` and column `j`, the percentage of areas sampled by `i`
 that are also sampled by `j`. That matrix is not symmetric.
 
 A recording pair may be averaged together only when both directions are at
-least 50%. The retained group is the largest set in which every pair passes
-that test. If two such sets are the same size, the one with the higher mean
+least `MIN_SHARED_AREA_PERCENT` (50 in the notebook cell). Change that one
+line and rerun the overlap cell to keep a different group. The retained
+group is the largest set in which every pair passes that test. If two such
+sets are the same size, the one with the higher mean
 overlap is kept. Recordings outside that group stay out of the cross-session
 area average. Results are written to `session_overlap/`.
 
