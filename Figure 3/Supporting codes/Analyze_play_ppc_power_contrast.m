@@ -412,6 +412,74 @@ xlabel('\Delta delta power (dB)')
 ylabel('\Delta PPC')
 legend({'Non-play power-contrast null','Amplitude-matched estimate'})
 
+%% Power-balanced pre-play versus play PPC, Figure 3e areas
+% SC is stored as SupCol. This is the same comparison as the power-control plot.
+paper_areas = ["SupCol","DLPAG","LPAG","VLPAG","DR"];
+paper_labels = ["SC","DLPAG","LPAG","VLPAG","DR"];
+finite_level = isfinite(matched_summary.PrePPC) & isfinite(matched_summary.PlayPPC);
+level_rows = matched_summary(finite_level & ...
+    ismember(string(matched_summary.Area), paper_areas), :);
+pre_z = atanh(min(max(level_rows.PrePPC, -0.999), 0.999));
+play_z = atanh(min(max(level_rows.PlayPPC, -0.999), 0.999));
+level_areas = string(level_rows.Area);
+fprintf('Areas included in the power-balanced all-areas panel:\n');
+disp(unique(level_areas));
+level_limit = [min([-0.005; pre_z; play_z]), max([0.07; pre_z; play_z])];
+figure('Name', 'Power-balanced trough PPC, pre-play vs play');
+for an = 1:numel(paper_areas)
+    subplot(1, numel(paper_areas)+1, an)
+    in_area = level_areas == paper_areas(an);
+    plot_paired_ppc(pre_z(in_area), play_z(in_area), level_limit)
+    title(sprintf('%s n=%d p=%s', paper_labels(an), sum(in_area), ...
+        paired_signrank_text(pre_z(in_area), play_z(in_area))))
+    xlabel('Pre-play PPC (atanh)')
+    if an == 1
+        ylabel('Play PPC (atanh)')
+    end
+end
+subplot(1, numel(paper_areas)+1, numel(paper_areas)+1)
+plot_paired_ppc(pre_z, play_z, level_limit)
+xlabel('Pre-play PPC (atanh)')
+title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
+    height(level_rows), numel(unique(string(level_rows.Animal))), ...
+    paired_signrank_text(pre_z, play_z)))
+
+%% Observed versus null-model PPC difference, Figure 3e areas
+% The prediction uses each neuron's matched power difference, spike-count
+% difference, mean spike count, and epoch count.
+finite_difference = isfinite(matched_summary.PPCDifference) & ...
+    isfinite(matched_summary.ModelExpectedPPCDifference);
+plot_rows = matched_summary(finite_difference & ...
+    ismember(string(matched_summary.Area), paper_areas), :);
+predicted_difference = plot_rows.ModelExpectedPPCDifference;
+observed_difference = plot_rows.PPCDifference;
+present_areas = string(plot_rows.Area);
+fprintf('Areas included in the PPC-difference all-areas panel:\n');
+disp(unique(present_areas));
+span = [predicted_difference; observed_difference; 0];
+pad = 0.05 * max(max(span) - min(span), eps);
+axis_limit = [min(span) - pad, max(span) + pad];
+figure('Name', 'Observed versus null-model PPC difference');
+for an = 1:numel(paper_areas)
+    subplot(1, numel(paper_areas)+1, an)
+    in_area = present_areas == paper_areas(an);
+    plot_paired_ppc(predicted_difference(in_area), ...
+        observed_difference(in_area), axis_limit)
+    title(sprintf('%s n=%d p=%s', paper_labels(an), sum(in_area), ...
+        paired_signrank_text(predicted_difference(in_area), ...
+        observed_difference(in_area))))
+    xlabel('Null-model PPC difference')
+    if an == 1
+        ylabel('Observed PPC difference')
+    end
+end
+subplot(1, numel(paper_areas)+1, numel(paper_areas)+1)
+plot_paired_ppc(predicted_difference, observed_difference, axis_limit)
+xlabel('Null-model PPC difference')
+title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
+    height(plot_rows), numel(unique(string(plot_rows.Animal))), ...
+    paired_signrank_text(predicted_difference, observed_difference)))
+
 analysis_parameters = struct( ...
     'epoch_seconds', EPOCH_SECONDS, ...
     'power_caliper_sd', POWER_CALIPER_SD, ...
@@ -433,6 +501,34 @@ save(fullfile(saving_folder, ...
     'animal_summary', 'overall_result', 'analysis_parameters', '-v7.3');
 
 %% Local functions
+function label = paired_signrank_text(x_value, y_value)
+finite_pairs = isfinite(x_value) & isfinite(y_value);
+if nnz(finite_pairs) < 1
+    label = "NA";
+    return
+end
+try
+    p_value = signrank(x_value(finite_pairs), y_value(finite_pairs));
+catch
+    label = "NA";
+    return
+end
+label = sprintf('%.3g', p_value);
+end
+
+function plot_paired_ppc(x_value, y_value, axis_limit)
+plot(x_value, y_value, 'k.')
+hold on
+finite_pairs = isfinite(x_value) & isfinite(y_value);
+if any(finite_pairs)
+    pair_median = [median(x_value(finite_pairs)), median(y_value(finite_pairs))];
+    plot(pair_median(1), pair_median(2), 'rx', 'LineWidth', 1.2)
+end
+plot(axis_limit, axis_limit, 'r-')
+axis([axis_limit axis_limit])
+axis square
+end
+
 function [pairs, caliper_db] = nearest_power_pairs( ...
     pre_power, play_power, caliper_sd)
 valid_pre = find(isfinite(pre_power));
