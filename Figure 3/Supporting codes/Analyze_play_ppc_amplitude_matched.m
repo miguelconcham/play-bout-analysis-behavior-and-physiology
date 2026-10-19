@@ -387,6 +387,43 @@ xlabel('\Delta delta power (dB)')
 ylabel('\Delta PPC')
 legend({'Merged-pool null arrangements','Amplitude-matched estimate'})
 
+%% Power-balanced trough-cell PPC, in the Figure 3e square-plot layout
+plot_rows = matched_summary(isfinite(matched_summary.PrePPC) & ...
+    isfinite(matched_summary.PlayPPC), :);
+pre_z = atanh(min(max(plot_rows.PrePPC, -0.999), 0.999));
+play_z = atanh(min(max(plot_rows.PlayPPC, -0.999), 0.999));
+preferred_areas = ["DLPAG","DMPAG","DR","LPAG","SupCol","VLPAG"];
+present_areas = string(plot_rows.Area);
+extra_areas = unique(present_areas( ...
+    ~ismember(present_areas, preferred_areas)), 'stable');
+area_order = [preferred_areas(ismember(preferred_areas, present_areas)).'; ...
+    extra_areas(:)];
+axis_limit = [min([pre_z; play_z; -0.005]), max([pre_z; play_z; 0.07])];
+figure('Name', 'Power-balanced trough PPC, pre-play vs play');
+for an = 1:numel(area_order)
+    subplot(1, numel(area_order)+1, an)
+    in_area = present_areas == area_order(an);
+    plot_paired_ppc(pre_z(in_area), play_z(in_area), axis_limit)
+    title(sprintf('%s (n=%d)', area_order(an), sum(in_area)))
+    xlabel('Pre-play PPC (atanh)')
+    if an == 1
+        ylabel('Play PPC (atanh)')
+    end
+end
+subplot(1, numel(area_order)+1, numel(area_order)+1)
+plot_paired_ppc(pre_z, play_z, axis_limit)
+xlabel('Pre-play PPC (atanh)')
+if ~isempty(animal_summary) && ...
+        ismember('ObservedPPCDifference', animal_summary.Properties.VariableNames)
+    animal_mean = mean(animal_summary.ObservedPPCDifference, 'omitnan');
+    animal_p = one_sided_sign_flip( ...
+        animal_summary.ObservedPPCDifference, N_SIGN_FLIP);
+    title(sprintf('All areas, n=%d neurons, %d animals, mean \\Delta=%.4g, p=%.3g', ...
+        height(plot_rows), height(animal_summary), animal_mean, animal_p))
+else
+    title(sprintf('All areas (n=%d)', height(plot_rows)))
+end
+
 analysis_parameters = struct( ...
     'epoch_seconds', EPOCH_SECONDS, ...
     'power_caliper_sd', POWER_CALIPER_SD, ...
@@ -579,6 +616,19 @@ metrics = [(1:n_draws)', repmat(size(pseudo_pre,2),n_draws,1), ...
     mean_post_power-mean_pre_power, power_smd, ...
     n_pre, n_post, n_post-n_pre, (n_post+n_pre)/2, ...
     pre_ppc, post_ppc, post_ppc-pre_ppc, double(reliable)];
+end
+
+function plot_paired_ppc(pre_z, play_z, axis_limit)
+plot(pre_z, play_z, 'k.')
+hold on
+finite_pairs = isfinite(pre_z) & isfinite(play_z);
+if any(finite_pairs)
+    pair_median = [median(pre_z(finite_pairs)), median(play_z(finite_pairs))];
+    plot(pair_median(1), pair_median(2), 'rx', 'LineWidth', 1.2)
+end
+plot(axis_limit, axis_limit, 'r-')
+axis([axis_limit axis_limit])
+axis square
 end
 
 function value = phase_vector(phase)
