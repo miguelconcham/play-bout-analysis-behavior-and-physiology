@@ -139,6 +139,8 @@ def _as_config(cfg: Union[DatasetConfig, Dict[str, Any]]) -> DatasetConfig:
 
 def load_raw(
     folder: PathLike,
+    *,
+    mmap_mode: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, Optional[float]]:
     """
     Load a CSD-ready folder.
@@ -149,7 +151,7 @@ def load_raw(
     Optional ``fs.npy`` overrides the config sampling rate when present.
     """
     folder = os.fspath(folder)
-    lfp = np.load(os.path.join(folder, "lfp.npy"))
+    lfp = np.load(os.path.join(folder, "lfp.npy"), mmap_mode=mmap_mode)
     x = np.load(os.path.join(folder, "x_coords.npy")).flatten()
     y = np.load(os.path.join(folder, "y_coords.npy")).flatten()
     t0 = int(np.asarray(np.load(os.path.join(folder, "T0.npy"))).reshape(-1)[0])
@@ -225,9 +227,12 @@ def prepare_channels(
         if 0 <= ch < keep.size:
             keep[ch] = False
     removed = np.where(~keep)[0].tolist()
-    lfp = lfp[:, keep, :]
-    x = x[keep]
-    y = y[keep]
+    # Preserve memory-mapped LFP when no bad channels are removed. Boolean
+    # indexing would eagerly copy the complete event stack into RAM.
+    if removed:
+        lfp = lfp[:, keep, :]
+        x = x[keep]
+        y = y[keep]
     meta["channels_removed"] = removed
 
     ref_idx = _resolve_ref_chan(y, cfg.ref_chan, cfg.ref_rng_seed)
@@ -339,8 +344,15 @@ def compute_kcsd_1d_columns(
     n_src_factor: float = 4.0,
     smooth_sigma_time: float = 0.0,
     sort_by_depth: bool = True,
+    progress_label: str = "",
 ) -> Dict[float, np.ndarray]:
-    """1D kCSD per shank / unique x. Returns dict x -> (n_ch_col, n_time_sel)."""
+    """
+    1D kCSD per shank / unique x.
+
+    All selected time frames for one column are solved together. KCSD1D
+    accepts ``pots`` as channels × time, so constructing one model per frame
+    is unnecessary and is hundreds of times slower for multi-second epochs.
+    """
     if KCSD1D is None:
         raise ImportError(
             "kcsd is not installed. Install with `pip install kcsd` "
@@ -350,7 +362,7 @@ def compute_kcsd_1d_columns(
     unique_x = np.unique(x)
     csd_dict: Dict[float, np.ndarray] = {}
 
-    for ux in unique_x:
+    for column_number, ux in enumerate(unique_x, start=1):
         idx = np.where(x == ux)[0]
         y_ch = y[idx].astype(float)
         v_ch = evoked[idx, :].astype(float)
@@ -362,7 +374,12 @@ def compute_kcsd_1d_columns(
 
         n_ch = len(y_ch)
         n_time_sel = len(time_indices)
-        csd_stack = np.zeros((n_ch, n_time_sel))
+        label = f"{progress_label}: " if progress_label else ""
+        print(
+            f"    {label}kCSD column {column_number}/{len(unique_x)} "
+            f"(x={float(ux):g}, channels={n_ch}, frames={n_time_sel})",
+            flush=True,
+        )
 
         # Same as share notebook: unit-normalize depth, smooth V, KCSD1D, interp back
         y_norm = _normalize_y(y_ch, y_scale)
@@ -372,23 +389,35 @@ def compute_kcsd_1d_columns(
             v_s = v_ch
 
         n_src = max(2, int(round(n_src_factor * n_ch)))  # share notebook: 2 * n_ch
-
-        for ti_idx, ti in enumerate(time_indices):
-            v_t = v_s[:, ti][:, None]
-            k = KCSD1D(
-                ele_pos=y_norm,
-                pots=v_t,
-                h=h,
-                n_src_init=n_src,
+        k = KCSD1D(
+            ele_pos=y_norm,
+            pots=v_s[:, time_indices],
+            h=h,
+            n_src_init=n_src,
+        )
+        csd_grid = np.asarray(k.values(estimate="CSD"))
+        if csd_grid.ndim == 1:
+            csd_grid = csd_grid[:, None]
+        grid_y = np.linspace(y_ch.min(), y_ch.max(), csd_grid.shape[0])
+        interpolate = interp1d(
+            grid_y,
+            csd_grid,
+            axis=0,
+            kind="linear",
+            fill_value="extrapolate",
+        )
+        csd_stack = np.asarray(interpolate(y_ch))
+        if csd_stack.shape != (n_ch, n_time_sel):
+            raise RuntimeError(
+                f"Unexpected vectorized kCSD shape {csd_stack.shape}; "
+                f"expected {(n_ch, n_time_sel)}"
             )
-            csd_grid = np.asarray(k.values(estimate="CSD"))
-            if csd_grid.ndim == 2:
-                csd_grid = csd_grid[:, 0]
-            grid_y = np.linspace(y_ch.min(), y_ch.max(), len(csd_grid))
-            f = interp1d(grid_y, csd_grid, kind="linear", fill_value="extrapolate")
-            csd_stack[:, ti_idx] = f(y_ch)
 
         csd_dict[float(ux)] = csd_stack
+        print(
+            f"    {label}completed column {column_number}/{len(unique_x)}",
+            flush=True,
+        )
 
     return csd_dict
 
@@ -623,6 +652,7 @@ def run_dataset(cfg: Union[DatasetConfig, Dict[str, Any]]) -> Dict[str, Any]:
             n_src_factor=cfg.n_src_factor,
             smooth_sigma_time=cfg.smooth_sigma_time,
             sort_by_depth=cfg.sort_by_depth,
+            progress_label=name,
         )
         result["csd_kcsd"] = csd_dict
         if cfg.save:
