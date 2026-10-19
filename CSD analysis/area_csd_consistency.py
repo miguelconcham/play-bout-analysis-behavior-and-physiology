@@ -22,6 +22,11 @@ rebuilds the means, clusters, and copies from that cache. A refresh does not
 delete the cache, and a failed delete on experimentFS is overwritten instead
 of stopping the run.
 
+Recordings are pooled only after an area-overlap check. ``a(i, j)`` is the
+percentage of areas sampled by recording ``i`` that recording ``j`` also
+sampled. A pair may be averaged together when both directions are at least
+50%. The retained group is the largest set in which every pair passes.
+
 Area rules, matching the MATLAB generator:
 
 - Animal key: session folder ``<batch> <date> <repeated> ...``.
@@ -48,7 +53,7 @@ import shutil
 import stat
 import warnings
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 
@@ -66,6 +71,8 @@ DEFAULT_MIN_CLUSTER_DURATION_MS = 25.0
 DEFAULT_MIN_CLUSTER_DEPTH_FRACTION = 0.10
 DEFAULT_DEPTH_GRID_STEP_UM = 20.0
 SESSION_CACHE_NAME = "session_cache"
+SESSION_OVERLAP_NAME = "session_overlap"
+DEFAULT_MIN_SHARED_AREA_PERCENT = 50.0
 _MIN_KERNEL_SUPPORT = 0.5
 _FOUR_CONNECTED = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
 
@@ -756,6 +763,532 @@ def _absorb_leaf_assignment(
             )
 
 
+def area_overlap_matrix(
+    session_areas: Dict[str, Sequence[str]],
+) -> Tuple[List[str], np.ndarray]:
+    """
+    Return recordings and the asymmetric overlap matrix.
+
+    ``overlap[i, j]`` is the percentage of areas sampled by recording ``i``
+    that are also sampled by recording ``j``. The diagonal is 100. A
+    recording with no assigned area is omitted because that percentage is
+    undefined.
+    """
+    sessions = sorted(name for name, areas in session_areas.items() if areas)
+    sets = [set(session_areas[name]) for name in sessions]
+    overlap = np.full((len(sessions), len(sessions)), np.nan, dtype=float)
+    for i, left in enumerate(sets):
+        for j, right in enumerate(sets):
+            overlap[i, j] = 100.0 * len(left & right) / len(left)
+    return sessions, overlap
+
+
+def _maximal_cliques(adjacency: Sequence[Set[int]]) -> List[List[int]]:
+    """List every maximal clique, including isolated recordings."""
+    cliques: List[List[int]] = []
+
+    def search(chosen: Set[int], candidates: Set[int], excluded: Set[int]) -> None:
+        if not candidates and not excluded:
+            cliques.append(sorted(chosen))
+            return
+        universe = candidates | excluded
+        pivot = max(universe, key=lambda node: len(adjacency[node] & candidates))
+        for node in list(candidates - adjacency[pivot]):
+            neighbors = adjacency[node]
+            search(chosen | {node}, candidates & neighbors, excluded & neighbors)
+            candidates.remove(node)
+            excluded.add(node)
+
+    search(set(), set(range(len(adjacency))), set())
+    return cliques
+
+
+def _mean_directed_overlap(overlap: np.ndarray, members: Sequence[int]) -> float:
+    if len(members) < 2:
+        return 100.0
+    values = [
+        float(overlap[i, j])
+        for i in members
+        for j in members
+        if i != j and np.isfinite(overlap[i, j])
+    ]
+    if not values:
+        return float("nan")
+    return float(np.mean(values))
+
+
+def select_sessions_by_area_overlap(
+    session_areas: Dict[str, Sequence[str]],
+    *,
+    min_shared_area_percent: float = DEFAULT_MIN_SHARED_AREA_PERCENT,
+) -> Dict[str, object]:
+    """
+    Choose one group of recordings that can be pooled.
+
+    A pair is eligible when each recording finds at least
+    ``min_shared_area_percent`` of its own areas in the other. One direction
+    is not enough: a short recording can sit entirely inside a long one
+    while the long one shares only a small fraction of its areas. The
+    retained group is a clique under that rule, so every retained pair
+    clears the threshold. The largest clique is kept. Equal sizes use the
+    higher mean directed overlap, then the alphabetically first session list.
+    """
+    if not 0 < min_shared_area_percent <= 100:
+        raise ValueError("min_shared_area_percent must be in (0, 100]")
+    sessions, overlap = area_overlap_matrix(session_areas)
+    adjacency = [set() for _ in sessions]
+    for i in range(len(sessions)):
+        for j in range(i + 1, len(sessions)):
+            if (
+                overlap[i, j] >= min_shared_area_percent
+                and overlap[j, i] >= min_shared_area_percent
+            ):
+                adjacency[i].add(j)
+                adjacency[j].add(i)
+    raw_cliques = _maximal_cliques(adjacency) if sessions else []
+    groups = []
+    for members in raw_cliques:
+        if len(members) < 2:
+            continue
+        names = [sessions[index] for index in members]
+        groups.append(
+            {
+                "sessions": names,
+                "n_sessions": len(names),
+                "mean_overlap_percent": _mean_directed_overlap(overlap, members),
+                "selected": False,
+            }
+        )
+    groups.sort(
+        key=lambda group: (
+            -int(group["n_sessions"]),
+            -float(group["mean_overlap_percent"]),
+            tuple(group["sessions"]),
+        )
+    )
+    selected: List[str] = []
+    if groups:
+        groups[0]["selected"] = True
+        selected = list(groups[0]["sessions"])
+    selected_set = set(selected)
+    excluded = []
+    for index, name in enumerate(sessions):
+        if name in selected_set:
+            continue
+        best_partner = ""
+        best_mutual = 0.0
+        for other in range(len(sessions)):
+            if other == index:
+                continue
+            mutual = float(min(overlap[index, other], overlap[other, index]))
+            if np.isfinite(mutual) and mutual > best_mutual:
+                best_mutual = mutual
+                best_partner = sessions[other]
+        excluded.append(
+            {
+                "session": name,
+                "best_partner": best_partner,
+                "best_mutual_percent": best_mutual,
+            }
+        )
+    if not sessions:
+        reason = "No recording had an assigned anatomical area, so no sessions are pooled."
+    elif not selected:
+        reason = (
+            f"No pair of recordings shares at least {min_shared_area_percent:g}% "
+            "of its sampled areas in both directions, so no sessions are pooled."
+        )
+    else:
+        mean_overlap = float(groups[0]["mean_overlap_percent"])
+        reason = (
+            f"Selected {len(selected)} sessions because every pair has at least "
+            f"{min_shared_area_percent:g}% of its own sampled areas present in "
+            f"the other session (mean directed overlap {mean_overlap:.0f}%): "
+            + "; ".join(selected)
+            + "."
+        )
+        alternatives = [group for group in groups if not group["selected"]]
+        if alternatives:
+            reason += (
+                " Other maximal groups meet the same rule but are not pooled: "
+                + "; ".join(", ".join(group["sessions"]) for group in alternatives)
+                + "."
+            )
+        if excluded:
+            reason += " Left out: " + "; ".join(
+                (
+                    f"{item['session']} (best mutual overlap "
+                    f"{item['best_mutual_percent']:.0f}%"
+                    + (
+                        f" with {item['best_partner']}"
+                        if item["best_partner"]
+                        else ""
+                    )
+                    + ")"
+                )
+                for item in excluded
+            ) + "."
+    return {
+        "sessions": sessions,
+        "overlap_percent": overlap,
+        "selected_sessions": selected,
+        "groups": groups,
+        "excluded_sessions": excluded,
+        "reason": reason,
+        "min_shared_area_percent": float(min_shared_area_percent),
+    }
+
+
+def _discover_depth_leaves(
+    root: str,
+    *,
+    output_subdir: str,
+) -> List[str]:
+    found = []
+    skipped_roots = {SESSION_CACHE_NAME, SESSION_OVERLAP_NAME, "area_consistency"}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        if os.path.basename(dirpath) != output_subdir:
+            continue
+        relative = os.path.relpath(dirpath, root).split(os.sep)
+        if any(part in skipped_roots for part in relative):
+            continue
+        if "y_mean_columns.npy" in filenames:
+            found.append(dirpath)
+    found.sort()
+    return found
+
+
+def _areas_from_depths(
+    y: np.ndarray,
+    parsed: Dict[str, str],
+    rows_by_animal: Dict[str, List[AreaLimit]],
+) -> Tuple[str, Dict[str, Dict[str, float]], str]:
+    y = np.asarray(y, dtype=float).reshape(-1)
+    y = y[np.isfinite(y)]
+    try:
+        animal_key = animal_key_from_session(parsed["session"])
+    except ValueError as exc:
+        return "", {}, str(exc)
+    animal_rows = rows_by_animal.get(animal_key)
+    if not animal_rows:
+        return animal_key, {}, f"No area-table rows for {animal_key}"
+    try:
+        npx_type, probe_num = _probe_identity(parsed["probe"])
+    except ValueError as exc:
+        return animal_key, {}, str(exc)
+    covered: Dict[str, Dict[str, float]] = {}
+    for depth in y:
+        chosen = select_area_for_depth(
+            float(depth),
+            animal_rows,
+            npx_type=npx_type,
+            probe_num=probe_num,
+        )
+        if chosen is None:
+            continue
+        stats = covered.get(chosen.area)
+        depth_value = float(depth)
+        if stats is None:
+            covered[chosen.area] = {
+                "n_depths": 1.0,
+                "depth_min": depth_value,
+                "depth_max": depth_value,
+            }
+        else:
+            stats["n_depths"] += 1.0
+            stats["depth_min"] = min(float(stats["depth_min"]), depth_value)
+            stats["depth_max"] = max(float(stats["depth_max"]), depth_value)
+    if not covered:
+        return animal_key, {}, f"No sampled depth fell inside an area for {parsed['session']}"
+    return animal_key, covered, ""
+
+
+def _save_overlap_figure(
+    sessions: Sequence[str],
+    overlap: np.ndarray,
+    save_path: str,
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg", force=False)
+    import matplotlib.pyplot as plt
+
+    if len(sessions) == 0:
+        return
+    fig_side = max(6.0, 0.45 * len(sessions) + 2.0)
+    fig, ax = plt.subplots(figsize=(fig_side, fig_side))
+    image = ax.imshow(overlap, vmin=0.0, vmax=100.0, cmap="viridis", origin="upper")
+    fig.colorbar(image, ax=ax, label="% of areas in row recording also sampled by column")
+    positions = np.arange(len(sessions))
+    ax.set_xticks(positions)
+    ax.set_yticks(positions)
+    ax.set_xticklabels(sessions, rotation=90, fontsize=7)
+    ax.set_yticklabels(sessions, fontsize=7)
+    ax.set_xlabel("Recording j")
+    ax.set_ylabel("Recording i")
+    ax.set_title("Percent of areas from i that are present in j")
+    if len(sessions) <= 12:
+        for i in range(len(sessions)):
+            for j in range(len(sessions)):
+                value = overlap[i, j]
+                if not np.isfinite(value):
+                    continue
+                color = "white" if value < 55.0 else "black"
+                ax.text(
+                    j,
+                    i,
+                    f"{value:.0f}",
+                    ha="center",
+                    va="center",
+                    color=color,
+                    fontsize=7,
+                )
+    fig.tight_layout()
+    try:
+        _ensure_writable(save_path)
+        fig.savefig(save_path, dpi=150)
+    except PermissionError as exc:
+        print(f"  Could not write {save_path}: {exc}", flush=True)
+    finally:
+        plt.close(fig)
+
+
+def summarize_session_area_overlap(
+    root: PathLike,
+    area_table_path: Optional[PathLike] = None,
+    *,
+    area_rows: Optional[Sequence[Union[AreaLimit, Dict[str, object]]]] = None,
+    output_subdir: str = "csd_1d_onset_baseline",
+    output_folder_name: str = SESSION_OVERLAP_NAME,
+    min_shared_area_percent: float = DEFAULT_MIN_SHARED_AREA_PERCENT,
+    save_plot: bool = True,
+    refresh: bool = True,
+) -> Dict[str, object]:
+    """
+    List the areas sampled by each recording and the overlap between them.
+
+    Reads ``y_mean_columns.npy`` only. It does not read the CSD matrices,
+    refit kCSD, or write ``Area_limits_GoodLooking.xlsx``. Areas are assigned
+    with the same animal-key and depth rules as the cross-session summary.
+    Probes and repeated behavior folders from one recording are combined
+    before the overlap is calculated.
+    """
+    root = os.path.abspath(os.fspath(root))
+    rows = _coerce_area_rows(area_rows, area_table_path)
+    rows_by_animal: Dict[str, List[AreaLimit]] = {}
+    for row in rows:
+        rows_by_animal.setdefault(row.animal_name, []).append(row)
+    leaves = _discover_depth_leaves(root, output_subdir=output_subdir)
+    if not leaves:
+        raise FileNotFoundError(
+            f"No saved y_mean_columns.npy maps under {root}. Run column "
+            "averaging before estimating sampled areas. This step does not "
+            "estimate kCSD."
+        )
+
+    print(
+        f"Estimating sampled areas from {len(leaves)} saved depth maps. "
+        "kCSD will NOT be rerun and the area workbook will not be written.",
+        flush=True,
+    )
+    depths_by_probe: Dict[Tuple[str, str], List[np.ndarray]] = {}
+    parsed_by_probe: Dict[Tuple[str, str], Dict[str, str]] = {}
+    for leaf_number, leaf in enumerate(leaves, start=1):
+        try:
+            parsed = _parse_mean_leaf(root, leaf, output_subdir)
+        except ValueError as exc:
+            print(f"  Skipped {leaf}: {exc}", flush=True)
+            continue
+        probe = parsed["probe"] or "NPX1"
+        key = (parsed["session"], probe)
+        depths_by_probe.setdefault(key, []).append(
+            np.load(os.path.join(leaf, "y_mean_columns.npy"))
+        )
+        parsed_by_probe[key] = parsed
+        if leaf_number == 1 or leaf_number == len(leaves) or leaf_number % 25 == 0:
+            print(f"  Read depth map {leaf_number}/{len(leaves)}", flush=True)
+
+    session_areas: Dict[str, Dict[str, Dict[str, float]]] = {}
+    session_animal: Dict[str, str] = {}
+    session_depths: Dict[str, int] = {}
+    session_probes: Dict[str, Set[str]] = {}
+    session_notes: Dict[str, str] = {}
+    for key in sorted(depths_by_probe):
+        session, probe = key
+        y = np.unique(
+            np.concatenate(
+                [np.asarray(chunk, dtype=float).reshape(-1) for chunk in depths_by_probe[key]]
+            )
+        )
+        animal_key, covered, reason = _areas_from_depths(
+            y, parsed_by_probe[key], rows_by_animal
+        )
+        session_animal[session] = animal_key
+        session_depths[session] = session_depths.get(session, 0) + int(np.isfinite(y).sum())
+        session_probes.setdefault(session, set()).add(probe)
+        if reason and not covered:
+            session_notes.setdefault(session, reason)
+        destination = session_areas.setdefault(session, {})
+        for area, stats in covered.items():
+            previous = destination.get(area)
+            if previous is None:
+                destination[area] = dict(stats)
+            else:
+                previous["n_depths"] += stats["n_depths"]
+                previous["depth_min"] = min(previous["depth_min"], stats["depth_min"])
+                previous["depth_max"] = max(previous["depth_max"], stats["depth_max"])
+
+    area_sets = {
+        session: sorted(areas)
+        for session, areas in session_areas.items()
+    }
+    for session, areas in sorted(area_sets.items()):
+        if areas:
+            print(
+                f"  {session}: {len(areas)} areas ({', '.join(areas)})",
+                flush=True,
+            )
+        else:
+            print(
+                f"  {session}: no assigned area"
+                + (f" ({session_notes.get(session, '')})" if session_notes.get(session) else ""),
+                flush=True,
+            )
+
+    selection = select_sessions_by_area_overlap(
+        area_sets,
+        min_shared_area_percent=min_shared_area_percent,
+    )
+    sessions = list(selection["sessions"])
+    overlap = np.asarray(selection["overlap_percent"], dtype=float)
+    print(selection["reason"], flush=True)
+    if len(sessions):
+        print(
+            "Overlap percent, row i and column j: percent of areas in i also present in j",
+            flush=True,
+        )
+        for index, name in enumerate(sessions):
+            print(f"  [{index}] {name}", flush=True)
+        print(np.array2string(overlap, precision=1, floatmode="fixed"), flush=True)
+
+    output_root = os.path.join(root, output_folder_name)
+    if refresh and os.path.isdir(output_root):
+        _remove_tree(output_root)
+    os.makedirs(output_root, exist_ok=True)
+
+    coverage_rows = []
+    detail_rows = []
+    for session in sorted(session_areas):
+        areas = area_sets[session]
+        coverage_rows.append(
+            {
+                "session": session,
+                "animal_key": session_animal.get(session, ""),
+                "n_probes": len(session_probes.get(session, ())),
+                "n_depths": session_depths.get(session, 0),
+                "n_areas": len(areas),
+                "areas": "; ".join(areas),
+                "note": "" if areas else session_notes.get(session, ""),
+            }
+        )
+        for area in areas:
+            stats = session_areas[session][area]
+            detail_rows.append(
+                {
+                    "session": session,
+                    "area": area,
+                    "n_depths": int(stats["n_depths"]),
+                    "depth_min": stats["depth_min"],
+                    "depth_max": stats["depth_max"],
+                }
+            )
+    coverage_csv = os.path.join(output_root, "coverage.csv")
+    detail_csv = os.path.join(output_root, "coverage_by_area.csv")
+    _write_csv(
+        coverage_csv,
+        ["session", "animal_key", "n_probes", "n_depths", "n_areas", "areas", "note"],
+        coverage_rows,
+    )
+    _write_csv(
+        detail_csv,
+        ["session", "area", "n_depths", "depth_min", "depth_max"],
+        detail_rows,
+    )
+    overlap_csv = os.path.join(output_root, "overlap_percent.csv")
+    overlap_rows = []
+    for i, name in enumerate(sessions):
+        row = {"recording": name}
+        for j, other in enumerate(sessions):
+            value = overlap[i, j]
+            row[other] = "" if not np.isfinite(value) else f"{float(value):.6f}"
+        overlap_rows.append(row)
+    _write_csv(overlap_csv, ["recording", *sessions], overlap_rows)
+    overlap_npy = os.path.join(output_root, "overlap_percent.npy")
+    _write_npy(overlap_npy, overlap)
+    order_path = os.path.join(output_root, "session_order.txt")
+    _ensure_writable(order_path)
+    with open(order_path, "w", encoding="utf-8") as stream:
+        stream.write("".join(f"{name}\n" for name in sessions))
+    selected_path = os.path.join(output_root, "selected_sessions.txt")
+    _ensure_writable(selected_path)
+    with open(selected_path, "w", encoding="utf-8") as stream:
+        stream.write("".join(f"{name}\n" for name in selection["selected_sessions"]))
+    groups_csv = os.path.join(output_root, "session_groups.csv")
+    _write_csv(
+        groups_csv,
+        ["group_id", "selected", "n_sessions", "mean_overlap_percent", "sessions"],
+        [
+            {
+                "group_id": group_id,
+                "selected": group["selected"],
+                "n_sessions": group["n_sessions"],
+                "mean_overlap_percent": group["mean_overlap_percent"],
+                "sessions": "; ".join(group["sessions"]),
+            }
+            for group_id, group in enumerate(selection["groups"], start=1)
+        ],
+    )
+    selection_path = os.path.join(output_root, "selection.json")
+    _ensure_writable(selection_path)
+    with open(selection_path, "w", encoding="utf-8") as stream:
+        json.dump(
+            {
+                "min_shared_area_percent": selection["min_shared_area_percent"],
+                "selected_sessions": selection["selected_sessions"],
+                "reason": selection["reason"],
+                "excluded_sessions": selection["excluded_sessions"],
+            },
+            stream,
+            indent=2,
+        )
+    figure_path = os.path.join(output_root, "overlap_matrix.png")
+    if save_plot:
+        _save_overlap_figure(sessions, overlap, figure_path)
+        print(f"  Saved overlap matrix: {figure_path}", flush=True)
+    print(f"Session overlap written to {output_root}", flush=True)
+    unassigned = sorted(session for session, areas in area_sets.items() if not areas)
+    return {
+        "output_root": output_root,
+        "coverage_csv": coverage_csv,
+        "coverage_by_area_csv": detail_csv,
+        "overlap_csv": overlap_csv,
+        "overlap_npy": overlap_npy,
+        "overlap_figure": figure_path if save_plot else None,
+        "selected_sessions_path": selected_path,
+        "groups_csv": groups_csv,
+        "selection_json": selection_path,
+        "sessions": sessions,
+        "session_areas": {name: area_sets[name] for name in sessions},
+        "unassigned_sessions": unassigned,
+        "overlap_percent": overlap,
+        "selected_sessions": list(selection["selected_sessions"]),
+        "groups": selection["groups"],
+        "excluded_sessions": selection["excluded_sessions"],
+        "reason": selection["reason"],
+        "min_shared_area_percent": selection["min_shared_area_percent"],
+    }
+
+
 def summarize_area_csd_across_sessions(
     root: PathLike,
     area_table_path: Optional[PathLike] = None,
@@ -781,6 +1314,7 @@ def summarize_area_csd_across_sessions(
     stop_on_error: bool = False,
     reuse_session_cache: bool = True,
     from_cache_only: bool = False,
+    session_allowlist: Optional[Sequence[str]] = None,
 ) -> Dict[str, object]:
     """
     Pool saved averaged kCSD maps by anatomical area across sessions.
@@ -799,6 +1333,10 @@ def summarize_area_csd_across_sessions(
     folder is written. ``refresh`` replaces group outputs and leaves that
     cache in place. If experimentFS refuses to delete an old folder, the
     new files are written over the old ones.
+
+    ``session_allowlist`` limits the pool to recordings chosen by
+    ``summarize_session_area_overlap``. Sessions outside that list are not
+    averaged together. ``None`` keeps every saved session.
     """
     if n_relative_depths < 2:
         raise ValueError("n_relative_depths must be at least 2")
@@ -874,6 +1412,13 @@ def summarize_area_csd_across_sessions(
     session_smoothed_parts: Dict[Tuple[str, str, str, str, str], List[np.ndarray]] = {}
     session_time: Dict[Tuple[str, str, str, str, str], np.ndarray] = {}
     skipped: List[Dict[str, str]] = []
+    allowed_sessions = None if session_allowlist is None else set(session_allowlist)
+    if allowed_sessions is not None:
+        print(
+            f"Area-overlap group contains {len(allowed_sessions)} sessions. "
+            "Recordings outside that group are not averaged together.",
+            flush=True,
+        )
 
     if from_cache_only:
         folders = _iter_cache_folders(cache_root)
@@ -887,6 +1432,7 @@ def summarize_area_csd_across_sessions(
                 "clusters, and figure copies without reading those matrices."
             )
         loaded_any = False
+        skipped_by_overlap = 0
         for folder_number, folder in enumerate(folders, start=1):
             label = os.path.relpath(folder, cache_root)
             print(f"[{folder_number}/{len(folders)}] Cache {label}", flush=True)
@@ -904,6 +1450,18 @@ def summarize_area_csd_across_sessions(
                 print(f"  Skipped: {reason}", flush=True)
                 skipped.append({"leaf": folder, "reason": reason})
                 continue
+            if (
+                allowed_sessions is not None
+                and loaded["parsed"]["session"] not in allowed_sessions
+            ):
+                skipped_by_overlap += 1
+                skipped.append(
+                    {
+                        "leaf": folder,
+                        "reason": "Session is outside the area-overlap group",
+                    }
+                )
+                continue
             loaded_any = True
             _absorb_leaf_assignment(
                 loaded["parsed"],
@@ -915,7 +1473,12 @@ def summarize_area_csd_across_sessions(
                 skipped=skipped,
                 stop_on_error=stop_on_error,
             )
-        if not loaded_any:
+        if not loaded_any and skipped_by_overlap:
+            print(
+                "No cached session belongs to the selected area-overlap group.",
+                flush=True,
+            )
+        elif not loaded_any:
             raise FileNotFoundError(
                 f"No usable session cache at {cache_root}. The saved maps "
                 "do not match the current smoothing, depth-span, or "
@@ -926,6 +1489,17 @@ def summarize_area_csd_across_sessions(
     else:
         for leaf_number, leaf in enumerate(discovered["means"], start=1):
             parsed = _parse_mean_leaf(root, leaf, output_subdir)
+            if (
+                allowed_sessions is not None
+                and parsed["session"] not in allowed_sessions
+            ):
+                skipped.append(
+                    {
+                        "leaf": leaf,
+                        "reason": "Session is outside the area-overlap group",
+                    }
+                )
+                continue
             label = (
                 f"{parsed['scope']}/{parsed['behavior']} {parsed['alignment']} "
                 f"{parsed['session']} {parsed['probe'] or 'NPX1'}"
@@ -1192,6 +1766,9 @@ def summarize_area_csd_across_sessions(
         "skipped": skipped,
         "groups": summaries,
         "color_limits": color_limits,
+        "session_allowlist": (
+            None if allowed_sessions is None else sorted(allowed_sessions)
+        ),
     }
 
 
@@ -1213,6 +1790,7 @@ def finalize_area_consistency_from_cache(
     min_cluster_depth_fraction: float = DEFAULT_MIN_CLUSTER_DEPTH_FRACTION,
     save_plots: bool = True,
     refresh: bool = True,
+    session_allowlist: Optional[Sequence[str]] = None,
 ) -> Dict[str, object]:
     """
     Write area means, clusters, and sorted figures from ``session_cache``.
@@ -1241,6 +1819,7 @@ def finalize_area_consistency_from_cache(
         refresh=refresh,
         from_cache_only=True,
         reuse_session_cache=True,
+        session_allowlist=session_allowlist,
     )
 
 

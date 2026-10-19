@@ -11,6 +11,7 @@ import numpy as np
 import area_csd_consistency as area_mod
 from area_csd_consistency import (
     animal_key_from_session,
+    area_overlap_matrix,
     finalize_area_consistency_from_cache,
     infer_saved_kcsd_clusters,
     label_significant_clusters,
@@ -18,8 +19,10 @@ from area_csd_consistency import (
     organize_area_consistency_figures,
     resample_area_segment,
     select_area_for_depth,
+    select_sessions_by_area_overlap,
     smooth_csd_in_depth_and_time,
     summarize_area_csd_across_sessions,
+    summarize_session_area_overlap,
     AreaLimit,
 )
 
@@ -618,6 +621,144 @@ class AcrossSessionTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError) as missing:
                 finalize_area_consistency_from_cache(empty, save_plots=False)
             self.assertIn("session cache", str(missing.exception).lower())
+
+    def test_overlap_keeps_the_group_that_shares_half_its_areas_both_ways(self):
+        areas = {
+            "s1": ["A", "B", "C", "D"],
+            "s2": ["A", "B", "C", "E"],
+            "s3": ["A"],
+            "wide": ["P", "Q", "R", "S"],
+            "wide_match": ["P", "Q", "R", "S"],
+            "alpha": ["W", "X", "Y", "Z"],
+            "beta": ["W", "X", "Y", "Z"],
+        }
+        names, matrix = area_overlap_matrix(areas)
+        s1 = names.index("s1")
+        s3 = names.index("s3")
+        self.assertEqual(matrix[s3, s1], 100.0)
+        self.assertEqual(matrix[s1, s3], 25.0)
+        self.assertEqual(matrix[s1, names.index("s2")], 75.0)
+
+        selected = select_sessions_by_area_overlap(areas)
+        self.assertEqual(selected["selected_sessions"], ["alpha", "beta"])
+        self.assertEqual(len(selected["groups"]), 3)
+
+        tied = select_sessions_by_area_overlap(
+            {
+                "b": ["A", "B", "C", "D"],
+                "a": ["A", "B", "C", "D"],
+                "d": ["W", "X", "Y", "Z"],
+                "c": ["W", "X", "Y", "Z"],
+            }
+        )
+        self.assertEqual(tied["selected_sessions"], ["a", "b"])
+
+        boundary = select_sessions_by_area_overlap(
+            {"p": ["A", "B", "C", "D"], "q": ["A", "B", "X", "Y"]}
+        )
+        self.assertEqual(boundary["selected_sessions"], ["p", "q"])
+
+    def test_recording_coverage_union_and_allowlist(self):
+        s_wide = "B1A2 20240101 RatA"
+        s_narrow = "B1B2 20240202 RatB"
+        s_other = "B1C2 20240303 RatC"
+        rows = [
+            _row("LPAG", 1, 0, 399, "PAG", animal="Batch1RatA2"),
+            _row("VTA", 2, 400, 800, "PAG", animal="Batch1RatA2"),
+            _row("LPAG", 1, 0, 399, "PAG", animal="Batch1RatB2"),
+            _row("ZZZ", 1, 0, 399, "PAG", animal="Batch1RatC2"),
+        ]
+        y_lpag = np.array([0.0, 300.0])
+        y_vta = np.array([400.0, 700.0])
+        time_ms = np.array([0.0, 5.0])
+        with tempfile.TemporaryDirectory() as root:
+            _write_mean(
+                os.path.join(root, "behavior", "Pounce", "onset", s_wide, "probe1"),
+                2.0,
+                y_lpag,
+                time_ms,
+            )
+            _write_mean(
+                os.path.join(root, "behavior", "Pounce", "onset", s_wide, "probe2"),
+                8.0,
+                y_vta,
+                time_ms,
+            )
+            _write_mean(
+                os.path.join(root, "behavior", "Pounce", "offset", s_wide, "probe1"),
+                2.0,
+                y_lpag,
+                time_ms,
+            )
+            _write_mean(
+                os.path.join(root, "behavior", "Pounce", "onset", s_narrow, "probe1"),
+                20.0,
+                y_lpag,
+                time_ms,
+            )
+            _write_mean(
+                os.path.join(root, "behavior", "Pounce", "onset", s_other, "probe1"),
+                100.0,
+                y_lpag,
+                time_ms,
+            )
+
+            overlap = summarize_session_area_overlap(
+                root,
+                area_rows=rows,
+                save_plot=True,
+            )
+            self.assertEqual(overlap["session_areas"][s_wide], ["LPAG", "VTA"])
+            self.assertEqual(overlap["session_areas"][s_narrow], ["LPAG"])
+            names = overlap["sessions"]
+            matrix = overlap["overlap_percent"]
+            wide = names.index(s_wide)
+            narrow = names.index(s_narrow)
+            self.assertEqual(matrix[narrow, wide], 100.0)
+            self.assertEqual(matrix[wide, narrow], 50.0)
+            self.assertEqual(overlap["selected_sessions"], [s_wide, s_narrow])
+            self.assertNotIn(s_other, overlap["selected_sessions"])
+            self.assertTrue(os.path.isfile(overlap["coverage_csv"]))
+            self.assertTrue(os.path.isfile(overlap["overlap_figure"]))
+            self.assertFalse(
+                any(name.endswith(".xlsx") for _dir, _dirs, files in os.walk(root) for name in files)
+            )
+            with open(overlap["coverage_by_area_csv"], encoding="utf-8") as stream:
+                detail = stream.read()
+            self.assertEqual(detail.count("LPAG"), 2)
+
+            restricted = summarize_area_csd_across_sessions(
+                root,
+                area_rows=rows,
+                save_plots=False,
+                session_allowlist=overlap["selected_sessions"],
+            )
+            pooled = np.load(
+                os.path.join(
+                    root,
+                    "area_consistency",
+                    "behavior",
+                    "Pounce",
+                    "onset",
+                    "LPAG",
+                    "mean_csd.npy",
+                )
+            )
+            # Wide probe1 is 2 and narrow is 20. The other session is 100 and must stay out.
+            finite = pooled[np.isfinite(pooled)]
+            self.assertTrue(finite.size)
+            np.testing.assert_allclose(finite, 11.0)
+            self.assertEqual(
+                restricted["session_allowlist"],
+                sorted(overlap["selected_sessions"]),
+            )
+            self.assertFalse(
+                os.path.isdir(
+                    os.path.join(
+                        root, "area_consistency", "behavior", "Pounce", "onset", "ZZZ"
+                    )
+                )
+            )
 
     def test_module_does_not_estimate_kcsd(self):
         code_dir = os.path.dirname(os.path.abspath(__file__))
