@@ -454,7 +454,7 @@ plot_rows = matched_summary(finite_difference & ...
 predicted_difference = plot_rows.ModelExpectedPPCDifference;
 observed_difference = plot_rows.PPCDifference;
 present_areas = string(plot_rows.Area);
-fprintf('Areas included in the all-areas panel:\n');
+fprintf('Areas included in the PPC-difference all-areas panel:\n');
 disp(unique(present_areas));
 span = [predicted_difference; observed_difference; 0];
 pad = 0.05 * max(max(span) - min(span), eps);
