@@ -205,6 +205,39 @@ The original (pre-v2) Figure 2 pipeline lives outside this repository, in the pa
 
 `Figure 3/Supporting codes/` holds GENERATE / Estimate / ANALYZE pipelines that build the `.mat` files those plots load. `Estiamte_activation_index_and_other_variables.m` section 8 writes the example-plot checkpoint used by `SuppFig4 ActivationIndex Example.m`.
 
+### Figure 3e delta-power control
+
+Both pipelines use `\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\...`.
+The earlier one is unchanged and keeps writing
+`Data/Analysis results/phase locking power control/`:
+
+```
+Estimate_phase_locking_power_control.m
+  → GENERATE_PHASE_LOCKING_POWER_CONTROL.m
+  → Analyze_play_ppc_amplitude_matched.m
+```
+
+It matches one-second play and pre-play epochs by log-delta power. Its null
+uses pre-play epochs only. Existing session files are skipped.
+
+The power-contrast pipeline is separate and writes
+`Data/Analysis results/phase locking power contrast/`:
+
+```
+Estimate_phase_locking_power_contrast.m
+  → GENERATE_PHASE_LOCKING_POWER_CONTRAST.m
+  → Analyze_play_ppc_power_contrast.m
+```
+
+Its null uses every non-play second inside each Partners session: before the
+first play bout, between bouts, and after the last bout. Three tail widths
+stay within twice the group size, spaced so the power gap changes in equal
+steps, and each width that can supply distinct groups receives the same
+number of draws. The rows entered in the model are saved as
+`neuron_model_table`. Trough-locked cells come from the existing Figure 3
+labels (`EntireSession.PPCPval < 0.01` and preferred angle outside ±π/2).
+The overall result averages residual PPC change within animal.
+
 ---
 
 ## Figure 4 and Extended Data Fig. 6
