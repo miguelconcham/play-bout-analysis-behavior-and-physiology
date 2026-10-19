@@ -123,7 +123,13 @@ class AreaRuleTests(unittest.TestCase):
             sheet.append(["Batch1RatA2", "LPAG", 2, 0, 100, "PAG"])
             workbook.save(path)
             workbook.close()
+            with open(path, "rb") as stream:
+                before = stream.read()
+            modified = os.path.getmtime(path)
             loaded = load_area_limits(path)
+            with open(path, "rb") as stream:
+                self.assertEqual(stream.read(), before)
+            self.assertEqual(os.path.getmtime(path), modified)
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0].animal_name, "Batch1RatA2")
         self.assertEqual(loaded[0].probe_num, 2)
@@ -622,6 +628,8 @@ class AcrossSessionTests(unittest.TestCase):
         self.assertNotIn("compute_kcsd_1d_columns", source)
         self.assertNotIn("import kcsd", source)
         self.assertNotIn("csd_1d_pipeline", source)
+        self.assertNotIn("workbook.save", source)
+        self.assertNotIn("load_workbook(path", source)
         env = os.environ.copy()
         env["PYTHONPATH"] = code_dir + os.pathsep + env.get("PYTHONPATH", "")
         completed = subprocess.run(

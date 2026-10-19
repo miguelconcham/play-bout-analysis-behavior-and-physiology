@@ -40,6 +40,7 @@ Area rules, matching the MATLAB generator:
 from __future__ import annotations
 
 import csv
+import io
 import json
 import os
 import re
@@ -123,7 +124,12 @@ def animal_key_from_session(session_name: str) -> str:
 
 
 def load_area_limits(path: PathLike) -> List[AreaLimit]:
-    """Load the area workbook used by the MATLAB generators."""
+    """
+    Read area rows from the workbook used by the MATLAB generators.
+
+    ``Area_limits_GoodLooking.xlsx`` is source data. This function opens it
+    with a read-only byte copy and never saves, overwrites, or truncates it.
+    """
     path = os.fspath(path)
     if not os.path.isfile(path):
         raise FileNotFoundError(
@@ -138,7 +144,9 @@ def load_area_limits(path: PathLike) -> List[AreaLimit]:
             "Install it in the kCSD_env kernel with: python -m pip install openpyxl"
         ) from exc
 
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    with open(path, "rb") as stream:
+        payload = io.BytesIO(stream.read())
+    workbook = openpyxl.load_workbook(payload, read_only=True, data_only=True)
     try:
         sheet = workbook.active
         iterator = sheet.iter_rows(values_only=True)

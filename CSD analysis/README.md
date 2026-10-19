@@ -278,7 +278,8 @@ with `mean_csd.png`, `sign_consistency.png`, and the arrays behind them.
 at least two sessions, high sign agreement, and a large absolute mean.
 Consistency images are blank where fewer than two sessions overlap. The
 `kCSD_env` kernel needs `openpyxl` (`python -m pip install openpyxl`) to read
-the spreadsheet.
+the spreadsheet. The reader copies the workbook into memory and does not
+save it. `Area_limits_GoodLooking.xlsx` is never modified.
 
 Before that average, each probe segment is smoothed with a Gaussian whose
 full width at half maximum is 250 ms and 100 µm. Samples are dropped where
