@@ -412,6 +412,44 @@ xlabel('\Delta delta power (dB)')
 ylabel('\Delta PPC')
 legend({'Non-play power-contrast null','Amplitude-matched estimate'})
 
+%% Observed versus null-model PPC difference, Figure 3e areas
+% The prediction uses each neuron's matched power difference, spike-count
+% difference, mean spike count, and epoch count. SC is stored as SupCol.
+paper_areas = ["SupCol","DLPAG","LPAG","VLPAG","DR"];
+paper_labels = ["SC","DLPAG","LPAG","VLPAG","DR"];
+finite_difference = isfinite(matched_summary.PPCDifference) & ...
+    isfinite(matched_summary.ModelExpectedPPCDifference);
+plot_rows = matched_summary(finite_difference & ...
+    ismember(string(matched_summary.Area), paper_areas), :);
+predicted_difference = plot_rows.ModelExpectedPPCDifference;
+observed_difference = plot_rows.PPCDifference;
+present_areas = string(plot_rows.Area);
+fprintf('Areas included in the all-areas panel:\n');
+disp(unique(present_areas));
+span = [predicted_difference; observed_difference; 0];
+pad = 0.05 * max(max(span) - min(span), eps);
+axis_limit = [min(span) - pad, max(span) + pad];
+figure('Name', 'Observed versus null-model PPC difference');
+for an = 1:numel(paper_areas)
+    subplot(1, numel(paper_areas)+1, an)
+    in_area = present_areas == paper_areas(an);
+    plot_paired_ppc(predicted_difference(in_area), ...
+        observed_difference(in_area), axis_limit)
+    title(sprintf('%s n=%d p=%s', paper_labels(an), sum(in_area), ...
+        paired_signrank_text(predicted_difference(in_area), ...
+        observed_difference(in_area))))
+    xlabel('Null-model PPC difference')
+    if an == 1
+        ylabel('Observed PPC difference')
+    end
+end
+subplot(1, numel(paper_areas)+1, numel(paper_areas)+1)
+plot_paired_ppc(predicted_difference, observed_difference, axis_limit)
+xlabel('Null-model PPC difference')
+title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
+    height(plot_rows), numel(unique(string(plot_rows.Animal))), ...
+    paired_signrank_text(predicted_difference, observed_difference)))
+
 analysis_parameters = struct( ...
     'epoch_seconds', EPOCH_SECONDS, ...
     'power_caliper_sd', POWER_CALIPER_SD, ...
@@ -433,6 +471,34 @@ save(fullfile(saving_folder, ...
     'animal_summary', 'overall_result', 'analysis_parameters', '-v7.3');
 
 %% Local functions
+function label = paired_signrank_text(x_value, y_value)
+finite_pairs = isfinite(x_value) & isfinite(y_value);
+if nnz(finite_pairs) < 1
+    label = "NA";
+    return
+end
+try
+    p_value = signrank(x_value(finite_pairs), y_value(finite_pairs));
+catch
+    label = "NA";
+    return
+end
+label = sprintf('%.3g', p_value);
+end
+
+function plot_paired_ppc(x_value, y_value, axis_limit)
+plot(x_value, y_value, 'k.')
+hold on
+finite_pairs = isfinite(x_value) & isfinite(y_value);
+if any(finite_pairs)
+    pair_median = [median(x_value(finite_pairs)), median(y_value(finite_pairs))];
+    plot(pair_median(1), pair_median(2), 'rx', 'LineWidth', 1.2)
+end
+plot(axis_limit, axis_limit, 'r-')
+axis([axis_limit axis_limit])
+axis square
+end
+
 function [pairs, caliper_db] = nearest_power_pairs( ...
     pre_power, play_power, caliper_sd)
 valid_pre = find(isfinite(pre_power));
