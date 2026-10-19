@@ -1,13 +1,17 @@
 import os
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
+import area_csd_consistency as area_mod
 from area_csd_consistency import (
     animal_key_from_session,
+    finalize_area_consistency_from_cache,
     infer_saved_kcsd_clusters,
     label_significant_clusters,
     load_area_limits,
@@ -539,6 +543,75 @@ class AcrossSessionTests(unittest.TestCase):
         inferred = infer_saved_kcsd_clusters(stack, time_ms, relative_depth)
         self.assertTrue(np.all(inferred["mask"] == 1))
         self.assertTrue(np.all(inferred["p"] == 0.0))
+
+    def test_failed_delete_still_writes_and_cache_resumes_without_sources(self):
+        time_ms = np.array([-1000.0, 1000.0])
+        y = np.array([0.0, 400.0])
+        session = "B1A2 20240101 RatA"
+        rows = [_row("LPAG", 1, 0, 400, "PAG")]
+        with tempfile.TemporaryDirectory() as root:
+            _write_mean(
+                os.path.join(root, "behavior", "Pounce", "onset", session),
+                4.0,
+                y,
+                time_ms,
+            )
+            group = os.path.join(
+                root, "area_consistency", "behavior", "Pounce", "onset", "LPAG"
+            )
+            os.makedirs(group)
+            stale = os.path.join(group, "mean_csd.npy")
+            np.save(stale, np.zeros((2, 2)))
+            os.chmod(stale, stat.S_IREAD)
+
+            def refuse_delete(*_args, **_kwargs):
+                raise PermissionError("experimentFS denied rmtree")
+
+            with mock.patch.object(area_mod.shutil, "rmtree", side_effect=refuse_delete):
+                summarize_area_csd_across_sessions(
+                    root,
+                    area_rows=rows,
+                    save_plots=False,
+                )
+
+            np.testing.assert_allclose(np.load(stale), 4.0)
+            cache_root = os.path.join(root, "area_consistency", "session_cache")
+            marker = os.path.join(cache_root, "keep.txt")
+            with open(marker, "w", encoding="utf-8") as stream:
+                stream.write("keep")
+            self.assertTrue(area_mod._iter_cache_folders(cache_root))
+
+            for dirpath, _dirnames, filenames in os.walk(root):
+                if "session_cache" in dirpath.split(os.sep):
+                    continue
+                if "csd_mean_columns.npy" in filenames:
+                    os.remove(os.path.join(dirpath, "csd_mean_columns.npy"))
+            os.remove(stale)
+            self.assertFalse(os.path.isfile(stale))
+
+            with mock.patch.object(area_mod.shutil, "rmtree", side_effect=refuse_delete):
+                resumed = finalize_area_consistency_from_cache(
+                    root,
+                    save_plots=False,
+                )
+            np.testing.assert_allclose(np.load(os.path.join(group, "mean_csd.npy")), 4.0)
+            self.assertEqual(resumed["n_groups"], 1)
+            self.assertEqual(resumed["n_missing_mean"], 0)
+            with open(marker, encoding="utf-8") as stream:
+                self.assertEqual(stream.read(), "keep")
+
+            with self.assertRaises(FileNotFoundError) as mismatched:
+                finalize_area_consistency_from_cache(
+                    root,
+                    n_relative_depths=11,
+                    save_plots=False,
+                )
+            self.assertIn("not match", str(mismatched.exception))
+
+        with tempfile.TemporaryDirectory() as empty:
+            with self.assertRaises(FileNotFoundError) as missing:
+                finalize_area_consistency_from_cache(empty, save_plots=False)
+            self.assertIn("session cache", str(missing.exception).lower())
 
     def test_module_does_not_estimate_kcsd(self):
         code_dir = os.path.dirname(os.path.abspath(__file__))

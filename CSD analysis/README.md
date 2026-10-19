@@ -305,3 +305,18 @@ area_consistency/by_behavior/figure_index.csv
 `play__category__LPAG__mean_csd.png` is the across-session play map for LPAG.
 Original area folders are not changed. If the maps already exist, rerun only
 `organize_area_consistency_figures(BEHAVIOR_ROOT)`.
+
+While each saved map is read, a copy is written to
+`area_consistency/session_cache/`. Refreshing the area folder does not delete
+that cache. On experimentFS, Windows often raises `PermissionError` when
+`shutil.rmtree` tries to remove `area_consistency` (a file is open or
+read-only). The run now overwrites the old files instead of stopping. The
+failed run that hit that delete had already finished the read in memory, but
+the old code wrote nothing, so that attempt cannot be resumed. Rerun the area
+cell once. After `session_cache` exists, rebuild the means, clusters, and
+`by_behavior` copies without reading `csd_mean_columns.npy` again:
+
+```python
+from area_csd_consistency import finalize_area_consistency_from_cache
+finalize_area_consistency_from_cache(BEHAVIOR_ROOT)
+```

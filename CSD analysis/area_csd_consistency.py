@@ -16,6 +16,12 @@ threshold are kept only when they span at least 25 ms and 10% of the
 relative-depth axis. A probe segment whose unique depths span less than
 200 µm is left out of that session.
 
+Each accepted session map is written to ``area_consistency/session_cache``
+before the group figures are saved. ``finalize_area_consistency_from_cache``
+rebuilds the means, clusters, and copies from that cache. A refresh does not
+delete the cache, and a failed delete on experimentFS is overwritten instead
+of stopping the run.
+
 Area rules, matching the MATLAB generator:
 
 - Animal key: session folder ``<batch> <date> <repeated> ...``.
@@ -34,9 +40,11 @@ Area rules, matching the MATLAB generator:
 from __future__ import annotations
 
 import csv
+import json
 import os
 import re
 import shutil
+import stat
 import warnings
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -56,6 +64,7 @@ DEFAULT_TTEST_ALPHA = 0.05
 DEFAULT_MIN_CLUSTER_DURATION_MS = 25.0
 DEFAULT_MIN_CLUSTER_DEPTH_FRACTION = 0.10
 DEFAULT_DEPTH_GRID_STEP_UM = 20.0
+SESSION_CACHE_NAME = "session_cache"
 _MIN_KERNEL_SUPPORT = 0.5
 _FOUR_CONNECTED = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
 
@@ -504,6 +513,241 @@ def _axis_step(values: np.ndarray) -> float:
     return float(np.median(positive))
 
 
+def _ensure_writable(path: str) -> None:
+    if os.path.exists(path):
+        try:
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+        except OSError:
+            pass
+
+
+def _remove_tree(path: str) -> bool:
+    """
+    Delete a folder tree.
+
+    experimentFS often raises PermissionError for ``shutil.rmtree`` when a
+    file is open or marked read-only. Returning False lets the caller
+    overwrite files instead of stopping.
+    """
+    if not os.path.exists(path):
+        return True
+
+    def _retry(function, failed_path, _exc_info):
+        _ensure_writable(failed_path)
+        function(failed_path)
+
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path, onerror=_retry)
+        else:
+            _ensure_writable(path)
+            os.remove(path)
+        return True
+    except PermissionError as exc:
+        print(
+            f"Could not delete {path}: {exc}. "
+            "The existing files will be overwritten. On experimentFS this "
+            "usually means a file in that folder is open or read-only.",
+            flush=True,
+        )
+        return False
+
+
+def _prepare_area_output(output_root: str, *, refresh: bool) -> None:
+    """Create the area folder without deleting the session cache."""
+    try:
+        os.makedirs(output_root, exist_ok=True)
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Cannot create {output_root}. The behavior-aligned CSD folder "
+            "on experimentFS is not writable from this kernel."
+        ) from exc
+    if not refresh:
+        return
+    for name in os.listdir(output_root):
+        if name == SESSION_CACHE_NAME:
+            continue
+        _remove_tree(os.path.join(output_root, name))
+
+
+def _processing_metadata(
+    *,
+    n_relative_depths: int,
+    smooth_fwhm_ms: float,
+    smooth_fwhm_um: float,
+    min_depth_span_um: float,
+    depth_grid_step_um: float,
+) -> Dict[str, object]:
+    return {
+        "n_relative_depths": int(n_relative_depths),
+        "smooth_fwhm_ms": float(smooth_fwhm_ms),
+        "smooth_fwhm_um": float(smooth_fwhm_um),
+        "min_depth_span_um": float(min_depth_span_um),
+        "depth_grid_step_um": float(depth_grid_step_um),
+    }
+
+
+def _metadata_matches(saved: Dict[str, object], expected: Dict[str, object]) -> bool:
+    for key, value in expected.items():
+        other = saved.get(key)
+        if isinstance(value, float):
+            try:
+                if other is None or not np.isclose(float(other), value):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        elif other != value:
+            return False
+    return True
+
+
+def _leaf_cache_dir(cache_root: str, parsed: Dict[str, str]) -> str:
+    probe = parsed["probe"] or "NPX1"
+    return os.path.join(
+        cache_root,
+        _safe_path_part(parsed["scope"]),
+        _safe_path_part(parsed["behavior"]),
+        parsed["alignment"],
+        _safe_path_part(parsed["session"]),
+        _safe_path_part(probe),
+    )
+
+
+def _save_leaf_cache(
+    cache_root: str,
+    parsed: Dict[str, str],
+    assignment: Dict[str, object],
+    processing: Dict[str, object],
+) -> None:
+    folder = _leaf_cache_dir(cache_root, parsed)
+    os.makedirs(folder, exist_ok=True)
+    areas = assignment["areas"]
+    smoothed = assignment.get("areas_smoothed") or {}
+    stored = {}
+    for area, matrix in areas.items():
+        safe = _safe_path_part(str(area))
+        stored[safe] = str(area)
+        _write_npy(os.path.join(folder, f"{safe}__csd.npy"), matrix)
+        if area in smoothed:
+            _write_npy(os.path.join(folder, f"{safe}__smoothed.npy"), smoothed[area])
+    _write_npy(os.path.join(folder, "time_ms.npy"), assignment["time_ms"])
+    payload = {
+        **processing,
+        "scope": parsed["scope"],
+        "behavior": parsed["behavior"],
+        "alignment": parsed["alignment"],
+        "session": parsed["session"],
+        "probe": parsed["probe"] or "NPX1",
+        "areas": stored,
+    }
+    path = os.path.join(folder, "cache.json")
+    _ensure_writable(path)
+    with open(path, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream)
+
+
+def _load_leaf_cache(
+    folder: str,
+    processing: Dict[str, object],
+) -> Optional[Dict[str, object]]:
+    meta_path = os.path.join(folder, "cache.json")
+    if not os.path.isfile(meta_path):
+        return None
+    with open(meta_path, encoding="utf-8") as stream:
+        meta = json.load(stream)
+    if not _metadata_matches(meta, processing):
+        return None
+    areas = {}
+    smoothed = {}
+    for safe, area in meta.get("areas", {}).items():
+        csd_path = os.path.join(folder, f"{safe}__csd.npy")
+        if not os.path.isfile(csd_path):
+            return None
+        areas[area] = np.load(csd_path)
+        smoothed_path = os.path.join(folder, f"{safe}__smoothed.npy")
+        if os.path.isfile(smoothed_path):
+            smoothed[area] = np.load(smoothed_path)
+    return {
+        "status": "ok",
+        "areas": areas,
+        "areas_smoothed": smoothed,
+        "time_ms": np.load(os.path.join(folder, "time_ms.npy")),
+        "parsed": {
+            "scope": meta["scope"],
+            "behavior": meta["behavior"],
+            "alignment": meta["alignment"],
+            "session": meta["session"],
+            "probe": "" if meta.get("probe") == "NPX1" else meta.get("probe", ""),
+        },
+    }
+
+
+def _iter_cache_folders(cache_root: str) -> List[str]:
+    found = []
+    if not os.path.isdir(cache_root):
+        return found
+    for dirpath, _dirnames, filenames in os.walk(cache_root):
+        if "cache.json" in filenames:
+            found.append(dirpath)
+    found.sort()
+    return found
+
+
+def _write_npy(path: str, array: np.ndarray) -> None:
+    _ensure_writable(path)
+    np.save(path, array)
+
+
+def _copy_overwrite(source: str, destination: str) -> None:
+    _ensure_writable(destination)
+    shutil.copy2(source, destination)
+
+
+def _absorb_leaf_assignment(
+    parsed: Dict[str, str],
+    assignment: Dict[str, object],
+    source: str,
+    *,
+    session_parts: Dict[Tuple[str, str, str, str, str], List[np.ndarray]],
+    session_smoothed_parts: Dict[Tuple[str, str, str, str, str], List[np.ndarray]],
+    session_time: Dict[Tuple[str, str, str, str, str], np.ndarray],
+    skipped: List[Dict[str, str]],
+    stop_on_error: bool,
+) -> None:
+    if assignment["status"] != "ok":
+        print(f"  Skipped: {assignment['reason']}", flush=True)
+        skipped.append({"leaf": source, "reason": str(assignment["reason"])})
+        return
+    for area, matrix in assignment["areas"].items():
+        key = (
+            parsed["scope"],
+            parsed["behavior"],
+            parsed["alignment"],
+            parsed["session"],
+            str(area),
+        )
+        label = (
+            f"{parsed['scope']}/{parsed['behavior']} {parsed['alignment']} "
+            f"{parsed['session']} {parsed['probe'] or 'NPX1'}"
+        )
+        if key in session_time and not np.allclose(
+            session_time[key], assignment["time_ms"]
+        ):
+            reason = f"Time axis mismatch for {label} area {area}"
+            if stop_on_error:
+                raise ValueError(reason)
+            print(f"  Skipped area {area}: {reason}", flush=True)
+            skipped.append({"leaf": source, "reason": reason})
+            continue
+        session_parts.setdefault(key, []).append(np.asarray(matrix, dtype=float))
+        session_time[key] = np.asarray(assignment["time_ms"], dtype=float)
+        smoothed = assignment["areas_smoothed"].get(area)
+        if smoothed is not None:
+            session_smoothed_parts.setdefault(key, []).append(
+                np.asarray(smoothed, dtype=float)
+            )
+
+
 def summarize_area_csd_across_sessions(
     root: PathLike,
     area_table_path: Optional[PathLike] = None,
@@ -527,18 +771,26 @@ def summarize_area_csd_across_sessions(
     save_plots: bool = True,
     refresh: bool = True,
     stop_on_error: bool = False,
+    reuse_session_cache: bool = True,
+    from_cache_only: bool = False,
 ) -> Dict[str, object]:
     """
     Pool saved averaged kCSD maps by anatomical area across sessions.
 
-    Requires ``csd_mean_columns.npy``. Per-column matrices are not refit and
-    ``KCSD1D`` is never called. Run ``average_saved_behavior_kcsd_from_root``
-    first when a completed kCSD run has not yet written the column average.
+    Requires ``csd_mean_columns.npy`` unless ``from_cache_only`` is set.
+    Per-column matrices are not refit and ``KCSD1D`` is never called. Run
+    ``average_saved_behavior_kcsd_from_root`` first when a completed kCSD
+    run has not yet written the column average.
 
     The unsmoothed mean and sign-consistency maps are always saved. A second
     map smooths each probe in micrometers and milliseconds, tests session
     means against zero, and outlines clusters that are long enough in time
     and relative depth.
+
+    Accepted session maps are stored in ``session_cache`` before any group
+    folder is written. ``refresh`` replaces group outputs and leaves that
+    cache in place. If experimentFS refuses to delete an old folder, the
+    new files are written over the old ones.
     """
     if n_relative_depths < 2:
         raise ValueError("n_relative_depths must be at least 2")
@@ -551,34 +803,52 @@ def summarize_area_csd_across_sessions(
     if min_sessions_for_ttest < 2:
         raise ValueError("min_sessions_for_ttest must be at least 2")
     root = os.path.abspath(os.fspath(root))
-    rows = _coerce_area_rows(area_rows, area_table_path)
+    processing = _processing_metadata(
+        n_relative_depths=n_relative_depths,
+        smooth_fwhm_ms=smooth_fwhm_ms,
+        smooth_fwhm_um=smooth_fwhm_um,
+        min_depth_span_um=min_depth_span_um,
+        depth_grid_step_um=depth_grid_step_um,
+    )
+    cache_root = os.path.join(root, output_folder_name, SESSION_CACHE_NAME)
     rows_by_animal: Dict[str, List[AreaLimit]] = {}
-    for row in rows:
-        rows_by_animal.setdefault(row.animal_name, []).append(row)
+    if not from_cache_only:
+        rows = _coerce_area_rows(area_rows, area_table_path)
+        for row in rows:
+            rows_by_animal.setdefault(row.animal_name, []).append(row)
 
-    discovered = _discover_averaged_leaves(
-        root,
-        output_subdir=output_subdir,
-        output_folder_name=output_folder_name,
-    )
-    if not discovered["means"]:
-        extra = ""
-        if discovered["missing_means"]:
-            extra = (
-                f" Found {len(discovered['missing_means'])} folders with "
-                "per-column csd_x*.npy but no csd_mean_columns.npy."
-            )
-        raise FileNotFoundError(
-            "No saved csd_mean_columns.npy maps under "
-            f"{root}.{extra} Run average_saved_behavior_kcsd_from_root "
-            "before the area summary. This step does not estimate kCSD."
+    discovered = {"means": [], "missing_means": []}
+    if not from_cache_only:
+        discovered = _discover_averaged_leaves(
+            root,
+            output_subdir=output_subdir,
+            output_folder_name=output_folder_name,
         )
+        if not discovered["means"]:
+            extra = ""
+            if discovered["missing_means"]:
+                extra = (
+                    f" Found {len(discovered['missing_means'])} folders with "
+                    "per-column csd_x*.npy but no csd_mean_columns.npy."
+                )
+            raise FileNotFoundError(
+                "No saved csd_mean_columns.npy maps under "
+                f"{root}.{extra} Run average_saved_behavior_kcsd_from_root "
+                "before the area summary. This step does not estimate kCSD."
+            )
 
-    print(
-        "Area consistency reads saved csd_mean_columns.npy only; "
-        "kCSD will NOT be rerun",
-        flush=True,
-    )
+    if from_cache_only:
+        print(
+            "Resuming area consistency from session_cache. "
+            "csd_mean_columns.npy will not be read and kCSD will NOT be rerun.",
+            flush=True,
+        )
+    else:
+        print(
+            "Area consistency reads saved csd_mean_columns.npy only; "
+            "kCSD will NOT be rerun",
+            flush=True,
+        )
     print(
         "Sign is the saved kCSD polarity (RdBu_r). It is not relabeled "
         "as sink or source.",
@@ -597,60 +867,102 @@ def summarize_area_csd_across_sessions(
     session_time: Dict[Tuple[str, str, str, str, str], np.ndarray] = {}
     skipped: List[Dict[str, str]] = []
 
-    for leaf_number, leaf in enumerate(discovered["means"], start=1):
-        parsed = _parse_mean_leaf(root, leaf, output_subdir)
-        label = (
-            f"{parsed['scope']}/{parsed['behavior']} {parsed['alignment']} "
-            f"{parsed['session']} {parsed['probe'] or 'NPX1'}"
-        )
-        print(
-            f"[{leaf_number}/{len(discovered['means'])}] Reading {label}",
-            flush=True,
-        )
-        try:
-            assignment = _segment_leaf(
-                leaf,
-                parsed,
-                rows_by_animal,
-                relative_depth,
-                min_depths=min_depths,
-                min_depth_span_um=min_depth_span_um,
-                smooth_fwhm_ms=smooth_fwhm_ms,
-                smooth_fwhm_um=smooth_fwhm_um,
-                depth_grid_step_um=depth_grid_step_um,
+    if from_cache_only:
+        folders = _iter_cache_folders(cache_root)
+        if not folders:
+            raise FileNotFoundError(
+                f"No session cache at {cache_root}. The previous run stopped "
+                "before any cached session map was written, so it cannot be "
+                "resumed. Rerun summarize_area_csd_across_sessions once. That "
+                "cell saves each session while it reads csd_mean_columns.npy. "
+                "After the cache exists, this step rebuilds the means, "
+                "clusters, and figure copies without reading those matrices."
             )
-        except Exception as exc:
-            if stop_on_error:
-                raise
-            print(f"  Skipped: {exc}", flush=True)
-            skipped.append({"leaf": leaf, "reason": str(exc)})
-            continue
-        if assignment["status"] != "ok":
-            print(f"  Skipped: {assignment['reason']}", flush=True)
-            skipped.append({"leaf": leaf, "reason": assignment["reason"]})
-            continue
-        for area, matrix in assignment["areas"].items():
-            key = (
-                parsed["scope"],
-                parsed["behavior"],
-                parsed["alignment"],
-                parsed["session"],
-                area,
-            )
-            if key in session_time and not np.allclose(
-                session_time[key], assignment["time_ms"]
-            ):
-                reason = f"Time axis mismatch for {label} area {area}"
-                if stop_on_error:
-                    raise ValueError(reason)
-                print(f"  Skipped area {area}: {reason}", flush=True)
-                skipped.append({"leaf": leaf, "reason": reason})
+        loaded_any = False
+        for folder_number, folder in enumerate(folders, start=1):
+            label = os.path.relpath(folder, cache_root)
+            print(f"[{folder_number}/{len(folders)}] Cache {label}", flush=True)
+            try:
+                loaded = _load_leaf_cache(folder, processing)
+            except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+                print(f"  Skipped: {exc}", flush=True)
+                skipped.append({"leaf": folder, "reason": str(exc)})
                 continue
-            session_parts.setdefault(key, []).append(matrix)
-            session_time[key] = assignment["time_ms"]
-            smoothed = assignment["areas_smoothed"].get(area)
-            if smoothed is not None:
-                session_smoothed_parts.setdefault(key, []).append(smoothed)
+            if loaded is None:
+                reason = (
+                    "Session cache does not match the current smoothing, "
+                    "depth-span, or relative-depth settings"
+                )
+                print(f"  Skipped: {reason}", flush=True)
+                skipped.append({"leaf": folder, "reason": reason})
+                continue
+            loaded_any = True
+            _absorb_leaf_assignment(
+                loaded["parsed"],
+                loaded,
+                folder,
+                session_parts=session_parts,
+                session_smoothed_parts=session_smoothed_parts,
+                session_time=session_time,
+                skipped=skipped,
+                stop_on_error=stop_on_error,
+            )
+        if not loaded_any:
+            raise FileNotFoundError(
+                f"No usable session cache at {cache_root}. The saved maps "
+                "do not match the current smoothing, depth-span, or "
+                "relative-depth settings, or the cache files could not be "
+                "read. Rerun summarize_area_csd_across_sessions so the cache "
+                "is rebuilt."
+            )
+    else:
+        for leaf_number, leaf in enumerate(discovered["means"], start=1):
+            parsed = _parse_mean_leaf(root, leaf, output_subdir)
+            label = (
+                f"{parsed['scope']}/{parsed['behavior']} {parsed['alignment']} "
+                f"{parsed['session']} {parsed['probe'] or 'NPX1'}"
+            )
+            print(
+                f"[{leaf_number}/{len(discovered['means'])}] Reading {label}",
+                flush=True,
+            )
+            cache_folder = _leaf_cache_dir(cache_root, parsed)
+            assignment = None
+            if reuse_session_cache:
+                assignment = _load_leaf_cache(cache_folder, processing)
+                if assignment is not None:
+                    print(f"  Using saved session cache: {label}", flush=True)
+            if assignment is None:
+                try:
+                    assignment = _segment_leaf(
+                        leaf,
+                        parsed,
+                        rows_by_animal,
+                        relative_depth,
+                        min_depths=min_depths,
+                        min_depth_span_um=min_depth_span_um,
+                        smooth_fwhm_ms=smooth_fwhm_ms,
+                        smooth_fwhm_um=smooth_fwhm_um,
+                        depth_grid_step_um=depth_grid_step_um,
+                    )
+                except Exception as exc:
+                    if stop_on_error:
+                        raise
+                    print(f"  Skipped: {exc}", flush=True)
+                    skipped.append({"leaf": leaf, "reason": str(exc)})
+                    continue
+                if assignment["status"] == "ok":
+                    _save_leaf_cache(cache_root, parsed, assignment, processing)
+            _absorb_leaf_assignment(
+                parsed,
+                assignment,
+                leaf,
+                session_parts=session_parts,
+                session_smoothed_parts=session_smoothed_parts,
+                session_time=session_time,
+                skipped=skipped,
+                stop_on_error=stop_on_error,
+            )
 
     grouped: Dict[Tuple[str, str, str, str], List[Tuple[str, np.ndarray, np.ndarray]]] = {}
     grouped_smoothed: Dict[Tuple[str, str, str, str], Dict[str, np.ndarray]] = {}
@@ -671,9 +983,7 @@ def summarize_area_csd_across_sessions(
                 grouped_smoothed.setdefault(group_key, {})[session] = smoothed_mean
 
     output_root = os.path.join(root, output_folder_name)
-    if refresh and os.path.isdir(output_root):
-        shutil.rmtree(output_root)
-    os.makedirs(output_root, exist_ok=True)
+    _prepare_area_output(output_root, refresh=refresh)
 
     summaries = []
     stable_rows: List[Dict[str, object]] = []
@@ -742,7 +1052,9 @@ def summarize_area_csd_across_sessions(
                     **cluster,
                 }
             )
-        with open(os.path.join(folder, "sessions.txt"), "w", encoding="utf-8") as stream:
+        sessions_path = os.path.join(folder, "sessions.txt")
+        _ensure_writable(sessions_path)
+        with open(sessions_path, "w", encoding="utf-8") as stream:
             stream.write("".join(f"{session}\n" for session, _matrix in usable))
         summary, feature_rows = _group_tables(
             scope,
@@ -875,6 +1187,55 @@ def summarize_area_csd_across_sessions(
     }
 
 
+def finalize_area_consistency_from_cache(
+    root: PathLike,
+    *,
+    output_folder_name: str = "area_consistency",
+    n_relative_depths: int = 41,
+    min_sessions_for_consistency: int = 2,
+    consistency_threshold: float = 0.8,
+    magnitude_percentile: float = 75.0,
+    smooth_fwhm_ms: float = DEFAULT_SMOOTH_FWHM_MS,
+    smooth_fwhm_um: float = DEFAULT_SMOOTH_FWHM_UM,
+    min_depth_span_um: float = DEFAULT_MIN_DEPTH_SPAN_UM,
+    depth_grid_step_um: float = DEFAULT_DEPTH_GRID_STEP_UM,
+    min_sessions_for_ttest: int = DEFAULT_MIN_SESSIONS_FOR_TTEST,
+    ttest_alpha: float = DEFAULT_TTEST_ALPHA,
+    min_cluster_duration_ms: float = DEFAULT_MIN_CLUSTER_DURATION_MS,
+    min_cluster_depth_fraction: float = DEFAULT_MIN_CLUSTER_DEPTH_FRACTION,
+    save_plots: bool = True,
+    refresh: bool = True,
+) -> Dict[str, object]:
+    """
+    Write area means, clusters, and sorted figures from ``session_cache``.
+
+    Does not read ``csd_mean_columns.npy``, the area spreadsheet, or refit
+    kCSD. The cache is filled by ``summarize_area_csd_across_sessions`` as
+    each saved map is read. A run that stopped before the first cache file
+    was written has nothing to resume; rerun that function once.
+    """
+    return summarize_area_csd_across_sessions(
+        root,
+        output_folder_name=output_folder_name,
+        n_relative_depths=n_relative_depths,
+        min_sessions_for_consistency=min_sessions_for_consistency,
+        consistency_threshold=consistency_threshold,
+        magnitude_percentile=magnitude_percentile,
+        smooth_fwhm_ms=smooth_fwhm_ms,
+        smooth_fwhm_um=smooth_fwhm_um,
+        min_depth_span_um=min_depth_span_um,
+        depth_grid_step_um=depth_grid_step_um,
+        min_sessions_for_ttest=min_sessions_for_ttest,
+        ttest_alpha=ttest_alpha,
+        min_cluster_duration_ms=min_cluster_duration_ms,
+        min_cluster_depth_fraction=min_cluster_depth_fraction,
+        save_plots=save_plots,
+        refresh=refresh,
+        from_cache_only=True,
+        reuse_session_cache=True,
+    )
+
+
 def organize_area_consistency_figures(
     root: PathLike,
     *,
@@ -915,8 +1276,8 @@ def organize_area_consistency_figures(
         raise FileNotFoundError(message)
 
     output_root = os.path.join(area_root, output_folder_name)
-    if refresh and os.path.isdir(output_root):
-        shutil.rmtree(output_root)
+    if refresh:
+        _remove_tree(output_root)
     os.makedirs(output_root, exist_ok=True)
 
     rows: List[Dict[str, str]] = []
@@ -942,7 +1303,7 @@ def organize_area_consistency_figures(
             )
         destinations[destination] = source["path"]
         os.makedirs(os.path.dirname(destination), exist_ok=True)
-        shutil.copy2(source["path"], destination)
+        _copy_overwrite(source["path"], destination)
         print(
             f"  {alignment}: {filename}",
             flush=True,
@@ -997,7 +1358,7 @@ def _discover_area_figures(
     found: List[Dict[str, str]] = []
     for dirpath, _dirnames, filenames in os.walk(area_root):
         relative_parts = os.path.relpath(dirpath, area_root).split(os.sep)
-        if relative_parts[0] == output_folder_name:
+        if relative_parts[0] in {output_folder_name, SESSION_CACHE_NAME}:
             continue
         if len(relative_parts) != 4 or relative_parts[2] not in {"onset", "offset"}:
             continue
@@ -1290,25 +1651,25 @@ def _save_group_arrays(
     relative_depth: np.ndarray,
     time_ms: np.ndarray,
 ) -> None:
-    np.save(os.path.join(folder, "mean_csd.npy"), stats["mean"])
-    np.save(os.path.join(folder, "sem_csd.npy"), stats["sem"])
-    np.save(os.path.join(folder, "fraction_positive.npy"), stats["fraction_positive"])
-    np.save(os.path.join(folder, "fraction_negative.npy"), stats["fraction_negative"])
-    np.save(os.path.join(folder, "sign_consistency.npy"), stats["sign_consistency"])
-    np.save(
+    _write_npy(os.path.join(folder, "mean_csd.npy"), stats["mean"])
+    _write_npy(os.path.join(folder, "sem_csd.npy"), stats["sem"])
+    _write_npy(os.path.join(folder, "fraction_positive.npy"), stats["fraction_positive"])
+    _write_npy(os.path.join(folder, "fraction_negative.npy"), stats["fraction_negative"])
+    _write_npy(os.path.join(folder, "sign_consistency.npy"), stats["sign_consistency"])
+    _write_npy(
         os.path.join(folder, "n_sessions_by_depth.npy"),
         stats["n_sessions_by_depth"],
     )
-    np.save(os.path.join(folder, "n_sessions.npy"), stats["n_sessions"])
-    np.save(os.path.join(folder, "relative_depth.npy"), relative_depth)
-    np.save(os.path.join(folder, "time_ms.npy"), time_ms)
+    _write_npy(os.path.join(folder, "n_sessions.npy"), stats["n_sessions"])
+    _write_npy(os.path.join(folder, "relative_depth.npy"), relative_depth)
+    _write_npy(os.path.join(folder, "time_ms.npy"), time_ms)
 
 
 def _save_inference_arrays(folder: str, inference: Dict[str, object]) -> None:
-    np.save(os.path.join(folder, "smoothed_mean_csd.npy"), inference["mean"])
-    np.save(os.path.join(folder, "t_statistic.npy"), inference["t"])
-    np.save(os.path.join(folder, "p_value.npy"), inference["p"])
-    np.save(os.path.join(folder, "cluster_mask.npy"), inference["mask"])
+    _write_npy(os.path.join(folder, "smoothed_mean_csd.npy"), inference["mean"])
+    _write_npy(os.path.join(folder, "t_statistic.npy"), inference["t"])
+    _write_npy(os.path.join(folder, "p_value.npy"), inference["p"])
+    _write_npy(os.path.join(folder, "cluster_mask.npy"), inference["mask"])
     _write_csv(
         os.path.join(folder, "clusters.csv"),
         [
@@ -1582,8 +1943,17 @@ def _save_heatmap(
     ax.set_ylabel("Relative depth (0 = area start, 1 = area end)")
     ax.set_title(title)
     fig.tight_layout()
-    fig.savefig(save_path, dpi=150)
-    plt.close(fig)
+    try:
+        _ensure_writable(save_path)
+        fig.savefig(save_path, dpi=150)
+    except PermissionError as exc:
+        print(
+            f"  Could not write {save_path}: {exc}. Close that image if it "
+            "is open, then rerun the session-cache cell.",
+            flush=True,
+        )
+    finally:
+        plt.close(fig)
 
 
 def _write_csv(
@@ -1591,6 +1961,7 @@ def _write_csv(
     fieldnames: Sequence[str],
     rows: Iterable[Dict[str, object]],
 ) -> None:
+    _ensure_writable(path)
     with open(path, "w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(fieldnames), extrasaction="ignore")
         writer.writeheader()
