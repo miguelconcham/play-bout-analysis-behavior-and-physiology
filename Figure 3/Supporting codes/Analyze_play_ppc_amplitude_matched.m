@@ -388,8 +388,9 @@ ylabel('\Delta PPC')
 legend({'Merged-pool null arrangements','Amplitude-matched estimate'})
 
 %% Power-balanced trough-cell PPC, in the Figure 3e square-plot layout
-% The all-areas panel contains only the areas plotted in Figure 3e.
-paper_areas = ["DLPAG","DMPAG","DR","LPAG","SupCol","VLPAG"];
+% Figure 3 labels superior colliculus as SC. The stored area name is SupCol.
+paper_areas = ["SupCol","DLPAG","LPAG","VLPAG","DR"];
+paper_labels = ["SC","DLPAG","LPAG","VLPAG","DR"];
 finite_ppc = isfinite(matched_summary.PrePPC) & isfinite(matched_summary.PlayPPC);
 plot_rows = matched_summary(finite_ppc & ...
     ismember(string(matched_summary.Area), paper_areas), :);
@@ -404,7 +405,7 @@ for an = 1:numel(paper_areas)
     subplot(1, numel(paper_areas)+1, an)
     in_area = present_areas == paper_areas(an);
     plot_paired_ppc(pre_z(in_area), play_z(in_area), axis_limit)
-    title(sprintf('%s n=%d p=%s', paper_areas(an), sum(in_area), ...
+    title(sprintf('%s n=%d p=%s', paper_labels(an), sum(in_area), ...
         paired_signrank_text(pre_z(in_area), play_z(in_area))))
     xlabel('Pre-play PPC (atanh)')
     if an == 1
@@ -414,7 +415,7 @@ end
 subplot(1, numel(paper_areas)+1, numel(paper_areas)+1)
 plot_paired_ppc(pre_z, play_z, axis_limit)
 xlabel('Pre-play PPC (atanh)')
-title(sprintf('All areas n=%d neurons, %d animals, p=%s', ...
+title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
     height(plot_rows), numel(unique(string(plot_rows.Animal))), ...
     paired_signrank_text(pre_z, play_z)))
 
