@@ -300,6 +300,46 @@ class PairedBaselineTests(unittest.TestCase):
             self.assertEqual(rows[0]["behavior"], "play")
             self.assertEqual(rows[0]["probe"], "probe2")
 
+    def test_session_figure_refresh_keeps_animal_pooling(self):
+        with tempfile.TemporaryDirectory() as root:
+            onset_folder = os.path.join(root, "category", "play", "onset", "B1 D1")
+            offset_folder = os.path.join(root, "category", "play", "offset", "B1 D1")
+            lfp = np.zeros((1, 2, 10), dtype=np.float32)
+            _write_leaf(onset_folder, lfp, event_ids=[1])
+            _write_leaf(offset_folder, lfp, event_ids=[1])
+            for folder in (onset_folder, offset_folder):
+                figure_dir = os.path.join(folder, "csd_1d_onset_baseline", "figures")
+                os.makedirs(figure_dir)
+                with open(os.path.join(figure_dir, "kcsd_xmean.png"), "wb") as stream:
+                    stream.write(b"session")
+            kept = os.path.join(
+                root,
+                "sorted_figures",
+                "animal_pooling",
+                "by_behavior",
+                "onset",
+                "category__play__Batch1RatA2__NPX1__xmean.png",
+            )
+            os.makedirs(os.path.dirname(kept))
+            with open(kept, "wb") as stream:
+                stream.write(b"animal")
+
+            organize_behavior_aligned_figures(root)
+
+            with open(kept, "rb") as stream:
+                self.assertEqual(stream.read(), b"animal")
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        root,
+                        "sorted_figures",
+                        "by_session",
+                        "onset",
+                        "B1_D1__category__play__NPX1__xmean.png",
+                    )
+                )
+            )
+
     def test_saved_matrix_postprocessing_does_not_rerun_kcsd(self):
         with tempfile.TemporaryDirectory() as root:
             onset_folder = os.path.join(
@@ -557,12 +597,22 @@ class AnimalPooledTests(unittest.TestCase):
             os.makedirs(outside)
             with open(os.path.join(outside, "kcsd_xmean.png"), "wb") as stream:
                 stream.write(b"session")
+            stale = os.path.join(
+                root, "animal_pooled", "sorted_figures", "by_animal", "onset", "old.png"
+            )
+            os.makedirs(os.path.dirname(stale))
+            with open(stale, "wb") as stream:
+                stream.write(b"stale")
 
             result = organize_animal_pooled_figures(root)
 
-            by_animal = os.path.join(
+            self.assertEqual(
+                os.path.relpath(result["output_root"], root).replace("\\", "/"),
+                "sorted_figures/animal_pooling",
+            )
+            by_session = os.path.join(
                 result["output_root"],
-                "by_animal",
+                "by_session",
                 "onset",
                 "Batch1RatA2__category__play__NPX1__xmean.png",
             )
@@ -578,15 +628,27 @@ class AnimalPooledTests(unittest.TestCase):
                 "onset",
                 "play_bout__all__Batch1RatA2__NPX1__xmean.png",
             )
-            self.assertTrue(os.path.isfile(by_animal))
+            self.assertTrue(os.path.isfile(by_session))
             self.assertTrue(os.path.isfile(by_behavior))
             self.assertTrue(os.path.isfile(bout))
-            with open(by_animal, "rb") as stream:
+            with open(by_session, "rb") as stream:
                 self.assertEqual(stream.read(), b"play-onset")
             self.assertEqual(result["n_source_figures"], 3)
             self.assertEqual(result["n_copies"], 6)
             self.assertFalse(
-                any("kcsd_x0.0" in name for name in os.listdir(os.path.dirname(by_animal)))
+                any("kcsd_x0.0" in name for name in os.listdir(os.path.dirname(by_session)))
+            )
+            self.assertFalse(os.path.isdir(os.path.join(root, "animal_pooled", "sorted_figures")))
+            self.assertFalse(os.path.exists(stale))
+            session_names = sorted(os.listdir(
+                os.path.join(result["output_root"], "by_session", "onset")
+            ))
+            self.assertEqual(
+                session_names,
+                [
+                    "Batch1RatA2__category__play__NPX1__xmean.png",
+                    "Batch1RatA2__play_bout__all__NPX1__xmean.png",
+                ],
             )
             with open(result["index_path"], newline="", encoding="utf-8") as stream:
                 rows = list(csv.DictReader(stream))

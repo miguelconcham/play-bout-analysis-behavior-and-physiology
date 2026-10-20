@@ -195,19 +195,26 @@ pooled. When electrode depths differ between days, each probe column is
 aligned only inside the depth range present in every session. The pooled PSTH and its kCSD matrices stay under
 `animal_pooled/category/<play|aggression|exploration>/onset|offset/<animal>/`
 and `animal_pooled/play_bout/all/onset|offset/<animal>/`, in
-`csd_1d_onset_baseline/`. The averaged images are also copied into one
-folder with the same names used for session figures, with the animal key
-in the session position:
+`csd_1d_onset_baseline/`. Each of those leaves is one animal: the sessions
+for that animal are already averaged, so there is not a separate image per
+recording.
+
+The averaged images are copied under the existing figure folder, in their
+own section, with the same `by_session` / `by_behavior` and onset / offset
+layout used for the per-session analysis. The name in the session position
+is the animal key:
 
 ```text
-animal_pooled/sorted_figures/
-  by_animal/onset/Batch1RatA2__category__play__NPX1__xmean.png
+sorted_figures/animal_pooling/
+  by_session/onset/Batch1RatA2__category__play__NPX1__xmean.png
   by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png
   figure_index.csv
 ```
 
-Notebook cell **C7** writes that folder. Cell **C17** rebuilds only the
-copies when the PNGs already exist.
+`sorted_figures/by_session` remains the per-recording analysis. Rebuilding
+those session copies does not delete `animal_pooling`. Notebook cell **C7**
+writes the animal-pooling copies. Cell **C17** rebuilds only those copies
+when the PNGs already exist.
 
 ```python
 from behavior_aligned_kcsd import (

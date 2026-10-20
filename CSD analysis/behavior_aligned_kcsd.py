@@ -875,8 +875,9 @@ def organize_behavior_aligned_figures(
     """
     Copy every behavior kCSD PNG into session-first and behavior-first views.
 
-    Original figures are never changed. With ``refresh=True``, only the
-    generated ``sorted_figures`` folder is rebuilt, preventing stale copies.
+    Original figures are never changed. With ``refresh=True``, the per-session
+    ``by_session`` and ``by_behavior`` copies are rebuilt. ``animal_pooling``
+    is left in place because that folder holds the merged-animal figures.
     """
     root = os.path.abspath(os.fspath(root))
     pairs = discover_behavior_aligned_pairs(root)
@@ -887,7 +888,10 @@ def organize_behavior_aligned_figures(
 
     output_root = os.path.join(root, output_folder_name)
     if refresh and os.path.isdir(output_root):
-        shutil.rmtree(output_root)
+        # Keep sorted_figures/animal_pooling. That view is the merged-animal
+        # analysis, and refreshing the per-session copies must not remove it.
+        for name in ("by_session", "by_behavior", "figure_index.csv"):
+            _remove_figure_entry(os.path.join(output_root, name))
     os.makedirs(output_root, exist_ok=True)
 
     rows: List[Dict[str, str]] = []
@@ -1027,23 +1031,43 @@ def organize_behavior_aligned_figures(
     }
 
 
+def _remove_figure_entry(path: str) -> None:
+    """Delete one sorted-figure file or folder, overwriting if delete is denied."""
+    if not os.path.lexists(path):
+        return
+    try:
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+    except PermissionError as exc:
+        print(
+            f"Could not delete {path}: {exc}. "
+            "Existing figure copies will be overwritten.",
+            flush=True,
+        )
+
+
 def organize_animal_pooled_figures(
     root: PathLike,
     *,
     pooled_folder_name: str = ANIMAL_POOLED_FOLDER,
-    output_folder_name: str = "sorted_figures",
+    sorted_folder_name: str = "sorted_figures",
+    output_folder_name: str = "animal_pooling",
     csd_output_subdir: str = "csd_1d_onset_baseline",
     refresh: bool = True,
     missing_ok: bool = False,
 ) -> Dict[str, Any]:
     """
-    Copy animal-pooled kCSD PNGs into one onset folder and one offset folder.
+    Copy one merged-animal kCSD PNG per animal into ``sorted_figures/animal_pooling``.
 
-    Original figures stay beside each pooled PSTH. Names follow the session
-    organizer, with the animal key in the session position:
+    Sessions of one animal are already averaged, so this view does not keep a
+    separate image for each recording. The layout matches the per-session
+    sorter (``by_session`` and ``by_behavior``, each split into onset and
+    offset), and it stays beside that analysis instead of inside it:
 
-    ``by_animal/onset/Batch1RatA2__category__play__NPX1__xmean.png``
-    ``by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png``
+    ``sorted_figures/animal_pooling/by_session/onset/Batch1RatA2__category__play__NPX1__xmean.png``
+    ``sorted_figures/animal_pooling/by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png``
     """
     root = os.path.abspath(os.fspath(root))
     pooled_root = os.path.join(root, pooled_folder_name)
@@ -1053,10 +1077,20 @@ def organize_animal_pooled_figures(
             "estimate_animal_pooled_kcsd first."
         )
 
+    stale_copies = os.path.join(pooled_root, sorted_folder_name)
+    if os.path.isdir(stale_copies):
+        print(
+            f"Removing figure copies stored under {stale_copies}. "
+            "Merged-animal figures now go to "
+            f"{os.path.join(root, sorted_folder_name, output_folder_name)}.",
+            flush=True,
+        )
+        _remove_figure_entry(stale_copies)
+
     figure_dirs: List[str] = []
     for dirpath, _dirnames, filenames in os.walk(pooled_root):
         relative = os.path.relpath(dirpath, pooled_root).split(os.sep)
-        if output_folder_name in relative:
+        if sorted_folder_name in relative or output_folder_name in relative:
             continue
         if (
             relative[-1] == "figures"
@@ -1067,7 +1101,7 @@ def organize_animal_pooled_figures(
             figure_dirs.append(dirpath)
     figure_dirs.sort()
 
-    output_root = os.path.join(pooled_root, output_folder_name)
+    output_root = os.path.join(root, sorted_folder_name, output_folder_name)
     if not figure_dirs:
         message = (
             f"No animal-pooled kCSD PNGs under {pooled_root}. "
@@ -1083,15 +1117,8 @@ def organize_animal_pooled_figures(
             }
         raise FileNotFoundError(message)
 
-    if refresh and os.path.isdir(output_root):
-        try:
-            shutil.rmtree(output_root)
-        except PermissionError as exc:
-            print(
-                f"Could not delete {output_root}: {exc}. "
-                "Existing figure copies will be overwritten.",
-                flush=True,
-            )
+    if refresh:
+        _remove_figure_entry(output_root)
     os.makedirs(output_root, exist_ok=True)
 
     rows: List[Dict[str, str]] = []
@@ -1135,11 +1162,11 @@ def organize_animal_pooled_figures(
                 f"{safe_scope}__{safe_behavior}__{safe_animal}__"
                 f"{safe_probe}__{xpos}.png"
             )
-            by_animal = os.path.join(output_root, "by_animal", alignment, animal_name)
+            by_session = os.path.join(output_root, "by_session", alignment, animal_name)
             by_behavior = os.path.join(
                 output_root, "by_behavior", alignment, behavior_name
             )
-            for destination in (by_animal, by_behavior):
+            for destination in (by_session, by_behavior):
                 prior_source = destinations.get(destination)
                 if prior_source is not None and prior_source != source:
                     raise RuntimeError(
@@ -1163,7 +1190,7 @@ def organize_animal_pooled_figures(
                     "probe": probe,
                     "xpos": xpos,
                     "original_file": os.path.relpath(source, root),
-                    "by_animal_file": os.path.relpath(by_animal, root),
+                    "by_session_file": os.path.relpath(by_session, root),
                     "by_behavior_file": os.path.relpath(by_behavior, root),
                 }
             )
@@ -1177,7 +1204,7 @@ def organize_animal_pooled_figures(
         "probe",
         "xpos",
         "original_file",
-        "by_animal_file",
+        "by_session_file",
         "by_behavior_file",
     ]
     with open(index_path, "w", newline="", encoding="utf-8") as stream:
