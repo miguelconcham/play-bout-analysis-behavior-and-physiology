@@ -69,11 +69,7 @@ play bout analysis behavior and physiology/
 ├── Synchronous spike artifacts/       # Waveforms from continuous.dat for coincident-spike checks
 │   ├── load_waveforms_from_continuous.m
 │   ├── test_load_waveforms_from_continuous.m
-│   ├── check_npx_raw_folder_composition.m
-│   ├── test_compare_npx_folder_tables.m
-│   ├── plot_random_good_cluster_checks.m
-│   ├── plot_cluster_waveform_and_acg.m
-│   └── good_clusters_from_sorting.m
+│   └── Check_NPX_folders_and_load_waveforms.m
 ├── Custom functions/                  # Shared helpers (play_bout, kernel_rate, ppc, …)
 ├── manual traking/
 │   └── manual_traking.m               # Click tracking for focal animal and partner

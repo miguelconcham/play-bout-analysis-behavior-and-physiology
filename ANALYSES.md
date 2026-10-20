@@ -68,8 +68,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Plot delta peak/trough evoked LFP (before CSD) | extra | — | `CSD analysis/Plot_delta_peak_trough_evoked.m` |
 | 1D CSD (kCSD / finite-difference) on LFP stacks | extra | `CSD analysis/CSD_1D_general.ipynb` or `python csd_1d_pipeline.py <delta-root>` | same (saves `csd_1d_*.npy` + plots) |
 | Waveforms around a neuron channel, for synchronous-spike artifact checks | extra | — | `Synchronous spike artifacts/load_waveforms_from_continuous.m` (check: `test_load_waveforms_from_continuous.m`) |
-| Raw continuous-file paths vs experiment-info folder composition | extra | — | `Synchronous spike artifacts/check_npx_raw_folder_composition.m` (check: `test_compare_npx_folder_tables.m`) |
-| One random good cluster per matched session: multi-channel waveform and autocorrelogram | extra | — | `Synchronous spike artifacts/plot_random_good_cluster_checks.m` (after the folder check passes) |
+| Compare the two NPX location workbooks, pick one good unit per session folder, and load its waveform from the continuous file | extra | — | `Synchronous spike artifacts/Check_NPX_folders_and_load_waveforms.m` |
 
 ---
 
@@ -128,11 +127,9 @@ Older one-file versions (do not start here unless you need the original session 
 |------|-----|
 | Cut multi-channel waveforms from a continuous int16 file at spike samples. The channel window is `neuron_channel ± channel_range`, capped at channel 1 and at 384 without shifting the window. | `Synchronous spike artifacts/load_waveforms_from_continuous.m` |
 | Synthetic-file check of that cut (channel caps, alignment, edge NaNs) | `Synchronous spike artifacts/test_load_waveforms_from_continuous.m` |
-| Check that each raw continuous-file path is the date, NPX recording folder, probe, and recording number from `Experiment_Info_GoodLooking.xlsx` | `Synchronous spike artifacts/check_npx_raw_folder_composition.m` |
-| Synthetic-sheet check of that comparison | `Synchronous spike artifacts/test_compare_npx_folder_tables.m` |
-| After that check passes, plot one random good cluster per session (waveform on ±5 channels, autocorrelogram) | `Synchronous spike artifacts/plot_random_good_cluster_checks.m` |
+| Section 1 compares `Experiment_Info_GoodLooking.xlsx` with `NPX_raw_data_folders.xlsx` and prints dissimilarities. Section 2 stores one random good unit per folder of `NPX raw data` in `selected_units` (`cluster_id`, `session_id`, `animal_name`, `spike_times` in samples, `channel`). Section 3 loads those spikes from the continuous file in the raw-folder sheet (±5 channels) and plots the stack with the autocorrelogram. | `Synchronous spike artifacts/Check_NPX_folders_and_load_waveforms.m` |
 
-Later scripts in `Synchronous spike artifacts/` use these snippets to test whether synchronous spikes are shared electrical artifacts.
+Run that script from the top. Section 1 prints and continues, so read the dissimilarities before taking a waveform as proof of the folder assignment.
 
 ---
 
