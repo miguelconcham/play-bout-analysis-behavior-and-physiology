@@ -69,7 +69,8 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | 1D CSD (kCSD / finite-difference) on LFP stacks | extra | `CSD analysis/CSD_1D_general.ipynb` or `python csd_1d_pipeline.py <delta-root>` | same (saves `csd_1d_*.npy` + plots) |
 | Waveforms around a neuron channel, for synchronous-spike artifact checks | extra | — | `Synchronous spike artifacts/load_waveforms_from_continuous.m` (check: `test_load_waveforms_from_continuous.m`) |
 | Four best-sampled good units per NPX session: waveforms from the continuous file in `NPX_raw_data_folders.xlsx`, plus autocorrelograms | extra | — | `Synchronous spike artifacts/Check_NPX_folders_and_load_waveforms.m` |
-| Mean raw-LFP amplitude at synchronous play-bout spikes versus the same number of other spikes | extra | — | `Synchronous spike artifacts/Estimate_sync_lfp_amplitude.m` |
+| Synchronous-spike waveforms versus the all-spike mean (play-bout coincidences) | extra | `Synchronous spike artifacts/Estimate_sync_spike_waveforms.m` (calls `GENERATE_SYNC_SPIKE_WAVEFORMS.m`) | `Synchronous spike artifacts/Analyze_sync_spike_waveforms.m` |
+| Raw-LFP power at synchronous play-bout spikes versus other spikes of the same neuron | extra | `Synchronous spike artifacts/Estimate_sync_spike_lfp_power.m` (calls `GENERATE_SYNC_SPIKE_LFP_POWER.m`) | `Synchronous spike artifacts/Analyze_sync_spike_lfp_power.m` |
 
 ---
 
@@ -124,12 +125,14 @@ Older one-file versions (do not start here unless you need the original session 
 
 ### Synchronous spike artifacts
 
-| What | Run |
-|------|-----|
-| Cut multi-channel waveforms from a continuous int16 file at spike samples. The channel window is `neuron_channel ± channel_range`, capped at channel 1 and at 384 without shifting the window. | `Synchronous spike artifacts/load_waveforms_from_continuous.m` |
-| Synthetic-file check of that cut (channel caps, alignment, edge NaNs) | `Synchronous spike artifacts/test_load_waveforms_from_continuous.m` |
-| Read `NPX_raw_data_folders.xlsx`, keep the four good units with the most spikes in each `NPX raw data` session, and load those spikes from that session's continuous file (±5 channels). One figure per session has four rows (waveform and autocorrelogram). The waveform axis follows the mean spike after the pre-spike baseline is removed. | `Synchronous spike artifacts/Check_NPX_folders_and_load_waveforms.m` |
-| For each neuron in a play-bout synchronous pair, compare the mean raw-LFP envelope at every synchronous spike with 500 means from the same number of that neuron's other spikes. Each LFP channel is read once. | `Synchronous spike artifacts/Estimate_sync_lfp_amplitude.m` |
+Both estimates use the same play-bout pairs (`synchronous_play_pairs.m`): good units in DLPAG, LPAG, VLPAG, DR, and SupCol, 5 ms coincidence inside [−1.5, 1] s of bout onset, at least 1000 spikes, every coincident spike kept. At most 2 pairs per neuron, 8 per session, and 80 in the run. Results go to `Data/Analysis results/synchronous spike waveforms/`. Run Estimate, then Analyze. `test_sync_event_statistics.m` checks the mask, caps, distances, and power percentile without the experiment files.
+
+| What | Estimate | Analyze |
+|------|----------|---------|
+| Mean waveform of every synchronous spike versus 500 means of the same number of that neuron's other spikes. Distance is the mean absolute difference from the all-spike template, on the ±5 channel neighborhood and on the neuron channel. The continuous file is the session row in `NPX_raw_data_folders.xlsx`. Each neuron is read once. | `Estimate_sync_spike_waveforms.m` (`GENERATE_SYNC_SPIKE_WAVEFORMS.m`) | `Analyze_sync_spike_waveforms.m` |
+| Mean raw-LFP power at those same spikes. Power is one sample of `abs(hilbert(unfiltered LFP_PAG)).^2` on the neuron channel (`ch + 1`), interpolated at the spike time. Each LFP channel is read once. | `Estimate_sync_spike_lfp_power.m` (`GENERATE_SYNC_SPIKE_LFP_POWER.m`) | `Analyze_sync_spike_lfp_power.m` |
+| Cut multi-channel waveforms from a continuous int16 file. The channel window is `neuron_channel ± channel_range`, capped at channel 1 and at 384. | — | `load_waveforms_from_continuous.m` (check: `test_load_waveforms_from_continuous.m`) |
+| Four good units with the most spikes in each session: waveforms from that session's continuous file and autocorrelograms. The waveform axis follows the mean spike after the pre-spike baseline is removed. | — | `Check_NPX_folders_and_load_waveforms.m` |
 
 ---
 

@@ -66,11 +66,18 @@ play bout analysis behavior and physiology/
 │   ├── Analyze_acute_phase_locking.m
 │   ├── GENERATE_STIM_CALL_RESPONSES.m
 │   └── Estimate_stim_call_responses.m
-├── Synchronous spike artifacts/       # Waveforms from continuous.dat for coincident-spike checks
+├── Synchronous spike artifacts/       # Synchronous-spike waveform and raw-LFP power checks
+│   ├── GENERATE_SYNC_SPIKE_WAVEFORMS.m
+│   ├── Estimate_sync_spike_waveforms.m
+│   ├── Analyze_sync_spike_waveforms.m
+│   ├── GENERATE_SYNC_SPIKE_LFP_POWER.m
+│   ├── Estimate_sync_spike_lfp_power.m
+│   ├── Analyze_sync_spike_lfp_power.m
+│   ├── synchronous_play_pairs.m       # Shared play-bout coincidence pairs
 │   ├── load_waveforms_from_continuous.m
 │   ├── test_load_waveforms_from_continuous.m
-│   ├── Check_NPX_folders_and_load_waveforms.m
-│   └── Estimate_sync_lfp_amplitude.m
+│   ├── test_sync_event_statistics.m
+│   └── Check_NPX_folders_and_load_waveforms.m
 ├── Custom functions/                  # Shared helpers (play_bout, kernel_rate, ppc, …)
 ├── manual traking/
 │   └── manual_traking.m               # Click tracking for focal animal and partner
