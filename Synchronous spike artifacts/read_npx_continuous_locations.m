@@ -1,194 +1,131 @@
-function locations = read_npx_continuous_locations(path)
-%READ_NPX_CONTINUOUS_LOCATIONS  Session names and continuous paths.
+function paths = read_npx_continuous_locations(xlsx_path, session_id)
+%READ_NPX_CONTINUOUS_LOCATIONS  Continuous-file location for one session.
 %
-% Reads NPX_raw_data_folders.xlsx. locations(k).session is the session
-% folder name and locations(k).path is the continuous file or its folder.
+% session_id is the NPX raw-data folder, for example 'B2S2 1110 Single2'.
+% The animal name is the first word. The session name is that full folder
+% name. NPX_raw_data_folders.xlsx has those names in a column and the
+% continuous-file location in another. paths is a cell array of the
+% matching locations. One session can have more than one row.
 
-sheet = read_location_sheet(path);
-headers = sheet(1, :);
-if size(sheet, 1) < 2
-    rows = cell(0, size(sheet, 2));
-else
-    rows = sheet(2:end, :);
+if nargin < 2 || isempty(session_id)
+    error('read_npx_continuous_locations:session', ...
+        'Pass the session folder name, for example ''B2S2 1110 Single2''.');
 end
-session_col = 1;
-if ~isempty(rows)
-    sample = canonical_text(rows{1, 1});
-    if ~isempty(regexp(sample, '[\\/]', 'once'))
-        session_col = find_header(headers, 'session');
-        if isempty(session_col)
-            error('read_npx_continuous_locations:columns', ...
-                ['The first raw-folder column looks like a path, ' ...
-                 'and no session column was found.']);
+if exist(xlsx_path, 'file') ~= 2
+    error('read_npx_continuous_locations:file', 'Could not find %s', xlsx_path);
+end
+session_id = strtrim(char(session_id));
+name_parts = regexp(session_id, '\s+', 'split');
+name_parts = name_parts(~cellfun('isempty', name_parts));
+animal = name_parts{1};
+if numel(name_parts) > 1
+    session_rest = strjoin(name_parts(2:end), ' ');
+else
+    session_rest = '';
+end
+
+sheet = readtable(xlsx_path);
+headers = sheet.Properties.VariableNames;
+animal_col = header_index(headers, {'animal'}, false);
+session_col = header_index(headers, {'session'}, false);
+location_col = header_index(headers, ...
+    {'location', 'path', 'folder', 'file', 'continuous', 'directory'}, true);
+if isempty(session_col)
+    session_col = 1;
+end
+if isempty(location_col)
+    if size(sheet, 2) < 2
+        error('read_npx_continuous_locations:columns', ...
+            'NPX_raw_data_folders needs a session column and a location column.');
+    end
+    location_col = 2;
+    if location_col == session_col
+        location_col = setdiff(1:size(sheet, 2), session_col);
+        location_col = location_col(1);
+    end
+end
+
+sessions = column_text(sheet{:, session_col});
+if isempty(animal_col)
+    keep = strcmp(sessions, session_id);
+else
+    animals = column_text(sheet{:, animal_col});
+    keep = strcmp(animals, animal) & ...
+        (strcmp(sessions, session_id) | strcmp(sessions, session_rest));
+end
+locations = column_text(sheet{:, location_col});
+paths = locations(keep);
+paths = paths(~cellfun('isempty', paths));
+paths = unique_paths(paths);
+if isempty(paths)
+    error('read_npx_continuous_locations:missing', ...
+        'No location for session "%s" in %s.', session_id, xlsx_path);
+end
+end
+
+function index = header_index(headers, tokens, skip_name_columns)
+index = [];
+for column = 1:numel(headers)
+    key = lower(regexprep(headers{column}, '[^A-Za-z0-9]', ''));
+    if isempty(key)
+        continue
+    end
+    if skip_name_columns && (~isempty(strfind(key, 'session')) || ~isempty(strfind(key, 'animal')))
+        continue
+    end
+    for token_index = 1:numel(tokens)
+        if ~isempty(strfind(key, tokens{token_index}))
+            index = column;
+            return
         end
     end
 end
-path_col = [];
-for header_index = 1:numel(headers)
-    if header_index == session_col
-        continue
-    end
-    if strcmp(header_role(headers{header_index}), 'path')
-        path_col = header_index;
-        break
-    end
-end
-if isempty(path_col)
-    path_col = first_path_column(rows, session_col);
-end
-if isempty(path_col)
-    error('read_npx_continuous_locations:columns', ...
-        ['NPX_raw_data_folders needs a session name and a file path. ' ...
-         'Headers found: %s'], strjoin(headers, ', '));
 end
 
-locations = struct('session', {}, 'path', {});
-for row_index = 1:size(rows, 1)
-    session = canonical_text(rows{row_index, session_col});
-    file_path = canonical_text(rows{row_index, path_col});
-    if isempty(session) && isempty(file_path)
-        continue
+function texts = column_text(column)
+n = numel(column);
+texts = cell(n, 1);
+for index = 1:n
+    if iscell(column)
+        value = column{index};
+    elseif isnumeric(column) || islogical(column)
+        value = column(index);
+    else
+        value = column(index);
     end
-    locations(end + 1).session = session; %#ok<AGROW>
-    locations(end).path = file_path;
-end
-end
-
-function column = find_header(headers, role_name)
-column = [];
-for index = 1:numel(headers)
-    if strcmp(header_role(headers{index}), role_name)
-        column = index;
-        return
-    end
-end
-end
-
-function role = header_role(header)
-key = lower(regexprep(canonical_text(header), '[^A-Za-z0-9]', ''));
-role = '';
-if isempty(key)
-    return
-end
-if any(strcmp(key, {'session', 'sessionname', 'sessionfolder', 'animalfolder'})) ...
-        || ~isempty(strfind(key, 'session'))
-    role = 'session';
-elseif ~isempty(strfind(key, 'path')) || ~isempty(strfind(key, 'location')) ...
-        || ~isempty(strfind(key, 'folder')) || ~isempty(strfind(key, 'file')) ...
-        || ~isempty(strfind(key, 'continuous')) || ~isempty(strfind(key, 'directory'))
-    role = 'path';
-end
-end
-
-function column = first_path_column(rows, session_col)
-column = [];
-if isempty(rows)
-    return
-end
-for column_index = 1:size(rows, 2)
-    if column_index == session_col
-        continue
-    end
-    n_path = 0;
-    n_filled = 0;
-    for row_index = 1:size(rows, 1)
-        text = canonical_text(rows{row_index, column_index});
-        if isempty(text)
+    if iscell(value)
+        if numel(value) == 1
+            value = value{1};
+        else
+            texts{index} = '';
             continue
         end
-        n_filled = n_filled + 1;
-        if ~isempty(regexp(text, '[\\/]', 'once')) || ~isempty(strfind(lower(text), '.dat'))
-            n_path = n_path + 1;
+    end
+    if isnumeric(value) || islogical(value)
+        if isempty(value) || any(~isfinite(value))
+            texts{index} = '';
+        else
+            texts{index} = strtrim(num2str(value));
         end
+        continue
     end
-    if n_filled > 0 && n_path == n_filled
-        column = column_index;
-        return
+    if exist('isstring', 'builtin') && isstring(value)
+        value = char(value);
     end
-end
-end
-
-function sheet = read_location_sheet(path)
-if exist(path, 'file') ~= 2
-    error('read_npx_continuous_locations:file', 'Could not find %s', path);
-end
-try
-    table_data = readtable(path, 'VariableNamingRule', 'preserve');
-catch
-    try
-        table_data = readtable(path, 'PreserveVariableNames', true);
-    catch
-        table_data = readtable(path);
-    end
-end
-headers = cellstr(table_data.Properties.VariableNames);
-if exist('table2cell', 'file') == 2 || exist('table2cell', 'builtin') == 5
-    rows = table2cell(table_data);
-else
-    rows = cell(height(table_data), width(table_data));
-    for column_index = 1:numel(headers)
-        rows(:, column_index) = column_to_cell(table_data.(headers{column_index}));
-    end
-end
-if isempty(rows)
-    rows = cell(0, numel(headers));
-end
-sheet = [headers; rows];
-end
-
-function cells = column_to_cell(column)
-n = numel(column);
-cells = cell(n, 1);
-if iscell(column)
-    for index = 1:n
-        cells{index} = column{index};
-    end
-elseif isnumeric(column) || islogical(column)
-    for index = 1:n
-        cells{index} = column(index);
-    end
-elseif exist('isstring', 'builtin') && isstring(column)
-    cells = cellstr(column);
-elseif ischar(column)
-    cells = cellstr(column);
-else
-    for index = 1:n
-        cells{index} = column(index);
-    end
-end
-end
-
-function text = canonical_text(value)
-text = '';
-if iscell(value)
-    if numel(value) ~= 1
-        return
-    end
-    text = canonical_text(value{1});
-    return
-end
-if isnumeric(value) && isscalar(value)
-    if ~isfinite(value)
-        return
-    end
-    if value == round(value)
-        text = sprintf('%.0f', value);
+    if isempty(value)
+        texts{index} = '';
     else
-        text = sprintf('%g', value);
-    end
-    return
-end
-if exist('isstring', 'builtin') && isstring(value)
-    if numel(value) ~= 1
-        return
-    end
-    text = strtrim(char(value));
-    return
-end
-if ischar(value)
-    text = strtrim(value);
-    if size(text, 1) > 1
-        text = '';
+        texts{index} = strtrim(char(value));
     end
 end
+end
+
+function paths = unique_paths(paths)
+kept = {};
+for index = 1:numel(paths)
+    if ~any(strcmp(kept, paths{index}))
+        kept{end + 1} = paths{index}; %#ok<AGROW>
+    end
+end
+paths = kept;
 end

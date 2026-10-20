@@ -127,26 +127,7 @@ if isfield(options, 'continuous_file') && ~isempty(options.continuous_file)
     candidates = {options.continuous_file};
     return
 end
-if isfield(options, 'continuous_locations') && ~isempty(options.continuous_locations)
-    locations = options.continuous_locations;
-else
-    locations = read_npx_continuous_locations(options.raw_folders_file);
-end
-candidates = {};
-for index = 1:numel(locations)
-    if ~strcmp(locations(index).session, session_id)
-        continue
-    end
-    path = strtrim(locations(index).path);
-    if isempty(path) || any(strcmp(candidates, path))
-        continue
-    end
-    candidates{end + 1} = path; %#ok<AGROW>
-end
-if isempty(candidates)
-    error('GENERATE_SYNC_SPIKE_WAVEFORMS:continuous', ...
-        'No continuous path for %s in %s.', session_id, options.raw_folders_file);
-end
+candidates = read_npx_continuous_locations(options.raw_folders_file, session_id);
 end
 
 function choice = file_choice(options)

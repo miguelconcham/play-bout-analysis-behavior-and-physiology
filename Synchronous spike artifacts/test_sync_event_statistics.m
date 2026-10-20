@@ -99,7 +99,38 @@ assert(strcmp(power_session.status, 'pair_budget_exhausted'), ...
 
 delete_if_present(spike_file());
 delete_if_present(zero_file());
+check_location_lookup();
 fprintf('Synchronous-event statistic checks passed.\n');
+end
+
+function check_location_lookup()
+if exist('readtable', 'file') ~= 2 && exist('readtable', 'builtin') ~= 5
+    return
+end
+split_file = fullfile(tempdir, 'npx_locations_split.csv');
+full_file = fullfile(tempdir, 'npx_locations_full.csv');
+write_text(split_file, sprintf('%s\n%s\n%s\n', ...
+    'Animal,Session,Location', ...
+    'B2S2,1110 Single2,server/probeA/continuous.dat', ...
+    'B4D4,0826 Dual,server/other/continuous.dat'));
+write_text(full_file, sprintf('%s\n%s\n', ...
+    'Session,Path', ...
+    'B2S2 1110 Single2,D:/data/continuous.dat'));
+split_paths = read_npx_continuous_locations(split_file, 'B2S2 1110 Single2');
+full_paths = read_npx_continuous_locations(full_file, 'B2S2 1110 Single2');
+delete_if_present(split_file);
+delete_if_present(full_file);
+assert(numel(split_paths) == 1 && ~isempty(strfind(split_paths{1}, 'probeA')), ...
+    'Animal plus session did not return that row''s location.');
+assert(numel(full_paths) == 1 && ~isempty(strfind(full_paths{1}, 'continuous.dat')), ...
+    'The session-folder column did not return its path.');
+end
+
+function write_text(path, text)
+file_id = fopen(path, 'w');
+assert(file_id >= 0, 'Could not write %s.', path);
+cleaner = onCleanup(@() fclose(file_id)); %#ok<NASGU>
+fwrite(file_id, text);
 end
 
 function neurons = example_neurons()
