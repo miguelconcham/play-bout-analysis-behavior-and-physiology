@@ -12,10 +12,9 @@ function session_result = GENERATE_SYNC_SPIKE_WAVEFORMS(npx_data_dir, options)
 % neuron channel alone. A high percentile means the synchronous waveform
 % is more dissimilar than the null draws.
 %
-% The continuous path comes from NPX_raw_data_folders.xlsx, matched on the
-% session folder name. Several paths are scored with a short read on the
-% neuron channel; a flat mean stops the session. The null waveforms are
-% not saved.
+% The continuous path is column 2 of NPX_raw_data_folders.xlsx on the row
+% whose SessionName is this NPX folder. A flat mean stops the session.
+% The null waveforms are not saved.
 
 if nargin < 2 || isempty(options)
     options = struct();
