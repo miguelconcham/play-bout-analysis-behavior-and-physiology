@@ -265,7 +265,11 @@ area average. Results are written to `session_overlap/`.
 
 ```python
 from area_csd_consistency import summarize_session_area_overlap
-session_overlap = summarize_session_area_overlap(BEHAVIOR_ROOT, AREA_TABLE)
+session_overlap = summarize_session_area_overlap(
+    BEHAVIOR_ROOT,
+    AREA_TABLE,
+    min_shared_area_percent=50,
+)
 summarize_area_csd_across_sessions(
     BEHAVIOR_ROOT,
     AREA_TABLE,
