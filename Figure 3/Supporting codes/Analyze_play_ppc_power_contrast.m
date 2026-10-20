@@ -831,24 +831,36 @@ n_pre = sum(pre_epochs,2);
 n_play = sum(play_epochs,2);
 r_pre = sum(pre_phase,2);
 r_play = sum(play_phase,2);
-pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
-play_ppc = ppc_from_sufficient_statistics(r_play, n_play);
 mean_pre_power = mean(pre_power_by_draw,2,'omitnan');
 mean_play_power = mean(play_power_by_draw,2,'omitnan');
 pooled_sd = sqrt((var(pre_power_by_draw,0,2,'omitnan') + ...
     var(play_power_by_draw,0,2,'omitnan'))/2);
-power_smd = (mean_play_power-mean_pre_power)./pooled_sd;
+n_pre = n_pre(:);
+n_play = n_play(:);
+r_pre = r_pre(:);
+r_play = r_play(:);
+mean_pre_power = mean_pre_power(:);
+mean_play_power = mean_play_power(:);
+pooled_sd = pooled_sd(:);
+pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
+play_ppc = ppc_from_sufficient_statistics(r_play, n_play);
+power_difference = mean_play_power-mean_pre_power;
+spike_difference = n_play-n_pre;
+mean_spike_count = (n_play+n_pre)/2;
+ppc_difference = play_ppc-pre_ppc;
+power_smd = power_difference./pooled_sd;
 power_smd(pooled_sd == 0 & mean_play_power == mean_pre_power) = 0;
 reliable = isfinite(pre_ppc) & isfinite(play_ppc);
 if require_balance
     reliable = reliable & abs(power_smd) <= max_abs_smd;
 end
+reliable = double(reliable);
 
 n_draws = size(pre_index,1);
 metrics = [(1:n_draws)', repmat(size(pre_index,2),n_draws,1), ...
-    mean_pre_power(:), mean_play_power(:), (mean_play_power-mean_pre_power)(:), ...
-    power_smd(:), n_pre(:), n_play(:), (n_play-n_pre)(:), ((n_play+n_pre)/2)(:), ...
-    pre_ppc(:), play_ppc(:), (play_ppc-pre_ppc)(:), double(reliable(:))];
+    mean_pre_power, mean_play_power, power_difference, power_smd, ...
+    n_pre, n_play, spike_difference, mean_spike_count, ...
+    pre_ppc, play_ppc, ppc_difference, reliable];
 end
 
 function metrics = evaluate_null_draws(neuron, pseudo_pre, pseudo_post, ...
@@ -868,22 +880,32 @@ n_pre = sum(pre_epochs,2);
 n_post = sum(post_epochs,2);
 r_pre = sum(pre_phase,2);
 r_post = sum(post_phase,2);
-pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
-post_ppc = ppc_from_sufficient_statistics(r_post, n_post);
 mean_pre_power = mean(pre_power_by_draw,2,'omitnan');
 mean_post_power = mean(post_power_by_draw,2,'omitnan');
 pooled_sd = sqrt((var(pre_power_by_draw,0,2,'omitnan') + ...
     var(post_power_by_draw,0,2,'omitnan'))/2);
-power_smd = (mean_post_power-mean_pre_power)./pooled_sd;
+n_pre = n_pre(:);
+n_post = n_post(:);
+r_pre = r_pre(:);
+r_post = r_post(:);
+mean_pre_power = mean_pre_power(:);
+mean_post_power = mean_post_power(:);
+pooled_sd = pooled_sd(:);
+pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
+post_ppc = ppc_from_sufficient_statistics(r_post, n_post);
+power_difference = mean_post_power-mean_pre_power;
+spike_difference = n_post-n_pre;
+mean_spike_count = (n_post+n_pre)/2;
+ppc_difference = post_ppc-pre_ppc;
+power_smd = power_difference./pooled_sd;
 power_smd(pooled_sd == 0 & mean_post_power == mean_pre_power) = 0;
-reliable = isfinite(pre_ppc) & isfinite(post_ppc);
+reliable = double(isfinite(pre_ppc) & isfinite(post_ppc));
 
 n_draws = size(pseudo_pre,1);
 metrics = [(1:n_draws)', repmat(size(pseudo_pre,2),n_draws,1), ...
-    mean_pre_power(:), mean_post_power(:), ...
-    (mean_post_power-mean_pre_power)(:), power_smd(:), ...
-    n_pre(:), n_post(:), (n_post-n_pre)(:), ((n_post+n_pre)/2)(:), ...
-    pre_ppc(:), post_ppc(:), (post_ppc-pre_ppc)(:), double(reliable(:))];
+    mean_pre_power, mean_post_power, power_difference, power_smd, ...
+    n_pre, n_post, spike_difference, mean_spike_count, ...
+    pre_ppc, post_ppc, ppc_difference, reliable];
 end
 
 function selected = values_by_draw(data, index)
