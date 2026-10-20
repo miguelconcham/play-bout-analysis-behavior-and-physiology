@@ -25,6 +25,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | CNN on locomotion features | extra | `Obtain_Feature_USV_space.m` (features) | `Figure 1/LDA analysis/Convolutional classification.ipynb` |
 | HMM inputs from speed + calls | Fig 1, Supp 2 | `Figure 1/HMM modeling/CreateHMMFIiles.m` (calls `Create_HMM_inputs.m`) | Python: `Figure 1/HMM modeling/python hmm estimate.txt` |
 | HMM states, play score, engaged vs unengaged | Fig 1e–f, Supp 2 | after Python HMM | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` then `Figure 1/Figure 1 HMM.m` |
+| Manual click tracking (focal animal, partner, arena) | extra (feeds Fig 1) | — | `manual traking/manual_traking.m` |
 | Play-bout LFP band-power PSTH (delta / theta / gamma) | Fig 2c–f, Supp 4a,d | `Figure 2/Supporting codes v2/Estimate_psth_band_power.m` | `Figure 2/Figure 2.m` |
 | Unique \(R^2\) / GLM of band power | Fig 2g, Supp 4c,f | `Figure 2/Supporting codes v2/Estimate_psth_all_regressors.m` | `Figure 2/Figure 2.m` (`%% 7`) |
 | Reciprocal vs non-reciprocal play vs delta | Fig 2h, Supp 3a–f | `Estimate_psth_all_regressors.m` | `Figure 2/Reciprocity.m` |
@@ -127,6 +128,7 @@ Older one-file versions (do not start here unless you need the original session 
 | HMM input files | `Figure 1/HMM modeling/CreateHMMFIiles.m` |
 | HMM fit | `Figure 1/HMM modeling/python hmm estimate.txt` (see `Figure 1/HMM modeling/README.md`) |
 | HMM post-processing | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` |
+| Manual video tracking | `manual traking/manual_traking.m` (run one section at a time; copy the final `.mat` into `Data/Traking backups/`) |
 
 ---
 
