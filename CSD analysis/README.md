@@ -247,6 +247,36 @@ self/other play, play bouts, and multi-probe sessions. New runs copy only the
 averaged `xmean` PNG; per-column PNGs are used only as a fallback for legacy
 results that do not yet contain an averaged image.
 
+### Session area overlap
+
+Before pooling sessions, estimate the anatomical areas actually sampled by
+each recording from `y_mean_columns.npy` and `Area_limits_GoodLooking.xlsx`.
+The workbook is only read. For every pair of recordings the overlap matrix
+stores, at row `i` and column `j`, the percentage of areas sampled by `i`
+that are also sampled by `j`. That matrix is not symmetric.
+
+A recording pair may be averaged together only when both directions are at
+least `MIN_SHARED_AREA_PERCENT` (50 in the notebook cell). Change that one
+line and rerun the overlap cell to keep a different group. The retained
+group is the largest set in which every pair passes that test. If two such
+sets are the same size, the one with the higher mean
+overlap is kept. Recordings outside that group stay out of the cross-session
+area average. Results are written to `session_overlap/`.
+
+```python
+from area_csd_consistency import summarize_session_area_overlap
+session_overlap = summarize_session_area_overlap(
+    BEHAVIOR_ROOT,
+    AREA_TABLE,
+    min_shared_area_percent=50,
+)
+summarize_area_csd_across_sessions(
+    BEHAVIOR_ROOT,
+    AREA_TABLE,
+    session_allowlist=session_overlap["selected_sessions"],
+)
+```
+
 ### Area consistency across sessions
 
 After `csd_mean_columns.npy` exists, `area_csd_consistency.py` groups channels
