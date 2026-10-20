@@ -67,6 +67,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Delta peak/trough raw LFP snippets for CSD (LPAG center, Partners session) | extra | `CSD analysis/Estimate_delta_peak_trough_csd.m` (calls `GENERATE_DELTA_PEAK_TROUGH_CSD_LFP.m`) | writes `Data/Analysis results/delta peak trough CSD/{peak,trough}/...` |
 | Plot delta peak/trough evoked LFP (before CSD) | extra | — | `CSD analysis/Plot_delta_peak_trough_evoked.m` |
 | 1D CSD (kCSD / finite-difference) on LFP stacks | extra | `CSD analysis/CSD_1D_general.ipynb` or `python csd_1d_pipeline.py <delta-root>` | same (saves `csd_1d_*.npy` + plots) |
+| Waveforms around a neuron channel, for synchronous-spike artifact checks | extra | — | `Synchronous spike artifacts/load_waveforms_from_continuous.m` (check: `test_load_waveforms_from_continuous.m`) |
 
 ---
 
@@ -116,6 +117,17 @@ BC / dithering variants (same question, different shuffle): `Estimate suprise st
 | LIF with shared vs independent oscillatory drive | notebook Estimate grid | `Complementary figures/LIF neuron model.ipynb` |
 
 Older one-file versions (do not start here unless you need the original session walkthrough): `Complementary figures/Phase_locking in acute experiments.m`, `Complementary figures/spike_train_parsing_phase_lock.m`.
+
+---
+
+### Synchronous spike artifacts
+
+| What | Run |
+|------|-----|
+| Cut multi-channel waveforms from a continuous int16 file at spike samples. The channel window is `neuron_channel ± channel_range`, capped at channel 1 and at 384 without shifting the window. | `Synchronous spike artifacts/load_waveforms_from_continuous.m` |
+| Synthetic-file check of that cut (channel caps, alignment, edge NaNs) | `Synchronous spike artifacts/test_load_waveforms_from_continuous.m` |
+
+Later scripts in `Synchronous spike artifacts/` use these snippets to test whether synchronous spikes are shared electrical artifacts.
 
 ---
 

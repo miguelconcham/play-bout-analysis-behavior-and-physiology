@@ -66,6 +66,9 @@ play bout analysis behavior and physiology/
 │   ├── Analyze_acute_phase_locking.m
 │   ├── GENERATE_STIM_CALL_RESPONSES.m
 │   └── Estimate_stim_call_responses.m
+├── Synchronous spike artifacts/       # Waveforms from continuous.dat for coincident-spike checks
+│   ├── load_waveforms_from_continuous.m
+│   └── test_load_waveforms_from_continuous.m
 ├── Custom functions/                  # Shared helpers (play_bout, kernel_rate, ppc, …)
 ├── manual traking/
 │   └── manual_traking.m               # Click tracking for focal animal and partner
