@@ -480,16 +480,57 @@ title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
     height(plot_rows), numel(unique(string(plot_rows.Animal))), ...
     paired_signrank_text(predicted_difference, observed_difference)))
 
+% The red cross in each panel is the median predicted change (x) and the
+% median observed change (y), computed on the same neurons drawn there.
+cross_area = [paper_labels, "ALL AREAS"]';
+cross_n = zeros(numel(cross_area), 1);
+cross_predicted = nan(numel(cross_area), 1);
+cross_observed = nan(numel(cross_area), 1);
+for an = 1:numel(paper_areas)
+    [cross_n(an), cross_predicted(an), cross_observed(an)] = ...
+        median_cross(predicted_difference(present_areas == paper_areas(an)), ...
+        observed_difference(present_areas == paper_areas(an)));
+end
+[cross_n(end), cross_predicted(end), cross_observed(end)] = ...
+    median_cross(predicted_difference, observed_difference);
+ppc_difference_median_crosses = table(cross_area, cross_n, ...
+    cross_predicted, cross_observed, cross_observed-cross_predicted, ...
+    'VariableNames', {'Area','NNeurons','MedianPredictedDeltaPPC', ...
+    'MedianObservedDeltaPPC','ObservedMinusPredicted'});
+fprintf(['Median crosses on the observed-versus-predicted ' ...
+    'PPC-difference plot:\n']);
+disp(ppc_difference_median_crosses);
+show_median_cross_table(ppc_difference_median_crosses);
+
 %% Example matched powers and one neuron's null-model fit
 % Estimate stores every epoch power, not the matched pairs. The pairs below
 % are rebuilt from those saved values. LFP and spike phases are not estimated again.
 if ~isempty(plot_rows)
     null_per_neuron = accumarray(neuron_model_table.NeuronRow, 1, ...
         [height(matched_summary), 1]);
-    candidate_rows = find(finite_difference & ...
-        ismember(string(matched_summary.Area), paper_areas));
-    [~, richest] = max(null_per_neuron(candidate_rows));
-    example_row = candidate_rows(richest);
+    % The square-plot cross is above the equality line when the median
+    % observed change exceeds the median prediction. Use a neuron on that
+    % side of the line, with enough null draws to show the fit.
+    positive_example = finite_difference & ...
+        ismember(string(matched_summary.Area), paper_areas) & ...
+        matched_summary.PPCDifference > ...
+        matched_summary.ModelExpectedPPCDifference;
+    candidate_rows = find(positive_example);
+    if isempty(candidate_rows)
+        warning(['No trough-locked paper-area neuron has an observed ' ...
+            'PPC difference above its null-model prediction.']);
+        candidate_rows = find(finite_difference & ...
+            ismember(string(matched_summary.Area), paper_areas));
+    end
+    null_counts = null_per_neuron(candidate_rows);
+    if max(null_counts) >= 1
+        dense_enough = null_counts >= max(1, floor(0.5*max(null_counts)));
+        candidate_rows = candidate_rows(dense_enough);
+    end
+    example_residual = matched_summary.PPCDifference(candidate_rows) - ...
+        matched_summary.ModelExpectedPPCDifference(candidate_rows);
+    [~, clearest] = max(example_residual);
+    example_row = candidate_rows(clearest);
     example_neuron = matched_summary(example_row,:);
     session_index = find(string({power_control_struct.session}) == ...
         string(example_neuron.Session), 1);
@@ -566,9 +607,11 @@ if ~isempty(plot_rows)
         ylabel('PPC difference')
         legend({'Null draws','Fixed-effect model','Predicted','Observed'}, ...
             'Location', 'best')
-        title(sprintf('%s ch%d cl%d, n=%d null draws', ...
-            string(example_neuron.NeuronKey), example_neuron.Channel, ...
-            example_neuron.ClusterID, height(example_null)))
+        title(sprintf(['%s ch%d cl%d, observed %.4f, predicted %.4f, ' ...
+            'n=%d null draws'], string(example_neuron.NeuronKey), ...
+            example_neuron.Channel, example_neuron.ClusterID, ...
+            example_neuron.PPCDifference, ...
+            example_neuron.ModelExpectedPPCDifference, height(example_null)))
     end
 end
 
@@ -590,6 +633,7 @@ save(fullfile(saving_folder, ...
     'play_ppc_power_contrast_analysis.mat'), ...
     'matched_summary', 'matched_draw_table', 'null_draw_table', ...
     'neuron_model_table', 'excluded_neurons', 'ppc_power_spike_model', ...
+    'ppc_difference_median_crosses', ...
     'animal_summary', 'overall_result', 'analysis_parameters', '-v7.3');
 
 %% Local functions
@@ -619,14 +663,61 @@ end
 function plot_paired_ppc(x_value, y_value, axis_limit)
 plot(x_value, y_value, 'k.')
 hold on
-finite_pairs = isfinite(x_value) & isfinite(y_value);
-if any(finite_pairs)
-    pair_median = [median(x_value(finite_pairs)), median(y_value(finite_pairs))];
-    plot(pair_median(1), pair_median(2), 'rx', 'LineWidth', 1.2)
+[~, x_median, y_median] = median_cross(x_value, y_value);
+if isfinite(x_median) && isfinite(y_median)
+    plot(x_median, y_median, 'rx', 'LineWidth', 1.2)
 end
 plot(axis_limit, axis_limit, 'r-')
 axis([axis_limit axis_limit])
 axis square
+end
+
+function [n_pairs, x_median, y_median] = median_cross(x_value, y_value)
+finite_pairs = isfinite(x_value) & isfinite(y_value);
+n_pairs = nnz(finite_pairs);
+if n_pairs < 1
+    x_median = NaN;
+    y_median = NaN;
+    return
+end
+x_median = median(x_value(finite_pairs));
+y_median = median(y_value(finite_pairs));
+end
+
+function show_median_cross_table(cross_table)
+figure('Name', 'Median crosses, observed versus predicted PPC difference', ...
+    'Color', 'w', 'Position', [80 80 980 380]);
+annotation('textbox', [0.03 0.86 0.94 0.12], 'String', ...
+    ['Red cross on each panel: median predicted change (x) and median ' ...
+    'observed change (y). A positive last column places that cross ' ...
+    'above the equality line.'], 'EdgeColor', 'none', 'FontSize', 10, ...
+    'HorizontalAlignment', 'left', 'VerticalAlignment', 'middle');
+axes('Position', [0.03 0.06 0.94 0.78], 'Visible', 'off');
+xlim([0 1]); ylim([0 1]);
+header = ["Area","Neurons","Median predicted \DeltaPPC", ...
+    "Median observed \DeltaPPC","Observed - predicted"];
+x_position = [0.01 0.16 0.32 0.56 0.80];
+for column = 1:numel(header)
+    text(x_position(column), 0.92, header(column), 'FontWeight', 'bold', ...
+        'FontSize', 11, 'Interpreter', 'tex', 'VerticalAlignment', 'middle');
+end
+for row = 1:height(cross_table)
+    y_position = 0.92 - row*(0.78/height(cross_table));
+    row_text = [string(cross_table.Area(row)), ...
+        string(cross_table.NNeurons(row)), ...
+        string(sprintf('%.5f', cross_table.MedianPredictedDeltaPPC(row))), ...
+        string(sprintf('%.5f', cross_table.MedianObservedDeltaPPC(row))), ...
+        string(sprintf('%+.5f', cross_table.ObservedMinusPredicted(row)))];
+    font_weight = 'normal';
+    if cross_table.Area(row) == "ALL AREAS"
+        font_weight = 'bold';
+    end
+    for column = 1:numel(row_text)
+        text(x_position(column), y_position, row_text(column), ...
+            'FontSize', 12, 'FontWeight', font_weight, ...
+            'Interpreter', 'none', 'VerticalAlignment', 'middle');
+    end
+end
 end
 
 function [pairs, caliper_db] = nearest_power_pairs( ...
