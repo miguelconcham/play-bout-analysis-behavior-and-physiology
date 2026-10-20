@@ -1061,12 +1061,11 @@ def organize_animal_pooled_figures(
     """
     Copy one merged-animal kCSD PNG per animal into ``sorted_figures/animal_pooling``.
 
-    Sessions of one animal are already averaged, so this view does not keep a
-    separate image for each recording. The layout matches the per-session
-    sorter (``by_session`` and ``by_behavior``, each split into onset and
-    offset), and it stays beside that analysis instead of inside it:
+    Sessions of one animal are already averaged, so each file is one animal.
+    The two views are ``by_animal`` and ``by_behavior``, each split into
+    onset and offset:
 
-    ``sorted_figures/animal_pooling/by_session/onset/Batch1RatA2__category__play__NPX1__xmean.png``
+    ``sorted_figures/animal_pooling/by_animal/onset/Batch1RatA2__category__play__NPX1__xmean.png``
     ``sorted_figures/animal_pooling/by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png``
     """
     root = os.path.abspath(os.fspath(root))
@@ -1162,11 +1161,11 @@ def organize_animal_pooled_figures(
                 f"{safe_scope}__{safe_behavior}__{safe_animal}__"
                 f"{safe_probe}__{xpos}.png"
             )
-            by_session = os.path.join(output_root, "by_session", alignment, animal_name)
+            by_animal = os.path.join(output_root, "by_animal", alignment, animal_name)
             by_behavior = os.path.join(
                 output_root, "by_behavior", alignment, behavior_name
             )
-            for destination in (by_session, by_behavior):
+            for destination in (by_animal, by_behavior):
                 prior_source = destinations.get(destination)
                 if prior_source is not None and prior_source != source:
                     raise RuntimeError(
@@ -1190,7 +1189,7 @@ def organize_animal_pooled_figures(
                     "probe": probe,
                     "xpos": xpos,
                     "original_file": os.path.relpath(source, root),
-                    "by_session_file": os.path.relpath(by_session, root),
+                    "by_animal_file": os.path.relpath(by_animal, root),
                     "by_behavior_file": os.path.relpath(by_behavior, root),
                 }
             )
@@ -1204,7 +1203,7 @@ def organize_animal_pooled_figures(
         "probe",
         "xpos",
         "original_file",
-        "by_session_file",
+        "by_animal_file",
         "by_behavior_file",
     ]
     with open(index_path, "w", newline="", encoding="utf-8") as stream:

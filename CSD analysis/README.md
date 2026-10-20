@@ -200,13 +200,12 @@ for that animal are already averaged, so there is not a separate image per
 recording.
 
 The averaged images are copied under the existing figure folder, in their
-own section, with the same `by_session` / `by_behavior` and onset / offset
-layout used for the per-session analysis. The name in the session position
-is the animal key:
+own section. Because the recordings are already merged, the two views are
+`by_animal` and `by_behavior`, each split into onset and offset:
 
 ```text
 sorted_figures/animal_pooling/
-  by_session/onset/Batch1RatA2__category__play__NPX1__xmean.png
+  by_animal/onset/Batch1RatA2__category__play__NPX1__xmean.png
   by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png
   figure_index.csv
 ```

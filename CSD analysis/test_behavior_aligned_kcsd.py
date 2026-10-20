@@ -610,9 +610,9 @@ class AnimalPooledTests(unittest.TestCase):
                 os.path.relpath(result["output_root"], root).replace("\\", "/"),
                 "sorted_figures/animal_pooling",
             )
-            by_session = os.path.join(
+            by_animal = os.path.join(
                 result["output_root"],
-                "by_session",
+                "by_animal",
                 "onset",
                 "Batch1RatA2__category__play__NPX1__xmean.png",
             )
@@ -628,23 +628,24 @@ class AnimalPooledTests(unittest.TestCase):
                 "onset",
                 "play_bout__all__Batch1RatA2__NPX1__xmean.png",
             )
-            self.assertTrue(os.path.isfile(by_session))
+            self.assertTrue(os.path.isfile(by_animal))
             self.assertTrue(os.path.isfile(by_behavior))
             self.assertTrue(os.path.isfile(bout))
-            with open(by_session, "rb") as stream:
+            with open(by_animal, "rb") as stream:
                 self.assertEqual(stream.read(), b"play-onset")
             self.assertEqual(result["n_source_figures"], 3)
             self.assertEqual(result["n_copies"], 6)
             self.assertFalse(
-                any("kcsd_x0.0" in name for name in os.listdir(os.path.dirname(by_session)))
+                any("kcsd_x0.0" in name for name in os.listdir(os.path.dirname(by_animal)))
             )
+            self.assertFalse(os.path.isdir(os.path.join(result["output_root"], "by_session")))
             self.assertFalse(os.path.isdir(os.path.join(root, "animal_pooled", "sorted_figures")))
             self.assertFalse(os.path.exists(stale))
-            session_names = sorted(os.listdir(
-                os.path.join(result["output_root"], "by_session", "onset")
+            animal_names = sorted(os.listdir(
+                os.path.join(result["output_root"], "by_animal", "onset")
             ))
             self.assertEqual(
-                session_names,
+                animal_names,
                 [
                     "Batch1RatA2__category__play__NPX1__xmean.png",
                     "Batch1RatA2__play_bout__all__NPX1__xmean.png",
