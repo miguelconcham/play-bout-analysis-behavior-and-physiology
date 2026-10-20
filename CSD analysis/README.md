@@ -180,10 +180,10 @@ results = run_behavior_aligned_kcsd_from_root(
 )
 ```
 
-Notebook users can open `CSD_1D_general.ipynb` and run all cells under
-**Section C: Behavior/play-bout onset and offset (self-locating)**. That
-section searches both experimentFS hostnames and does not depend on Jupyter's
-current working directory.
+Notebook users can open `CSD_1D_general.ipynb`. Every cell starts with a
+code (`0B`, `A2`, `C7`, …). Section C searches both experimentFS hostnames
+and does not depend on Jupyter's current working directory. For the
+animal-level play bouts and categories, run **C2**, then **C3**, then **C7**.
 
 For play bouts and the play, aggression, and exploration categories, sessions
 from the same implanted animal can be combined before kCSD.
@@ -230,8 +230,8 @@ removed by default. Averaged outputs include `csd_mean_columns.npy`,
 
 ### Sorted figure copies
 
-If per-column kCSD matrices are already saved, do **not** rerun kCSD. Run the
-final Section C notebook cell, which first averages the existing matrices:
+If per-column kCSD matrices are already saved, do **not** rerun kCSD. Run
+notebook cell **C9**, which first averages the existing matrices:
 
 ```python
 from behavior_aligned_kcsd import (
