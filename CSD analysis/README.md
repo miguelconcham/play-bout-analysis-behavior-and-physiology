@@ -215,6 +215,11 @@ those session copies does not delete `animal_pooling`. Notebook cell **C7**
 writes the animal-pooling copies. Cell **C17** rebuilds only those copies
 when the PNGs already exist.
 
+The matrix behind each averaged image is saved as `csd_mean_columns.npy`
+in the same `csd_1d_onset_baseline/` folder, with `y_mean_columns.npy` and
+`time_mean_columns.npy`. Cell **C19** redraws `kcsd_xmean.png` from those
+files with a color scale you choose. It does not estimate kCSD again.
+
 ```python
 from behavior_aligned_kcsd import (
     estimate_animal_pooled_kcsd,

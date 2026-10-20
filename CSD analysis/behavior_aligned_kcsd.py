@@ -1223,6 +1223,148 @@ def organize_animal_pooled_figures(
     }
 
 
+def _resolve_color_limit(
+    color_limit: Union[float, Tuple[float, float], None],
+    observed_abs_max: float,
+) -> Tuple[float, float]:
+    """Turn a user limit into ``(vmin, vmax)``. ``None`` uses one shared ±max."""
+    if color_limit is None:
+        limit = float(observed_abs_max)
+        if not np.isfinite(limit) or limit <= 0:
+            limit = 1.0
+        return (-limit, limit)
+    if isinstance(color_limit, (int, float, np.floating)):
+        limit = abs(float(color_limit))
+        if not np.isfinite(limit) or limit <= 0:
+            raise ValueError("color_limit must be a positive number or (vmin, vmax)")
+        return (-limit, limit)
+    if len(color_limit) != 2:
+        raise ValueError("color_limit must be a positive number or (vmin, vmax)")
+    vmin = float(color_limit[0])
+    vmax = float(color_limit[1])
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin >= vmax:
+        raise ValueError("color_limit (vmin, vmax) must be finite with vmin < vmax")
+    return (vmin, vmax)
+
+
+def _iter_saved_mean_maps(search_root: str, output_subdir: str) -> List[str]:
+    found: List[str] = []
+    if not os.path.isdir(search_root):
+        return found
+    for dirpath, dirnames, filenames in os.walk(search_root):
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name not in {
+                "sorted_figures",
+                "area_consistency",
+                "figures",
+                "by_animal",
+                "by_behavior",
+                "by_session",
+            }
+        ]
+        if os.path.basename(dirpath) != output_subdir:
+            continue
+        required = {"csd_mean_columns.npy", "y_mean_columns.npy", "time_mean_columns.npy"}
+        if required.issubset(filenames):
+            found.append(dirpath)
+    found.sort()
+    return found
+
+
+def replot_saved_mean_kcsd(
+    root: PathLike,
+    *,
+    color_limit: Union[float, Tuple[float, float], None] = None,
+    output_subdir: str = "csd_1d_onset_baseline",
+    pooled_folder_name: str = ANIMAL_POOLED_FOLDER,
+    pooled_only: bool = True,
+    refresh_animal_copies: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Redraw saved ``kcsd_xmean.png`` files from ``csd_mean_columns.npy``.
+
+    kCSD is not estimated again. ``color_limit`` is one scale for every map:
+    a positive number means ± that value, ``(vmin, vmax)`` is used as given,
+    and ``None`` uses the largest absolute value in the selected maps.
+    With ``pooled_only=True`` only the merged-animal maps are redrawn.
+    """
+    root = os.path.abspath(os.fspath(root))
+    search_root = os.path.join(root, pooled_folder_name) if pooled_only else root
+    map_dirs = _iter_saved_mean_maps(search_root, output_subdir)
+    if not map_dirs:
+        scope = "animal-pooled" if pooled_only else "saved"
+        raise FileNotFoundError(
+            f"No {scope} csd_mean_columns.npy maps under {search_root}. "
+            "The averaged matrix is written when kCSD is estimated or when "
+            "saved columns are averaged."
+        )
+
+    loaded = []
+    observed = 0.0
+    for map_dir in map_dirs:
+        csd = np.load(os.path.join(map_dir, "csd_mean_columns.npy"))
+        depth = np.load(os.path.join(map_dir, "y_mean_columns.npy")).reshape(-1)
+        time_ms = np.load(os.path.join(map_dir, "time_mean_columns.npy")).reshape(-1)
+        if csd.ndim != 2 or csd.shape != (len(depth), len(time_ms)):
+            raise ValueError(
+                f"Saved mean CSD shape {csd.shape} does not match "
+                f"y={len(depth)} and time={len(time_ms)} in {map_dir}"
+            )
+        finite = csd[np.isfinite(csd)]
+        if finite.size:
+            observed = max(observed, float(np.max(np.abs(finite))))
+        loaded.append((map_dir, csd, depth, time_ms))
+
+    clim = _resolve_color_limit(color_limit, observed)
+    print(
+        f"Replotting {len(loaded)} saved mean maps. "
+        f"Largest |kCSD| = {observed:g}. Color limits = ({clim[0]:g}, {clim[1]:g}). "
+        "kCSD will NOT be rerun.",
+        flush=True,
+    )
+    results: List[Dict[str, Any]] = []
+    replotted_animal = False
+    for map_dir, csd, depth, time_ms in loaded:
+        alignment_folder = os.path.dirname(map_dir)
+        relative_name = os.path.relpath(alignment_folder, root)
+        parts = relative_name.split(os.sep)
+        label = "offset" if "offset" in parts else "onset"
+        averaged = {"csd_mean": csd, "y": depth}
+        _plot_averaged_alignment(
+            label,
+            relative_name,
+            alignment_folder,
+            output_subdir,
+            averaged,
+            time_ms,
+            np.arange(time_ms.size),
+            clim=clim,
+            show=False,
+            save_plot=True,
+        )
+        if parts and parts[0] == pooled_folder_name:
+            replotted_animal = True
+        results.append(
+            {
+                "folder": alignment_folder,
+                "name": relative_name,
+                "color_limit": clim,
+                "abs_max": float(np.nanmax(np.abs(csd))),
+            }
+        )
+    if refresh_animal_copies and replotted_animal:
+        organize_animal_pooled_figures(
+            root,
+            pooled_folder_name=pooled_folder_name,
+            csd_output_subdir=output_subdir,
+            refresh=True,
+            missing_ok=True,
+        )
+    return results
+
+
 def _load_and_average_saved_columns(
     folder: PathLike,
     *,
@@ -1888,6 +2030,7 @@ __all__: Sequence[str] = (
     "estimate_animal_pooled_kcsd",
     "load_paired_raw",
     "organize_animal_pooled_figures",
+    "replot_saved_mean_kcsd",
     "organize_behavior_aligned_figures",
     "run_behavior_aligned_kcsd",
     "run_behavior_aligned_kcsd_from_root",

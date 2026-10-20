@@ -15,6 +15,7 @@ from behavior_aligned_kcsd import (
     load_paired_raw,
     organize_animal_pooled_figures,
     organize_behavior_aligned_figures,
+    replot_saved_mean_kcsd,
     run_behavior_aligned_kcsd,
     trial_weighted_psth,
 )
@@ -661,6 +662,46 @@ class AnimalPooledTests(unittest.TestCase):
                     ("play_bout", "all", "NPX1"),
                 },
             )
+
+    def test_replot_reads_saved_mean_matrix_and_uses_the_requested_scale(self):
+        with tempfile.TemporaryDirectory() as root:
+            folders = []
+            for alignment, value in (("onset", 4.0), ("offset", -1.5)):
+                folder = os.path.join(
+                    root,
+                    "animal_pooled",
+                    "category",
+                    "play",
+                    alignment,
+                    "Batch1RatA2",
+                    "csd_1d_onset_baseline",
+                )
+                os.makedirs(folder)
+                np.save(os.path.join(folder, "csd_mean_columns.npy"), np.full((2, 3), value))
+                np.save(os.path.join(folder, "y_mean_columns.npy"), np.array([0.0, 20.0]))
+                np.save(os.path.join(folder, "time_mean_columns.npy"), np.array([-10.0, 0.0, 10.0]))
+                folders.append(folder)
+            session_only = os.path.join(
+                root, "category", "play", "onset", "day1", "csd_1d_onset_baseline"
+            )
+            os.makedirs(session_only)
+            np.save(os.path.join(session_only, "csd_mean_columns.npy"), np.ones((2, 3)))
+            np.save(os.path.join(session_only, "y_mean_columns.npy"), np.array([0.0, 20.0]))
+            np.save(os.path.join(session_only, "time_mean_columns.npy"), np.array([-10.0, 0.0, 10.0]))
+
+            with patch("behavior_aligned_kcsd.plot_column") as plot:
+                results = replot_saved_mean_kcsd(
+                    root,
+                    color_limit=2.5,
+                    refresh_animal_copies=False,
+                )
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(plot.call_count, 2)
+            for call in plot.call_args_list:
+                self.assertEqual(call.kwargs["clim"], (-2.5, 2.5))
+            plotted_values = {call.args[0][0, 0] for call in plot.call_args_list}
+            self.assertEqual(plotted_values, {4.0, -1.5})
 
     def _write_constant_pair(self, root, scope, behavior, session, *, n_events, response):
         onset = np.zeros((n_events, 2, 10), dtype=float)
