@@ -480,6 +480,141 @@ title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
     height(plot_rows), numel(unique(string(plot_rows.Animal))), ...
     paired_signrank_text(predicted_difference, observed_difference)))
 
+% The red cross in each panel is the median predicted change (x) and the
+% median observed change (y), computed on the same neurons drawn there.
+cross_area = [paper_labels, "ALL AREAS"]';
+cross_n = zeros(numel(cross_area), 1);
+cross_predicted = nan(numel(cross_area), 1);
+cross_observed = nan(numel(cross_area), 1);
+for an = 1:numel(paper_areas)
+    [cross_n(an), cross_predicted(an), cross_observed(an)] = ...
+        median_cross(predicted_difference(present_areas == paper_areas(an)), ...
+        observed_difference(present_areas == paper_areas(an)));
+end
+[cross_n(end), cross_predicted(end), cross_observed(end)] = ...
+    median_cross(predicted_difference, observed_difference);
+ppc_difference_median_crosses = table(cross_area, cross_n, ...
+    cross_predicted, cross_observed, cross_observed-cross_predicted, ...
+    'VariableNames', {'Area','NNeurons','MedianPredictedDeltaPPC', ...
+    'MedianObservedDeltaPPC','ObservedMinusPredicted'});
+fprintf(['Median crosses on the observed-versus-predicted ' ...
+    'PPC-difference plot:\n']);
+disp(ppc_difference_median_crosses);
+show_median_cross_table(ppc_difference_median_crosses);
+
+%% Example matched powers and one neuron's null-model fit
+% Estimate stores every epoch power, not the matched pairs. The pairs below
+% are rebuilt from those saved values. LFP and spike phases are not estimated again.
+if ~isempty(plot_rows)
+    null_per_neuron = accumarray(neuron_model_table.NeuronRow, 1, ...
+        [height(matched_summary), 1]);
+    % The square-plot cross is above the equality line when the median
+    % observed change exceeds the median prediction. Use a neuron on that
+    % side of the line, with enough null draws to show the fit.
+    positive_example = finite_difference & ...
+        ismember(string(matched_summary.Area), paper_areas) & ...
+        matched_summary.PPCDifference > ...
+        matched_summary.ModelExpectedPPCDifference;
+    candidate_rows = find(positive_example);
+    if isempty(candidate_rows)
+        warning(['No trough-locked paper-area neuron has an observed ' ...
+            'PPC difference above its null-model prediction.']);
+        candidate_rows = find(finite_difference & ...
+            ismember(string(matched_summary.Area), paper_areas));
+    end
+    null_counts = null_per_neuron(candidate_rows);
+    if max(null_counts) >= 1
+        dense_enough = null_counts >= max(1, floor(0.5*max(null_counts)));
+        candidate_rows = candidate_rows(dense_enough);
+    end
+    example_residual = matched_summary.PPCDifference(candidate_rows) - ...
+        matched_summary.ModelExpectedPPCDifference(candidate_rows);
+    [~, clearest] = max(example_residual);
+    example_row = candidate_rows(clearest);
+    example_neuron = matched_summary(example_row,:);
+    session_index = find(string({power_control_struct.session}) == ...
+        string(example_neuron.Session), 1);
+    session_data = power_control_struct(session_index);
+    channel_index = find([session_data.channel_data.channel] == ...
+        example_neuron.Channel, 1);
+    channel_data = session_data.channel_data(channel_index);
+    [matched_pairs, example_caliper] = nearest_power_pairs( ...
+        channel_data.pre_epoch_power_db(:), ...
+        channel_data.play_epoch_power_db(:), POWER_CALIPER_SD);
+    if isempty(matched_pairs)
+        warning('Example neuron has no power-matched epoch pairs.');
+        matched_pre_power = [];
+        matched_play_power = [];
+    else
+        matched_pre_power = channel_data.pre_epoch_power_db(matched_pairs(:,1));
+        matched_play_power = channel_data.play_epoch_power_db(matched_pairs(:,2));
+        matched_pre_power = matched_pre_power(:);
+        matched_play_power = matched_play_power(:);
+    end
+    fprintf(['Example matched powers: %s, channel %d, cluster %d, ' ...
+        '%d pairs, caliper %.3g dB.\n'], string(example_neuron.Session), ...
+        example_neuron.Channel, example_neuron.ClusterID, ...
+        numel(matched_pre_power), example_caliper);
+
+    if ~isempty(matched_pre_power)
+        figure('Name', 'Example matched delta-power distributions');
+        subplot(1,2,1)
+        histogram(matched_pre_power, 'Normalization', 'probability', ...
+            'FaceAlpha', 0.5)
+        hold on
+        histogram(matched_play_power, 'Normalization', 'probability', ...
+            'FaceAlpha', 0.5)
+        xlabel('Delta power (dB)')
+        ylabel('Probability')
+        legend({'Matched pre-play','Matched play'})
+        title(sprintf('n=%d pairs', numel(matched_pre_power)))
+        subplot(1,2,2)
+        plot(matched_pre_power, matched_play_power, 'k.')
+        hold on
+        pair_limit = [min([matched_pre_power; matched_play_power]), ...
+            max([matched_pre_power; matched_play_power])];
+        plot(pair_limit, pair_limit, 'r-')
+        axis square
+        xlabel('Matched pre-play power (dB)')
+        ylabel('Matched play power (dB)')
+    end
+
+    if ~isempty(ppc_power_spike_model)
+        example_null = neuron_model_table( ...
+            neuron_model_table.NeuronRow == example_row, :);
+        coefficient = fixedEffects(ppc_power_spike_model);
+        null_predictor = fixed_effect_predictor(example_null, coefficient);
+        observed_features = table(example_neuron.PowerDifferenceDB, ...
+            example_neuron.SpikeCountDifference, ...
+            example_neuron.MeanSpikeCount, ...
+            example_neuron.EpochsPerCondition, 'VariableNames', ...
+            {'PowerDifferenceDB','SpikeCountDifference', ...
+            'MeanSpikeCount','EpochCount'});
+        observed_predictor = fixed_effect_predictor( ...
+            observed_features, coefficient);
+        predictor_span = [min([null_predictor; observed_predictor]), ...
+            max([null_predictor; observed_predictor])];
+        figure('Name', 'Example null-model fit');
+        plot(null_predictor, example_null.PPCDifference, '.', ...
+            'Color', [0.65 0.65 0.65])
+        hold on
+        plot(predictor_span, predictor_span, 'k-')
+        plot(observed_predictor, example_neuron.ModelExpectedPPCDifference, ...
+            'bs', 'MarkerFaceColor', 'b', 'MarkerSize', 9)
+        plot(observed_predictor, example_neuron.PPCDifference, ...
+            'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 9)
+        xlabel('Fixed-effect linear predictor')
+        ylabel('PPC difference')
+        legend({'Null draws','Fixed-effect model','Predicted','Observed'}, ...
+            'Location', 'best')
+        title(sprintf(['%s ch%d cl%d, observed %.4f, predicted %.4f, ' ...
+            'n=%d null draws'], string(example_neuron.NeuronKey), ...
+            example_neuron.Channel, example_neuron.ClusterID, ...
+            example_neuron.PPCDifference, ...
+            example_neuron.ModelExpectedPPCDifference, height(example_null)))
+    end
+end
+
 analysis_parameters = struct( ...
     'epoch_seconds', EPOCH_SECONDS, ...
     'power_caliper_sd', POWER_CALIPER_SD, ...
@@ -498,9 +633,18 @@ save(fullfile(saving_folder, ...
     'play_ppc_power_contrast_analysis.mat'), ...
     'matched_summary', 'matched_draw_table', 'null_draw_table', ...
     'neuron_model_table', 'excluded_neurons', 'ppc_power_spike_model', ...
+    'ppc_difference_median_crosses', ...
     'animal_summary', 'overall_result', 'analysis_parameters', '-v7.3');
 
 %% Local functions
+function predictor = fixed_effect_predictor(data_table, coefficient)
+predictor = coefficient(1) + ...
+    coefficient(2) * data_table.PowerDifferenceDB + ...
+    coefficient(3) * data_table.SpikeCountDifference + ...
+    coefficient(4) * data_table.MeanSpikeCount + ...
+    coefficient(5) * data_table.EpochCount;
+end
+
 function label = paired_signrank_text(x_value, y_value)
 finite_pairs = isfinite(x_value) & isfinite(y_value);
 if nnz(finite_pairs) < 1
@@ -519,14 +663,61 @@ end
 function plot_paired_ppc(x_value, y_value, axis_limit)
 plot(x_value, y_value, 'k.')
 hold on
-finite_pairs = isfinite(x_value) & isfinite(y_value);
-if any(finite_pairs)
-    pair_median = [median(x_value(finite_pairs)), median(y_value(finite_pairs))];
-    plot(pair_median(1), pair_median(2), 'rx', 'LineWidth', 1.2)
+[~, x_median, y_median] = median_cross(x_value, y_value);
+if isfinite(x_median) && isfinite(y_median)
+    plot(x_median, y_median, 'rx', 'LineWidth', 1.2)
 end
 plot(axis_limit, axis_limit, 'r-')
 axis([axis_limit axis_limit])
 axis square
+end
+
+function [n_pairs, x_median, y_median] = median_cross(x_value, y_value)
+finite_pairs = isfinite(x_value) & isfinite(y_value);
+n_pairs = nnz(finite_pairs);
+if n_pairs < 1
+    x_median = NaN;
+    y_median = NaN;
+    return
+end
+x_median = median(x_value(finite_pairs));
+y_median = median(y_value(finite_pairs));
+end
+
+function show_median_cross_table(cross_table)
+figure('Name', 'Median crosses, observed versus predicted PPC difference', ...
+    'Color', 'w', 'Position', [80 80 980 380]);
+annotation('textbox', [0.03 0.86 0.94 0.12], 'String', ...
+    ['Red cross on each panel: median predicted change (x) and median ' ...
+    'observed change (y). A positive last column places that cross ' ...
+    'above the equality line.'], 'EdgeColor', 'none', 'FontSize', 10, ...
+    'HorizontalAlignment', 'left', 'VerticalAlignment', 'middle');
+axes('Position', [0.03 0.06 0.94 0.78], 'Visible', 'off');
+xlim([0 1]); ylim([0 1]);
+header = ["Area","Neurons","Median predicted \DeltaPPC", ...
+    "Median observed \DeltaPPC","Observed - predicted"];
+x_position = [0.01 0.16 0.32 0.56 0.80];
+for column = 1:numel(header)
+    text(x_position(column), 0.92, header(column), 'FontWeight', 'bold', ...
+        'FontSize', 11, 'Interpreter', 'tex', 'VerticalAlignment', 'middle');
+end
+for row = 1:height(cross_table)
+    y_position = 0.92 - row*(0.78/height(cross_table));
+    row_text = [string(cross_table.Area(row)), ...
+        string(cross_table.NNeurons(row)), ...
+        string(sprintf('%.5f', cross_table.MedianPredictedDeltaPPC(row))), ...
+        string(sprintf('%.5f', cross_table.MedianObservedDeltaPPC(row))), ...
+        string(sprintf('%+.5f', cross_table.ObservedMinusPredicted(row)))];
+    font_weight = 'normal';
+    if cross_table.Area(row) == "ALL AREAS"
+        font_weight = 'bold';
+    end
+    for column = 1:numel(row_text)
+        text(x_position(column), y_position, row_text(column), ...
+            'FontSize', 12, 'FontWeight', font_weight, ...
+            'Interpreter', 'none', 'VerticalAlignment', 'middle');
+    end
+end
 end
 
 function [pairs, caliper_db] = nearest_power_pairs( ...
@@ -720,28 +911,47 @@ play_count = neuron.play_epoch_spike_count(:);
 pre_vector = cellfun(@phase_vector, neuron.pre_epoch_phase);
 play_vector = cellfun(@phase_vector, neuron.play_epoch_phase);
 
-n_pre = sum(pre_count(pre_index),2);
-n_play = sum(play_count(play_index),2);
-r_pre = sum(pre_vector(pre_index),2);
-r_play = sum(play_vector(play_index),2);
+pre_epochs = values_by_draw(pre_count, pre_index);
+play_epochs = values_by_draw(play_count, play_index);
+pre_phase = values_by_draw(pre_vector, pre_index);
+play_phase = values_by_draw(play_vector, play_index);
+pre_power_by_draw = values_by_draw(pre_power, pre_index);
+play_power_by_draw = values_by_draw(play_power, play_index);
+
+n_pre = sum(pre_epochs,2);
+n_play = sum(play_epochs,2);
+r_pre = sum(pre_phase,2);
+r_play = sum(play_phase,2);
+mean_pre_power = mean(pre_power_by_draw,2,'omitnan');
+mean_play_power = mean(play_power_by_draw,2,'omitnan');
+pooled_sd = sqrt((var(pre_power_by_draw,0,2,'omitnan') + ...
+    var(play_power_by_draw,0,2,'omitnan'))/2);
+n_pre = n_pre(:);
+n_play = n_play(:);
+r_pre = r_pre(:);
+r_play = r_play(:);
+mean_pre_power = mean_pre_power(:);
+mean_play_power = mean_play_power(:);
+pooled_sd = pooled_sd(:);
 pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
 play_ppc = ppc_from_sufficient_statistics(r_play, n_play);
-mean_pre_power = mean(pre_power(pre_index),2,'omitnan');
-mean_play_power = mean(play_power(play_index),2,'omitnan');
-pooled_sd = sqrt((var(pre_power(pre_index),0,2,'omitnan') + ...
-    var(play_power(play_index),0,2,'omitnan'))/2);
-power_smd = (mean_play_power-mean_pre_power)./pooled_sd;
+power_difference = mean_play_power-mean_pre_power;
+spike_difference = n_play-n_pre;
+mean_spike_count = (n_play+n_pre)/2;
+ppc_difference = play_ppc-pre_ppc;
+power_smd = power_difference./pooled_sd;
 power_smd(pooled_sd == 0 & mean_play_power == mean_pre_power) = 0;
 reliable = isfinite(pre_ppc) & isfinite(play_ppc);
 if require_balance
     reliable = reliable & abs(power_smd) <= max_abs_smd;
 end
+reliable = double(reliable);
 
 n_draws = size(pre_index,1);
 metrics = [(1:n_draws)', repmat(size(pre_index,2),n_draws,1), ...
-    mean_pre_power, mean_play_power, mean_play_power-mean_pre_power, ...
-    power_smd, n_pre, n_play, n_play-n_pre, (n_play+n_pre)/2, ...
-    pre_ppc, play_ppc, play_ppc-pre_ppc, double(reliable)];
+    mean_pre_power, mean_play_power, power_difference, power_smd, ...
+    n_pre, n_play, spike_difference, mean_spike_count, ...
+    pre_ppc, play_ppc, ppc_difference, reliable];
 end
 
 function metrics = evaluate_null_draws(neuron, pseudo_pre, pseudo_post, ...
@@ -750,26 +960,52 @@ merged_power = nonplay_power(:);
 merged_count = neuron.nonplay_epoch_spike_count(:);
 merged_vector = cellfun(@phase_vector, neuron.nonplay_epoch_phase);
 
-n_pre = sum(merged_count(pseudo_pre),2);
-n_post = sum(merged_count(pseudo_post),2);
-r_pre = sum(merged_vector(pseudo_pre),2);
-r_post = sum(merged_vector(pseudo_post),2);
+pre_epochs = values_by_draw(merged_count, pseudo_pre);
+post_epochs = values_by_draw(merged_count, pseudo_post);
+pre_phase = values_by_draw(merged_vector, pseudo_pre);
+post_phase = values_by_draw(merged_vector, pseudo_post);
+pre_power_by_draw = values_by_draw(merged_power, pseudo_pre);
+post_power_by_draw = values_by_draw(merged_power, pseudo_post);
+
+n_pre = sum(pre_epochs,2);
+n_post = sum(post_epochs,2);
+r_pre = sum(pre_phase,2);
+r_post = sum(post_phase,2);
+mean_pre_power = mean(pre_power_by_draw,2,'omitnan');
+mean_post_power = mean(post_power_by_draw,2,'omitnan');
+pooled_sd = sqrt((var(pre_power_by_draw,0,2,'omitnan') + ...
+    var(post_power_by_draw,0,2,'omitnan'))/2);
+n_pre = n_pre(:);
+n_post = n_post(:);
+r_pre = r_pre(:);
+r_post = r_post(:);
+mean_pre_power = mean_pre_power(:);
+mean_post_power = mean_post_power(:);
+pooled_sd = pooled_sd(:);
 pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
 post_ppc = ppc_from_sufficient_statistics(r_post, n_post);
-mean_pre_power = mean(merged_power(pseudo_pre),2,'omitnan');
-mean_post_power = mean(merged_power(pseudo_post),2,'omitnan');
-pooled_sd = sqrt((var(merged_power(pseudo_pre),0,2,'omitnan') + ...
-    var(merged_power(pseudo_post),0,2,'omitnan'))/2);
-power_smd = (mean_post_power-mean_pre_power)./pooled_sd;
+power_difference = mean_post_power-mean_pre_power;
+spike_difference = n_post-n_pre;
+mean_spike_count = (n_post+n_pre)/2;
+ppc_difference = post_ppc-pre_ppc;
+power_smd = power_difference./pooled_sd;
 power_smd(pooled_sd == 0 & mean_post_power == mean_pre_power) = 0;
-reliable = isfinite(pre_ppc) & isfinite(post_ppc);
+reliable = double(isfinite(pre_ppc) & isfinite(post_ppc));
 
 n_draws = size(pseudo_pre,1);
 metrics = [(1:n_draws)', repmat(size(pseudo_pre,2),n_draws,1), ...
-    mean_pre_power, mean_post_power, ...
-    mean_post_power-mean_pre_power, power_smd, ...
-    n_pre, n_post, n_post-n_pre, (n_post+n_pre)/2, ...
-    pre_ppc, post_ppc, post_ppc-pre_ppc, double(reliable)];
+    mean_pre_power, mean_post_power, power_difference, power_smd, ...
+    n_pre, n_post, spike_difference, mean_spike_count, ...
+    pre_ppc, post_ppc, ppc_difference, reliable];
+end
+
+function selected = values_by_draw(data, index)
+% Indexing a vector with a vector keeps the data orientation. A single
+% draw is a 1-by-K row, so indexing a column of epoch values returns a
+% K-by-1 column. Reducing along dimension 2 then leaves K rows, which
+% cannot be concatenated with the one-row draw index. Restore draws-by-
+% epochs before summing, averaging, or taking the variance.
+selected = reshape(data(index(:)), size(index));
 end
 
 function value = phase_vector(phase)
