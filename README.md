@@ -67,6 +67,8 @@ play bout analysis behavior and physiology/
 │   ├── GENERATE_STIM_CALL_RESPONSES.m
 │   └── Estimate_stim_call_responses.m
 ├── Custom functions/                  # Shared helpers (play_bout, kernel_rate, ppc, …)
+├── manual traking/
+│   └── manual_traking.m               # Click tracking for focal animal and partner
 ├── Figure 1/
 │   ├── Figure 1 Play Bouts.m
 │   ├── Figure 1 LDA.m
@@ -131,6 +133,9 @@ Panel letters below match the uploaded files in `Paper figures/` where previews 
 | Build HMM inputs | `Figure 1/HMM modeling/CreateHMMFIiles.m` |
 | Train CNN autoencoder (PyTorch) | `Figure 1/LDA analysis/Convolutional classification.ipynb` |
 | Fit HMMs in Python | `Figure 1/HMM modeling/python hmm estimate.txt` |
+| Manual tracking of both animals | `manual traking/manual_traking.m` |
+
+`manual traking/manual_traking.m` writes the `traking_structure` `.mat` files. That output goes in `Data/Traking backups/`. Figure 1 and Figure 2 load those files from that folder.
 
 HMM pipeline order: `Figure 1/HMM modeling/README.md`.
 
@@ -433,6 +438,7 @@ Phase of coincident events (not a numbered paper panel here): `Figure 3/Former S
 ### Figure 1
 
 - `Behavior backups/` — manual annotations (`.txt`)
+- `Traking backups/` — output of `manual traking/manual_traking.m` (`traking_structure` `.mat` files). On disk this is `Data/Traking backups/`.
 - `Analysis results/locomotive behaviors 2 partners/`
 - `Analysis results/Behavior classification/` — trained LDA models
 - `Analysis results/HMM 2 and 3 states 2 partners/`
