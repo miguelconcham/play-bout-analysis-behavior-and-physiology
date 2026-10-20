@@ -135,6 +135,8 @@ Panel letters below match the uploaded files in `Paper figures/` where previews 
 | Fit HMMs in Python | `Figure 1/HMM modeling/python hmm estimate.txt` |
 | Manual tracking of both animals | `manual traking/manual_traking.m` |
 
+`manual traking/manual_traking.m` writes the `traking_structure` `.mat` files. That output goes in `Data/Traking backups/`. Figure 1 and Figure 2 load those files from that folder.
+
 HMM pipeline order: `Figure 1/HMM modeling/README.md`.
 
 **MATLAB:** Statistics and Machine Learning Toolbox, Signal Processing Toolbox, Image Processing Toolbox; `readNPY` / `writeNPY`, `run_umap`, `play_bout`, `fit_exp_heaviside3` on the path.
@@ -436,7 +438,7 @@ Phase of coincident events (not a numbered paper panel here): `Figure 3/Former S
 ### Figure 1
 
 - `Behavior backups/` — manual annotations (`.txt`)
-- `Traking backups/` — `traking_structure` files from `manual traking/manual_traking.m`
+- `Traking backups/` — output of `manual traking/manual_traking.m` (`traking_structure` `.mat` files). On disk this is `Data/Traking backups/`.
 - `Analysis results/locomotive behaviors 2 partners/`
 - `Analysis results/Behavior classification/` — trained LDA models
 - `Analysis results/HMM 2 and 3 states 2 partners/`
