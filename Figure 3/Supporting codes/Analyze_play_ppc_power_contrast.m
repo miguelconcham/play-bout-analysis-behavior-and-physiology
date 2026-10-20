@@ -820,16 +820,23 @@ play_count = neuron.play_epoch_spike_count(:);
 pre_vector = cellfun(@phase_vector, neuron.pre_epoch_phase);
 play_vector = cellfun(@phase_vector, neuron.play_epoch_phase);
 
-n_pre = sum(pre_count(pre_index),2);
-n_play = sum(play_count(play_index),2);
-r_pre = sum(pre_vector(pre_index),2);
-r_play = sum(play_vector(play_index),2);
+pre_epochs = values_by_draw(pre_count, pre_index);
+play_epochs = values_by_draw(play_count, play_index);
+pre_phase = values_by_draw(pre_vector, pre_index);
+play_phase = values_by_draw(play_vector, play_index);
+pre_power_by_draw = values_by_draw(pre_power, pre_index);
+play_power_by_draw = values_by_draw(play_power, play_index);
+
+n_pre = sum(pre_epochs,2);
+n_play = sum(play_epochs,2);
+r_pre = sum(pre_phase,2);
+r_play = sum(play_phase,2);
 pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
 play_ppc = ppc_from_sufficient_statistics(r_play, n_play);
-mean_pre_power = mean(pre_power(pre_index),2,'omitnan');
-mean_play_power = mean(play_power(play_index),2,'omitnan');
-pooled_sd = sqrt((var(pre_power(pre_index),0,2,'omitnan') + ...
-    var(play_power(play_index),0,2,'omitnan'))/2);
+mean_pre_power = mean(pre_power_by_draw,2,'omitnan');
+mean_play_power = mean(play_power_by_draw,2,'omitnan');
+pooled_sd = sqrt((var(pre_power_by_draw,0,2,'omitnan') + ...
+    var(play_power_by_draw,0,2,'omitnan'))/2);
 power_smd = (mean_play_power-mean_pre_power)./pooled_sd;
 power_smd(pooled_sd == 0 & mean_play_power == mean_pre_power) = 0;
 reliable = isfinite(pre_ppc) & isfinite(play_ppc);
@@ -839,9 +846,9 @@ end
 
 n_draws = size(pre_index,1);
 metrics = [(1:n_draws)', repmat(size(pre_index,2),n_draws,1), ...
-    mean_pre_power, mean_play_power, mean_play_power-mean_pre_power, ...
-    power_smd, n_pre, n_play, n_play-n_pre, (n_play+n_pre)/2, ...
-    pre_ppc, play_ppc, play_ppc-pre_ppc, double(reliable)];
+    mean_pre_power(:), mean_play_power(:), (mean_play_power-mean_pre_power)(:), ...
+    power_smd(:), n_pre(:), n_play(:), (n_play-n_pre)(:), ((n_play+n_pre)/2)(:), ...
+    pre_ppc(:), play_ppc(:), (play_ppc-pre_ppc)(:), double(reliable(:))];
 end
 
 function metrics = evaluate_null_draws(neuron, pseudo_pre, pseudo_post, ...
@@ -850,26 +857,42 @@ merged_power = nonplay_power(:);
 merged_count = neuron.nonplay_epoch_spike_count(:);
 merged_vector = cellfun(@phase_vector, neuron.nonplay_epoch_phase);
 
-n_pre = sum(merged_count(pseudo_pre),2);
-n_post = sum(merged_count(pseudo_post),2);
-r_pre = sum(merged_vector(pseudo_pre),2);
-r_post = sum(merged_vector(pseudo_post),2);
+pre_epochs = values_by_draw(merged_count, pseudo_pre);
+post_epochs = values_by_draw(merged_count, pseudo_post);
+pre_phase = values_by_draw(merged_vector, pseudo_pre);
+post_phase = values_by_draw(merged_vector, pseudo_post);
+pre_power_by_draw = values_by_draw(merged_power, pseudo_pre);
+post_power_by_draw = values_by_draw(merged_power, pseudo_post);
+
+n_pre = sum(pre_epochs,2);
+n_post = sum(post_epochs,2);
+r_pre = sum(pre_phase,2);
+r_post = sum(post_phase,2);
 pre_ppc = ppc_from_sufficient_statistics(r_pre, n_pre);
 post_ppc = ppc_from_sufficient_statistics(r_post, n_post);
-mean_pre_power = mean(merged_power(pseudo_pre),2,'omitnan');
-mean_post_power = mean(merged_power(pseudo_post),2,'omitnan');
-pooled_sd = sqrt((var(merged_power(pseudo_pre),0,2,'omitnan') + ...
-    var(merged_power(pseudo_post),0,2,'omitnan'))/2);
+mean_pre_power = mean(pre_power_by_draw,2,'omitnan');
+mean_post_power = mean(post_power_by_draw,2,'omitnan');
+pooled_sd = sqrt((var(pre_power_by_draw,0,2,'omitnan') + ...
+    var(post_power_by_draw,0,2,'omitnan'))/2);
 power_smd = (mean_post_power-mean_pre_power)./pooled_sd;
 power_smd(pooled_sd == 0 & mean_post_power == mean_pre_power) = 0;
 reliable = isfinite(pre_ppc) & isfinite(post_ppc);
 
 n_draws = size(pseudo_pre,1);
 metrics = [(1:n_draws)', repmat(size(pseudo_pre,2),n_draws,1), ...
-    mean_pre_power, mean_post_power, ...
-    mean_post_power-mean_pre_power, power_smd, ...
-    n_pre, n_post, n_post-n_pre, (n_post+n_pre)/2, ...
-    pre_ppc, post_ppc, post_ppc-pre_ppc, double(reliable)];
+    mean_pre_power(:), mean_post_power(:), ...
+    (mean_post_power-mean_pre_power)(:), power_smd(:), ...
+    n_pre(:), n_post(:), (n_post-n_pre)(:), ((n_post+n_pre)/2)(:), ...
+    pre_ppc(:), post_ppc(:), (post_ppc-pre_ppc)(:), double(reliable(:))];
+end
+
+function selected = values_by_draw(data, index)
+% Indexing a vector with a vector keeps the data orientation. A single
+% draw is a 1-by-K row, so indexing a column of epoch values returns a
+% K-by-1 column. Reducing along dimension 2 then leaves K rows, which
+% cannot be concatenated with the one-row draw index. Restore draws-by-
+% epochs before summing, averaging, or taking the variance.
+selected = reshape(data(index(:)), size(index));
 end
 
 function value = phase_vector(phase)
