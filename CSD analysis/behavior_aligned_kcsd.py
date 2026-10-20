@@ -79,6 +79,14 @@ BEHAVIOR_ALIGNED_CSD_DEFAULTS: Dict[str, Any] = {
     "save_mean_plot": True,
 }
 
+ANIMAL_POOLED_FOLDER = "animal_pooled"
+ANIMAL_POOLED_DATASETS = (
+    ("category", "play"),
+    ("category", "aggression"),
+    ("category", "exploration"),
+    ("play_bout", "all"),
+)
+
 
 def _load_event_ids(folder: PathLike) -> Optional[np.ndarray]:
     path = os.path.join(os.fspath(folder), "event_ids.npy")
@@ -1019,6 +1027,176 @@ def organize_behavior_aligned_figures(
     }
 
 
+def organize_animal_pooled_figures(
+    root: PathLike,
+    *,
+    pooled_folder_name: str = ANIMAL_POOLED_FOLDER,
+    output_folder_name: str = "sorted_figures",
+    csd_output_subdir: str = "csd_1d_onset_baseline",
+    refresh: bool = True,
+    missing_ok: bool = False,
+) -> Dict[str, Any]:
+    """
+    Copy animal-pooled kCSD PNGs into one onset folder and one offset folder.
+
+    Original figures stay beside each pooled PSTH. Names follow the session
+    organizer, with the animal key in the session position:
+
+    ``by_animal/onset/Batch1RatA2__category__play__NPX1__xmean.png``
+    ``by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png``
+    """
+    root = os.path.abspath(os.fspath(root))
+    pooled_root = os.path.join(root, pooled_folder_name)
+    if not os.path.isdir(pooled_root):
+        raise FileNotFoundError(
+            f"No animal-pooled results at {pooled_root}. Run "
+            "estimate_animal_pooled_kcsd first."
+        )
+
+    figure_dirs: List[str] = []
+    for dirpath, _dirnames, filenames in os.walk(pooled_root):
+        relative = os.path.relpath(dirpath, pooled_root).split(os.sep)
+        if output_folder_name in relative:
+            continue
+        if (
+            relative[-1] == "figures"
+            and len(relative) >= 2
+            and relative[-2] == csd_output_subdir
+            and any(name.lower().endswith(".png") and name.startswith("kcsd_x") for name in filenames)
+        ):
+            figure_dirs.append(dirpath)
+    figure_dirs.sort()
+
+    output_root = os.path.join(pooled_root, output_folder_name)
+    if not figure_dirs:
+        message = (
+            f"No animal-pooled kCSD PNGs under {pooled_root}. "
+            "Estimation may have been run with save_plots=False."
+        )
+        if missing_ok:
+            print(message, flush=True)
+            return {
+                "output_root": output_root,
+                "index_path": None,
+                "n_source_figures": 0,
+                "n_copies": 0,
+            }
+        raise FileNotFoundError(message)
+
+    if refresh and os.path.isdir(output_root):
+        try:
+            shutil.rmtree(output_root)
+        except PermissionError as exc:
+            print(
+                f"Could not delete {output_root}: {exc}. "
+                "Existing figure copies will be overwritten.",
+                flush=True,
+            )
+    os.makedirs(output_root, exist_ok=True)
+
+    rows: List[Dict[str, str]] = []
+    destinations: Dict[str, str] = {}
+    print(
+        f"Copying animal-pooled kCSD figures from {len(figure_dirs)} "
+        f"folders into {output_root}",
+        flush=True,
+    )
+    for figure_dir in figure_dirs:
+        relative = os.path.relpath(figure_dir, pooled_root).split(os.sep)
+        leaf = relative[:-2]
+        if len(leaf) not in (4, 5) or leaf[2] not in {"onset", "offset"}:
+            print(f"  Skipping unrecognized figure folder: {figure_dir}", flush=True)
+            continue
+        scope, behavior, alignment, animal = leaf[:4]
+        probe = leaf[4] if len(leaf) == 5 else "NPX1"
+        all_figure_names = sorted(
+            name
+            for name in os.listdir(figure_dir)
+            if name.lower().endswith(".png") and name.startswith("kcsd_x")
+        )
+        if "kcsd_xmean.png" in all_figure_names:
+            figure_names = ["kcsd_xmean.png"]
+        else:
+            figure_names = all_figure_names
+        safe_scope = _safe_figure_name_part(scope)
+        safe_behavior = _safe_figure_name_part(behavior)
+        safe_animal = _safe_figure_name_part(animal)
+        safe_probe = _safe_figure_name_part(probe)
+        for figure_name in figure_names:
+            source = os.path.join(figure_dir, figure_name)
+            xpos = _safe_figure_name_part(
+                os.path.splitext(figure_name)[0].removeprefix("kcsd_")
+            )
+            animal_name = (
+                f"{safe_animal}__{safe_scope}__{safe_behavior}__"
+                f"{safe_probe}__{xpos}.png"
+            )
+            behavior_name = (
+                f"{safe_scope}__{safe_behavior}__{safe_animal}__"
+                f"{safe_probe}__{xpos}.png"
+            )
+            by_animal = os.path.join(output_root, "by_animal", alignment, animal_name)
+            by_behavior = os.path.join(
+                output_root, "by_behavior", alignment, behavior_name
+            )
+            for destination in (by_animal, by_behavior):
+                prior_source = destinations.get(destination)
+                if prior_source is not None and prior_source != source:
+                    raise RuntimeError(
+                        "Figure-name collision: "
+                        f"{prior_source} and {source} both map to {destination}"
+                    )
+                destinations[destination] = source
+                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                shutil.copy2(source, destination)
+                print(
+                    f"    Saved sorted copy: "
+                    f"{os.path.relpath(destination, output_root)}",
+                    flush=True,
+                )
+            rows.append(
+                {
+                    "alignment": alignment,
+                    "scope": scope,
+                    "behavior": behavior,
+                    "animal": animal,
+                    "probe": probe,
+                    "xpos": xpos,
+                    "original_file": os.path.relpath(source, root),
+                    "by_animal_file": os.path.relpath(by_animal, root),
+                    "by_behavior_file": os.path.relpath(by_behavior, root),
+                }
+            )
+
+    index_path = os.path.join(output_root, "figure_index.csv")
+    fieldnames = [
+        "alignment",
+        "scope",
+        "behavior",
+        "animal",
+        "probe",
+        "xpos",
+        "original_file",
+        "by_animal_file",
+        "by_behavior_file",
+    ]
+    with open(index_path, "w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(
+        f"Animal-pooled figure sorting complete: {len(rows)} source PNGs, "
+        f"{2 * len(rows)} copies, index={index_path}",
+        flush=True,
+    )
+    return {
+        "output_root": output_root,
+        "index_path": index_path,
+        "n_source_figures": len(rows),
+        "n_copies": 2 * len(rows),
+    }
+
+
 def _load_and_average_saved_columns(
     folder: PathLike,
     *,
@@ -1224,15 +1402,6 @@ def average_saved_behavior_kcsd_from_root(
         flush=True,
     )
     return results
-
-
-ANIMAL_POOLED_FOLDER = "animal_pooled"
-ANIMAL_POOLED_DATASETS = (
-    ("category", "play"),
-    ("category", "aggression"),
-    ("category", "exploration"),
-    ("play_bout", "all"),
-)
 
 
 def _order_channels(
@@ -1627,6 +1796,13 @@ def estimate_animal_pooled_kcsd(
         f"{n_failed} failed. Index: {index_path}",
         flush=True,
     )
+    organize_animal_pooled_figures(
+        root,
+        pooled_folder_name=output_folder_name,
+        csd_output_subdir=str(settings.get("output_subdir", "csd_1d_onset_baseline")),
+        refresh=refresh,
+        missing_ok=True,
+    )
     return results
 
 
@@ -1685,6 +1861,7 @@ __all__: Sequence[str] = (
     "epoch_paired_with_onset_baseline",
     "estimate_animal_pooled_kcsd",
     "load_paired_raw",
+    "organize_animal_pooled_figures",
     "organize_behavior_aligned_figures",
     "run_behavior_aligned_kcsd",
     "run_behavior_aligned_kcsd_from_root",

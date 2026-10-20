@@ -192,13 +192,30 @@ session's PSTH by its trial count, and fits kCSD once to the pooled PSTH.
 A session with more trials therefore counts more, which is the same result
 as concatenating the trials and then averaging. Individual behaviors are not
 pooled. When electrode depths differ between days, each probe column is
-aligned only inside the depth range present in every session. Outputs are
-written under `animal_pooled/category/<play|aggression|exploration>/` and
-`animal_pooled/play_bout/all/`.
+aligned only inside the depth range present in every session. The pooled PSTH and its kCSD matrices stay under
+`animal_pooled/category/<play|aggression|exploration>/onset|offset/<animal>/`
+and `animal_pooled/play_bout/all/onset|offset/<animal>/`, in
+`csd_1d_onset_baseline/`. The averaged images are also copied into one
+folder with the same names used for session figures, with the animal key
+in the session position:
+
+```text
+animal_pooled/sorted_figures/
+  by_animal/onset/Batch1RatA2__category__play__NPX1__xmean.png
+  by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png
+  figure_index.csv
+```
+
+Notebook cell **C7** writes that folder. Cell **C17** rebuilds only the
+copies when the PNGs already exist.
 
 ```python
-from behavior_aligned_kcsd import estimate_animal_pooled_kcsd
+from behavior_aligned_kcsd import (
+    estimate_animal_pooled_kcsd,
+    organize_animal_pooled_figures,
+)
 estimate_animal_pooled_kcsd(r"...\behavior aligned CSD")
+organize_animal_pooled_figures(r"...\behavior aligned CSD")
 ```
 
 Defaults are raw LFP, no rereference, −1000…+2000 ms response epochs, onset

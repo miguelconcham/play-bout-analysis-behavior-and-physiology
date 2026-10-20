@@ -13,6 +13,7 @@ from behavior_aligned_kcsd import (
     epoch_paired_with_onset_baseline,
     estimate_animal_pooled_kcsd,
     load_paired_raw,
+    organize_animal_pooled_figures,
     organize_behavior_aligned_figures,
     run_behavior_aligned_kcsd,
     trial_weighted_psth,
@@ -503,6 +504,100 @@ class AnimalPooledTests(unittest.TestCase):
                 )
             )
             np.testing.assert_allclose(other_lfp[0, :, 2:], 100.0)
+
+    def test_animal_pooled_figures_use_the_session_name_pattern(self):
+        with tempfile.TemporaryDirectory() as root:
+            leaves = [
+                (
+                    os.path.join(
+                        root,
+                        "animal_pooled",
+                        "category",
+                        "play",
+                        "onset",
+                        "Batch1RatA2",
+                    ),
+                    b"play-onset",
+                ),
+                (
+                    os.path.join(
+                        root,
+                        "animal_pooled",
+                        "category",
+                        "play",
+                        "offset",
+                        "Batch1RatA2",
+                        "probe2",
+                    ),
+                    b"play-offset",
+                ),
+                (
+                    os.path.join(
+                        root,
+                        "animal_pooled",
+                        "play_bout",
+                        "all",
+                        "onset",
+                        "Batch1RatA2",
+                    ),
+                    b"bout",
+                ),
+            ]
+            for folder, payload in leaves:
+                figure_dir = os.path.join(folder, "csd_1d_onset_baseline", "figures")
+                os.makedirs(figure_dir)
+                with open(os.path.join(figure_dir, "kcsd_x0.0.png"), "wb") as stream:
+                    stream.write(b"column")
+                with open(os.path.join(figure_dir, "kcsd_xmean.png"), "wb") as stream:
+                    stream.write(payload)
+            outside = os.path.join(
+                root, "category", "play", "onset", "B1A2 20240101 RatA",
+                "csd_1d_onset_baseline", "figures",
+            )
+            os.makedirs(outside)
+            with open(os.path.join(outside, "kcsd_xmean.png"), "wb") as stream:
+                stream.write(b"session")
+
+            result = organize_animal_pooled_figures(root)
+
+            by_animal = os.path.join(
+                result["output_root"],
+                "by_animal",
+                "onset",
+                "Batch1RatA2__category__play__NPX1__xmean.png",
+            )
+            by_behavior = os.path.join(
+                result["output_root"],
+                "by_behavior",
+                "offset",
+                "category__play__Batch1RatA2__probe2__xmean.png",
+            )
+            bout = os.path.join(
+                result["output_root"],
+                "by_behavior",
+                "onset",
+                "play_bout__all__Batch1RatA2__NPX1__xmean.png",
+            )
+            self.assertTrue(os.path.isfile(by_animal))
+            self.assertTrue(os.path.isfile(by_behavior))
+            self.assertTrue(os.path.isfile(bout))
+            with open(by_animal, "rb") as stream:
+                self.assertEqual(stream.read(), b"play-onset")
+            self.assertEqual(result["n_source_figures"], 3)
+            self.assertEqual(result["n_copies"], 6)
+            self.assertFalse(
+                any("kcsd_x0.0" in name for name in os.listdir(os.path.dirname(by_animal)))
+            )
+            with open(result["index_path"], newline="", encoding="utf-8") as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(
+                {(row["scope"], row["behavior"], row["probe"]) for row in rows},
+                {
+                    ("category", "play", "NPX1"),
+                    ("category", "play", "probe2"),
+                    ("play_bout", "all", "NPX1"),
+                },
+            )
 
     def _write_constant_pair(self, root, scope, behavior, session, *, n_events, response):
         onset = np.zeros((n_events, 2, 10), dtype=float)
