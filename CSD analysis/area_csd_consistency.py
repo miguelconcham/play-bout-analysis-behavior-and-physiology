@@ -1432,6 +1432,12 @@ def _discover_averaged_leaves(
         relative = os.path.relpath(dirpath, root).split(os.sep)
         if output_folder_name in relative:
             continue
+        # Session maps are scope/behavior/onset|offset/session[/probe]/<subdir>.
+        # Animal-pooled maps add a folder in front of that layout; leave them
+        # out so this session summary does not treat an animal key as a session.
+        leaf_parts = relative[:-1]
+        if len(leaf_parts) not in (4, 5) or leaf_parts[2] not in {"onset", "offset"}:
+            continue
         names = set(filenames)
         if "csd_mean_columns.npy" in names:
             means.append(dirpath)

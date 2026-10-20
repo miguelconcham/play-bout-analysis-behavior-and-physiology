@@ -135,6 +135,32 @@ class AreaRuleTests(unittest.TestCase):
         self.assertEqual(loaded[0].probe_num, 2)
         self.assertEqual(loaded[0].area, "LPAG")
 
+    def test_discovery_keeps_session_maps_and_skips_animal_pools(self):
+        y = np.array([0.0, 200.0])
+        time_ms = np.array([0.0, 25.0])
+        with tempfile.TemporaryDirectory() as root:
+            session = os.path.join(
+                root, "category", "play", "onset", "B1A2 20240101 RatA"
+            )
+            pooled = os.path.join(
+                root,
+                "animal_pooled",
+                "category",
+                "play",
+                "onset",
+                "Batch1RatA2",
+            )
+            _write_mean(session, 1.0, y, time_ms)
+            _write_mean(pooled, 9.0, y, time_ms)
+            found = area_mod._discover_averaged_leaves(
+                root,
+                output_subdir="csd_1d_onset_baseline",
+                output_folder_name="area_consistency",
+            )
+        self.assertEqual(len(found["means"]), 1)
+        self.assertIn("B1A2 20240101 RatA", found["means"][0])
+        self.assertNotIn("animal_pooled", found["means"][0])
+
 
 class AcrossSessionTests(unittest.TestCase):
     def test_probes_are_averaged_before_sessions_and_signs_are_scored(self):

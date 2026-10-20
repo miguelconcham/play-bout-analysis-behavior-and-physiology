@@ -185,6 +185,22 @@ Notebook users can open `CSD_1D_general.ipynb` and run all cells under
 section searches both experimentFS hostnames and does not depend on Jupyter's
 current working directory.
 
+For play bouts and the play, aggression, and exploration categories, sessions
+from the same implanted animal can be combined before kCSD.
+`estimate_animal_pooled_kcsd` reads each session's trials, weights that
+session's PSTH by its trial count, and fits kCSD once to the pooled PSTH.
+A session with more trials therefore counts more, which is the same result
+as concatenating the trials and then averaging. Individual behaviors are not
+pooled. When electrode depths differ between days, each probe column is
+aligned only inside the depth range present in every session. Outputs are
+written under `animal_pooled/category/<play|aggression|exploration>/` and
+`animal_pooled/play_bout/all/`.
+
+```python
+from behavior_aligned_kcsd import estimate_animal_pooled_kcsd
+estimate_animal_pooled_kcsd(r"...\behavior aligned CSD")
+```
+
 Defaults are raw LFP, no rereference, −1000…+2000 ms response epochs, onset
 baseline −1000…0 ms, and the same spatial kCSD parameters as the delta
 peak/trough pipeline.

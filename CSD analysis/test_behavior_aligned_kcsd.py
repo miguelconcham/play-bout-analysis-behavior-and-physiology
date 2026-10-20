@@ -11,9 +11,11 @@ from behavior_aligned_kcsd import (
     average_saved_behavior_kcsd_from_root,
     discover_behavior_aligned_pairs,
     epoch_paired_with_onset_baseline,
+    estimate_animal_pooled_kcsd,
     load_paired_raw,
     organize_behavior_aligned_figures,
     run_behavior_aligned_kcsd,
+    trial_weighted_psth,
 )
 
 
@@ -360,6 +362,164 @@ class PairedBaselineTests(unittest.TestCase):
                     os.listdir(os.path.join(output, "figures")),
                     ["kcsd_xmean.png"],
                 )
+
+
+class AnimalPooledTests(unittest.TestCase):
+    def test_trial_weighted_psth_aligns_different_depths_without_extrapolation(self):
+        time_ms = np.array([0.0, 1.0])
+        first = {
+            "session": "day1",
+            "n_events": 1,
+            "x": np.array([0.0, 0.0, 0.0]),
+            "y": np.array([0.0, 20.0, 40.0]),
+            "onset_evoked": np.array([[0.0, 0.0], [10.0, 10.0], [20.0, 20.0]]),
+            "offset_evoked": np.zeros((3, 2)),
+            "time_ms": time_ms,
+        }
+        second = {
+            "session": "day2",
+            "n_events": 1,
+            "x": np.array([0.0, 0.0, 0.0]),
+            "y": np.array([10.0, 30.0, 50.0]),
+            "onset_evoked": np.array([[10.0, 10.0], [30.0, 30.0], [50.0, 50.0]]),
+            "offset_evoked": np.zeros((3, 2)),
+            "time_ms": time_ms,
+        }
+        pooled = trial_weighted_psth([first, second])
+        np.testing.assert_allclose(pooled["y"], [10.0, 20.0, 30.0, 40.0])
+        np.testing.assert_allclose(
+            pooled["onset_evoked"][:, 0], [7.5, 15.0, 22.5, 30.0]
+        )
+        self.assertEqual(pooled["aligned_by"], "shared_column_depths")
+        self.assertEqual(pooled["n_events"], 2)
+
+    def test_same_animal_trials_are_pooled_before_kcsd_for_categories_only(self):
+        day1 = "B1A2 20240101 RatA"
+        day2 = "B1A2 20240202 RatA"
+        other = "B1B2 20240101 RatB"
+        with tempfile.TemporaryDirectory() as root:
+            self._write_constant_pair(
+                root, "category", "play", day1, n_events=1, response=8.0
+            )
+            self._write_constant_pair(
+                root, "category", "play", day2, n_events=3, response=0.0
+            )
+            self._write_constant_pair(
+                root, "category", "play", other, n_events=1, response=100.0
+            )
+            self._write_constant_pair(
+                root, "behavior", "Pounce", day1, n_events=1, response=50.0
+            )
+            self._write_constant_pair(
+                root, "play_bout", "all", day1, n_events=2, response=4.0
+            )
+            self._write_constant_pair(
+                root, "category", "aggression", day1, n_events=2, response=6.0
+            )
+            self._write_constant_pair(
+                root, "category", "exploration", day1, n_events=2, response=3.0
+            )
+            self._write_constant_pair(
+                root, "play_role", "self_play", day1, n_events=4, response=9.0
+            )
+
+            results = estimate_animal_pooled_kcsd(
+                root,
+                t_pre=2.0,
+                t_post=2.0,
+                onset_baseline_window_ms=(-2.0, 0.0),
+                compute_kcsd=False,
+                compute_fd=False,
+                save=False,
+                save_plots=False,
+                plot=False,
+            )
+
+            self.assertTrue(all("error" not in result for result in results))
+            play = np.load(
+                os.path.join(
+                    root,
+                    "animal_pooled",
+                    "category",
+                    "play",
+                    "onset",
+                    "Batch1RatA2",
+                    "lfp.npy",
+                )
+            )
+            np.testing.assert_allclose(play[0, :, 2:], 2.0)
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(root, "animal_pooled", "behavior", "Pounce")
+                )
+            )
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(root, "animal_pooled", "play_role", "self_play")
+                )
+            )
+            for behavior, response in (("aggression", 6.0), ("exploration", 3.0)):
+                pooled_lfp = np.load(
+                    os.path.join(
+                        root,
+                        "animal_pooled",
+                        "category",
+                        behavior,
+                        "onset",
+                        "Batch1RatA2",
+                        "lfp.npy",
+                    )
+                )
+                np.testing.assert_allclose(pooled_lfp[0, :, 2:], response)
+            discovered = [
+                pair["name"] for pair in discover_behavior_aligned_pairs(root)
+            ]
+            self.assertTrue(any(name.startswith("category/play/") for name in discovered))
+            self.assertFalse(
+                any(name.startswith("animal_pooled/") for name in discovered)
+            )
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        root,
+                        "animal_pooled",
+                        "play_bout",
+                        "all",
+                        "onset",
+                        "Batch1RatA2",
+                        "animal_pooling.json",
+                    )
+                )
+            )
+            other_lfp = np.load(
+                os.path.join(
+                    root,
+                    "animal_pooled",
+                    "category",
+                    "play",
+                    "onset",
+                    "Batch1RatB2",
+                    "lfp.npy",
+                )
+            )
+            np.testing.assert_allclose(other_lfp[0, :, 2:], 100.0)
+
+    def _write_constant_pair(self, root, scope, behavior, session, *, n_events, response):
+        onset = np.zeros((n_events, 2, 10), dtype=float)
+        onset[:, :, 5:7] = response
+        offset = onset.copy()
+        for alignment, lfp in (("onset", onset), ("offset", offset)):
+            folder = os.path.join(root, scope, behavior, alignment, session)
+            os.makedirs(folder, exist_ok=True)
+            np.save(os.path.join(folder, "lfp.npy"), lfp)
+            np.save(os.path.join(folder, "x_coords.npy"), np.zeros(2))
+            np.save(os.path.join(folder, "y_coords.npy"), np.array([0.0, 20.0]))
+            np.save(os.path.join(folder, "T0.npy"), np.array(5))
+            np.save(os.path.join(folder, "fs.npy"), np.array(1000.0))
+            np.save(
+                os.path.join(folder, "event_ids.npy"),
+                np.arange(1, n_events + 1),
+            )
 
 
 if __name__ == "__main__":

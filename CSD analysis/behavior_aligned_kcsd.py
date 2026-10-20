@@ -24,6 +24,11 @@ Alignment folders may occur anywhere below a root, for example:
 
 Discovery replaces the ``onset`` path component with ``offset``, so behavior
 and play-bout datasets use exactly the same processing code.
+
+``estimate_animal_pooled_kcsd`` is separate from that per-session run. It
+concatenates trials from sessions of the same animal for play bouts and the
+play, aggression, and exploration categories, forms the trial-weighted PSTH,
+and only then estimates kCSD.
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from scipy.interpolate import interp1d
 
+from area_csd_consistency import animal_key_from_session
 from csd_1d_pipeline import (
     DELTA_CSD_DEFAULTS,
     DatasetConfig,
@@ -817,6 +823,10 @@ def discover_behavior_aligned_pairs(root: PathLike) -> List[Dict[str, str]]:
         if not required.issubset(filenames):
             continue
         rel_parts = list(os.path.relpath(dirpath, root).split(os.sep))
+        # Animal-level PSTHs are written back under this root. They are not
+        # another session and must not be estimated or averaged again.
+        if ANIMAL_POOLED_FOLDER in rel_parts:
+            continue
         onset_positions = [i for i, part in enumerate(rel_parts) if part == "onset"]
         if not onset_positions:
             continue
@@ -1216,6 +1226,410 @@ def average_saved_behavior_kcsd_from_root(
     return results
 
 
+ANIMAL_POOLED_FOLDER = "animal_pooled"
+ANIMAL_POOLED_DATASETS = (
+    ("category", "play"),
+    ("category", "aggression"),
+    ("category", "exploration"),
+    ("play_bout", "all"),
+)
+
+
+def _order_channels(
+    x: np.ndarray,
+    y: np.ndarray,
+    onset: np.ndarray,
+    offset: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    order = np.lexsort((np.asarray(y, dtype=float), np.asarray(x, dtype=float)))
+    return x[order], y[order], onset[order], offset[order]
+
+
+def _same_electrode_grid(records: Sequence[Dict[str, Any]]) -> bool:
+    reference_x = records[0]["x"]
+    reference_y = records[0]["y"]
+    return all(
+        record["x"].shape == reference_x.shape
+        and np.allclose(record["x"], reference_x)
+        and np.allclose(record["y"], reference_y)
+        for record in records[1:]
+    )
+
+
+def _column_profiles(
+    x: np.ndarray,
+    y: np.ndarray,
+    onset: np.ndarray,
+    offset: np.ndarray,
+) -> Dict[float, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    profiles = {}
+    for ux in np.unique(np.asarray(x, dtype=float)):
+        indices = np.where(x == ux)[0]
+        order = np.argsort(y[indices])
+        yy = np.asarray(y[indices][order], dtype=float)
+        onset_column = np.asarray(onset[indices][order], dtype=float)
+        offset_column = np.asarray(offset[indices][order], dtype=float)
+        unique_y, inverse = np.unique(yy, return_inverse=True)
+        if len(unique_y) < len(yy):
+            onset_sum = np.zeros((len(unique_y), onset_column.shape[1]), dtype=float)
+            offset_sum = np.zeros_like(onset_sum)
+            counts = np.zeros(len(unique_y), dtype=float)
+            for index, group in enumerate(inverse):
+                onset_sum[group] += onset_column[index]
+                offset_sum[group] += offset_column[index]
+                counts[group] += 1.0
+            onset_column = onset_sum / counts[:, None]
+            offset_column = offset_sum / counts[:, None]
+            yy = unique_y
+        profiles[float(ux)] = (yy, onset_column, offset_column)
+    return profiles
+
+
+def _weighted_mean(records: Sequence[Dict[str, Any]], key: str) -> np.ndarray:
+    total = float(sum(int(record["n_events"]) for record in records))
+    accumulator = np.zeros_like(records[0][key], dtype=float)
+    for record in records:
+        accumulator += int(record["n_events"]) * np.asarray(record[key], dtype=float)
+    return accumulator / total
+
+
+def trial_weighted_psth(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Average session PSTHs with weight equal to the number of trials.
+
+    This is the mean that concatenation of the trials would produce. Sessions
+    with the same electrode coordinates are averaged directly. When depths
+    differ between days, each probe column is interpolated onto depths inside
+    the range covered by every session, and those aligned PSTHs are averaged.
+    Values are not extrapolated past a session's own electrodes.
+    """
+    if not records:
+        raise ValueError("No session PSTHs to combine")
+    ordered = []
+    for record in records:
+        x, y, onset, offset = _order_channels(
+            np.asarray(record["x"], dtype=float),
+            np.asarray(record["y"], dtype=float),
+            np.asarray(record["onset_evoked"], dtype=float),
+            np.asarray(record["offset_evoked"], dtype=float),
+        )
+        ordered.append({**record, "x": x, "y": y, "onset_evoked": onset, "offset_evoked": offset})
+    reference_time = np.asarray(ordered[0]["time_ms"], dtype=float)
+    for record in ordered[1:]:
+        if not np.allclose(record["time_ms"], reference_time):
+            raise ValueError(
+                f"Time axis for {record['session']} does not match "
+                f"{ordered[0]['session']}"
+            )
+    total_events = int(sum(int(record["n_events"]) for record in ordered))
+    if _same_electrode_grid(ordered):
+        return {
+            "x": ordered[0]["x"],
+            "y": ordered[0]["y"],
+            "onset_evoked": _weighted_mean(ordered, "onset_evoked"),
+            "offset_evoked": _weighted_mean(ordered, "offset_evoked"),
+            "time_ms": reference_time,
+            "n_events": total_events,
+            "aligned_by": "identical_electrodes",
+        }
+
+    column_sets = [_column_profiles(r["x"], r["y"], r["onset_evoked"], r["offset_evoked"]) for r in ordered]
+    shared_x = set(column_sets[0])
+    for columns in column_sets[1:]:
+        shared_x &= set(columns)
+    if not shared_x:
+        raise ValueError("Sessions have no probe column in common")
+    x_values = []
+    y_values = []
+    onset_rows = []
+    offset_rows = []
+    for ux in sorted(shared_x):
+        profiles = [columns[ux] for columns in column_sets]
+        overlap_min = max(float(profile[0][0]) for profile in profiles)
+        overlap_max = min(float(profile[0][-1]) for profile in profiles)
+        if overlap_min >= overlap_max:
+            raise ValueError(f"Column x={ux:g} has no shared depth range")
+        observed = [
+            profile[0][(profile[0] >= overlap_min) & (profile[0] <= overlap_max)]
+            for profile in profiles
+        ]
+        common_y = np.unique(np.concatenate(observed))
+        if common_y.size < 2:
+            raise ValueError(f"Column x={ux:g} has fewer than two shared depths")
+        onset_acc = np.zeros((common_y.size, reference_time.size), dtype=float)
+        offset_acc = np.zeros_like(onset_acc)
+        for record, (yy, onset_column, offset_column) in zip(ordered, profiles):
+            onset_acc += record["n_events"] * interp1d(
+                yy, onset_column, axis=0, bounds_error=True
+            )(common_y)
+            offset_acc += record["n_events"] * interp1d(
+                yy, offset_column, axis=0, bounds_error=True
+            )(common_y)
+        onset_acc /= total_events
+        offset_acc /= total_events
+        x_values.append(np.full(common_y.size, ux, dtype=float))
+        y_values.append(common_y)
+        onset_rows.append(onset_acc)
+        offset_rows.append(offset_acc)
+    return {
+        "x": np.concatenate(x_values),
+        "y": np.concatenate(y_values),
+        "onset_evoked": np.vstack(onset_rows),
+        "offset_evoked": np.vstack(offset_rows),
+        "time_ms": reference_time,
+        "n_events": total_events,
+        "aligned_by": "shared_column_depths",
+    }
+
+
+def _session_psth(
+    onset_folder: str,
+    offset_folder: str,
+    *,
+    epoch_settings: Dict[str, Any],
+) -> Dict[str, Any]:
+    paired = load_paired_raw(onset_folder, offset_folder)
+    fs = float(paired["fs_loaded"]) if paired["fs_loaded"] is not None else float(
+        epoch_settings["fs"]
+    )
+    prepared = epoch_paired_with_onset_baseline(
+        paired["onset"],
+        paired["offset"],
+        paired["t0_onset"],
+        paired["t0_offset"],
+        fs,
+        float(epoch_settings["t_pre"]),
+        float(epoch_settings["t_post"]),
+        float(epoch_settings["step_ms"]),
+        onset_baseline_window_ms=tuple(epoch_settings["onset_baseline_window_ms"]),
+        baseline_correct=bool(epoch_settings["baseline_correct"]),
+        normalize=str(epoch_settings["normalize"]),
+        retain_epochs=False,
+    )
+    return {
+        "x": np.asarray(paired["x"], dtype=float),
+        "y": np.asarray(paired["y"], dtype=float),
+        "onset_evoked": prepared["onset_evoked"],
+        "offset_evoked": prepared["offset_evoked"],
+        "time_ms": prepared["time_ms"],
+        "n_events": int(paired["onset"].shape[0]),
+        "fs": fs,
+    }
+
+
+def _write_pooled_leaf(
+    folder: str,
+    evoked: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    time_ms: np.ndarray,
+    fs: float,
+) -> None:
+    os.makedirs(folder, exist_ok=True)
+    pre_samples = int(np.argmin(np.abs(time_ms)))
+    if not np.isclose(time_ms[pre_samples], 0.0):
+        raise ValueError("Pooled PSTH time axis does not contain 0 ms")
+    np.save(os.path.join(folder, "lfp.npy"), evoked.astype(np.float32)[None, :, :])
+    np.save(os.path.join(folder, "x_coords.npy"), np.asarray(x, dtype=float))
+    np.save(os.path.join(folder, "y_coords.npy"), np.asarray(y, dtype=float))
+    np.save(os.path.join(folder, "T0.npy"), np.array(pre_samples))
+    np.save(os.path.join(folder, "fs.npy"), np.array(fs))
+    np.save(os.path.join(folder, "time_ms.npy"), np.asarray(time_ms, dtype=float))
+    np.save(os.path.join(folder, "event_ids.npy"), np.array([1], dtype=np.int64))
+
+
+def estimate_animal_pooled_kcsd(
+    root: PathLike,
+    *,
+    output_folder_name: str = ANIMAL_POOLED_FOLDER,
+    datasets: Sequence[Tuple[str, str]] = ANIMAL_POOLED_DATASETS,
+    stop_on_error: bool = False,
+    refresh: bool = True,
+    **overrides: Any,
+) -> List[Dict[str, Any]]:
+    """
+    Pool trials from sessions of one animal, then estimate paired kCSD.
+
+    Only play bouts and the play, aggression, and exploration categories are
+    included. Individual behaviors are left as session-level exports. The
+    pooled PSTH weights each session by its trial count, which is the same
+    mean as concatenating the trials before averaging. kCSD is fit to that
+    pooled PSTH, not to each session and then averaged.
+    """
+    root = os.path.abspath(os.fspath(root))
+    selected = {tuple(item) for item in datasets}
+    grouped: Dict[Tuple[str, str, str, str], List[Dict[str, str]]] = {}
+    for pair in discover_behavior_aligned_pairs(root):
+        parts = pair["name"].replace("\\", "/").split("/")
+        if output_folder_name in parts or len(parts) < 3:
+            continue
+        scope, behavior, session = parts[:3]
+        if (scope, behavior) not in selected:
+            continue
+        probe = parts[3] if len(parts) > 3 else ""
+        try:
+            animal_key = animal_key_from_session(session)
+        except ValueError as exc:
+            print(f"Skipping {pair['name']}: {exc}", flush=True)
+            continue
+        grouped.setdefault((scope, behavior, animal_key, probe), []).append(
+            {**pair, "session": session, "probe": probe}
+        )
+    if not grouped:
+        raise FileNotFoundError(
+            "No play-bout or category onset/offset exports were found under "
+            f"{root}. Individual behavior folders are not pooled."
+        )
+
+    settings = dict(BEHAVIOR_ALIGNED_CSD_DEFAULTS)
+    settings.update(overrides)
+    epoch_settings = {
+        "fs": float(settings.get("fs", 2500.0)),
+        "t_pre": float(settings["t_pre"]),
+        "t_post": float(settings["t_post"]),
+        "step_ms": float(settings["step_ms"]),
+        "onset_baseline_window_ms": tuple(settings["onset_baseline_window_ms"]),
+        "baseline_correct": bool(settings["baseline_correct"]),
+        "normalize": str(settings["normalize"]),
+    }
+    output_root = os.path.join(root, output_folder_name)
+    if refresh and os.path.isdir(output_root):
+        try:
+            shutil.rmtree(output_root)
+        except PermissionError as exc:
+            print(
+                f"Could not delete {output_root}: {exc}. "
+                "Existing pooled files will be overwritten.",
+                flush=True,
+            )
+    os.makedirs(output_root, exist_ok=True)
+
+    print(
+        f"Pooling trials within animal for {len(grouped)} "
+        "play-bout/category probe groups, then estimating kCSD",
+        flush=True,
+    )
+    results: List[Dict[str, Any]] = []
+    index_rows: List[Dict[str, Any]] = []
+    for group_number, key in enumerate(sorted(grouped), start=1):
+        scope, behavior, animal_key, probe = key
+        members = sorted(grouped[key], key=lambda item: item["session"])
+        label = f"{scope}/{behavior} {animal_key} {probe or 'NPX1'}"
+        print(
+            f"\n[{group_number}/{len(grouped)}] {label}: "
+            f"{len(members)} sessions",
+            flush=True,
+        )
+        try:
+            psths = []
+            for member in members:
+                print(f"  Reading trials: {member['session']}", flush=True)
+                psth = _session_psth(
+                    member["onset_folder"],
+                    member["offset_folder"],
+                    epoch_settings=epoch_settings,
+                )
+                psth["session"] = member["session"]
+                psths.append(psth)
+                print(f"    {psth['n_events']} trials", flush=True)
+            pooled = trial_weighted_psth(psths)
+            tail = [animal_key] if not probe else [animal_key, probe]
+            onset_folder = os.path.join(output_root, scope, behavior, "onset", *tail)
+            offset_folder = os.path.join(output_root, scope, behavior, "offset", *tail)
+            _write_pooled_leaf(
+                onset_folder,
+                pooled["onset_evoked"],
+                pooled["x"],
+                pooled["y"],
+                pooled["time_ms"],
+                psths[0]["fs"],
+            )
+            _write_pooled_leaf(
+                offset_folder,
+                pooled["offset_evoked"],
+                pooled["x"],
+                pooled["y"],
+                pooled["time_ms"],
+                psths[0]["fs"],
+            )
+            source_rows = [
+                {"session": item["session"], "n_events": int(item["n_events"])}
+                for item in psths
+            ]
+            pooling_record = {
+                "animal_key": animal_key,
+                "scope": scope,
+                "behavior": behavior,
+                "probe": probe or "NPX1",
+                "n_sessions": len(psths),
+                "n_events": int(pooled["n_events"]),
+                "aligned_by": pooled["aligned_by"],
+                "sessions": source_rows,
+            }
+            for folder in (onset_folder, offset_folder):
+                with open(os.path.join(folder, "animal_pooling.json"), "w", encoding="utf-8") as stream:
+                    json.dump(pooling_record, stream, indent=2)
+            print(
+                f"  Pooled {pooled['n_events']} trials by {pooled['aligned_by']}; "
+                "estimating kCSD",
+                flush=True,
+            )
+            result = run_behavior_aligned_kcsd(
+                onset_folder,
+                offset_folder,
+                name=f"{output_folder_name}/{scope}/{behavior}/{animal_key}"
+                + (f"/{probe}" if probe else ""),
+                **overrides,
+            )
+            result["animal_pooling"] = pooling_record
+            results.append(result)
+            index_rows.append(
+                {
+                    "scope": scope,
+                    "behavior": behavior,
+                    "animal_key": animal_key,
+                    "probe": probe or "NPX1",
+                    "n_sessions": len(psths),
+                    "n_events": int(pooled["n_events"]),
+                    "sessions": "; ".join(
+                        f"{item['session']} ({item['n_events']})" for item in source_rows
+                    ),
+                    "aligned_by": pooled["aligned_by"],
+                    "onset_folder": os.path.relpath(onset_folder, root),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - one animal should not stop the rest
+            print(f"  ERROR {label}: {exc}", flush=True)
+            if stop_on_error:
+                raise
+            results.append({"name": label, "error": str(exc)})
+    index_path = os.path.join(output_root, "index.csv")
+    with open(index_path, "w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=[
+                "scope",
+                "behavior",
+                "animal_key",
+                "probe",
+                "n_sessions",
+                "n_events",
+                "sessions",
+                "aligned_by",
+                "onset_folder",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(index_rows)
+    n_failed = sum("error" in result for result in results)
+    print(
+        f"\nAnimal-pooled kCSD finished: {len(results) - n_failed} successful, "
+        f"{n_failed} failed. Index: {index_path}",
+        flush=True,
+    )
+    return results
+
+
 def run_behavior_aligned_kcsd_from_root(
     root: PathLike,
     *,
@@ -1265,10 +1679,14 @@ __all__: Sequence[str] = (
     "BEHAVIOR_ALIGNED_CSD_DEFAULTS",
     "average_kcsd_columns",
     "average_saved_behavior_kcsd_from_root",
+    "ANIMAL_POOLED_FOLDER",
+    "ANIMAL_POOLED_DATASETS",
     "discover_behavior_aligned_pairs",
     "epoch_paired_with_onset_baseline",
+    "estimate_animal_pooled_kcsd",
     "load_paired_raw",
     "organize_behavior_aligned_figures",
     "run_behavior_aligned_kcsd",
     "run_behavior_aligned_kcsd_from_root",
+    "trial_weighted_psth",
 )
