@@ -2,10 +2,11 @@ function summary = spatial_range_stack(distances, ranges, centers)
 %SPATIAL_RANGE_STACK  Stack peak-to-peak range against distance on the probe.
 %
 % distances and ranges are cell arrays, one neuron each. Distance is the
-% signed Euclidean distance from that neuron's channel, in micrometers.
-% Each neuron is divided by the range on its own channel, so the channel
-% sits at 1. Samples are then averaged in bins centered on `centers`.
-% Rows whose own channel has no positive range are left out. The remaining
+% signed Euclidean distance, in micrometers, from the channel placed at 0.
+% The range plot places 0 on the channel with the largest range. Each
+% neuron is divided by the range nearest 0, so that channel sits at 1.
+% Samples are then averaged in bins centered on `centers`. Rows whose
+% zero-distance channel has no positive range are left out. The remaining
 % rows are ordered by the distance of their peak.
 %
 % mean_range is the mean across neurons in each bin, ignoring bins a

@@ -9,8 +9,9 @@
 % was kept, low channel at the bottom. The non-synchronous in-window mean
 % is drawn on the same channels. Beside it, the peak-to-peak range of that
 % synchronous mean is plotted against signed Euclidean distance from the
-% neuron channel, in micrometers. Distance uses xcoords and ycoords from
-% chann_map_PAG.mat. The neuron channel is at 0. Larger y is positive.
+% channel with the largest peak-to-peak range, in micrometers. Distance
+% uses xcoords and ycoords from chann_map_PAG.mat. That peak channel is
+% at 0. Larger y is positive.
 % The autocorrelogram uses only spikes that belong to a synchronous event,
 % reloaded from the sorting and the play-bout windows. ±50 ms, 1 ms bins.
 % The zero lag is omitted. The summary figure stacks one normalized
@@ -26,7 +27,7 @@
 % then the same three panels for neuron 2.
 % The spatial stack is a separate figure. Each curve is the peak-to-peak
 % range of that neuron's saved synchronous mean, divided by the range on
-% its own channel.
+% its largest-range channel. Distance 0 is that channel.
 
 repo_root = fileparts(fileparts(mfilename('fullpath')));
 if ~isempty(repo_root)
@@ -265,16 +266,27 @@ plot([0 0], [0, peak * 1.15], 'Color', [0.75 0.75 0.75], 'LineWidth', 1);
 plot(profile.distance_um, profile.range, '-o', ...
     'Color', [0.85 0.1 0.1], 'MarkerFaceColor', [0.85 0.1 0.1], ...
     'LineWidth', 1.4, 'MarkerSize', 5);
-neuron_point = profile.channel == row.channel;
-if any(neuron_point)
-    plot(profile.distance_um(neuron_point), profile.range(neuron_point), 'o', ...
+peak_point = profile.channel == profile.center_channel;
+if any(peak_point)
+    plot(profile.distance_um(peak_point), profile.range(peak_point), 'o', ...
         'Color', [0.85 0.1 0.1], 'MarkerFaceColor', [0.85 0.1 0.1], 'MarkerSize', 8);
+end
+assigned_point = profile.channel == row.channel;
+if any(assigned_point) && profile.center_channel ~= row.channel
+    plot(profile.distance_um(assigned_point), profile.range(assigned_point), 'o', ...
+        'Color', [0 0 0], 'MarkerSize', 8);
 end
 ylim([0, peak * 1.15]);
 xlim(span * [-1.15 1.15]);
-xlabel('Distance from neuron channel (\mum)')
+xlabel('Distance from peak channel (\mum)')
 ylabel('Peak-to-peak range')
-title(sprintf('cluster %g   ch %g', row.cluster_id, row.channel), 'Interpreter', 'none');
+if profile.center_channel == row.channel
+    range_title = sprintf('cluster %g   ch %g', row.cluster_id, row.channel);
+else
+    range_title = sprintf('cluster %g   peak ch %g   assigned %g', ...
+        row.cluster_id, profile.center_channel, row.channel);
+end
+title(range_title, 'Interpreter', 'none');
 box off
 end
 
@@ -436,6 +448,9 @@ end
 function [distance_um, range] = profile_from_saved(members, geometry)
 distance_um = [];
 range = [];
+channels = [];
+ranges = [];
+neuron_channel = NaN;
 for index = 1:numel(members)
     row = members(index);
     if ~isfield(row, 'sync_mean') || isempty(row.sync_mean) ...
@@ -444,8 +459,41 @@ for index = 1:numel(members)
     end
     profile = sync_waveform_spatial_range(row.channels_kept, row.sync_mean, ...
         row.channel, geometry.chan_map, geometry.xcoords, geometry.ycoords);
-    distance_um = [distance_um; profile.distance_um(:)]; %#ok<AGROW>
-    range = [range; profile.range(:)]; %#ok<AGROW>
+    channels = [channels; profile.channel(:)]; %#ok<AGROW>
+    ranges = [ranges; profile.range(:)]; %#ok<AGROW>
+    if isfield(row, 'channel')
+        neuron_channel = row.channel;
+    end
+end
+if isempty(channels)
+    return
+end
+[channels, ranges] = average_channel_ranges(channels, ranges);
+span = nan(numel(channels), 2);
+finite_range = isfinite(ranges);
+span(finite_range, 1) = 0;
+span(finite_range, 2) = ranges(finite_range);
+profile = sync_waveform_spatial_range(channels, span, neuron_channel, ...
+    geometry.chan_map, geometry.xcoords, geometry.ycoords);
+distance_um = profile.distance_um;
+range = profile.range;
+end
+
+function [channels_out, ranges_out] = average_channel_ranges(channels, ranges)
+channels = double(channels(:));
+ranges = double(ranges(:));
+keep = isfinite(channels) & isfinite(ranges);
+channels = channels(keep);
+ranges = ranges(keep);
+if isempty(channels)
+    channels_out = zeros(0, 1);
+    ranges_out = zeros(0, 1);
+    return
+end
+[channels_out, ~, group] = unique(channels);
+ranges_out = zeros(size(channels_out));
+for index = 1:numel(channels_out)
+    ranges_out(index) = mean(ranges(group == index));
 end
 end
 
@@ -472,7 +520,7 @@ end
 summary = spatial_range_stack(distances, ranges, centers);
 if summary.n < 1
     warning('Plot_sync_spike_acg_and_waveforms:spatial', ...
-        'No neuron had a usable range on its own channel.');
+        'No neuron had a positive range on its peak channel.');
     return
 end
 used = any(isfinite(summary.normalized), 1) | any(isfinite(summary.mean_range));
@@ -495,9 +543,9 @@ image_handle = imagesc(centers, 1:summary.n, normalized);
 set(image_handle, 'AlphaData', double(isfinite(normalized)));
 set(gca, 'YDir', 'reverse');
 xlim(span * [-1.05 1.05]);
-xlabel('Distance from neuron channel (\mum)')
-ylabel('Neuron, sorted by peak distance')
-title(sprintf('Synchronous-event neurons, range / own channel, n = %d', summary.n));
+xlabel('Distance from peak channel (\mum)')
+ylabel('Neuron')
+title(sprintf('Synchronous-event neurons, range / peak channel, n = %d', summary.n));
 color_bar = colorbar;
 ylabel(color_bar, 'Normalized range');
 color_peak = max(normalized(isfinite(normalized)));
@@ -518,9 +566,9 @@ fill([centers, fliplr(centers)], [ci_low, fliplr(ci_high)], ...
     [0.85 0.1 0.1], 'FaceAlpha', 0.2, 'EdgeColor', 'none');
 plot(centers, mean_range, 'Color', [0.85 0.1 0.1], 'LineWidth', 2);
 xlim(span * [-1.05 1.05]);
-xlabel('Distance from neuron channel (\mum)')
-ylabel('Range / range at the neuron channel')
-title(sprintf('Mean spatial range of synchronous-event neurons, 95%% CI, n = %d', summary.n));
+xlabel('Distance from peak channel (\mum)')
+ylabel('Range / range at the peak channel')
+title(sprintf('Mean spatial range, centered on the peak channel, 95%% CI, n = %d', summary.n));
 box off
 end
 
