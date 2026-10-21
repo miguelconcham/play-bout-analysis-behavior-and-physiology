@@ -1,7 +1,9 @@
 %% Estimate_coherence_maps
 % Driver script: compute PLI/coherence maps between brain areas (PAG recordings).
-% Calls GENERATE_COHERNECE_MAPS_STRUCT (note: v2 GENERATE not yet in repo).
-% Subsequent sections load, merge, and plot coherence structures from multiple sources.
+% Calls GENERATE_COHERNECE_MAPS_STRUCT for delta (freq1) and theta (freq2)
+% PLI, wPLI, and pairwise phase lag. Subsequent sections load, merge, and
+% plot coherence heatmaps. Delta phase vs distance from the LPAG center is
+% plotted by Analyze_coherence_maps.m.
 
 %% Paths and animal selection
 npx_Raw_Data = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
@@ -39,7 +41,6 @@ Hd_freq2 = designfilt('bandpassfir', ...
     'Window', 'hamming');
 
 %% Estimate coherence maps
-% NOTE: GENERATE_COHERNECE_MAPS_STRUCT is not yet available in Supporting codes v2.
 pli_struct = [];
 animal_names = {};
 
@@ -124,3 +125,8 @@ for j = 1:numel(pli_struct)
     clim(c_lim)
     title(animal_names{j,1})
 end
+
+%% Delta phase vs distance from LPAG center
+% Pairwise heatmaps above use the saved phase-lag matrices. For the delta
+% (freq1) phase of every channel relative to that recording's LPAG center,
+% plotted against signed probe distance, run Analyze_coherence_maps.m.
