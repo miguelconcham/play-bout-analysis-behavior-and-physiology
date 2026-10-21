@@ -63,6 +63,30 @@ class GeometryTests(unittest.TestCase):
         np.testing.assert_allclose(trace.phase_rad, _linear_phase(y - 60.0))
         self.assertAlmostEqual(trace.phase_rad[3], 0.0)
         self.assertEqual(trace.area[3], "LPAG")
+        np.testing.assert_array_equal(np.diff(trace.distance_um) >= 0, True)
+
+    def test_resorts_scrambled_lfp_rows_by_channel_map_depth(self):
+        # LFP row order is not anatomical; y jumps around the probe.
+        y = np.array([80.0, 0.0, 40.0, 120.0])
+        x = np.array([43.0, 11.0, 27.0, 59.0])
+        areas = ["LPAG", "SupCol", "DLPAG", "VLPAG"]
+        n = y.size
+        phase = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                phase[i, j] = _linear_phase(y[i] - y[j])
+        traces = extract_session_traces(
+            phase, np.column_stack([x, y]), areas, "B1S3 scrambled"
+        )
+        self.assertEqual(len(traces), 1)
+        trace = traces[0]
+        np.testing.assert_array_equal(y[trace.channel_index], [0.0, 40.0, 80.0, 120.0])
+        np.testing.assert_array_equal(trace.channel_index, [1, 2, 0, 3])
+        self.assertTrue(np.all(np.diff(trace.distance_um) >= 0))
+        np.testing.assert_allclose(trace.distance_um, y[trace.channel_index] - 80.0)
+        np.testing.assert_allclose(
+            trace.phase_rad, _linear_phase(y[trace.channel_index] - 80.0)
+        )
 
     def test_region_borders_sit_between_area_changes(self):
         distance = np.array([-60.0, -40.0, -20.0, 0.0, 20.0, 40.0, 60.0, 80.0])

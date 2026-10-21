@@ -12,6 +12,11 @@ function traces = extract_delta_phase_vs_lpag_distance(pli_struct, animal_names)
 % Distance is signed probe y (µm) minus the LPAG-center y. Positive values
 % are toward higher ycoords (typically dorsal).
 %
+% Channel maps are stored in LFP-row order (chanMap+1 in GENERATE), which
+% is not anatomical. Same as the Estimate_coherence_maps heatmaps: sort
+% each probe by ycoords (then x) before reading the phase-lag column,
+% unwrapping, and drawing the line.
+%
 % traces(k) fields
 %   session_name, animal_id, line_label, probe_num
 %   lpag_center_index, lpag_center_y
@@ -106,10 +111,9 @@ for session_n = 1:numel(pli_struct)
         end
 
         probe_idx = find(probe_mask);
-        [~, order] = sort(y(probe_idx));
-        probe_idx = probe_idx(order);
+        probe_idx = local_sort_by_probe_depth(probe_idx, x, y);
         keep = isfinite(phase_matrix(probe_idx, ref));
-        probe_idx = probe_idx(keep);
+        probe_idx = local_sort_by_probe_depth(probe_idx(keep), x, y);
         if numel(probe_idx) < 2
             continue
         end
@@ -179,6 +183,16 @@ if isempty(tokens) || isempty(tokens{1})
 else
     animal_id = tokens{1};
 end
+end
+
+function probe_idx = local_sort_by_probe_depth(probe_idx, x, y)
+% Anatomical order along the shank: increasing y, then x at a given depth.
+if isempty(probe_idx)
+    return
+end
+coords = [y(probe_idx), x(probe_idx)];
+[~, order] = sortrows(coords, [1 2]);
+probe_idx = probe_idx(order);
 end
 
 function probe_num = local_probe_numbers(x, hard_coded_x_coords)

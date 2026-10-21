@@ -123,6 +123,22 @@ def pooled_region_borders(
     return np.asarray(distances, dtype=float), labels
 
 
+def sort_channels_by_probe_depth(
+    probe_idx: np.ndarray, x: np.ndarray, y: np.ndarray
+) -> np.ndarray:
+    """Anatomical order along the shank: increasing y, then x at a given depth.
+
+    LFP rows follow ``chanMap+1``, not probe depth. The Estimate heatmaps
+    sort ``channel_map(:,2)`` for the same reason.
+    """
+    probe_idx = np.asarray(probe_idx, dtype=int).reshape(-1)
+    if probe_idx.size == 0:
+        return probe_idx
+    coords = np.column_stack((y[probe_idx], x[probe_idx]))
+    order = np.lexsort((coords[:, 1], coords[:, 0]))
+    return probe_idx[order]
+
+
 def extract_session_traces(
     phase_matrix: np.ndarray,
     channel_map: np.ndarray,
@@ -173,10 +189,9 @@ def extract_session_traces(
         if not np.isfinite(distance_to_mean[ref]):
             continue
 
-        probe_idx = np.where(probe_mask)[0]
-        probe_idx = probe_idx[np.argsort(y[probe_idx])]
+        probe_idx = sort_channels_by_probe_depth(np.where(probe_mask)[0], x, y)
         keep = np.isfinite(phase_matrix[probe_idx, ref])
-        probe_idx = probe_idx[keep]
+        probe_idx = sort_channels_by_probe_depth(probe_idx[keep], x, y)
         if probe_idx.size < 2:
             continue
 

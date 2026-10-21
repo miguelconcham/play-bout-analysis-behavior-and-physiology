@@ -60,7 +60,8 @@ session_fig = figure('Name', 'Delta phase vs distance from LPAG center', ...
 hold on
 colors = generateDistinctColors(numel(traces));
 for trace_n = 1:numel(traces)
-    plot(traces(trace_n).distance_um, traces(trace_n).phase_unwrapped, ...
+    [distance_um, phase_rad] = local_sorted_trace(traces(trace_n));
+    plot(distance_um, phase_rad, ...
         'Color', colors(trace_n, :), 'LineWidth', 1.2, ...
         'DisplayName', traces(trace_n).line_label)
 end
@@ -84,7 +85,8 @@ for animal_n = 1:numel(animal_ids)
     hold on
     animal_colors = generateDistinctColors(numel(these));
     for trace_n = 1:numel(these)
-        plot(these(trace_n).distance_um, these(trace_n).phase_unwrapped, ...
+        [distance_um, phase_rad] = local_sorted_trace(these(trace_n));
+        plot(distance_um, phase_rad, ...
             'Color', animal_colors(trace_n, :), 'LineWidth', 1.2, ...
             'DisplayName', these(trace_n).line_label)
     end
@@ -111,6 +113,12 @@ for animal_n = 1:numel(animal_ids)
 end
 
 %% -------------------------------------------------------------------------
+function [distance_um, phase_rad] = local_sorted_trace(trace)
+% Plot in channel-map depth order, not LFP-row order.
+[distance_um, order] = sort(trace.distance_um);
+phase_rad = trace.phase_unwrapped(order);
+end
+
 function [border_distance, border_label] = local_pooled_borders(these)
 bin_um = 10;
 buckets = containers.Map('KeyType', 'double', 'ValueType', 'any');
