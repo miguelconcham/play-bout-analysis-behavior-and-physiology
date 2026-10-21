@@ -72,6 +72,7 @@ play bout analysis behavior and physiology/
 │   ├── Analyze_sync_spike_waveforms.m
 │   ├── Plot_sync_spike_acg_and_waveforms.m  # Profile, autocorrelogram, spatial range
 │   ├── sync_waveform_spatial_range.m   # Peak-to-peak versus distance from the peak channel
+│   ├── pair_channel_distance.m         # Euclidean separation of two neurons on the probe
 │   ├── normalized_acg_stack.m          # Normalized autocorrelograms and their mean CI
 │   ├── spatial_range_stack.m           # Normalized inverted-U profiles and their mean CI
 │   ├── template_spike_samples.m        # Caps spike samples inside play-bout windows

@@ -31,6 +31,12 @@
 % The spatial stack is a separate figure. Each curve is the peak-to-peak
 % range of that neuron's saved synchronous mean, divided by the range on
 % its largest-range channel. Distance 0 is that channel.
+%
+% min_pair_distance_um adds the same two stacks again, using only pairs
+% whose channels are at least that far apart on the probe. The distance is
+% the Euclidean separation of the two neurons' channels. A neuron that also
+% has a closer partner contributes only the spikes and the synchronous mean
+% from the pairs that meet the distance. The default is 500 micrometers.
 
 repo_root = fileparts(fileparts(mfilename('fullpath')));
 if ~isempty(repo_root)
@@ -43,6 +49,7 @@ max_example_neurons = 3;
 example_channel_half_width = 3;
 examples_per_figure = 6;
 spatial_distance_um = -400:20:400;
+min_pair_distance_um = 500;
 
 data_root = sync_analysis_options().data_root;
 saving_folder = fullfile(data_root, 'Analysis results', 'synchronous spike waveforms');
@@ -76,6 +83,8 @@ end
 session_ids = unique({neuron_rows.session_id}, 'stable');
 neuron_spikes = empty_neuron_spikes();
 spatial_profiles = empty_spatial_profiles();
+far_spikes = empty_neuron_spikes();
+far_profiles = empty_spatial_profiles();
 examples = empty_examples();
 for session_index = 1:numel(session_ids)
     session_id = session_ids{session_index};
@@ -83,12 +92,19 @@ for session_index = 1:numel(session_ids)
     [trains, bout_starts, time_options] = load_session_trains( ...
         npx_raw_data, session_id, session_rows(1));
     neuron_spikes = remember_analysis_neurons(neuron_spikes, session_id, ...
-        session_rows, trains, bout_starts, time_options);
+        session_rows, trains, bout_starts, time_options, 'autocorrelogram stack');
     geometry = load_channel_geometry(npx_raw_data, session_id);
     spatial_profiles = append_spatial_profiles(spatial_profiles, ...
-        collect_session_profiles(session_id, session_rows, geometry, time_options));
+        collect_session_profiles(session_id, session_rows, geometry, time_options, ...
+        'spatial stack'));
     examples = remember_example_neurons(examples, max_example_neurons, ...
         session_rows, trains, bout_starts, time_options, geometry);
+    far_rows = rows_farther_than(session_id, session_rows, geometry, min_pair_distance_um);
+    far_spikes = remember_analysis_neurons(far_spikes, session_id, ...
+        far_rows, trains, bout_starts, time_options, 'far-pair autocorrelogram');
+    far_profiles = append_spatial_profiles(far_profiles, ...
+        collect_session_profiles(session_id, far_rows, geometry, time_options, ...
+        'far-pair spatial stack'));
 end
 fprintf(['Example panels: %d neurons (cap %g). The stacks keep every ' ...
     'synchronous-event neuron in the analysis areas.\n'], ...
@@ -96,8 +112,12 @@ fprintf(['Example panels: %d neurons (cap %g). The stacks keep every ' ...
 draw_example_figures(examples, examples_per_figure, acg_window, acg_bin, ...
     example_channel_half_width);
 [acg_centers, acg_counts] = neuron_acg_counts(neuron_spikes, acg_window, acg_bin);
-draw_normalized_acg_figure(acg_centers, acg_counts, acg_window);
-draw_spatial_stack_figure(spatial_profiles, spatial_distance_um);
+draw_normalized_acg_figure(acg_centers, acg_counts, acg_window, '');
+draw_spatial_stack_figure(spatial_profiles, spatial_distance_um, '');
+far_label = sprintf('Pairs at least %g micrometers apart', min_pair_distance_um);
+[far_centers, far_counts] = neuron_acg_counts(far_spikes, acg_window, acg_bin);
+draw_normalized_acg_figure(far_centers, far_counts, acg_window, far_label);
+draw_spatial_stack_figure(far_profiles, spatial_distance_um, far_label);
 
 function examples = empty_examples()
 examples = struct('row', {}, 'spike_times', {}, 'geometry', {});
@@ -405,7 +425,10 @@ entries = struct('session_id', {}, 'cluster_id', {}, 'spike_times', {});
 end
 
 function entries = remember_analysis_neurons(entries, session_id, session_rows, ...
-    trains, bout_starts, time_options)
+    trains, bout_starts, time_options, stack_name)
+if nargin < 7 || isempty(stack_name)
+    stack_name = 'autocorrelogram stack';
+end
 n_before = numel(entries);
 areas = analysis_areas(time_options);
 saved_ids = [];
@@ -433,8 +456,9 @@ for index = 1:numel(saved_ids)
     end
 end
 n_neurons = numel(entries) - n_before;
-fprintf(['%s  autocorrelogram stack  %d neurons with synchronous spikes, ' ...
-    '%d neurons saved in the analysis areas\n'], session_id, n_neurons, n_analyzed);
+fprintf(['%s  %s  %d neurons with synchronous spikes, ' ...
+    '%d neurons saved in the analysis areas\n'], ...
+    session_id, stack_name, n_neurons, n_analyzed);
 end
 
 function entries = remember_neuron_spikes(entries, session_id, cluster_id, spike_times)
@@ -469,26 +493,42 @@ for index = 1:numel(entries)
 end
 end
 
-function draw_normalized_acg_figure(centers, counts, acg_window)
+function draw_normalized_acg_figure(centers, counts, acg_window, figure_label)
+if nargin < 4
+    figure_label = '';
+end
 if isempty(counts)
-    warning('Plot_sync_spike_acg_and_waveforms:acg', ...
-        ['No synchronous-spike autocorrelograms were available. The stack uses ' ...
-         'only synchronous-event spikes of neurons in DLPAG, LPAG, VLPAG, DR, and SupCol.']);
+    if isempty(figure_label)
+        warning('Plot_sync_spike_acg_and_waveforms:acg', ...
+            ['No synchronous-spike autocorrelograms were available. The stack uses ' ...
+             'only synchronous-event spikes of neurons in DLPAG, LPAG, VLPAG, DR, and SupCol.']);
+    else
+        warning('Plot_sync_spike_acg_and_waveforms:acg', ...
+            'No autocorrelograms for %s.', figure_label);
+    end
     return
 end
 summary = normalized_acg_stack(counts);
 if summary.n < 1
     return
 end
-figure('Color', 'w', 'Name', 'Synchronous-spike autocorrelograms', ...
-    'Position', [80 40 760 860]);
+if isempty(figure_label)
+    figure_name = 'Synchronous-spike autocorrelograms';
+    stack_title = sprintf('Synchronous spikes only, %d neurons in the analysis areas', summary.n);
+    mean_title = sprintf('Mean synchronous-spike autocorrelogram, 95%% CI, n = %d', summary.n);
+else
+    figure_name = ['Synchronous-spike autocorrelograms, ' figure_label];
+    stack_title = sprintf('%s, synchronous spikes only, n = %d', figure_label, summary.n);
+    mean_title = sprintf('%s, mean autocorrelogram, 95%% CI, n = %d', figure_label, summary.n);
+end
+figure('Color', 'w', 'Name', figure_name, 'Position', [80 40 760 860]);
 subplot(2, 1, 1);
 imagesc(centers, 1:summary.n, summary.normalized);
 set(gca, 'YDir', 'reverse');
 xlim(acg_window);
 xlabel('Lag (s)')
 ylabel('Neuron, sorted by peak lag')
-title(sprintf('Synchronous spikes only, %d neurons in the analysis areas', summary.n));
+title(stack_title);
 color_bar = colorbar;
 ylabel(color_bar, 'Fraction of spike pairs');
 box off
@@ -505,7 +545,7 @@ plot(centers, summary.mean_acg, 'Color', [0.85 0.1 0.1], 'LineWidth', 2);
 xlim(acg_window);
 xlabel('Lag (s)')
 ylabel('Fraction of spike pairs')
-title(sprintf('Mean synchronous-spike autocorrelogram, 95%% CI, n = %d', summary.n));
+title(mean_title);
 box off
 end
 
@@ -524,7 +564,11 @@ end
 profiles = [profiles, more];
 end
 
-function profiles = collect_session_profiles(session_id, session_rows, geometry, time_options)
+function profiles = collect_session_profiles(session_id, session_rows, geometry, ...
+    time_options, stack_name)
+if nargin < 5 || isempty(stack_name)
+    stack_name = 'spatial stack';
+end
 profiles = empty_spatial_profiles();
 if isempty(geometry)
     return
@@ -551,8 +595,8 @@ for index = 1:numel(saved_ids)
     profiles = add_spatial_profile(profiles, session_id, cluster_id, distance_um, range);
     n_kept = n_kept + 1;
 end
-fprintf(['%s  spatial stack  %d synchronous-event neurons in the analysis areas\n'], ...
-    session_id, n_kept);
+fprintf('%s  %s  %d synchronous-event neurons in the analysis areas\n', ...
+    session_id, stack_name, n_kept);
 end
 
 function [distance_um, range] = profile_from_saved(members, geometry)
@@ -614,11 +658,72 @@ profiles(end).distance_um = distance_um(:);
 profiles(end).range = range(:);
 end
 
-function draw_spatial_stack_figure(profiles, centers)
+function kept = rows_farther_than(session_id, session_rows, geometry, min_distance_um)
+if isempty(session_rows)
+    kept = session_rows;
+    return
+end
+kept = session_rows([]);
+if ~isfinite(min_distance_um)
+    min_distance_um = inf;
+end
+if isempty(geometry) || ~isfield(geometry, 'chan_map') ...
+        || ~isfield(session_rows, 'pair_index') || ~isfield(session_rows, 'channel')
+    warning('Plot_sync_spike_acg_and_waveforms:pairDistance', ...
+        ['%s  pairs were left out of the far-pair stacks because probe ' ...
+         'positions were not available.'], session_id);
+    return
+end
+pair_ids = unique([session_rows.pair_index], 'stable');
+n_far = 0;
+n_unknown = 0;
+for index = 1:numel(pair_ids)
+    members = session_rows([session_rows.pair_index] == pair_ids(index));
+    separation = pair_separation(members, geometry);
+    if ~isfinite(separation)
+        n_unknown = n_unknown + 1;
+        continue
+    end
+    if separation >= min_distance_um
+        kept = append_struct_array(kept, members);
+        n_far = n_far + 1;
+    end
+end
+fprintf(['%s  far pairs  %d of %d are at least %g um, ' ...
+    '%d without a probe distance\n'], ...
+    session_id, n_far, numel(pair_ids), min_distance_um, n_unknown);
+end
+
+function separation = pair_separation(members, geometry)
+separation = NaN;
+if numel(members) >= 2 && isfinite(double(members(1).channel)) ...
+        && isfinite(double(members(2).channel))
+    separation = pair_channel_distance(members(1).channel, members(2).channel, ...
+        geometry.chan_map, geometry.xcoords, geometry.ycoords);
+    return
+end
+if isfield(members, 'partner_channel') && ~isempty(members(1).partner_channel) ...
+        && isnumeric(members(1).partner_channel) ...
+        && isfinite(members(1).partner_channel(1)) ...
+        && isfinite(double(members(1).channel))
+    separation = pair_channel_distance(members(1).channel, members(1).partner_channel(1), ...
+        geometry.chan_map, geometry.xcoords, geometry.ycoords);
+end
+end
+
+function draw_spatial_stack_figure(profiles, centers, figure_label)
+if nargin < 3
+    figure_label = '';
+end
 if isempty(profiles)
-    warning('Plot_sync_spike_acg_and_waveforms:spatial', ...
-        ['No spatial profiles were available. The stack keeps synchronous-event ' ...
-         'neurons in DLPAG, LPAG, VLPAG, DR, and SupCol.']);
+    if isempty(figure_label)
+        warning('Plot_sync_spike_acg_and_waveforms:spatial', ...
+            ['No spatial profiles were available. The stack keeps synchronous-event ' ...
+             'neurons in DLPAG, LPAG, VLPAG, DR, and SupCol.']);
+    else
+        warning('Plot_sync_spike_acg_and_waveforms:spatial', ...
+            'No spatial profiles for %s.', figure_label);
+    end
     return
 end
 distances = cell(1, numel(profiles));
@@ -646,8 +751,16 @@ span = max(abs(centers));
 if ~isfinite(span) || span == 0
     span = 1;
 end
-figure('Color', 'w', 'Name', 'Normalized spatial range', ...
-    'Position', [120 40 760 860]);
+if isempty(figure_label)
+    figure_name = 'Normalized spatial range';
+    stack_title = sprintf('Synchronous-event neurons, range / peak channel, n = %d', summary.n);
+    mean_title = sprintf('Mean spatial range, centered on the peak channel, 95%% CI, n = %d', summary.n);
+else
+    figure_name = ['Normalized spatial range, ' figure_label];
+    stack_title = sprintf('%s, range / peak channel, n = %d', figure_label, summary.n);
+    mean_title = sprintf('%s, mean spatial range, 95%% CI, n = %d', figure_label, summary.n);
+end
+figure('Color', 'w', 'Name', figure_name, 'Position', [120 40 760 860]);
 subplot(2, 1, 1);
 image_handle = imagesc(centers, 1:summary.n, normalized);
 set(image_handle, 'AlphaData', double(isfinite(normalized)));
@@ -655,7 +768,7 @@ set(gca, 'YDir', 'reverse');
 xlim(span * [-1.05 1.05]);
 xlabel('Distance from peak channel (\mum)')
 ylabel('Neuron')
-title(sprintf('Synchronous-event neurons, range / peak channel, n = %d', summary.n));
+title(stack_title);
 color_bar = colorbar;
 ylabel(color_bar, 'Normalized range');
 color_peak = max(normalized(isfinite(normalized)));
@@ -678,7 +791,7 @@ plot(centers, mean_range, 'Color', [0.85 0.1 0.1], 'LineWidth', 2);
 xlim(span * [-1.05 1.05]);
 xlabel('Distance from peak channel (\mum)')
 ylabel('Range / range at the peak channel')
-title(sprintf('Mean spatial range, centered on the peak channel, 95%% CI, n = %d', summary.n));
+title(mean_title);
 box off
 end
 
