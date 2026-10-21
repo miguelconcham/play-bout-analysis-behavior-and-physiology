@@ -3,9 +3,11 @@
 %
 % Rebuild with Estimate_coherence_maps.m (GENERATE_COHERNECE_MAPS_STRUCT).
 % That Estimate stores pairwise delta (freq1, 1–5 Hz) and theta (freq2)
-% PLI / wPLI / phase-lag matrices. This script does not re-estimate and
-% does not restitch the old PAG/mPFC/NPX2 satellite files: it loads the
-% newest merged / all-together save (coherence_structure_merged.mat).
+% PLI / wPLI / phase-lag matrices and saves coherence_pli_struct_2026.mat.
+% This script does not re-estimate and does not restitch the old
+% PAG/mPFC/NPX2 satellite files: it loads the newest merged / all-together
+% / 2026 pairwise save. Do not load *lpag_ref* files here; those are
+% plotted by Analyze_coherence_maps_lpag_ref.m.
 %
 % Plot 1 — every session is one line:
 %   x = signed distance from that session's LPAG center (µm)
@@ -28,11 +30,12 @@ if exist(figure_folder, 'dir') ~= 7
     mkdir(figure_folder);
 end
 
-%% Load the newest merged / all-together coherence structure
+%% Load the newest merged / all-together / 2026 pairwise coherence structure
 % Dual-animal PAG/mPFC slots were mismatched once and patched by stitching
-% satellite mats in Estimate_coherence_maps.m. The combined result is saved
-% as coherence_structure_merged.mat (or a later *merged* / *all_together*
-% file). Do not reload mpfc / B1D11007 / NPX2 pieces here.
+% satellite mats. The combined result is saved as
+% coherence_pli_struct_2026.mat (or an older *merged* / *all_together*
+% file). Do not reload mpfc / B1D11007 / NPX2 pieces, and do not load
+% *lpag_ref* vector saves here.
 disp('loading coherence maps')
 [structure_file, names_file] = find_latest_merged_coherence_files(saving_folder);
 load(structure_file, 'pli_struct');

@@ -9,7 +9,11 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 from extract_delta_phase_vs_lpag_distance import (  # noqa: E402
+    extract_lpag_ref_session_trace,
     extract_session_traces,
+    lpag_center_map_index,
+    lpag_ref_jobs,
+    pli_wpli_phase_vs_ref,
     pooled_region_borders,
     probe_numbers,
     region_borders,
@@ -17,6 +21,7 @@ from extract_delta_phase_vs_lpag_distance import (  # noqa: E402
 )
 from find_latest_merged_coherence_files import (  # noqa: E402
     find_latest_merged_coherence_files,
+    is_lpag_ref_structure_name,
     is_merged_structure_name,
     partner_names_file,
 )
@@ -218,6 +223,111 @@ class MergedFileSelectionTests(unittest.TestCase):
         structure, names = find_latest_merged_coherence_files(entries)
         self.assertEqual(structure, "coherence_structure_all_together.mat")
         self.assertEqual(names, "coherence_structure_animal_names_all_together.mat")
+
+    def test_2026_all_animal_save_is_combined_and_excludes_lpag_ref(self):
+        self.assertTrue(is_merged_structure_name("coherence_pli_struct_2026.mat"))
+        self.assertFalse(
+            is_merged_structure_name("coherence_pli_struct_lpag_ref_2026.mat")
+        )
+        self.assertTrue(
+            is_lpag_ref_structure_name("coherence_pli_struct_lpag_ref_2026.mat")
+        )
+        self.assertFalse(is_lpag_ref_structure_name("coherence_pli_struct_2026.mat"))
+        self.assertEqual(
+            partner_names_file("coherence_pli_struct_2026.mat"),
+            "coherence_pli_structure_animal_names2026.mat",
+        )
+        self.assertEqual(
+            partner_names_file("coherence_pli_struct_lpag_ref_2026.mat"),
+            "coherence_pli_struct_lpag_ref_animal_names_2026.mat",
+        )
+        entries = [
+            ("coherence_structure.mat", 100.0),
+            ("coherence_structure_merged.mat", 200.0),
+            ("coherence_pli_struct_lpag_ref_2026.mat", 400.0),
+            ("coherence_pli_struct_lpag_ref_animal_names_2026.mat", 400.0),
+            ("coherence_pli_struct_2026.mat", 300.0),
+            ("coherence_pli_structure_animal_names2026.mat", 300.0),
+        ]
+        structure, names = find_latest_merged_coherence_files(entries)
+        self.assertEqual(structure, "coherence_pli_struct_2026.mat")
+        self.assertEqual(names, "coherence_pli_structure_animal_names2026.mat")
+        structure, names = find_latest_merged_coherence_files(entries, kind="lpag_ref")
+        self.assertEqual(structure, "coherence_pli_struct_lpag_ref_2026.mat")
+        self.assertEqual(
+            names, "coherence_pli_struct_lpag_ref_animal_names_2026.mat"
+        )
+
+
+class LpagRefPipelineTests(unittest.TestCase):
+    def test_pairwise_extractor_skips_vector_phase(self):
+        y = np.array([0.0, 40.0, 80.0, 120.0])
+        x = np.full(y.shape, 27.0)
+        areas = ["DLPAG", "LPAG", "LPAG", "VLPAG"]
+        traces = extract_session_traces(
+            _linear_phase(y - 40.0).reshape(-1, 1),
+            np.column_stack([x, y]),
+            areas,
+            "B1D1 vector",
+        )
+        self.assertEqual(traces, [])
+
+    def test_lpag_ref_extractor_sorts_scrambled_rows(self):
+        y = np.array([80.0, 0.0, 40.0, 120.0])
+        x = np.array([43.0, 11.0, 27.0, 59.0])
+        areas = ["LPAG", "SupCol", "DLPAG", "VLPAG"]
+        ref = 0
+        phase = _linear_phase(y - y[ref])
+        trace = extract_lpag_ref_session_trace(
+            phase, np.column_stack([x, y]), areas, "B1S3 scrambled", ref
+        )
+        self.assertIsNotNone(trace)
+        np.testing.assert_array_equal(y[trace.channel_index], [0.0, 40.0, 80.0, 120.0])
+        np.testing.assert_array_equal(trace.channel_index, [1, 2, 0, 3])
+        self.assertTrue(np.all(np.diff(trace.distance_um) >= 0))
+        np.testing.assert_allclose(trace.distance_um, y[trace.channel_index] - 80.0)
+        np.testing.assert_allclose(
+            trace.phase_rad, _linear_phase(y[trace.channel_index] - 80.0)
+        )
+        self.assertAlmostEqual(trace.phase_rad[list(trace.channel_index).index(0)], 0.0)
+
+    def test_npx2_lpag_jobs_keep_only_the_lpag_shank(self):
+        x = np.array([8.0, 8.0, 8.0, 258.0, 258.0, 258.0, 258.0])
+        y = np.array([0.0, 40.0, 80.0, 0.0, 40.0, 80.0, 120.0])
+        chan_map = np.arange(x.size, dtype=float)
+        jobs = lpag_ref_jobs(
+            2, [(2, 30.0, 90.0)], x, y, chan_map, n_lfp=384
+        )
+        self.assertEqual(len(jobs), 1)
+        job = jobs[0]
+        self.assertEqual(job["probe_num"], 2)
+        np.testing.assert_array_equal(job["x_coords"], [258.0, 258.0, 258.0, 258.0])
+        # LPAG at y=40 and 80; mean 60; closest first min is y=40.
+        self.assertEqual(job["ref_in_shank"], 1)
+        self.assertEqual(job["detection_lfp_row"], 5.0)
+        self.assertEqual(
+            lpag_center_map_index(x, y, np.array([False, False, False, False, True, True, False])),
+            4,
+        )
+
+    def test_phase_vs_ref_recovers_known_lag_and_is_linear_in_nch(self):
+        n_time = 4000
+        t = np.arange(n_time) / 2500.0
+        omega = 2 * np.pi * 3.0
+        lag = np.pi / 4
+        analytic = np.vstack(
+            [
+                np.exp(1j * omega * t),
+                np.exp(1j * (omega * t + lag)),
+                np.exp(1j * (omega * t - lag)),
+            ]
+        )
+        _pli, _wpli, phase_lag = pli_wpli_phase_vs_ref(analytic, 0)
+        self.assertAlmostEqual(phase_lag[0], 0.0, places=6)
+        self.assertAlmostEqual(phase_lag[1], lag, places=6)
+        self.assertAlmostEqual(phase_lag[2], -lag, places=6)
+        # Pairwise maps would be nCh x nCh; vs-ref is nCh.
+        self.assertEqual(phase_lag.shape, (3,))
 
 
 if __name__ == "__main__":

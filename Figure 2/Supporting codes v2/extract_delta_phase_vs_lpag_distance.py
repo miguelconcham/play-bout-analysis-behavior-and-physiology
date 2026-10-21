@@ -248,6 +248,194 @@ def extract_delta_phase_vs_lpag_distance(
     return traces
 
 
+def lpag_center_map_index(x: np.ndarray, y: np.ndarray, in_lpag: np.ndarray) -> int:
+    """Closest LPAG site to the mean (x, y) of LPAG sites (Fig 2 PSTH geometry)."""
+    x = np.asarray(x, dtype=float).reshape(-1)
+    y = np.asarray(y, dtype=float).reshape(-1)
+    in_lpag = np.asarray(in_lpag, dtype=bool).reshape(-1)
+    if not np.any(in_lpag):
+        raise ValueError("No LPAG sites")
+    mean_loc = np.array([np.mean(x[in_lpag]), np.mean(y[in_lpag])])
+    distance = np.abs(x - mean_loc[0]) + np.abs(y - mean_loc[1])
+    distance = distance.astype(float)
+    distance[~in_lpag] = np.inf
+    return int(np.argmin(distance))
+
+
+def lpag_ref_jobs(
+    npx_type: int,
+    lpag_rows: Sequence[Tuple[int, float, float]],
+    xcoords: np.ndarray,
+    ycoords: np.ndarray,
+    chan_map: np.ndarray,
+    n_lfp: int = 384,
+) -> List[dict]:
+    """Mirror GENERATE_COHERENCE_MAPS_LPAG_REF local_lpag_jobs (0-based Python).
+
+    ``lpag_rows`` are (probe_num, depth_start, depth_end) with 1-based probe
+    numbers. ``chan_map`` holds 0-based channel ids; LFP row = chan_map + 1.
+    ``ref_in_shank`` is a 0-based index into the returned shank vectors.
+    """
+    xcoords = np.asarray(xcoords, dtype=float).reshape(-1)
+    ycoords = np.asarray(ycoords, dtype=float).reshape(-1)
+    chan_map = np.asarray(chan_map, dtype=float).reshape(-1)
+    jobs: List[dict] = []
+    if npx_type == 1:
+        depth_start = min(row[1] for row in lpag_rows)
+        depth_end = max(row[2] for row in lpag_rows)
+        in_lpag = (ycoords >= depth_start) & (ycoords <= depth_end)
+        if not np.any(in_lpag):
+            return []
+        closest = lpag_center_map_index(xcoords, ycoords, in_lpag)
+        valid = np.isfinite(xcoords) & np.isfinite(ycoords) & np.isfinite(chan_map)
+        lfp_rows = chan_map[valid] + 1
+        keep = (lfp_rows >= 1) & (lfp_rows <= n_lfp)
+        shank_lfp = lfp_rows[keep]
+        det_row = chan_map[closest] + 1
+        matches = np.where(shank_lfp == det_row)[0]
+        if matches.size == 0:
+            return []
+        jobs.append(
+            {
+                "probe_num": 1,
+                "lfp_rows": shank_lfp,
+                "x_coords": xcoords[valid][keep],
+                "y_coords": ycoords[valid][keep],
+                "detection_lfp_row": det_row,
+                "ref_in_shank": int(matches[0]),
+            }
+        )
+        return jobs
+
+    probes = sorted({int(row[0]) for row in lpag_rows})
+    for probe_n in probes:
+        if probe_n < 1 or probe_n > NPX2_X_COORDS.shape[0]:
+            continue
+        rows = [row for row in lpag_rows if int(row[0]) == probe_n]
+        depth_start = min(row[1] for row in rows)
+        depth_end = max(row[2] for row in rows)
+        shank_mask = np.isin(xcoords, NPX2_X_COORDS[probe_n - 1])
+        lpag_mask = shank_mask & (ycoords >= depth_start) & (ycoords <= depth_end)
+        if not np.any(lpag_mask):
+            continue
+        closest = lpag_center_map_index(xcoords, ycoords, lpag_mask)
+        if not shank_mask[closest]:
+            shank_idx = np.where(shank_mask)[0]
+            closest = int(
+                shank_idx[
+                    np.argmin(
+                        np.abs(xcoords[shank_idx] - np.mean(xcoords[lpag_mask]))
+                        + np.abs(ycoords[shank_idx] - np.mean(ycoords[lpag_mask]))
+                    )
+                ]
+            )
+        lfp_rows = chan_map[shank_mask] + 1
+        x_sh = xcoords[shank_mask]
+        y_sh = ycoords[shank_mask]
+        keep = np.isfinite(lfp_rows) & (lfp_rows >= 1) & (lfp_rows <= n_lfp)
+        lfp_rows = lfp_rows[keep]
+        x_sh = x_sh[keep]
+        y_sh = y_sh[keep]
+        det_row = chan_map[closest] + 1
+        matches = np.where(lfp_rows == det_row)[0]
+        if matches.size == 0:
+            continue
+        jobs.append(
+            {
+                "probe_num": probe_n,
+                "lfp_rows": lfp_rows,
+                "x_coords": x_sh,
+                "y_coords": y_sh,
+                "detection_lfp_row": det_row,
+                "ref_in_shank": int(matches[0]),
+            }
+        )
+    return jobs
+
+
+def pli_wpli_phase_vs_ref(
+    analytic: np.ndarray, ref_ch: int
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """One-segment PLI / wPLI / phase lag versus a reference channel.
+
+    ``analytic`` is nCh x nTime. This is the inner loop of
+    ``Compute_pli_wpli_segments`` when ``ReferenceChannel`` is set: nCh
+    comparisons instead of nCh x nCh pairwise maps.
+    """
+    analytic = np.asarray(analytic, dtype=complex)
+    n_ch = analytic.shape[0]
+    if ref_ch < 0 or ref_ch >= n_ch:
+        raise ValueError(f"ReferenceChannel {ref_ch} is outside 0:{n_ch - 1}")
+    xref = analytic[ref_ch]
+    pli = np.empty(n_ch)
+    wpli = np.empty(n_ch)
+    phase_lag = np.empty(n_ch)
+    for index in range(n_ch):
+        cs = analytic[index] * np.conj(xref)
+        im_part = np.imag(cs)
+        pli[index] = np.abs(np.mean(np.sign(im_part)))
+        wpli[index] = np.abs(np.mean(im_part)) / (np.mean(np.abs(im_part)) + np.finfo(float).eps)
+        phase_lag[index] = np.angle(np.mean(cs))
+    return pli, wpli, phase_lag
+
+
+def extract_lpag_ref_session_trace(
+    phase_vs_ref: np.ndarray,
+    channel_map: np.ndarray,
+    areas: Sequence,
+    session_name: str,
+    lpag_center_index: int,
+    probe_num: int = 1,
+    npx_type: int = 1,
+) -> Optional[PhaseDistanceTrace]:
+    """One probe of GENERATE_COHERENCE_MAPS_LPAG_REF vector output.
+
+    ``lpag_center_index`` is 0-based into the shank vectors. Pairwise
+    matrices are rejected.
+    """
+    phase_vs_ref = np.asarray(phase_vs_ref, dtype=float).reshape(-1)
+    channel_map = np.asarray(channel_map, dtype=float)
+    if channel_map.ndim != 2 or channel_map.shape[1] < 2:
+        return None
+    n_chan = min(phase_vs_ref.size, channel_map.shape[0], len(areas))
+    if n_chan < 2:
+        return None
+    x = channel_map[:n_chan, 0]
+    y = channel_map[:n_chan, 1]
+    phase = phase_vs_ref[:n_chan]
+    valid = np.isfinite(x) & np.isfinite(y) & np.isfinite(phase)
+    if lpag_center_index < 0 or lpag_center_index >= n_chan or not valid[lpag_center_index]:
+        return None
+    probe_idx = sort_channels_by_probe_depth(np.where(valid)[0], x, y)
+    if probe_idx.size < 2:
+        return None
+    area_names = [channel_area(areas, index) for index in range(n_chan)]
+    area = [area_names[index] for index in probe_idx]
+    phase_rad = np.angle(np.exp(1j * phase[probe_idx]))
+    distance_um = y[probe_idx] - y[lpag_center_index]
+    border_distance, border_from, border_to = region_borders(distance_um, area)
+    if npx_type == 2:
+        line_label = f"{session_name} probe {int(probe_num)}"
+    else:
+        line_label = session_name
+    return PhaseDistanceTrace(
+        session_name=session_name,
+        animal_id=session_animal_id(session_name),
+        line_label=line_label,
+        probe_num=int(probe_num),
+        lpag_center_index=int(lpag_center_index),
+        lpag_center_y=float(y[lpag_center_index]),
+        channel_index=probe_idx.astype(int),
+        distance_um=np.asarray(distance_um, dtype=float),
+        phase_rad=np.asarray(phase_rad, dtype=float),
+        phase_unwrapped=np.unwrap(phase_rad),
+        area=area,
+        border_distance_um=border_distance,
+        border_from_area=border_from,
+        border_to_area=border_to,
+    )
+
+
 def _field(session, name: str, default=None):
     if isinstance(session, dict):
         return session.get(name, default)
