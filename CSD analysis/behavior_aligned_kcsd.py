@@ -892,7 +892,7 @@ def organize_behavior_aligned_figures(
         # analysis, and refreshing the per-session copies must not remove it.
         for name in ("by_session", "by_behavior", "figure_index.csv"):
             _remove_figure_entry(os.path.join(output_root, name))
-    os.makedirs(output_root, exist_ok=True)
+    _ensure_directory(output_root)
 
     rows: List[Dict[str, str]] = []
     destinations: Dict[str, str] = {}
@@ -972,7 +972,7 @@ def organize_behavior_aligned_figures(
                             f"{prior_source} and {source} both map to {destination}"
                         )
                     destinations[destination] = source
-                    os.makedirs(os.path.dirname(destination), exist_ok=True)
+                    _ensure_directory(os.path.dirname(destination))
                     shutil.copy2(source, destination)
                     print(
                         f"    Saved sorted copy: "
@@ -1040,12 +1040,50 @@ def _remove_figure_entry(path: str) -> None:
             shutil.rmtree(path)
         else:
             os.remove(path)
-    except PermissionError as exc:
+    except OSError as exc:
         print(
             f"Could not delete {path}: {exc}. "
             "Existing figure copies will be overwritten.",
             flush=True,
         )
+
+
+def _directory_is_usable(path: str) -> bool:
+    """True when ``path`` can be used as a folder, including on a lagging share."""
+    if os.path.isdir(path):
+        return True
+    try:
+        os.listdir(path)
+    except OSError:
+        return False
+    return True
+
+
+def _ensure_directory(path: str) -> None:
+    """
+    Create ``path`` and its parents.
+
+    experimentFS can raise WinError 183 from ``mkdir`` while ``isdir`` is still
+    false. The folder is usable when listing it succeeds.
+    """
+    last_error: Optional[OSError] = None
+    for _attempt in range(3):
+        try:
+            os.makedirs(path, exist_ok=True)
+            return
+        except OSError as exc:
+            last_error = exc
+            winerror = getattr(exc, "winerror", None)
+            already_exists = isinstance(exc, FileExistsError) or winerror in {17, 183}
+            if not already_exists:
+                raise
+            if _directory_is_usable(path):
+                return
+    if _directory_is_usable(path):
+        return
+    if last_error is not None:
+        raise last_error
+    raise FileExistsError(path)
 
 
 def organize_animal_pooled_figures(
@@ -1116,9 +1154,12 @@ def organize_animal_pooled_figures(
             }
         raise FileNotFoundError(message)
 
+    # Keep this folder. Deleting and recreating it on experimentFS raises
+    # WinError 183 even when the directory is already there.
+    _ensure_directory(output_root)
     if refresh:
-        _remove_figure_entry(output_root)
-    os.makedirs(output_root, exist_ok=True)
+        for name in ("by_animal", "by_behavior", "figure_index.csv"):
+            _remove_figure_entry(os.path.join(output_root, name))
 
     rows: List[Dict[str, str]] = []
     destinations: Dict[str, str] = {}
@@ -1173,7 +1214,7 @@ def organize_animal_pooled_figures(
                         f"{prior_source} and {source} both map to {destination}"
                     )
                 destinations[destination] = source
-                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                _ensure_directory(os.path.dirname(destination))
                 shutil.copy2(source, destination)
                 print(
                     f"    Saved sorted copy: "
@@ -1964,13 +2005,20 @@ def estimate_animal_pooled_kcsd(
         f"{n_failed} failed. Index: {index_path}",
         flush=True,
     )
-    organize_animal_pooled_figures(
-        root,
-        pooled_folder_name=output_folder_name,
-        csd_output_subdir=str(settings.get("output_subdir", "csd_1d_onset_baseline")),
-        refresh=refresh,
-        missing_ok=True,
-    )
+    try:
+        organize_animal_pooled_figures(
+            root,
+            pooled_folder_name=output_folder_name,
+            csd_output_subdir=str(settings.get("output_subdir", "csd_1d_onset_baseline")),
+            refresh=refresh,
+            missing_ok=True,
+        )
+    except OSError as exc:
+        print(
+            "Animal-pooled kCSD was saved, but the gathered figures were not "
+            f"updated: {exc}",
+            flush=True,
+        )
     return results
 
 

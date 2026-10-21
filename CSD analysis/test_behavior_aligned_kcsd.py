@@ -663,6 +663,53 @@ class AnimalPooledTests(unittest.TestCase):
                 },
             )
 
+    def test_existing_animal_pooling_folder_is_reused_when_mkdir_says_it_exists(self):
+        with tempfile.TemporaryDirectory() as root:
+            figure_dir = os.path.join(
+                root,
+                "animal_pooled",
+                "category",
+                "play",
+                "onset",
+                "Batch1RatA2",
+                "csd_1d_onset_baseline",
+                "figures",
+            )
+            os.makedirs(figure_dir)
+            with open(os.path.join(figure_dir, "kcsd_xmean.png"), "wb") as stream:
+                stream.write(b"merged")
+            pooling = os.path.join(root, "sorted_figures", "animal_pooling")
+            os.makedirs(pooling)
+            stale = os.path.join(pooling, "by_animal", "onset", "old.png")
+            os.makedirs(os.path.dirname(stale))
+            with open(stale, "wb") as stream:
+                stream.write(b"old")
+
+            real_makedirs = os.makedirs
+
+            def share_mkdir(path, mode=0o777, exist_ok=False):
+                if os.path.basename(path) == "animal_pooling":
+                    raise FileExistsError(
+                        183,
+                        "Cannot create a file when that file already exists",
+                        path,
+                    )
+                return real_makedirs(path, mode, exist_ok=exist_ok)
+
+            with patch("behavior_aligned_kcsd.os.makedirs", side_effect=share_mkdir):
+                result = organize_animal_pooled_figures(root)
+
+            copied = os.path.join(
+                result["output_root"],
+                "by_animal",
+                "onset",
+                "Batch1RatA2__category__play__NPX1__xmean.png",
+            )
+            self.assertTrue(os.path.isfile(copied))
+            with open(copied, "rb") as stream:
+                self.assertEqual(stream.read(), b"merged")
+            self.assertFalse(os.path.exists(stale))
+
     def test_replot_reads_saved_mean_matrix_and_uses_the_requested_scale(self):
         with tempfile.TemporaryDirectory() as root:
             folders = []
