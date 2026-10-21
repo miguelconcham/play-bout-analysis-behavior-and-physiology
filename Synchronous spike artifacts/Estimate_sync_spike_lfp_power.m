@@ -3,9 +3,12 @@
 % and saves one mat file per session. Then run Analyze_sync_spike_lfp_power.
 %
 % Power at a spike is one sample of abs(hilbert(raw LFP)).^2 on that
-% neuron's channel. The raw trace is not delta-filtered. The same pair
-% caps as the waveform estimate apply (80 pairs, 8 per session, 2 per
-% neuron). Each LFP channel is read once per session.
+% neuron's channel. The raw trace is not delta-filtered. The comparison
+% pool is the spikes inside the play-bout windows, with this pair's
+% synchronous spikes left out of the 500 draws. The same pair caps as the
+% waveform estimate apply (80 pairs, 8 per session, 2 per neuron). Each
+% LFP channel is read once per session. Re-run with RECOMPUTE_EXISTING =
+% true after this pool change; older mats compared against every spike.
 %
 % Results:
 %   Data/Analysis results/synchronous spike waveforms/

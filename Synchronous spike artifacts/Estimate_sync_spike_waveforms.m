@@ -2,11 +2,13 @@
 % Run this first. It loops NPX sessions, calls GENERATE_SYNC_SPIKE_WAVEFORMS,
 % and saves one mat file per session. Then run Analyze_sync_spike_waveforms.
 %
-% A neuron is read from the continuous file once. The run stops at
-% max_pairs (default 80), with at most 8 pairs in a session and 2 pairs
-% for a neuron. The first full spike read is timed. If it exceeds
-% max_first_load_seconds (default 10 minutes), that session is not saved
-% and later sessions are not started, so the pair cap can be lowered.
+% Each neuron is read once, and only the spikes inside the play-bout
+% windows are read. The run stops at max_pairs (default 80), with at most
+% 8 pairs in a session and 2 pairs for a neuron. The first interval read
+% is timed. If it exceeds max_first_load_seconds (default 10 minutes),
+% that session is not saved and later sessions are not started, so the
+% pair cap can be lowered. Re-run with RECOMPUTE_EXISTING = true after
+% this pool change; older mats used the session-wide spike pool.
 %
 % Results:
 %   Data/Analysis results/synchronous spike waveforms/

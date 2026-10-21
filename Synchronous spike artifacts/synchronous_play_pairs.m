@@ -10,7 +10,8 @@ function selection = synchronous_play_pairs(npx_data_dir, options)
 %
 % selection.pairs     one struct per kept pair, with sync_index into the
 %                     sorted spike list of selection.neurons
-% selection.neurons   only the neurons that appear in the kept pairs
+% selection.neurons   only the neurons that appear in the kept pairs.
+%                     interval_index lists spikes inside the bout windows.
 
 if nargin < 2 || isempty(options)
     options = struct();
@@ -270,6 +271,7 @@ pairs = struct('neuron_index_1', {}, 'neuron_index_2', {}, ...
     'channel_1', {}, 'channel_2', {}, ...
     'area_1', {}, 'area_2', {}, ...
     'n_spikes_1', {}, 'n_spikes_2', {}, ...
+    'n_interval_1', {}, 'n_interval_2', {}, ...
     'n_sync_1', {}, 'n_sync_2', {}, ...
     'sync_index_1', {}, 'sync_index_2', {}, ...
     'rank_spikes', {});
@@ -277,7 +279,7 @@ end
 
 function neurons = empty_neurons()
 neurons = struct('cluster_id', {}, 'channel', {}, 'area', {}, ...
-    'spike_times', {}, 'spike_samples', {});
+    'spike_times', {}, 'spike_samples', {}, 'interval_index', {});
 end
 
 function values = table_column(table_data, names)

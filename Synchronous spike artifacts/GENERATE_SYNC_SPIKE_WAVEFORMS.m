@@ -3,18 +3,28 @@ function session_result = GENERATE_SYNC_SPIKE_WAVEFORMS(npx_data_dir, options)
 %
 % Called by Estimate_sync_spike_waveforms. Do not start here.
 %
-% For each neuron in a play-bout coincident pair, every spike is read once
-% from the continuous file (a second pair reuses that read). The template
-% is the baseline-subtracted mean of all of those spikes. The synchronous
-% mean uses every coincident spike. Five hundred null means use that same
-% count of the neuron's other spikes. Distance is the mean absolute
-% difference from the template, on the channel neighborhood and on the
-% neuron channel alone. A high percentile means the synchronous waveform
-% is more dissimilar than the null draws.
+% The comparison pool for each neuron is the spikes inside the play-bout
+% windows, [bout_start - 1.5 s, bout_start + 1 s] for every play bout.
+% Only those snippets are read from the continuous file. A second pair of
+% the same neuron reuses that read. Synchronous spikes of this pair are
+% excluded from the 500 draws; a spike that is synchronous only with a
+% different partner can still be drawn.
+%
+% For each neuron in each pair the saved waveform detail is:
+%   sync_mean            mean around the synchronous spikes
+%   nonsync_mean         mean of the other spikes in the windows
+%   percentile_time      fraction of the 500 null means strictly below
+%                        sync_mean, one value per channel and time
+%   percentile_abs_time  fraction of null means closer to nonsync_mean
+%   null_p025, null_p975 pointwise null envelope
+% The scalar distance of sync_mean from nonsync_mean, and the 500 scalar
+% null distances, are saved as well. The 500 waveform tensors are not.
+%
+% session_result.rows is one struct per neuron in a pair.
+% session_result.pairs keeps the two neurons of each pair together.
 %
 % The continuous path is column 2 of NPX_raw_data_folders.xlsx on the row
 % whose SessionName is this NPX folder. A flat mean stops the session.
-% The null waveforms are not saved.
 
 if nargin < 2 || isempty(options)
     options = struct();
@@ -43,8 +53,8 @@ end
 first_neuron = neuron_by_id(selection.neurons, selection.pairs(1).cluster_id_1);
 [continuous_file, checks] = choose_continuous_file( ...
     continuous_candidates(session_result.session_id, options), ...
-    first_neuron.spike_samples, first_neuron.channel, options.channel_range, ...
-    file_choice(options));
+    first_neuron.spike_samples(first_neuron.interval_index), ...
+    first_neuron.channel, options.channel_range, file_choice(options));
 for check_index = 1:numel(checks)
     if isempty(checks(check_index).message)
         fprintf('  %s  spike scale %.3g\n', checks(check_index).path, checks(check_index).scale);
@@ -59,8 +69,10 @@ session_result.n_pairs = numel(selection.pairs);
 cache = struct('cluster_id', {}, 'waveforms', {}, 'channels_kept', {}, 'time_samples', {});
 timed_a_load = false;
 rows = empty_waveform_rows();
+pair_records = empty_waveform_pairs();
 for pair_index = 1:numel(selection.pairs)
     pair = selection.pairs(pair_index);
+    record = blank_pair_record(session_result.session_id, pair_index);
     sides = [1 2];
     for side_index = 1:numel(sides)
         if sides(side_index) == 1
@@ -70,6 +82,7 @@ for pair_index = 1:numel(selection.pairs)
             area = pair.area_1;
             channel = pair.channel_1;
             n_spikes = pair.n_spikes_1;
+            n_interval = pair.n_interval_1;
         else
             cluster_id = pair.cluster_id_2;
             partner_id = pair.cluster_id_1;
@@ -77,25 +90,36 @@ for pair_index = 1:numel(selection.pairs)
             area = pair.area_2;
             channel = pair.channel_2;
             n_spikes = pair.n_spikes_2;
+            n_interval = pair.n_interval_2;
         end
+        neuron = neuron_by_id(selection.neurons, cluster_id);
+        local_sync = local_sync_index(sync_index, neuron.interval_index);
         [cache, waveforms, channels_kept, time_samples, elapsed] = cached_waveforms( ...
-            cache, selection.neurons, cluster_id, continuous_file, options);
+            cache, neuron, continuous_file, options);
         if ~timed_a_load
             timed_a_load = true;
             session_result.first_load_seconds = elapsed;
-            fprintf('%s  cluster %g  read %d spikes in %.1f s\n', ...
-                session_result.session_id, cluster_id, n_spikes, elapsed);
+            fprintf('%s  cluster %g  read %d interval spikes in %.1f s\n', ...
+                session_result.session_id, cluster_id, numel(neuron.interval_index), elapsed);
             if isfinite(options.max_first_load_seconds) ...
                     && options.max_first_load_seconds > 0 ...
                     && elapsed > options.max_first_load_seconds
                 error('GENERATE_SYNC_SPIKE_WAVEFORMS:loadTime', ...
-                    ['Cluster %g in %s took %.1f minutes to read %d spikes. ' ...
+                    ['Cluster %g in %s took %.1f minutes to read %d interval spikes. ' ...
                      'Lower max_pairs, or raise max_first_load_seconds, before the full run.'], ...
-                    cluster_id, session_result.session_id, elapsed / 60, n_spikes);
+                    cluster_id, session_result.session_id, elapsed / 60, ...
+                    numel(neuron.interval_index));
             end
         end
-        comparison = compare_sync_waveforms(waveforms, time_samples, sync_index, ...
+        comparison = compare_sync_waveforms(waveforms, time_samples, local_sync, ...
             channel, channels_kept, options.n_repeats);
+        side = waveform_side(cluster_id, partner_id, area, channel, ...
+            n_spikes, n_interval, comparison, continuous_file);
+        if sides(side_index) == 1
+            record.neuron_1 = side;
+        else
+            record.neuron_2 = side;
+        end
         if ~comparison.ok
             note = sprintf('%s cluster %g pair %d: %s', ...
                 session_result.session_id, cluster_id, pair_index, comparison.reason);
@@ -104,16 +128,19 @@ for pair_index = 1:numel(selection.pairs)
             continue
         end
         rows = append_waveform_row(rows, waveform_row( ...
-            session_result.session_id, pair_index, cluster_id, partner_id, ...
-            area, channel, n_spikes, comparison, continuous_file));
-        fprintf(['%s  cluster %g  sync %d  distance %.3g  percentile %.1f' ...
-            '  channel percentile %.1f\n'], ...
-            session_result.session_id, cluster_id, comparison.n_sync, ...
-            comparison.distance_sync, 100 * comparison.percentile, ...
-            100 * comparison.percentile_channel);
+            session_result.session_id, pair_index, side));
+        fprintf(['%s  cluster %g  interval %d  sync %d  nonsync %d  ' ...
+            'distance %.3g  percentile %.1f  channel percentile %.1f  ' ...
+            'extreme sample %.0f (abs percentile %.1f)\n'], ...
+            session_result.session_id, cluster_id, n_interval, comparison.n_sync, ...
+            comparison.n_nonsync, comparison.distance_sync, ...
+            100 * comparison.percentile, 100 * comparison.percentile_channel, ...
+            comparison.extreme_time_samples, 100 * comparison.extreme_abs_percentile);
     end
+    pair_records = append_waveform_pair(pair_records, record);
 end
 session_result.rows = rows;
+session_result.pairs = pair_records;
 if isempty(rows)
     session_result.status = 'no_saved_neuron';
 else
@@ -138,9 +165,9 @@ choice.samples_after = options.samples_after;
 end
 
 function [cache, waveforms, channels_kept, time_samples, elapsed] = cached_waveforms( ...
-    cache, neurons, cluster_id, continuous_file, options)
+    cache, neuron, continuous_file, options)
 for index = 1:numel(cache)
-    if cache(index).cluster_id == cluster_id
+    if cache(index).cluster_id == neuron.cluster_id
         waveforms = cache(index).waveforms;
         channels_kept = cache(index).channels_kept;
         time_samples = cache(index).time_samples;
@@ -148,22 +175,23 @@ for index = 1:numel(cache)
         return
     end
 end
-neuron = neuron_by_id(neurons, cluster_id);
-if isempty(neuron)
-    error('GENERATE_SYNC_SPIKE_WAVEFORMS:neuron', ...
-        'Cluster %g was selected but has no spike list.', cluster_id);
-end
 started = tic;
 [waveforms, channels_kept, time_samples] = load_waveforms_from_continuous( ...
-    continuous_file, neuron.spike_samples, neuron.channel, options.channel_range, ...
+    continuous_file, neuron.spike_samples(neuron.interval_index), neuron.channel, ...
+    options.channel_range, ...
     'NChannels', options.n_ap_channels, ...
     'SamplesBefore', options.samples_before, ...
     'SamplesAfter', options.samples_after);
 elapsed = toc(started);
-cache(end + 1).cluster_id = cluster_id; %#ok<AGROW>
+cache(end + 1).cluster_id = neuron.cluster_id; %#ok<AGROW>
 cache(end).waveforms = waveforms;
 cache(end).channels_kept = channels_kept;
 cache(end).time_samples = time_samples;
+end
+
+function local = local_sync_index(sync_index, interval_index)
+[is_in, local] = ismember(sync_index(:), interval_index(:));
+local = local(is_in);
 end
 
 function neuron = neuron_by_id(neurons, cluster_id)
@@ -185,6 +213,7 @@ session_result.first_load_seconds = NaN;
 session_result.notes = {};
 session_result.options = stored_options(options);
 session_result.rows = empty_waveform_rows();
+session_result.pairs = empty_waveform_pairs();
 end
 
 function options = stored_options(options)
@@ -195,34 +224,50 @@ end
 
 function rows = empty_waveform_rows()
 rows = struct('session_id', {}, 'pair_index', {}, 'cluster_id', {}, ...
-    'partner_id', {}, 'area', {}, 'channel', {}, 'n_spikes', {}, 'n_sync', {}, ...
-    'channels_kept', {}, 'time_samples', {}, 'template_mean', {}, 'sync_mean', {}, ...
+    'partner_id', {}, 'area', {}, 'channel', {}, ...
+    'n_spikes', {}, 'n_interval', {}, 'n_sync', {}, 'n_nonsync', {}, ...
+    'channels_kept', {}, 'time_samples', {}, ...
+    'nonsync_mean', {}, 'sync_mean', {}, ...
+    'percentile_time', {}, 'percentile_abs_time', {}, ...
+    'null_p025', {}, 'null_p975', {}, ...
     'distance_sync', {}, 'null_distances', {}, 'percentile', {}, ...
     'distance_sync_channel', {}, 'null_distances_channel', {}, ...
-    'percentile_channel', {}, 'continuous_file', {});
+    'percentile_channel', {}, ...
+    'extreme_time_samples', {}, 'extreme_percentile', {}, ...
+    'extreme_abs_percentile', {}, 'neuron_channel_tail_fraction', {}, ...
+    'continuous_file', {});
 end
 
-function row = waveform_row(session_id, pair_index, cluster_id, partner_id, ...
-    area, channel, n_spikes, comparison, continuous_file)
+function row = waveform_row(session_id, pair_index, side)
 row.session_id = session_id;
 row.pair_index = pair_index;
-row.cluster_id = cluster_id;
-row.partner_id = partner_id;
-row.area = area;
-row.channel = channel;
-row.n_spikes = n_spikes;
-row.n_sync = comparison.n_sync;
-row.channels_kept = comparison.channels_kept;
-row.time_samples = comparison.time_samples;
-row.template_mean = comparison.template_mean;
-row.sync_mean = comparison.sync_mean;
-row.distance_sync = comparison.distance_sync;
-row.null_distances = comparison.null_distances;
-row.percentile = comparison.percentile;
-row.distance_sync_channel = comparison.distance_sync_channel;
-row.null_distances_channel = comparison.null_distances_channel;
-row.percentile_channel = comparison.percentile_channel;
-row.continuous_file = continuous_file;
+row.cluster_id = side.cluster_id;
+row.partner_id = side.partner_id;
+row.area = side.area;
+row.channel = side.channel;
+row.n_spikes = side.n_spikes;
+row.n_interval = side.n_interval;
+row.n_sync = side.n_sync;
+row.n_nonsync = side.n_nonsync;
+row.channels_kept = side.channels_kept;
+row.time_samples = side.time_samples;
+row.nonsync_mean = side.nonsync_mean;
+row.sync_mean = side.sync_mean;
+row.percentile_time = side.percentile_time;
+row.percentile_abs_time = side.percentile_abs_time;
+row.null_p025 = side.null_p025;
+row.null_p975 = side.null_p975;
+row.distance_sync = side.distance_sync;
+row.null_distances = side.null_distances;
+row.percentile = side.percentile;
+row.distance_sync_channel = side.distance_sync_channel;
+row.null_distances_channel = side.null_distances_channel;
+row.percentile_channel = side.percentile_channel;
+row.extreme_time_samples = side.extreme_time_samples;
+row.extreme_percentile = side.extreme_percentile;
+row.extreme_abs_percentile = side.extreme_abs_percentile;
+row.neuron_channel_tail_fraction = side.neuron_channel_tail_fraction;
+row.continuous_file = side.continuous_file;
 end
 
 function rows = append_waveform_row(rows, row)
@@ -233,13 +278,100 @@ else
 end
 end
 
+function pairs = empty_waveform_pairs()
+pairs = struct('session_id', {}, 'pair_index', {}, 'neuron_1', {}, 'neuron_2', {});
+end
+
+function record = blank_pair_record(session_id, pair_index)
+record.session_id = session_id;
+record.pair_index = pair_index;
+record.neuron_1 = empty_waveform_side();
+record.neuron_2 = empty_waveform_side();
+end
+
+function side = empty_waveform_side()
+side.ok = false;
+side.reason = '';
+side.cluster_id = NaN;
+side.partner_id = NaN;
+side.area = '';
+side.channel = NaN;
+side.n_spikes = 0;
+side.n_interval = 0;
+side.n_sync = 0;
+side.n_nonsync = 0;
+side.channels_kept = [];
+side.time_samples = [];
+side.nonsync_mean = [];
+side.sync_mean = [];
+side.percentile_time = [];
+side.percentile_abs_time = [];
+side.null_p025 = [];
+side.null_p975 = [];
+side.distance_sync = NaN;
+side.null_distances = [];
+side.percentile = NaN;
+side.distance_sync_channel = NaN;
+side.null_distances_channel = [];
+side.percentile_channel = NaN;
+side.extreme_time_samples = NaN;
+side.extreme_percentile = NaN;
+side.extreme_abs_percentile = NaN;
+side.neuron_channel_tail_fraction = NaN;
+side.continuous_file = '';
+end
+
+function side = waveform_side(cluster_id, partner_id, area, channel, ...
+    n_spikes, n_interval, comparison, continuous_file)
+side = empty_waveform_side();
+side.ok = comparison.ok;
+side.reason = comparison.reason;
+side.cluster_id = cluster_id;
+side.partner_id = partner_id;
+side.area = area;
+side.channel = channel;
+side.n_spikes = n_spikes;
+side.n_interval = n_interval;
+side.n_sync = comparison.n_sync;
+side.n_nonsync = comparison.n_nonsync;
+side.channels_kept = comparison.channels_kept;
+side.time_samples = comparison.time_samples;
+side.nonsync_mean = comparison.nonsync_mean;
+side.sync_mean = comparison.sync_mean;
+side.percentile_time = comparison.percentile_time;
+side.percentile_abs_time = comparison.percentile_abs_time;
+side.null_p025 = comparison.null_p025;
+side.null_p975 = comparison.null_p975;
+side.distance_sync = comparison.distance_sync;
+side.null_distances = comparison.null_distances;
+side.percentile = comparison.percentile;
+side.distance_sync_channel = comparison.distance_sync_channel;
+side.null_distances_channel = comparison.null_distances_channel;
+side.percentile_channel = comparison.percentile_channel;
+side.extreme_time_samples = comparison.extreme_time_samples;
+side.extreme_percentile = comparison.extreme_percentile;
+side.extreme_abs_percentile = comparison.extreme_abs_percentile;
+side.neuron_channel_tail_fraction = comparison.neuron_channel_tail_fraction;
+side.continuous_file = continuous_file;
+end
+
+function pairs = append_waveform_pair(pairs, pair)
+if isempty(pairs)
+    pairs = pair;
+else
+    pairs(end + 1) = orderfields(pair, pairs); %#ok<AGROW>
+end
+end
+
 function print_pairs(session_id, pairs)
 for pair_index = 1:numel(pairs)
     pair = pairs(pair_index);
-    fprintf(['%s  %s ch %g (%d spikes, %d sync)  with  ' ...
-        '%s ch %g (%d spikes, %d sync)\n'], ...
-        session_id, pair.area_1, pair.channel_1, pair.n_spikes_1, pair.n_sync_1, ...
-        pair.area_2, pair.channel_2, pair.n_spikes_2, pair.n_sync_2);
+    fprintf(['%s  %s ch %g (%d spikes, %d in window, %d sync)  with  ' ...
+        '%s ch %g (%d spikes, %d in window, %d sync)\n'], ...
+        session_id, pair.area_1, pair.channel_1, pair.n_spikes_1, ...
+        pair.n_interval_1, pair.n_sync_1, ...
+        pair.area_2, pair.channel_2, pair.n_spikes_2, ...
+        pair.n_interval_2, pair.n_sync_2);
 end
 end
 

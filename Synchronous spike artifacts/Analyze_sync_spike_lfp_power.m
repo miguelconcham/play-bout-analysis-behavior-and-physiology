@@ -5,9 +5,12 @@
 %
 % Power is the square of the Hilbert envelope of unfiltered LFP_PAG, one
 % interpolated sample at each spike time, on the neuron's own channel.
-% percentile is the fraction of 500 null means below the synchronous mean.
-% A high percentile means those spikes sit on larger raw-LFP power than
-% the same number of the neuron's other spikes.
+% The pool is every spike inside the play-bout windows. percentile is the
+% fraction of 500 null means, drawn from this pair's non-synchronous spikes
+% in those windows, that fall below the synchronous mean. A high percentile
+% means those spikes sit on larger raw-LFP power. mean_power_nonsync is the
+% mean of the non-synchronous spikes. mean_power_all includes the
+% synchronous spikes as well.
 %
 % neuron_rows is left in the workspace.
 
@@ -51,11 +54,12 @@ fprintf(['%d neurons. Median power percentile %.2f. ' ...
     n_neurons, median([neuron_rows.percentile]), n_high, 0.05 * n_neurons);
 for row_index = 1:n_neurons
     row = neuron_rows(row_index);
-    fprintf(['%s  cluster %g  partner %g  %s  ch %g  spikes %d  sync %d  ' ...
-        'sync power %.3g  all-spike power %.3g  percentile %.3f\n'], ...
+    fprintf(['%s  cluster %g  partner %g  %s  ch %g  spikes %d  interval %d  ' ...
+        'sync %d  nonsync %d  sync power %.3g  nonsync power %.3g  ' ...
+        'percentile %.3f\n'], ...
         row.session_id, row.cluster_id, row.partner_id, row.area, row.channel, ...
-        row.n_spikes, row.n_sync, row.mean_power_sync, row.mean_power_all, ...
-        row.percentile);
+        row.n_spikes, row.n_interval, row.n_sync, row.n_nonsync, ...
+        row.mean_power_sync, row.mean_power_nonsync, row.percentile);
 end
 
 figure('Color', 'w', 'Name', 'Synchronous LFP-power percentiles');
@@ -65,7 +69,7 @@ hold on
 plot([0.95 0.95], ylim, 'Color', [0.85 0.1 0.1], 'LineWidth', 1.5);
 xlabel('Percentile of mean raw-LFP power at synchronous spikes')
 ylabel('Neurons')
-title('Unfiltered LFP envelope power versus 500 matched draws')
+title('Unfiltered LFP envelope power versus non-synchronous spikes in the bout windows')
 box off
 
 n_plot = min(8, n_neurons);

@@ -3,14 +3,18 @@ function [pairs, kept_neurons] = select_synchronous_pairs(neurons, bout_starts, 
 %
 % neurons have cluster_id, channel, area, spike_times (seconds), and
 % spike_samples aligned with those times. Both neurons need at least
-% min_spikes spikes, at least min_sync coincident spikes inside the bout
-% windows, and at least that many other spikes so a null of the same size
-% can be drawn. Every coincident spike is kept. Pairs are taken from the
-% larger spike counts first, with at most max_pairs_per_neuron,
-% max_pairs_per_session, and max_pairs pairs.
+% min_spikes spikes in the session and at least min_sync coincident spikes
+% inside the bout windows. The null pool is the other spikes inside those
+% same windows, [bout_start + hist_range(1), bout_start + hist_range(2)]
+% for every play bout. A pair is kept only when each neuron has at least
+% as many non-synchronous spikes in the windows as synchronous spikes, so
+% a null of the same size can be drawn. Every coincident spike is kept.
+% Pairs are taken from the larger session spike counts first, with at most
+% max_pairs_per_neuron, max_pairs_per_session, and max_pairs pairs.
 %
 % sync_index_1 and sync_index_2 index the sorted spike list stored on the
-% returned neurons.
+% returned neurons. interval_index on each neuron is the same list's spikes
+% that fall inside any bout window.
 
 if nargin < 3 || isempty(options)
     options = struct();
@@ -23,6 +27,7 @@ if numel(neurons) < 2 || isempty(bout_starts) || options.max_pairs < 1
 end
 
 neurons = sort_neuron_spikes(neurons);
+neurons = attach_interval_index(neurons, bout_starts, options.hist_range);
 eligible = empty_pairs();
 for first = 1:numel(neurons) - 1
     for second = first + 1:numel(neurons)
@@ -36,13 +41,17 @@ for first = 1:numel(neurons) - 1
         n2 = numel(neurons(second).spike_times);
         n_sync_1 = numel(sync_index_1);
         n_sync_2 = numel(sync_index_2);
+        n_interval_1 = numel(neurons(first).interval_index);
+        n_interval_2 = numel(neurons(second).interval_index);
+        n_nonsync_1 = n_interval_1 - numel(intersect(sync_index_1, neurons(first).interval_index));
+        n_nonsync_2 = n_interval_2 - numel(intersect(sync_index_2, neurons(second).interval_index));
         if n1 < options.min_spikes || n2 < options.min_spikes
             continue
         end
         if n_sync_1 < options.min_sync || n_sync_2 < options.min_sync
             continue
         end
-        if n1 - n_sync_1 < n_sync_1 || n2 - n_sync_2 < n_sync_2
+        if n_nonsync_1 < n_sync_1 || n_nonsync_2 < n_sync_2
             continue
         end
         eligible(end + 1).neuron_index_1 = first; %#ok<AGROW>
@@ -55,6 +64,8 @@ for first = 1:numel(neurons) - 1
         eligible(end).area_2 = neurons(second).area;
         eligible(end).n_spikes_1 = n1;
         eligible(end).n_spikes_2 = n2;
+        eligible(end).n_interval_1 = n_interval_1;
+        eligible(end).n_interval_2 = n_interval_2;
         eligible(end).n_sync_1 = n_sync_1;
         eligible(end).n_sync_2 = n_sync_2;
         eligible(end).sync_index_1 = sync_index_1(:);
@@ -92,6 +103,25 @@ for index = 1:numel(kept_index)
 end
 end
 
+function neurons = attach_interval_index(neurons, bout_starts, hist_range)
+for index = 1:numel(neurons)
+    neurons(index).interval_index = bout_window_index( ...
+        neurons(index).spike_times, bout_starts, hist_range);
+end
+end
+
+function index = bout_window_index(spike_times, bout_starts, hist_range)
+spike_times = double(spike_times(:));
+bout_starts = double(bout_starts(:));
+in_window = false(numel(spike_times), 1);
+for bout_index = 1:numel(bout_starts)
+    t0 = bout_starts(bout_index);
+    in_window = in_window | (spike_times >= t0 + hist_range(1) ...
+        & spike_times <= t0 + hist_range(2));
+end
+index = find(in_window);
+end
+
 function neurons = sort_neuron_spikes(neurons)
 for index = 1:numel(neurons)
     times = double(neurons(index).spike_times(:));
@@ -115,6 +145,7 @@ pairs = struct('neuron_index_1', {}, 'neuron_index_2', {}, ...
     'channel_1', {}, 'channel_2', {}, ...
     'area_1', {}, 'area_2', {}, ...
     'n_spikes_1', {}, 'n_spikes_2', {}, ...
+    'n_interval_1', {}, 'n_interval_2', {}, ...
     'n_sync_1', {}, 'n_sync_2', {}, ...
     'sync_index_1', {}, 'sync_index_2', {}, ...
     'rank_spikes', {});
@@ -122,5 +153,5 @@ end
 
 function neurons = empty_neurons()
 neurons = struct('cluster_id', {}, 'channel', {}, 'area', {}, ...
-    'spike_times', {}, 'spike_samples', {});
+    'spike_times', {}, 'spike_samples', {}, 'interval_index', {});
 end

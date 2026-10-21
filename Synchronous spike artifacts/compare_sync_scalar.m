@@ -1,13 +1,17 @@
 function comparison = compare_sync_scalar(values, sync_index, n_repeats)
 %COMPARE_SYNC_SCALAR  Mean at synchronous spikes versus matched random means.
 %
-% values is one number per spike, in the same order as the neuron's spike
-% list. sync_index picks the synchronous spikes. The observed value is the
-% mean of those finite samples. Each of the n_repeats nulls is the mean of
-% that same count of the neuron's other finite spikes, drawn without
-% replacement inside the draw. percentile is the fraction of null means
-% that are smaller than the observed mean, so a high percentile means the
-% synchronous spikes sit higher than this neuron's other spikes.
+% values is one number per spike in the comparison pool. For the LFP
+% pipeline that pool is the spikes inside the play-bout windows, and
+% sync_index indexes that pool. The observed value is the mean of the
+% finite synchronous samples. Each of the n_repeats nulls is the mean of
+% that same count of the other finite values, drawn without replacement
+% inside the draw. Synchronous spikes of this pair are excluded. percentile
+% is the fraction of null means strictly smaller than the observed mean, so
+% a high percentile means the synchronous spikes sit higher than the
+% non-synchronous spikes in the pool. mean_all is the mean of every finite
+% value in the pool, including the synchronous spikes. mean_nonsync is the
+% mean of the other finite values.
 
 if nargin < 3 || isempty(n_repeats)
     n_repeats = 500;
@@ -15,8 +19,11 @@ end
 n_repeats = round(double(n_repeats));
 comparison.ok = false;
 comparison.reason = '';
+comparison.n_pool = 0;
 comparison.n_sync = 0;
+comparison.n_nonsync = 0;
 comparison.mean_all = NaN;
+comparison.mean_nonsync = NaN;
 comparison.mean_sync = NaN;
 comparison.null_means = nan(max(n_repeats, 0), 1);
 comparison.percentile = NaN;
@@ -39,8 +46,11 @@ sync_values = values(is_sync);
 sync_values = sync_values(isfinite(sync_values));
 other = values(~is_sync);
 other = other(isfinite(other));
+comparison.n_pool = n_spikes;
 comparison.n_sync = numel(sync_values);
+comparison.n_nonsync = numel(other);
 comparison.mean_all = mean_finite(values);
+comparison.mean_nonsync = mean_finite(other);
 if isempty(sync_values)
     comparison.reason = 'no finite values at the synchronous spikes';
     return

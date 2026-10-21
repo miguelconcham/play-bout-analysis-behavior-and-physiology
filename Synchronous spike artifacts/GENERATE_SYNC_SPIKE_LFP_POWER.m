@@ -15,10 +15,14 @@ function session_result = GENERATE_SYNC_SPIKE_LFP_POWER(npx_data_dir, options)
 % This is not a cut of LFP samples around the spike, and it is not the
 % 1-5 Hz delta power used for phase locking. The Hilbert transform uses
 % the whole trace; the number kept for each spike is the power at that
-% instant. The observed statistic is the mean of those values over every
-% synchronous spike. Each of 500 nulls is the mean of the same count of
-% the neuron's other spikes. A high percentile means the synchronous
-% spikes sit on larger raw-LFP power. Each LFP channel is read once.
+% instant. The comparison pool is the spikes inside the play-bout windows,
+% the same windows used for the waveform pipeline. The observed statistic
+% is the mean of power at the synchronous spikes. Each of 500 nulls is the
+% mean of the same count of this pair's non-synchronous spikes in those
+% windows. A high percentile means the synchronous spikes sit on larger
+% raw-LFP power. Each LFP channel is read once. mean_power_nonsync is the
+% mean of every non-synchronous spike in the windows. mean_power_all is
+% the mean of every spike in the windows, including the synchronous ones.
 
 if nargin < 2 || isempty(options)
     options = struct();
@@ -66,15 +70,17 @@ for pair_index = 1:numel(selection.pairs)
             channel = pair.channel_2;
             n_spikes = pair.n_spikes_2;
         end
+        neuron = neuron_by_id(selection.neurons, cluster_id);
         power = power_by_id(cache, cluster_id);
-        if isempty(power)
+        if isempty(power) || isempty(neuron)
             note = sprintf('%s cluster %g pair %d: no LFP power', ...
                 session_result.session_id, cluster_id, pair_index);
             session_result.notes{end + 1} = note; %#ok<AGROW>
             fprintf('  %s\n', note);
             continue
         end
-        comparison = compare_sync_scalar(power, sync_index, options.n_repeats);
+        local_sync = local_sync_index(sync_index, neuron.interval_index);
+        comparison = compare_sync_scalar(power, local_sync, options.n_repeats);
         if ~comparison.ok
             note = sprintf('%s cluster %g pair %d: %s', ...
                 session_result.session_id, cluster_id, pair_index, comparison.reason);
@@ -85,10 +91,10 @@ for pair_index = 1:numel(selection.pairs)
         rows = append_power_row(rows, power_row( ...
             session_result.session_id, pair_index, cluster_id, partner_id, ...
             area, channel, n_spikes, comparison, options.power_definition));
-        fprintf(['%s  cluster %g  sync %d  sync power %.3g  ' ...
-            'all-spike power %.3g  percentile %.1f\n'], ...
-            session_result.session_id, cluster_id, comparison.n_sync, ...
-            comparison.mean_sync, comparison.mean_all, 100 * comparison.percentile);
+        fprintf(['%s  cluster %g  interval %d  sync %d  sync power %.3g  ' ...
+            'nonsync power %.3g  percentile %.1f\n'], ...
+            session_result.session_id, cluster_id, comparison.n_pool, comparison.n_sync, ...
+            comparison.mean_sync, comparison.mean_nonsync, 100 * comparison.percentile);
     end
 end
 session_result.rows = rows;
@@ -117,7 +123,8 @@ for channel_index = 1:numel(channels)
     for neuron_index = 1:numel(neuron_ids)
         neuron = neuron_by_id(selection.neurons, neuron_ids(neuron_index));
         cache(end + 1).cluster_id = neuron.cluster_id; %#ok<AGROW>
-        cache(end).power = interp1(lfp_time, power, neuron.spike_times, 'linear', NaN);
+        cache(end).power = interp1(lfp_time, power, ...
+            neuron.spike_times(neuron.interval_index), 'linear', NaN);
     end
     clear power lfp_time
 end
@@ -171,6 +178,11 @@ if count ~= n_samples
 end
 end
 
+function local = local_sync_index(sync_index, interval_index)
+[is_in, local] = ismember(sync_index(:), interval_index(:));
+local = local(is_in);
+end
+
 function power = power_by_id(cache, cluster_id)
 power = [];
 for index = 1:numel(cache)
@@ -203,9 +215,10 @@ end
 
 function rows = empty_power_rows()
 rows = struct('session_id', {}, 'pair_index', {}, 'cluster_id', {}, ...
-    'partner_id', {}, 'area', {}, 'channel', {}, 'n_spikes', {}, 'n_sync', {}, ...
-    'mean_power_all', {}, 'mean_power_sync', {}, 'null_mean_power', {}, ...
-    'percentile', {}, 'power_definition', {});
+    'partner_id', {}, 'area', {}, 'channel', {}, ...
+    'n_spikes', {}, 'n_interval', {}, 'n_sync', {}, 'n_nonsync', {}, ...
+    'mean_power_all', {}, 'mean_power_nonsync', {}, 'mean_power_sync', {}, ...
+    'null_mean_power', {}, 'percentile', {}, 'power_definition', {});
 end
 
 function row = power_row(session_id, pair_index, cluster_id, partner_id, ...
@@ -217,8 +230,11 @@ row.partner_id = partner_id;
 row.area = area;
 row.channel = channel;
 row.n_spikes = n_spikes;
+row.n_interval = comparison.n_pool;
 row.n_sync = comparison.n_sync;
+row.n_nonsync = comparison.n_nonsync;
 row.mean_power_all = comparison.mean_all;
+row.mean_power_nonsync = comparison.mean_nonsync;
 row.mean_power_sync = comparison.mean_sync;
 row.null_mean_power = comparison.null_means;
 row.percentile = comparison.percentile;
@@ -236,10 +252,12 @@ end
 function print_pairs(session_id, pairs)
 for pair_index = 1:numel(pairs)
     pair = pairs(pair_index);
-    fprintf(['%s  %s ch %g (%d spikes, %d sync)  with  ' ...
-        '%s ch %g (%d spikes, %d sync)\n'], ...
-        session_id, pair.area_1, pair.channel_1, pair.n_spikes_1, pair.n_sync_1, ...
-        pair.area_2, pair.channel_2, pair.n_spikes_2, pair.n_sync_2);
+    fprintf(['%s  %s ch %g (%d spikes, %d in window, %d sync)  with  ' ...
+        '%s ch %g (%d spikes, %d in window, %d sync)\n'], ...
+        session_id, pair.area_1, pair.channel_1, pair.n_spikes_1, ...
+        pair.n_interval_1, pair.n_sync_1, ...
+        pair.area_2, pair.channel_2, pair.n_spikes_2, ...
+        pair.n_interval_2, pair.n_sync_2);
 end
 end
 
