@@ -3,9 +3,10 @@
 %
 % Rebuild with Estimate_coherence_maps.m (GENERATE_COHERNECE_MAPS_STRUCT).
 % That Estimate stores pairwise delta (freq1, 1–5 Hz) and theta (freq2)
-% PLI / wPLI / phase-lag matrices for every PAG recording. This script does
-% not re-estimate: it loads those matrices and plots the delta phase-lag
-% column against the LPAG-center site.
+% PLI / wPLI / phase-lag matrices. This script does not re-estimate and
+% does not restitch the old PAG/mPFC/NPX2 satellite files: it loads the
+% already-combined coherence_structure.mat, same as the other Figure 2
+% Analyze scripts.
 %
 % Plot 1 — every session is one line:
 %   x = signed distance from that session's LPAG center (µm)
@@ -28,9 +29,27 @@ if exist(figure_folder, 'dir') ~= 7
     mkdir(figure_folder);
 end
 
-%% Load the merged coherence structures (same files as Estimate_coherence_maps)
+%% Load the already-combined coherence structure
+% Dual-animal PAG/mPFC slots were mismatched once and patched by stitching
+% satellite mats in Estimate_coherence_maps.m. That correction is already
+% in these saved files. Do not reload mpfc / B1D11007 / NPX2 pieces here.
 disp('loading coherence maps')
-[pli_struct, animal_names] = local_load_merged_coherence(saving_folder);
+structure_file = fullfile(saving_folder, 'coherence_structure.mat');
+names_file = fullfile(saving_folder, 'coherence_structure_animal_names.mat');
+if exist(structure_file, 'file') ~= 2
+    error('Analyze_coherence_maps:MissingFile', ...
+        'Missing %s. Run Estimate_coherence_maps.m and save the combined pli_struct.', ...
+        structure_file);
+end
+load(structure_file, 'pli_struct');
+if exist(names_file, 'file') == 2
+    load(names_file, 'animal_names');
+else
+    animal_names = cell(numel(pli_struct), 1);
+    for session_n = 1:numel(pli_struct)
+        animal_names{session_n, 1} = sprintf('session %d', session_n);
+    end
+end
 disp('ready')
 
 %% One line per session / LPAG-containing probe
@@ -98,79 +117,6 @@ for animal_n = 1:numel(animal_ids)
 end
 
 %% -------------------------------------------------------------------------
-function [pli_struct, animal_names] = local_load_merged_coherence(saving_folder)
-% Same merge as Estimate_coherence_maps.m after the GENERATE loop.
-
-required = fullfile(saving_folder, 'coherence_structure.mat');
-if exist(required, 'file') ~= 2
-    error('Analyze_coherence_maps:MissingFile', ...
-        'Missing %s. Run Estimate_coherence_maps.m first.', required);
-end
-
-load(fullfile(saving_folder, 'coherence_structure.mat'), 'pli_struct');
-names_file = fullfile(saving_folder, 'coherence_structure_animal_names.mat');
-if exist(names_file, 'file') == 2
-    load(names_file, 'animal_names');
-else
-    animal_names = cell(numel(pli_struct), 1);
-    for session_n = 1:numel(pli_struct)
-        animal_names{session_n, 1} = sprintf('session %d', session_n);
-    end
-end
-
-try
-    mpfc_file = fullfile(saving_folder, 'coherence_structure_pli_struct_mpfc.mat');
-    if exist(mpfc_file, 'file') == 2
-        loaded = load(mpfc_file, 'pli_struct_mpfc');
-        pli_struct_mpfc = loaded.pli_struct_mpfc;
-    else
-        pli_struct_mpfc = [];
-    end
-
-    b1_file = fullfile(saving_folder, 'coherence_structure_pli_struct_B1D11007.mat');
-    if exist(b1_file, 'file') == 2
-        loaded = load(b1_file, 'pli_struct_B1D11007');
-        pli_struct_B1D11007 = loaded.pli_struct_B1D11007;
-    else
-        pli_struct_B1D11007 = [];
-    end
-
-    npx2_file = fullfile(saving_folder, 'coherence_structure_pli_struct_NPX2.mat');
-    if exist(npx2_file, 'file') == 2
-        loaded = load(npx2_file, 'pli_struct_NPX2');
-        pli_struct_NPX2 = loaded.pli_struct_NPX2;
-    else
-        pli_struct_NPX2 = [];
-    end
-
-    animal_names(7:numel(pli_struct) + 3, 1) = animal_names(4:numel(pli_struct), 1);
-    pli_struct(7:numel(pli_struct) + 3) = pli_struct(4:numel(pli_struct));
-    pli_struct(4) = pli_struct(1);
-    pli_struct(5:6) = pli_struct(2:3);
-    if ~isempty(pli_struct_mpfc)
-        n_mpfc = min(2, numel(pli_struct_mpfc));
-        pli_struct(2:1 + n_mpfc) = pli_struct_mpfc(1:n_mpfc);
-    end
-    if ~isempty(pli_struct_B1D11007)
-        pli_struct(1) = pli_struct_B1D11007(1);
-    end
-    if ~isempty(pli_struct_NPX2)
-        pli_struct(14) = pli_struct_NPX2(1);
-    end
-
-    animal_names{1, 1} = 'B1D1 1007 Dual ORIGINALLY mPFC';
-    animal_names{2, 1} = 'B1D1 1012 Dual ORIGINALLY mPFC';
-    animal_names{3, 1} = 'B1D1 1013 Dual ORIGINALLY mPFC';
-    animal_names{4, 1} = 'B1D1 1007 Dual ORIGINALLY PAG';
-    animal_names{5, 1} = 'B1D1 1012 Dual ORIGINALLY PAG';
-    animal_names{6, 1} = 'B1D1 1013 Dual ORIGINALLY PAG';
-catch merge_err
-    warning('Analyze_coherence_maps:Merge', ...
-        ['Could not apply the historical Estimate_coherence_maps merge (%s). ', ...
-        'Plotting the loaded pli_struct as-is.'], merge_err.message);
-end
-end
-
 function [border_distance, border_label] = local_pooled_borders(these)
 bin_um = 10;
 buckets = containers.Map('KeyType', 'double', 'ValueType', 'any');

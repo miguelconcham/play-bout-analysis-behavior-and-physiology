@@ -192,3 +192,13 @@ when they were not already present.
    Phase reset at bout onset (circular stats + surrogate test).
    See PHASE section above.
    Loaded by      : Analyze_phase_psth.m
+
+8) Analyze_coherence_maps.m
+   Delta phase vs distance from the LPAG-center channel.
+   pli_struct     : coherence_structure.mat
+   animal_names   : coherence_structure_animal_names.mat
+   Path           : Data\Analysis results\psth power by frequency and behavior\
+   Loaded by      : Analyze_coherence_maps.m
+   Note           : load this already-combined pair only. The old PAG/mPFC/NPX2
+                    satellite stitch lives in Estimate_coherence_maps.m and
+                    must not be repeated here.
