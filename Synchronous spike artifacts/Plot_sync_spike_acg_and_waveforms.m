@@ -10,11 +10,17 @@
 % chann_map_PAG.mat. The neuron channel is at 0. Larger y is positive.
 % The autocorrelogram uses the synchronous spike times of that pair,
 % reloaded from the sorting and the play-bout windows. ±50 ms, 1 ms bins.
-% The zero lag is omitted.
+% The zero lag is omitted. A separate figure stacks one normalized
+% autocorrelogram per neuron. Each row is that neuron's pair counts
+% divided by their sum. A neuron that belongs to several pairs contributes
+% the union of its synchronous spikes once. The upper panel is the stack.
+% The lower panel is every neuron as a thin line, the mean across neurons,
+% and the 95% confidence interval of that mean.
 %
 % One figure per session, six pairs per figure. Each pair is one row:
 % neuron 1 waveform, neuron 1 spatial range, neuron 1 autocorrelogram,
-% then the same three panels for neuron 2.
+% then the same three panels for neuron 2. The normalized stack is one
+% figure for every neuron that had at least one spike pair.
 
 repo_root = fileparts(fileparts(mfilename('fullpath')));
 if ~isempty(repo_root)
@@ -55,6 +61,7 @@ if isempty(neuron_rows)
 end
 
 session_ids = unique({neuron_rows.session_id}, 'stable');
+neuron_spikes = empty_neuron_spikes();
 for session_index = 1:numel(session_ids)
     session_id = session_ids{session_index};
     session_rows = neuron_rows(strcmp({neuron_rows.session_id}, session_id));
@@ -80,8 +87,11 @@ for session_index = 1:numel(session_ids)
                     subplot(numel(shown), 6, panel + 2);
                     draw_spatial_range(members(side), geometry);
                     subplot(numel(shown), 6, panel + 3);
-                    draw_sync_acg(members(side), trains, bout_starts, time_options, ...
-                        acg_window, acg_bin);
+                    spike_times = synchronous_times(trains, members(side), bout_starts, time_options);
+                    [centers, counts] = sync_event_acg(spike_times, acg_window, acg_bin);
+                    draw_sync_acg(members(side), centers, counts, spike_times, acg_window);
+                    neuron_spikes = remember_neuron_spikes(neuron_spikes, session_id, ...
+                        members(side).cluster_id, spike_times);
                 else
                     title('No neuron');
                     axis off
@@ -94,6 +104,8 @@ for session_index = 1:numel(session_ids)
         end
     end
 end
+[acg_centers, acg_counts] = neuron_acg_counts(neuron_spikes, acg_window, acg_bin);
+draw_normalized_acg_figure(acg_centers, acg_counts, acg_window);
 
 function rows = attach_plot_options(rows, session_result)
 if ~isfield(session_result, 'options')
@@ -255,9 +267,82 @@ title(sprintf('cluster %g   ch %g', row.cluster_id, row.channel), 'Interpreter',
 box off
 end
 
-function draw_sync_acg(row, trains, bout_starts, time_options, acg_window, acg_bin)
-spike_times = synchronous_times(trains, row, bout_starts, time_options);
-[centers, counts] = sync_event_acg(spike_times, acg_window, acg_bin);
+function entries = empty_neuron_spikes()
+entries = struct('session_id', {}, 'cluster_id', {}, 'spike_times', {});
+end
+
+function entries = remember_neuron_spikes(entries, session_id, cluster_id, spike_times)
+if isempty(spike_times)
+    return
+end
+for index = 1:numel(entries)
+    if strcmp(entries(index).session_id, session_id) && entries(index).cluster_id == cluster_id
+        entries(index).spike_times = unique([entries(index).spike_times(:); spike_times(:)]);
+        return
+    end
+end
+entries(end + 1).session_id = session_id; %#ok<AGROW>
+entries(end).cluster_id = cluster_id;
+entries(end).spike_times = unique(spike_times(:));
+end
+
+function [centers, counts] = neuron_acg_counts(entries, acg_window, acg_bin)
+centers = [];
+counts = [];
+for index = 1:numel(entries)
+    [these_centers, these_counts] = sync_event_acg(entries(index).spike_times, acg_window, acg_bin);
+    if isempty(these_counts) || ~any(these_counts > 0)
+        continue
+    end
+    if isempty(counts)
+        centers = these_centers(:)';
+        counts = these_counts(:)';
+    elseif numel(these_counts) == size(counts, 2)
+        counts(end + 1, :) = these_counts(:)'; %#ok<AGROW>
+    end
+end
+end
+
+function draw_normalized_acg_figure(centers, counts, acg_window)
+if isempty(counts)
+    warning('Plot_sync_spike_acg_and_waveforms:acg', ...
+        'No synchronous spike pairs were available for the normalized autocorrelogram.');
+    return
+end
+summary = normalized_acg_stack(counts);
+if summary.n < 1
+    return
+end
+figure('Color', 'w', 'Name', 'Normalized synchronous autocorrelograms', ...
+    'Position', [80 40 760 860]);
+subplot(2, 1, 1);
+imagesc(centers, 1:summary.n, summary.normalized);
+set(gca, 'YDir', 'reverse');
+xlim(acg_window);
+xlabel('Lag (s)')
+ylabel('Neuron, sorted by peak lag')
+title(sprintf('Normalized autocorrelogram, %d neurons', summary.n));
+color_bar = colorbar;
+ylabel(color_bar, 'Fraction of spike pairs');
+box off
+
+subplot(2, 1, 2);
+hold on
+for row_index = 1:summary.n
+    plot(centers, summary.normalized(row_index, :), ...
+        'Color', [0.85 0.55 0.55], 'LineWidth', 0.4);
+end
+fill([centers, fliplr(centers)], [summary.ci_low, fliplr(summary.ci_high)], ...
+    [0.85 0.1 0.1], 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+plot(centers, summary.mean_acg, 'Color', [0.85 0.1 0.1], 'LineWidth', 2);
+xlim(acg_window);
+xlabel('Lag (s)')
+ylabel('Fraction of spike pairs')
+title(sprintf('Mean normalized autocorrelogram, 95%% CI, n = %d', summary.n));
+box off
+end
+
+function draw_sync_acg(row, centers, counts, spike_times, acg_window)
 bar(centers, counts, 1, 'FaceColor', [0.85 0.1 0.1], 'EdgeColor', 'none');
 xlim(acg_window);
 xlabel('Lag (s)')
