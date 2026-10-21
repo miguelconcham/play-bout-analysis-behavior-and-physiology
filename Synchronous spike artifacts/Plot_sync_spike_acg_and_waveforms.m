@@ -15,16 +15,17 @@
 % The autocorrelogram uses only spikes that belong to a synchronous event,
 % reloaded from the sorting and the play-bout windows. ±50 ms, 1 ms bins.
 % The zero lag is omitted. The summary figure stacks one normalized
-% autocorrelogram for every such neuron, not only the neurons drawn on one
-% page. Each row is that neuron's synchronous-spike pair counts divided by
-% their sum. A neuron that belongs to several pairs contributes the union
-% of its synchronous spikes once. The upper panel is the stack. The lower
-% panel is every neuron as a thin line, the mean across neurons, and the
-% 95% confidence interval of that mean.
+% autocorrelogram for every such neuron. Each row is that neuron's
+% synchronous-spike pair counts divided by their sum. A neuron that belongs
+% to several pairs contributes the union of its synchronous spikes once.
+% The upper panel is the stack. The lower panel is every neuron as a thin
+% line, the mean across neurons, and the 95% confidence interval of that mean.
 %
-% One figure per session, six pairs per figure. Each pair is one row:
-% neuron 1 waveform, neuron 1 spatial range, neuron 1 autocorrelogram,
-% then the same three panels for neuron 2.
+% max_example_neurons limits the detailed panels. Those panels show the
+% first neurons in saved order, one row each: waveform, spatial range, and
+% autocorrelogram. The other synchronous-event neurons stay in the two
+% stacks and are not drawn as individual examples. Set the cap to inf to
+% show every neuron once.
 % The spatial stack is a separate figure. Each curve is the peak-to-peak
 % range of that neuron's saved synchronous mean, divided by the range on
 % its largest-range channel. Distance 0 is that channel.
@@ -36,7 +37,8 @@ end
 
 acg_window = [-0.05 0.05];
 acg_bin = 0.001;
-pairs_per_figure = 6;
+max_example_neurons = 3;
+examples_per_figure = 6;
 spatial_distance_um = -400:20:400;
 
 data_root = sync_analysis_options().data_root;
@@ -71,6 +73,7 @@ end
 session_ids = unique({neuron_rows.session_id}, 'stable');
 neuron_spikes = empty_neuron_spikes();
 spatial_profiles = empty_spatial_profiles();
+examples = empty_examples();
 for session_index = 1:numel(session_ids)
     session_id = session_ids{session_index};
     session_rows = neuron_rows(strcmp({neuron_rows.session_id}, session_id));
@@ -81,43 +84,96 @@ for session_index = 1:numel(session_ids)
     geometry = load_channel_geometry(npx_raw_data, session_id);
     spatial_profiles = append_spatial_profiles(spatial_profiles, ...
         collect_session_profiles(session_id, session_rows, geometry, time_options));
-    pair_ids = unique([session_rows.pair_index], 'stable');
-    n_figures = ceil(numel(pair_ids) / pairs_per_figure);
-    for figure_index = 1:n_figures
-        first_pair = (figure_index - 1) * pairs_per_figure + 1;
-        last_pair = min(numel(pair_ids), figure_index * pairs_per_figure);
-        shown = pair_ids(first_pair:last_pair);
-        figure('Color', 'w', ...
-            'Name', sprintf('%s synchronous spikes %d/%d', session_id, figure_index, n_figures), ...
-            'Position', [40 40 1650 240 * numel(shown)]);
-        for plot_index = 1:numel(shown)
-            members = session_rows([session_rows.pair_index] == shown(plot_index));
-            for side = 1:2
-                panel = (plot_index - 1) * 6 + (side - 1) * 3;
-                subplot(numel(shown), 6, panel + 1);
-                if side <= numel(members)
-                    draw_channel_profile(members(side), side == 1 && plot_index == 1);
-                    subplot(numel(shown), 6, panel + 2);
-                    draw_spatial_range(members(side), geometry);
-                    subplot(numel(shown), 6, panel + 3);
-                    spike_times = synchronous_times(trains, members(side), bout_starts, time_options);
-                    [centers, counts] = sync_event_acg(spike_times, acg_window, acg_bin);
-                    draw_sync_acg(members(side), centers, counts, spike_times, acg_window);
-                else
-                    title('No neuron');
-                    axis off
-                    subplot(numel(shown), 6, panel + 2);
-                    axis off
-                    subplot(numel(shown), 6, panel + 3);
-                    axis off
-                end
-            end
-        end
-    end
+    examples = remember_example_neurons(examples, max_example_neurons, ...
+        session_rows, trains, bout_starts, time_options, geometry);
 end
+fprintf(['Example panels: %d neurons (cap %g). The stacks keep every ' ...
+    'synchronous-event neuron in the analysis areas.\n'], ...
+    numel(examples), max_example_neurons);
+draw_example_figures(examples, examples_per_figure, acg_window, acg_bin);
 [acg_centers, acg_counts] = neuron_acg_counts(neuron_spikes, acg_window, acg_bin);
 draw_normalized_acg_figure(acg_centers, acg_counts, acg_window);
 draw_spatial_stack_figure(spatial_profiles, spatial_distance_um);
+
+function examples = empty_examples()
+examples = struct('row', {}, 'spike_times', {}, 'geometry', {});
+end
+
+function examples = remember_example_neurons(examples, max_neurons, session_rows, ...
+    trains, bout_starts, time_options, geometry)
+if ~isfinite(max_neurons)
+    max_neurons = inf;
+end
+max_neurons = floor(double(max_neurons));
+if max_neurons < 1 || numel(examples) >= max_neurons
+    return
+end
+areas = analysis_areas(time_options);
+saved_ids = [];
+if ~isempty(session_rows) && isfield(session_rows, 'cluster_id')
+    saved_ids = [session_rows.cluster_id];
+end
+for index = 1:numel(saved_ids)
+    if numel(examples) >= max_neurons
+        return
+    end
+    cluster_id = saved_ids(index);
+    if index > 1 && any(saved_ids(1:index - 1) == cluster_id)
+        continue
+    end
+    members = session_rows([session_rows.cluster_id] == cluster_id);
+    if ~members_in_analysis_area(members, areas)
+        continue
+    end
+    row = first_area_row(members, areas);
+    if isempty(row)
+        continue
+    end
+    examples(end + 1).row = row; %#ok<AGROW>
+    examples(end).spike_times = synchronous_times(trains, row, bout_starts, time_options);
+    examples(end).geometry = geometry;
+end
+end
+
+function row = first_area_row(members, areas)
+row = [];
+for index = 1:numel(members)
+    if row_in_analysis_area(members(index), areas)
+        row = members(index);
+        return
+    end
+end
+end
+
+function draw_example_figures(examples, per_figure, acg_window, acg_bin)
+if isempty(examples)
+    return
+end
+if ~isfinite(per_figure) || per_figure < 1
+    per_figure = numel(examples);
+end
+per_figure = floor(double(per_figure));
+n_figures = ceil(numel(examples) / per_figure);
+for figure_index = 1:n_figures
+    first_neuron = (figure_index - 1) * per_figure + 1;
+    last_neuron = min(numel(examples), figure_index * per_figure);
+    shown = examples(first_neuron:last_neuron);
+    figure('Color', 'w', ...
+        'Name', sprintf('Synchronous-spike examples %d/%d', figure_index, n_figures), ...
+        'Position', [40 40 1100 240 * numel(shown)]);
+    for plot_index = 1:numel(shown)
+        row = shown(plot_index).row;
+        subplot(numel(shown), 3, (plot_index - 1) * 3 + 1);
+        draw_channel_profile(row, figure_index == 1 && plot_index == 1);
+        subplot(numel(shown), 3, (plot_index - 1) * 3 + 2);
+        draw_spatial_range(row, shown(plot_index).geometry);
+        subplot(numel(shown), 3, (plot_index - 1) * 3 + 3);
+        spike_times = shown(plot_index).spike_times;
+        [centers, counts] = sync_event_acg(spike_times, acg_window, acg_bin);
+        draw_sync_acg(row, centers, counts, spike_times, acg_window);
+    end
+end
+end
 
 function rows = attach_plot_options(rows, session_result)
 if ~isfield(session_result, 'options')
