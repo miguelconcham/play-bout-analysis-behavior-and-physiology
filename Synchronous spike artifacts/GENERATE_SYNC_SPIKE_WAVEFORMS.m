@@ -39,6 +39,8 @@ end
 
 selection = synchronous_play_pairs(npx_data_dir, options);
 session_result.session_id = selection.session_id;
+session_result.coverage = selection.coverage;
+print_coverage(session_result.session_id, selection.coverage, options.min_spikes);
 if isempty(selection.pairs)
     session_result.status = 'no_eligible_pair';
     fprintf('%s  no eligible synchronous pair\n', session_result.session_id);
@@ -212,8 +214,43 @@ session_result.continuous_file = '';
 session_result.first_load_seconds = NaN;
 session_result.notes = {};
 session_result.options = stored_options(options);
+session_result.coverage = blank_session_coverage();
 session_result.rows = empty_waveform_rows();
 session_result.pairs = empty_waveform_pairs();
+end
+
+function coverage = blank_session_coverage()
+[~, ~, coverage] = select_synchronous_pairs(struct( ...
+    'cluster_id', {}, 'channel', {}, 'area', {}, ...
+    'spike_times', {}, 'spike_samples', {}, 'interval_index', {}), [], struct());
+end
+
+function print_coverage(session_id, coverage, min_spikes)
+fprintf(['%s  observed %d/%d neurons with >= %d spikes (%s), ' ...
+    '%d/%d good units in SC, DLPAG, LPAG, VLPAG, and DR. Target %.0f%%.\n'], ...
+    session_id, coverage.n_covered, coverage.n_with_spikes, min_spikes, ...
+    percent_text(coverage.fraction_of_spiking), coverage.n_covered, ...
+    coverage.n_area, 100 * coverage.target);
+for index = 1:numel(coverage.areas)
+    row = coverage.areas(index);
+    fprintf('  %s  %d/%d with enough spikes (%s), %d good units\n', ...
+        row.area, row.n_covered, row.n_with_spikes, ...
+        percent_text(row.fraction_of_spiking), row.n_area);
+end
+if ~coverage.target_met
+    fprintf(['  Short of %.0f%%: %d neurons have fewer than %d spikes, ' ...
+        'and %d have enough spikes but no partner that can support a null.\n'], ...
+        100 * coverage.target, coverage.n_below_min_spikes, min_spikes, ...
+        coverage.n_spiking_without_partner);
+end
+end
+
+function label = percent_text(fraction)
+if ~isfinite(fraction)
+    label = 'n/a';
+else
+    label = sprintf('%.0f%%', 100 * fraction);
+end
 end
 
 function options = stored_options(options)

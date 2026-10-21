@@ -3,15 +3,19 @@ function selection = synchronous_play_pairs(npx_data_dir, options)
 %
 % Good units in DLPAG, LPAG, VLPAG, DR, and SupCol. Coincidence uses the
 % same bout window and 5 ms tolerance as Estiamte_phase_coincidence.m.
-% A neuron enters only with at least 1000 spikes. Every coincident spike
-% is kept. Spike times in seconds are double(readNPY)/30000. spike_samples
-% are those indices, shifted by +1 when the file is 0-based, so sample 1
-% is the first frame of the continuous file.
+% A neuron needs at least 1000 spikes before it can enter a pair. Pairs
+% are added until each area has at least 90% of those neurons, and only
+% when the pair brings in a neuron that is not yet observed. Every
+% coincident spike is kept. Spike times in seconds are
+% double(readNPY)/30000. spike_samples are those indices, shifted by +1
+% when the file is 0-based, so sample 1 is the first frame of the
+% continuous file.
 %
-% selection.pairs     one struct per kept pair, with sync_index into the
-%                     sorted spike list of selection.neurons
-% selection.neurons   only the neurons that appear in the kept pairs.
-%                     interval_index lists spikes inside the bout windows.
+% selection.pairs      one struct per kept pair, with sync_index into the
+%                      sorted spike list of selection.neurons
+% selection.neurons    only the neurons that appear in the kept pairs.
+%                      interval_index lists spikes inside the bout windows.
+% selection.coverage   how many good units in the areas were observed.
 
 if nargin < 2 || isempty(options)
     options = struct();
@@ -21,7 +25,10 @@ options = sync_analysis_options(options);
 selection.session_id = session_id;
 selection.pairs = empty_pairs();
 selection.neurons = empty_neurons();
+selection.coverage = [];
 if options.max_pairs < 1
+    [selection.pairs, selection.neurons, selection.coverage] = ...
+        select_synchronous_pairs(empty_neurons(), [], options);
     return
 end
 if exist(npx_data_dir, 'dir') ~= 7
@@ -39,10 +46,12 @@ end
 
 bout_starts = play_bout_starts(session_id, name_parts, options);
 if isempty(bout_starts)
+    [selection.pairs, selection.neurons, selection.coverage] = ...
+        select_synchronous_pairs(empty_neurons(), [], options);
     return
 end
 neurons = neurons_in_session(npx_data_dir, name_parts, options);
-[selection.pairs, selection.neurons] = select_synchronous_pairs( ...
+[selection.pairs, selection.neurons, selection.coverage] = select_synchronous_pairs( ...
     neurons, bout_starts, options);
 selection.session_id = session_id;
 end

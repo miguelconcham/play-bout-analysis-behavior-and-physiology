@@ -3,12 +3,13 @@
 % and saves one mat file per session. Then run Analyze_sync_spike_waveforms.
 %
 % Each neuron is read once, and only the spikes inside the play-bout
-% windows are read. The run stops at max_pairs (default 80), with at most
-% 8 pairs in a session and 2 pairs for a neuron. The first interval read
-% is timed. If it exceeds max_first_load_seconds (default 10 minutes),
-% that session is not saved and later sessions are not started, so the
-% pair cap can be lowered. Re-run with RECOMPUTE_EXISTING = true after
-% this pool change; older mats used the session-wide spike pool.
+% windows are read. Pairs are kept until each of SC, DLPAG, LPAG, VLPAG,
+% and DR has an observation for at least 90% of its neurons with 1000
+% spikes. A pair is added only when it includes a neuron not yet observed.
+% The first interval read is timed. If it exceeds max_first_load_seconds
+% (default 10 minutes), that session is not saved and later sessions are
+% not started. Re-run with RECOMPUTE_EXISTING = true so older mats, which
+% stopped at 80 pairs, are rebuilt.
 %
 % Results:
 %   Data/Analysis results/synchronous spike waveforms/
@@ -38,11 +39,10 @@ if exist(saving_folder, 'dir') ~= 7
     mkdir(saving_folder);
 end
 
-fprintf(['Synchronous-spike waveforms. Seed %d. Up to %d pairs, ' ...
-    '%d per session, %d per neuron, %d null draws.\n%s\n'], ...
-    generator_options.random_seed, generator_options.max_pairs, ...
-    generator_options.max_pairs_per_session, generator_options.max_pairs_per_neuron, ...
-    generator_options.n_repeats, saving_folder);
+fprintf(['Synchronous-spike waveforms. Seed %d. Target %.0f%% of neurons ' ...
+    'with >= %d spikes in each area. %d null draws.\n%s\n'], ...
+    generator_options.random_seed, 100 * generator_options.min_neuron_fraction, ...
+    generator_options.min_spikes, generator_options.n_repeats, saving_folder);
 
 animal_list = dir(npx_raw_data);
 animal_list = animal_list([animal_list.isdir]);
@@ -92,8 +92,9 @@ for fn = 1:numel(animal_list)
             fullfile(npx_raw_data, animal_name), call_options);
         save(session_file, 'this_waveforms', '-v7.3');
         remaining = remaining - this_waveforms.n_pairs;
-        fprintf('Saved %s (%d pairs, %d neuron rows). Remaining pair budget %d.\n', ...
-            session_file, this_waveforms.n_pairs, numel(this_waveforms.rows), remaining);
+        fprintf('Saved %s (%d pairs, %d neuron rows, %d/%d spiking neurons).\n', ...
+            session_file, this_waveforms.n_pairs, numel(this_waveforms.rows), ...
+            this_waveforms.coverage.n_covered, this_waveforms.coverage.n_with_spikes);
     catch exception
         warning('Waveform analysis failed for %s: %s', animal_name, exception.message);
         failed_sessions(end + 1, :) = ...
@@ -120,6 +121,11 @@ for file_index = 1:numel(session_files)
     if ~isfield(loaded, 'this_waveforms')
         continue
     end
+    if ~isfield(loaded.this_waveforms, 'coverage') || isempty(loaded.this_waveforms.coverage)
+        [~, ~, loaded.this_waveforms.coverage] = select_synchronous_pairs( ...
+            struct('cluster_id', {}, 'channel', {}, 'area', {}, ...
+            'spike_times', {}, 'spike_samples', {}, 'interval_index', {}), [], struct());
+    end
     if isempty(sync_waveform_sessions)
         sync_waveform_sessions = loaded.this_waveforms;
     else
@@ -130,6 +136,9 @@ end
 combined_file = fullfile(saving_folder, 'sync_spike_waveforms_all_sessions.mat');
 save(combined_file, 'sync_waveform_sessions', 'failed_sessions', ...
     'skipped_sessions', 'generator_options', '-v7.3');
-fprintf('Combined %d sessions in %s. Failed %d. Skipped %d. Remaining budget %d.\n', ...
+fprintf('Combined %d sessions in %s. Failed %d. Skipped %d.\n', ...
     numel(sync_waveform_sessions), combined_file, height(failed_sessions), ...
-    numel(skipped_sessions), remaining);
+    numel(skipped_sessions));
+if ~isempty(sync_waveform_sessions) && isfield(sync_waveform_sessions, 'coverage')
+    summarize_sync_coverage([sync_waveform_sessions.coverage], generator_options.min_spikes);
+end

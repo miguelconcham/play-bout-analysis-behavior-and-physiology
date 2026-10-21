@@ -5,10 +5,12 @@
 % Power at a spike is one sample of abs(hilbert(raw LFP)).^2 on that
 % neuron's channel. The raw trace is not delta-filtered. The comparison
 % pool is the spikes inside the play-bout windows, with this pair's
-% synchronous spikes left out of the 500 draws. The same pair caps as the
-% waveform estimate apply (80 pairs, 8 per session, 2 per neuron). Each
-% LFP channel is read once per session. Re-run with RECOMPUTE_EXISTING =
-% true after this pool change; older mats compared against every spike.
+% synchronous spikes left out of the 500 draws. Pairs follow the waveform
+% sample: at least 90% of neurons with 1000 spikes in each of SC, DLPAG,
+% LPAG, VLPAG, and DR, and no extra pair among neurons already observed.
+% Each LFP channel is read once per session. Re-run with
+% RECOMPUTE_EXISTING = true so older mats, which stopped at 80 pairs, are
+% rebuilt.
 %
 % Results:
 %   Data/Analysis results/synchronous spike waveforms/
@@ -38,11 +40,10 @@ if exist(saving_folder, 'dir') ~= 7
     mkdir(saving_folder);
 end
 
-fprintf(['Synchronous-spike raw-LFP power. Seed %d. Up to %d pairs, ' ...
-    '%d per session, %d per neuron, %d null draws.\n%s\n'], ...
-    generator_options.random_seed, generator_options.max_pairs, ...
-    generator_options.max_pairs_per_session, generator_options.max_pairs_per_neuron, ...
-    generator_options.n_repeats, saving_folder);
+fprintf(['Synchronous-spike raw-LFP power. Seed %d. Target %.0f%% of neurons ' ...
+    'with >= %d spikes in each area. %d null draws.\n%s\n'], ...
+    generator_options.random_seed, 100 * generator_options.min_neuron_fraction, ...
+    generator_options.min_spikes, generator_options.n_repeats, saving_folder);
 
 animal_list = dir(npx_raw_data);
 animal_list = animal_list([animal_list.isdir]);
@@ -92,8 +93,9 @@ for fn = 1:numel(animal_list)
             fullfile(npx_raw_data, animal_name), call_options);
         save(session_file, 'this_lfp_power', '-v7.3');
         remaining = remaining - this_lfp_power.n_pairs;
-        fprintf('Saved %s (%d pairs, %d neuron rows). Remaining pair budget %d.\n', ...
-            session_file, this_lfp_power.n_pairs, numel(this_lfp_power.rows), remaining);
+        fprintf('Saved %s (%d pairs, %d neuron rows, %d/%d spiking neurons).\n', ...
+            session_file, this_lfp_power.n_pairs, numel(this_lfp_power.rows), ...
+            this_lfp_power.coverage.n_covered, this_lfp_power.coverage.n_with_spikes);
     catch exception
         warning('LFP-power analysis failed for %s: %s', animal_name, exception.message);
         failed_sessions(end + 1, :) = ...
@@ -115,6 +117,11 @@ for file_index = 1:numel(session_files)
     if ~isfield(loaded, 'this_lfp_power')
         continue
     end
+    if ~isfield(loaded.this_lfp_power, 'coverage') || isempty(loaded.this_lfp_power.coverage)
+        [~, ~, loaded.this_lfp_power.coverage] = select_synchronous_pairs( ...
+            struct('cluster_id', {}, 'channel', {}, 'area', {}, ...
+            'spike_times', {}, 'spike_samples', {}, 'interval_index', {}), [], struct());
+    end
     if isempty(sync_lfp_power_sessions)
         sync_lfp_power_sessions = loaded.this_lfp_power;
     else
@@ -125,6 +132,9 @@ end
 combined_file = fullfile(saving_folder, 'sync_spike_lfp_power_all_sessions.mat');
 save(combined_file, 'sync_lfp_power_sessions', 'failed_sessions', ...
     'skipped_sessions', 'generator_options', '-v7.3');
-fprintf('Combined %d sessions in %s. Failed %d. Skipped %d. Remaining budget %d.\n', ...
+fprintf('Combined %d sessions in %s. Failed %d. Skipped %d.\n', ...
     numel(sync_lfp_power_sessions), combined_file, height(failed_sessions), ...
-    numel(skipped_sessions), remaining);
+    numel(skipped_sessions));
+if ~isempty(sync_lfp_power_sessions) && isfield(sync_lfp_power_sessions, 'coverage')
+    summarize_sync_coverage([sync_lfp_power_sessions.coverage], generator_options.min_spikes);
+end

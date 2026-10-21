@@ -37,11 +37,29 @@ neuron_a = kept([kept.cluster_id] == 11);
 assert(numel(setdiff(neuron_a.interval_index, pairs(1).sync_index_1)) >= pairs(1).n_sync_1, ...
     'Spikes synchronous only with the other partner were removed from this pair''s pool.');
 
-[pairs, ~] = select_synchronous_pairs(example_neurons(), 10, ...
+[pairs, ~, coverage] = select_synchronous_pairs(example_neurons(), 10, ...
     sync_analysis_options(struct('max_pairs_per_neuron', 2, 'max_pairs', 2)));
-assert(numel(pairs) == 2, 'Two disjoint uses of the best-sampled neuron were expected.');
+assert(numel(pairs) == 2, 'Two uses of the best-sampled neuron were expected.');
 assert(pairs(2).cluster_id_1 == 11 && pairs(2).cluster_id_2 == 33, ...
-    'The second pair was not the next-largest spike count.');
+    'The second pair was not the neuron still missing from the sample.');
+assert(coverage.target_met && coverage.n_covered == 3, ...
+    'Three areas with one neuron each were not all observed.');
+
+same_area = example_neurons();
+for neuron_index = 1:numel(same_area)
+    same_area(neuron_index).area = 'LPAG';
+end
+[pairs, ~, coverage] = select_synchronous_pairs(same_area, 10, ...
+    sync_analysis_options(struct('min_neuron_fraction', 0.5)));
+assert(numel(pairs) == 1 && coverage.n_covered == 2 && coverage.target_met, ...
+    'Pairs were added after the area had already reached the target.');
+
+[pairs, kept, coverage] = select_synchronous_pairs(hub_neurons(), 10, ...
+    sync_analysis_options(struct('min_spikes', 50, 'min_sync', 10)));
+assert(numel(kept) == 5 && coverage.n_covered == 5 && coverage.target_met, ...
+    'Reusing the hub did not bring every partner neuron into the sample.');
+assert(numel(pairs) == 4, ...
+    'The hub sample kept combinations that did not add a neuron.');
 
 [pairs, ~] = select_synchronous_pairs(example_neurons(), 10, ...
     sync_analysis_options(struct('min_sync', 100)));
@@ -150,6 +168,25 @@ file_id = fopen(path, 'w');
 assert(file_id >= 0, 'Could not write %s.', path);
 cleaner = onCleanup(@() fclose(file_id)); %#ok<NASGU>
 fwrite(file_id, text);
+end
+
+function neurons = hub_neurons()
+blocks = zeros(20, 4);
+for block_index = 1:4
+    blocks(:, block_index) = 8.70 + (block_index - 1) * 0.30 + (0:19)' * 0.01;
+end
+controls = zeros(30, 5);
+for control_index = 1:5
+    controls(:, control_index) = 10.00 + (control_index - 1) * 0.12 + (0:29)' * 0.002;
+end
+areas = {'DLPAG', 'VLPAG', 'DR', 'SupCol'};
+neurons = empty_neurons(5);
+neurons(1) = make_neuron(1, 1, 'LPAG', [blocks(:); controls(:, 1); 100 + (1:40)']);
+for partner_index = 1:4
+    neurons(partner_index + 1) = make_neuron(10 + partner_index, 10 + partner_index, ...
+        areas{partner_index}, [blocks(:, partner_index); controls(:, partner_index + 1); ...
+        1000 * partner_index + (1:40)']);
+end
 end
 
 function neurons = example_neurons()

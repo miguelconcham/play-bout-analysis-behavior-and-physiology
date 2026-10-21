@@ -73,7 +73,8 @@ play bout analysis behavior and physiology/
 │   ├── GENERATE_SYNC_SPIKE_LFP_POWER.m
 │   ├── Estimate_sync_spike_lfp_power.m
 │   ├── Analyze_sync_spike_lfp_power.m
-│   ├── synchronous_play_pairs.m       # Shared play-bout coincidence pairs
+│   ├── synchronous_play_pairs.m       # Shared play-bout pairs, 90% of each area
+│   ├── summarize_sync_coverage.m      # How many neurons in each area were observed
 │   ├── load_waveforms_from_continuous.m
 │   ├── test_load_waveforms_from_continuous.m
 │   ├── test_sync_event_statistics.m
