@@ -34,11 +34,7 @@ for file_index = 1:numel(session_files)
     if ~isfield(loaded, 'this_lfp_power') || isempty(loaded.this_lfp_power.rows)
         continue
     end
-    if isempty(neuron_rows)
-        neuron_rows = loaded.this_lfp_power.rows;
-    else
-        neuron_rows = [neuron_rows, orderfields(loaded.this_lfp_power.rows, neuron_rows)]; %#ok<AGROW>
-    end
+    neuron_rows = append_struct_array(neuron_rows, loaded.this_lfp_power.rows);
 end
 if isempty(neuron_rows)
     error('Analyze_sync_spike_lfp_power:rows', ...

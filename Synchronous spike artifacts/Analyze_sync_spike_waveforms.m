@@ -37,17 +37,9 @@ for file_index = 1:numel(session_files)
     if ~isfield(loaded, 'this_waveforms') || isempty(loaded.this_waveforms.rows)
         continue
     end
-    if isempty(neuron_rows)
-        neuron_rows = loaded.this_waveforms.rows;
-    else
-        neuron_rows = [neuron_rows, orderfields(loaded.this_waveforms.rows, neuron_rows)]; %#ok<AGROW>
-    end
+    neuron_rows = append_struct_array(neuron_rows, loaded.this_waveforms.rows);
     if isfield(loaded.this_waveforms, 'pairs') && ~isempty(loaded.this_waveforms.pairs)
-        if isempty(pair_records)
-            pair_records = loaded.this_waveforms.pairs;
-        else
-            pair_records = [pair_records, orderfields(loaded.this_waveforms.pairs, pair_records)]; %#ok<AGROW>
-        end
+        pair_records = append_struct_array(pair_records, loaded.this_waveforms.pairs);
     end
 end
 if isempty(neuron_rows)

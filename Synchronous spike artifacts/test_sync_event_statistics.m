@@ -144,6 +144,17 @@ assert(strcmp(power_session.status, 'pair_budget_exhausted'), ...
 
 delete_if_present(spike_file());
 delete_if_present(zero_file());
+older = struct('session_id', 'old', 'rows', struct('percentile', 0.2));
+newer = struct('session_id', 'new', 'pairs', struct('pair_index', 1), 'rows', ...
+    struct('percentile', 0.9));
+combined = append_struct_array(older, newer);
+assert(numel(combined) == 2, 'Sessions with different fields were not combined.');
+assert(isempty(combined(1).pairs) && combined(2).pairs.pair_index == 1, ...
+    'The older session did not keep an empty field for the new one.');
+rows = append_struct_array(struct('percentile', 0.2), struct('percentile', 0.9, 'nonsync_mean', 1));
+assert(isempty(rows(1).nonsync_mean) && rows(2).nonsync_mean == 1, ...
+    'Neuron rows with different fields were not combined.');
+
 check_location_lookup();
 fprintf('Synchronous-event statistic checks passed.\n');
 end
