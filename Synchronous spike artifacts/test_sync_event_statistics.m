@@ -203,7 +203,58 @@ assert(sum(counts(abs(centers) <= 0.0005)) == 0, ...
     'The zero lag was left in the autocorrelogram.');
 
 check_location_lookup();
+check_spatial_range();
 fprintf('Synchronous-event statistic checks passed.\n');
+end
+
+function check_spatial_range()
+chan_map = [10; 11; 12];
+xcoords = [0; 32; 0];
+ycoords = [0; 20; -20];
+waveform = [0 10 0; 0 4 0; 0 2 -1];
+profile = sync_waveform_spatial_range([12 10 11], waveform([3 1 2], :), 10, ...
+    chan_map, xcoords, ycoords);
+assert(profile.neuron_found, 'The neuron channel was missing from the probe map.');
+assert(issorted(profile.distance_um), 'Spatial samples were not ordered along the probe.');
+assert(profile.distance_um(profile.channel == 10) == 0, ...
+    'The neuron channel is not at 0 um.');
+assert(abs(profile.distance_um(profile.channel == 11) - sqrt(32 ^ 2 + 20 ^ 2)) < 1e-9, ...
+    'Euclidean distance missed the lateral offset.');
+assert(profile.distance_um(profile.channel == 12) == -20, ...
+    'A site above the neuron was not given a negative distance.');
+assert(profile.range(profile.channel == 10) == 10, 'Peak-to-peak range is wrong.');
+assert(profile.range(profile.channel == 12) == 3, 'Peak-to-peak range dropped the negative sample.');
+lateral = sync_waveform_spatial_range([10 13], [0 1; 0 1], 10, [10; 13], [0; 16], [100; 100]);
+assert(abs(lateral.distance_um(lateral.channel == 13) - 16) < 1e-9, ...
+    'A site at the same depth did not take its sign from x.');
+dropped = sync_waveform_spatial_range([10 99], [0 5; 0 9], 10, chan_map, xcoords, ycoords);
+assert(isequal(dropped.channel, 10), 'A channel missing from the map was plotted.');
+
+session_dir = fullfile(tempdir, 'sync_geom_npx1');
+if exist(session_dir, 'dir') ~= 7
+    mkdir(session_dir);
+end
+chanMap = [(1:191).'; (193:384).']; %#ok<NASGU>
+xcoords = repmat([16; 48], ceil(numel(chanMap) / 2), 1); %#ok<NASGU>
+xcoords = xcoords(1:numel(chanMap)); %#ok<NASGU>
+ycoords = (1:numel(chanMap)).' * 20; %#ok<NASGU>
+save(fullfile(session_dir, 'chann_map_PAG.mat'), 'chanMap', 'xcoords', 'ycoords');
+[restored, restored_x, restored_y] = read_npx_channel_geometry(session_dir);
+assert(restored(192) == 192 && restored_x(192) == 43 && restored_y(192) == 1900, ...
+    'NPX1 channel 192 was not inserted at its probe position.');
+assert(restored(193) == 193, 'Channels after 192 shifted onto the wrong site.');
+delete(fullfile(session_dir, 'chann_map_PAG.mat'));
+
+npx2_dir = fullfile(tempdir, 'sync_geom_npx2');
+if exist(npx2_dir, 'dir') ~= 7
+    mkdir(npx2_dir);
+end
+xcoords(1:2) = [8; 40]; %#ok<NASGU>
+save(fullfile(npx2_dir, 'chann_map_PAG.mat'), 'chanMap', 'xcoords', 'ycoords');
+[npx2_map, ~, ~] = read_npx_channel_geometry(npx2_dir);
+assert(~any(npx2_map == 192) && numel(npx2_map) == numel(chanMap), ...
+    'An NPX2 map was given the NPX1 channel-192 site.');
+delete(fullfile(npx2_dir, 'chann_map_PAG.mat'));
 end
 
 function check_location_lookup()

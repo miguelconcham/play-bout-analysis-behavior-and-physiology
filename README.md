@@ -70,7 +70,9 @@ play bout analysis behavior and physiology/
 │   ├── GENERATE_SYNC_SPIKE_WAVEFORMS.m
 │   ├── Estimate_sync_spike_waveforms.m
 │   ├── Analyze_sync_spike_waveforms.m
-│   ├── Plot_sync_spike_acg_and_waveforms.m  # Saved sync waveform profile and autocorrelogram
+│   ├── Plot_sync_spike_acg_and_waveforms.m  # Profile, autocorrelogram, spatial range
+│   ├── sync_waveform_spatial_range.m   # Peak-to-peak versus signed probe distance
+│   ├── read_npx_channel_geometry.m     # x,y in um from chann_map_PAG.mat
 │   ├── GENERATE_SYNC_SPIKE_LFP_POWER.m
 │   ├── compare_phase_matched_lfp.m    # Null: same-window LFP at the same delta phase
 │   ├── lfp_phase_pool.m               # Bout-window samples, excluding +/- 10 ms of the event

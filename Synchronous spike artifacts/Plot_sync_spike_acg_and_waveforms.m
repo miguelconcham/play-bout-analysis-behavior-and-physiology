@@ -4,13 +4,17 @@
 %
 % The waveform is the saved synchronous mean, drawn on every channel that
 % was kept, low channel at the bottom. The non-synchronous in-window mean
-% is drawn on the same channels. The autocorrelogram uses the synchronous
-% spike times of that pair, reloaded from the sorting and the play-bout
-% windows. ±50 ms, 1 ms bins. The zero lag is omitted.
+% is drawn on the same channels. Beside it, the peak-to-peak range of that
+% synchronous mean is plotted against signed Euclidean distance from the
+% neuron channel, in micrometers. Distance uses xcoords and ycoords from
+% chann_map_PAG.mat. The neuron channel is at 0. Larger y is positive.
+% The autocorrelogram uses the synchronous spike times of that pair,
+% reloaded from the sorting and the play-bout windows. ±50 ms, 1 ms bins.
+% The zero lag is omitted.
 %
 % One figure per session, six pairs per figure. Each pair is one row:
-% neuron 1 waveform, neuron 1 autocorrelogram, neuron 2 waveform, neuron 2
-% autocorrelogram.
+% neuron 1 waveform, neuron 1 spatial range, neuron 1 autocorrelogram,
+% then the same three panels for neuron 2.
 
 repo_root = fileparts(fileparts(mfilename('fullpath')));
 if ~isempty(repo_root)
@@ -56,6 +60,7 @@ for session_index = 1:numel(session_ids)
     session_rows = neuron_rows(strcmp({neuron_rows.session_id}, session_id));
     [trains, bout_starts, time_options] = load_session_trains( ...
         npx_raw_data, session_id, session_rows(1));
+    geometry = load_channel_geometry(npx_raw_data, session_id);
     pair_ids = unique([session_rows.pair_index], 'stable');
     n_figures = ceil(numel(pair_ids) / pairs_per_figure);
     for figure_index = 1:n_figures
@@ -64,20 +69,25 @@ for session_index = 1:numel(session_ids)
         shown = pair_ids(first_pair:last_pair);
         figure('Color', 'w', ...
             'Name', sprintf('%s synchronous spikes %d/%d', session_id, figure_index, n_figures), ...
-            'Position', [40 40 1100 240 * numel(shown)]);
+            'Position', [40 40 1650 240 * numel(shown)]);
         for plot_index = 1:numel(shown)
             members = session_rows([session_rows.pair_index] == shown(plot_index));
             for side = 1:2
-                subplot(numel(shown), 4, (plot_index - 1) * 4 + (side - 1) * 2 + 1);
+                panel = (plot_index - 1) * 6 + (side - 1) * 3;
+                subplot(numel(shown), 6, panel + 1);
                 if side <= numel(members)
                     draw_channel_profile(members(side), side == 1 && plot_index == 1);
-                    subplot(numel(shown), 4, (plot_index - 1) * 4 + (side - 1) * 2 + 2);
+                    subplot(numel(shown), 6, panel + 2);
+                    draw_spatial_range(members(side), geometry);
+                    subplot(numel(shown), 6, panel + 3);
                     draw_sync_acg(members(side), trains, bout_starts, time_options, ...
                         acg_window, acg_bin);
                 else
                     title('No neuron');
                     axis off
-                    subplot(numel(shown), 4, (plot_index - 1) * 4 + (side - 1) * 2 + 2);
+                    subplot(numel(shown), 6, panel + 2);
+                    axis off
+                    subplot(numel(shown), 6, panel + 3);
                     axis off
                 end
             end
@@ -184,6 +194,64 @@ if show_legend && ~isempty(sync_line)
         legend(sync_line, {'Synchronous mean'}, 'Location', 'northeast');
     end
 end
+box off
+end
+
+function geometry = load_channel_geometry(npx_raw_data, session_id)
+geometry = [];
+session_dir = fullfile(npx_raw_data, session_id);
+try
+    [chan_map, xcoords, ycoords] = read_npx_channel_geometry(session_dir);
+    geometry.chan_map = chan_map;
+    geometry.xcoords = xcoords;
+    geometry.ycoords = ycoords;
+    fprintf('%s  loaded %d probe sites for the spatial range\n', ...
+        session_id, numel(chan_map));
+catch load_error
+    warning('Plot_sync_spike_acg_and_waveforms:geometry', ...
+        'Channel positions for %s were not loaded (%s). Spatial range is skipped.', ...
+        session_id, load_error.message);
+end
+end
+
+function draw_spatial_range(row, geometry)
+if isempty(geometry) || ~isfield(row, 'sync_mean') || isempty(row.sync_mean) ...
+        || ~isfield(row, 'channels_kept') || isempty(row.channels_kept) ...
+        || ~isfield(row, 'channel')
+    title(missing_title(row));
+    axis off
+    return
+end
+profile = sync_waveform_spatial_range(row.channels_kept, row.sync_mean, row.channel, ...
+    geometry.chan_map, geometry.xcoords, geometry.ycoords);
+if isempty(profile.distance_um)
+    title(sprintf('cluster %g   no probe position', row.cluster_id), 'Interpreter', 'none');
+    axis off
+    return
+end
+peak = max(profile.range);
+if ~isfinite(peak) || peak <= 0
+    peak = 1;
+end
+span = max(abs(profile.distance_um));
+if ~isfinite(span) || span == 0
+    span = 1;
+end
+hold on
+plot([0 0], [0, peak * 1.15], 'Color', [0.75 0.75 0.75], 'LineWidth', 1);
+plot(profile.distance_um, profile.range, '-o', ...
+    'Color', [0.85 0.1 0.1], 'MarkerFaceColor', [0.85 0.1 0.1], ...
+    'LineWidth', 1.4, 'MarkerSize', 5);
+neuron_point = profile.channel == row.channel;
+if any(neuron_point)
+    plot(profile.distance_um(neuron_point), profile.range(neuron_point), 'o', ...
+        'Color', [0.85 0.1 0.1], 'MarkerFaceColor', [0.85 0.1 0.1], 'MarkerSize', 8);
+end
+ylim([0, peak * 1.15]);
+xlim(span * [-1.15 1.15]);
+xlabel('Distance from neuron channel (\mum)')
+ylabel('Peak-to-peak range')
+title(sprintf('cluster %g   ch %g', row.cluster_id, row.channel), 'Interpreter', 'none');
 box off
 end
 
