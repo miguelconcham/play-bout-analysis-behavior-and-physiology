@@ -23,9 +23,11 @@
 %
 % max_example_neurons limits the detailed panels. Those panels show the
 % first neurons in saved order, one row each: waveform, spatial range, and
-% autocorrelogram. The other synchronous-event neurons stay in the two
-% stacks and are not drawn as individual examples. Set the cap to inf to
-% show every neuron once.
+% autocorrelogram. The waveform panel keeps example_channel_half_width
+% channels on either side of the largest-range channel, even when the saved
+% waveform covers a wider set. The other synchronous-event neurons stay in
+% the two stacks and are not drawn as individual examples. Set the neuron
+% cap to inf to show every neuron once.
 % The spatial stack is a separate figure. Each curve is the peak-to-peak
 % range of that neuron's saved synchronous mean, divided by the range on
 % its largest-range channel. Distance 0 is that channel.
@@ -38,6 +40,7 @@ end
 acg_window = [-0.05 0.05];
 acg_bin = 0.001;
 max_example_neurons = 3;
+example_channel_half_width = 3;
 examples_per_figure = 6;
 spatial_distance_um = -400:20:400;
 
@@ -90,7 +93,8 @@ end
 fprintf(['Example panels: %d neurons (cap %g). The stacks keep every ' ...
     'synchronous-event neuron in the analysis areas.\n'], ...
     numel(examples), max_example_neurons);
-draw_example_figures(examples, examples_per_figure, acg_window, acg_bin);
+draw_example_figures(examples, examples_per_figure, acg_window, acg_bin, ...
+    example_channel_half_width);
 [acg_centers, acg_counts] = neuron_acg_counts(neuron_spikes, acg_window, acg_bin);
 draw_normalized_acg_figure(acg_centers, acg_counts, acg_window);
 draw_spatial_stack_figure(spatial_profiles, spatial_distance_um);
@@ -145,7 +149,7 @@ for index = 1:numel(members)
 end
 end
 
-function draw_example_figures(examples, per_figure, acg_window, acg_bin)
+function draw_example_figures(examples, per_figure, acg_window, acg_bin, channel_half_width)
 if isempty(examples)
     return
 end
@@ -164,7 +168,7 @@ for figure_index = 1:n_figures
     for plot_index = 1:numel(shown)
         row = shown(plot_index).row;
         subplot(numel(shown), 3, (plot_index - 1) * 3 + 1);
-        draw_channel_profile(row, figure_index == 1 && plot_index == 1);
+        draw_channel_profile(row, figure_index == 1 && plot_index == 1, channel_half_width);
         subplot(numel(shown), 3, (plot_index - 1) * 3 + 2);
         draw_spatial_range(row, shown(plot_index).geometry);
         subplot(numel(shown), 3, (plot_index - 1) * 3 + 3);
@@ -207,7 +211,10 @@ catch load_error
 end
 end
 
-function draw_channel_profile(row, show_legend)
+function draw_channel_profile(row, show_legend, channel_half_width)
+if nargin < 3
+    channel_half_width = inf;
+end
 sync_mean = [];
 if isfield(row, 'sync_mean')
     sync_mean = row.sync_mean;
@@ -223,6 +230,8 @@ if isempty(sync_mean) || isempty(channels)
     return
 end
 [channels, sync_mean, reference] = order_channels(channels, sync_mean, reference);
+[channels, sync_mean, reference] = limit_displayed_channels( ...
+    channels, sync_mean, reference, row.channel, channel_half_width);
 time_samples = row.time_samples(:)';
 time_ms = time_samples / 30000 * 1000;
 scale = max(abs(sync_mean(:)));
@@ -234,13 +243,14 @@ if isempty(scale) || ~isfinite(scale) || scale == 0
 end
 gap = 2.6 * scale;
 n_channels = numel(channels);
+peak_channel = largest_range_channel(channels, sync_mean, row.channel);
 hold on
 sync_line = [];
 reference_line = [];
 for channel_index = 1:n_channels
     y_offset = (channel_index - 1) * gap;
     line_width = 1.2;
-    if channels(channel_index) == row.channel
+    if channels(channel_index) == peak_channel
         line_width = 2.4;
     end
     if ~isempty(reference)
@@ -275,6 +285,48 @@ if show_legend && ~isempty(sync_line)
     end
 end
 box off
+end
+
+function [channels, sync_mean, reference] = limit_displayed_channels( ...
+    channels, sync_mean, reference, assigned_channel, half_width)
+channels = double(channels(:).');
+if ~isfinite(half_width) || half_width < 0 || isempty(channels)
+    return
+end
+half_width = floor(double(half_width));
+center = largest_range_channel(channels, sync_mean, assigned_channel);
+keep = abs(channels - center) <= half_width;
+if ~any(keep)
+    keep = abs(channels - double(assigned_channel)) <= half_width;
+end
+if ~any(keep)
+    return
+end
+n_channels = numel(channels);
+channels = channels(keep);
+sync_mean = sync_mean(keep, :);
+if ~isempty(reference) && size(reference, 1) == n_channels
+    reference = reference(keep, :);
+end
+end
+
+function channel = largest_range_channel(channels, sync_mean, assigned_channel)
+channel = double(assigned_channel);
+ranges = nan(1, numel(channels));
+for index = 1:numel(channels)
+    samples = sync_mean(index, :);
+    samples = samples(isfinite(samples));
+    if isempty(samples)
+        continue
+    end
+    ranges(index) = max(samples) - min(samples);
+end
+finite_range = find(isfinite(ranges));
+if isempty(finite_range)
+    return
+end
+[~, best] = max(ranges(finite_range));
+channel = channels(finite_range(best));
 end
 
 function geometry = load_channel_geometry(npx_raw_data, session_id)
