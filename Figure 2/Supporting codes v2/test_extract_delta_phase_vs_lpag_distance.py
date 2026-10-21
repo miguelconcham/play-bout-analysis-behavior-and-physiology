@@ -15,6 +15,11 @@ from extract_delta_phase_vs_lpag_distance import (  # noqa: E402
     region_borders,
     session_animal_id,
 )
+from find_latest_merged_coherence_files import (  # noqa: E402
+    find_latest_merged_coherence_files,
+    is_merged_structure_name,
+    partner_names_file,
+)
 
 
 def _linear_phase(distance_um, slope=0.002):
@@ -148,6 +153,47 @@ class GeometryTests(unittest.TestCase):
         distances, labels = pooled_region_borders([a, b], bin_um=10.0)
         self.assertEqual(list(labels), ["DLPAG | LPAG", "LPAG | VLPAG"])
         self.assertEqual(len(distances), 2)
+
+
+class MergedFileSelectionTests(unittest.TestCase):
+    def test_partner_names_follow_the_merged_stem(self):
+        self.assertEqual(
+            partner_names_file("coherence_structure_merged.mat"),
+            "coherence_structure_animal_names_merged.mat",
+        )
+        self.assertEqual(
+            partner_names_file("coherence_structure_all_together.mat"),
+            "coherence_structure_animal_names_all_together.mat",
+        )
+
+    def test_ignores_unmerged_and_satellite_pieces(self):
+        self.assertFalse(is_merged_structure_name("coherence_structure.mat"))
+        self.assertFalse(
+            is_merged_structure_name("coherence_structure_pli_struct_NPX2.mat")
+        )
+        self.assertFalse(
+            is_merged_structure_name("coherence_structure_pli_struct_mpfc.mat")
+        )
+        self.assertFalse(
+            is_merged_structure_name("coherence_structure_animal_names_merged.mat")
+        )
+        self.assertTrue(is_merged_structure_name("coherence_structure_merged.mat"))
+        self.assertTrue(
+            is_merged_structure_name("coherence_structure_all_together.mat")
+        )
+
+    def test_picks_the_newest_merged_save(self):
+        entries = [
+            ("coherence_structure.mat", 100.0),
+            ("coherence_structure_pli_struct_NPX2.mat", 300.0),
+            ("coherence_structure_merged.mat", 200.0),
+            ("coherence_structure_animal_names_merged.mat", 200.0),
+            ("coherence_structure_all_together.mat", 250.0),
+            ("coherence_structure_animal_names_all_together.mat", 250.0),
+        ]
+        structure, names = find_latest_merged_coherence_files(entries)
+        self.assertEqual(structure, "coherence_structure_all_together.mat")
+        self.assertEqual(names, "coherence_structure_animal_names_all_together.mat")
 
 
 if __name__ == "__main__":

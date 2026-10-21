@@ -195,10 +195,12 @@ when they were not already present.
 
 8) Analyze_coherence_maps.m
    Delta phase vs distance from the LPAG-center channel.
-   pli_struct     : coherence_structure.mat
-   animal_names   : coherence_structure_animal_names.mat
+   pli_struct     : coherence_structure_merged.mat (or the newest *merged* /
+                    *all_together* / *combined* coherence mat)
+   animal_names   : coherence_structure_animal_names_merged.mat
    Path           : Data\Analysis results\psth power by frequency and behavior\
    Loaded by      : Analyze_coherence_maps.m
-   Note           : load this already-combined pair only. The old PAG/mPFC/NPX2
-                    satellite stitch lives in Estimate_coherence_maps.m and
-                    must not be repeated here.
+   Saved by       : Estimate_coherence_maps.m (after the PAG/mPFC/NPX2 stitch)
+   Note           : load the newest merged / all-together pair only. Do not
+                    restitch satellite mats or load the original
+                    coherence_structure.mat.

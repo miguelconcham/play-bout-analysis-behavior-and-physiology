@@ -85,7 +85,7 @@ These are the supporting / complementary pipelines. Rebuild with Estimate, then 
 | Speed vs band-limited power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m` |
 | Delta–gamma (or other) phase–amplitude coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m` or `Figure 2/CrossFreq coupling.m` |
 | CFC as depth maps | `Estimate_freq_coupling_maps.m` | `Analyze_freq_coupling_maps.m` |
-| PLI / wPLI coherence maps | `Estimate_coherence_maps.m` | same file (heatmaps); `Analyze_coherence_maps.m` (delta phase vs LPAG-center distance) |
+| PLI / wPLI coherence maps | `Estimate_coherence_maps.m` | same file (heatmaps); `Analyze_coherence_maps.m` (loads newest `coherence_structure_merged.mat` / all-together save) |
 | Hilbert phase at exploratory / play onset | `Estimate_phase_psth.m` | `Analyze_phase_psth.m` or `Analyze_phase_psth_SuppFig.m` |
 
 GENERATE functions live next to those Estimates (`GENERATE_PSTH_PLAY_BOUT.m`, `GENERATE_PSTH_ALL_BEHAVIORS.m`, `GENERATE_PSTH_CALLS.m`, `GENERATE_PSTH_CALL_LOC_REGRESSORS.m`, `GENERATE_SPEED_FREQ_RELATION.m`, `GENERATE_FREQ_COUPLING_STRUCT.m`, `GENERATE_FREQ_COUPLING_MAPS_STRUCT.m`, `GENERATE_COHERNECE_MAPS_STRUCT.m`, `GENERATE_PHASE_EXPLORATORY_ONSET.m`, `GENERATE_PSTH_AREA_MAPS.m`, `GENERATE_PSTH_SPECTROGRAM.m`).

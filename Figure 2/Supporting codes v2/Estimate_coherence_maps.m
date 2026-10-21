@@ -71,9 +71,9 @@ save(fullfile(saving_folder, 'coherence_structure_animal_names_pli_struct_NPX2.m
 
 %% Load and merge coherence structures from multiple sources
 % One-time mismatch fix: dual PAG/mPFC and NPX2 pieces were stored in
-% separate mats. After this stitch, the combined pli_struct is what
-% Analyze_coherence_maps.m loads from coherence_structure.mat — do not
-% repeat the stitch there.
+% separate mats. After this stitch, save the combined pli_struct as
+% coherence_structure_merged.mat. Analyze_coherence_maps.m loads the
+% newest merged / all-together file and must not repeat the stitch.
 disp('loading')
 load(fullfile(saving_folder, 'coherence_structure_pli_struct_mpfc.mat'), 'pli_struct_mpfc');
 load(fullfile(saving_folder, 'coherence_structure_pli_struct_B1D11007.mat'), 'pli_struct_B1D11007');
@@ -96,9 +96,11 @@ animal_names{4,1} = 'B1D1 1007 Dual ORIGINALLY PAG';
 animal_names{5,1} = 'B1D1 1012 Dual ORIGINALLY PAG';
 animal_names{6,1} = 'B1D1 1013 Dual ORIGINALLY PAG';
 
-% Combined structure already used by Analyze_coherence_maps.m:
-% save(fullfile(saving_folder, 'coherence_structure.mat'), 'pli_struct', '-v7.3');
-% save(fullfile(saving_folder, 'coherence_structure_animal_names.mat'), 'animal_names');
+merged_file = fullfile(saving_folder, 'coherence_structure_merged.mat');
+merged_names_file = fullfile(saving_folder, 'coherence_structure_animal_names_merged.mat');
+disp(['saving combined structure to ', merged_file])
+save(merged_file, 'pli_struct', '-v7.3');
+save(merged_names_file, 'animal_names');
 
 %% Plot — phase lags
 figure

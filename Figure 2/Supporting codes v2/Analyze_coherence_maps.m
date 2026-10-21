@@ -5,8 +5,7 @@
 % That Estimate stores pairwise delta (freq1, 1–5 Hz) and theta (freq2)
 % PLI / wPLI / phase-lag matrices. This script does not re-estimate and
 % does not restitch the old PAG/mPFC/NPX2 satellite files: it loads the
-% already-combined coherence_structure.mat, same as the other Figure 2
-% Analyze scripts.
+% newest merged / all-together save (coherence_structure_merged.mat).
 %
 % Plot 1 — every session is one line:
 %   x = signed distance from that session's LPAG center (µm)
@@ -29,20 +28,15 @@ if exist(figure_folder, 'dir') ~= 7
     mkdir(figure_folder);
 end
 
-%% Load the already-combined coherence structure
+%% Load the newest merged / all-together coherence structure
 % Dual-animal PAG/mPFC slots were mismatched once and patched by stitching
-% satellite mats in Estimate_coherence_maps.m. That correction is already
-% in these saved files. Do not reload mpfc / B1D11007 / NPX2 pieces here.
+% satellite mats in Estimate_coherence_maps.m. The combined result is saved
+% as coherence_structure_merged.mat (or a later *merged* / *all_together*
+% file). Do not reload mpfc / B1D11007 / NPX2 pieces here.
 disp('loading coherence maps')
-structure_file = fullfile(saving_folder, 'coherence_structure.mat');
-names_file = fullfile(saving_folder, 'coherence_structure_animal_names.mat');
-if exist(structure_file, 'file') ~= 2
-    error('Analyze_coherence_maps:MissingFile', ...
-        'Missing %s. Run Estimate_coherence_maps.m and save the combined pli_struct.', ...
-        structure_file);
-end
+[structure_file, names_file] = find_latest_merged_coherence_files(saving_folder);
 load(structure_file, 'pli_struct');
-if exist(names_file, 'file') == 2
+if ~isempty(names_file) && exist(names_file, 'file') == 2
     load(names_file, 'animal_names');
 else
     animal_names = cell(numel(pli_struct), 1);
