@@ -13,6 +13,9 @@ function session_result = GENERATE_SYNC_SPIKE_WAVEFORMS(npx_data_dir, options)
 % For each neuron in each pair the saved waveform detail is:
 %   sync_mean            mean around the synchronous spikes
 %   nonsync_mean         mean of the other spikes in the windows
+%   partner_id           cluster id of the neuron that formed the pair
+%   partner_area         area of that partner
+%   partner_channel      channel of that partner (cluster ch + 1)
 %   percentile_time      fraction of the 500 null means strictly below
 %                        sync_mean, one value per channel and time
 %   percentile_abs_time  fraction of null means closer to nonsync_mean
@@ -80,6 +83,8 @@ for pair_index = 1:numel(selection.pairs)
         if sides(side_index) == 1
             cluster_id = pair.cluster_id_1;
             partner_id = pair.cluster_id_2;
+            partner_area = pair.area_2;
+            partner_channel = pair.channel_2;
             sync_index = pair.sync_index_1;
             area = pair.area_1;
             channel = pair.channel_1;
@@ -88,6 +93,8 @@ for pair_index = 1:numel(selection.pairs)
         else
             cluster_id = pair.cluster_id_2;
             partner_id = pair.cluster_id_1;
+            partner_area = pair.area_1;
+            partner_channel = pair.channel_1;
             sync_index = pair.sync_index_2;
             area = pair.area_2;
             channel = pair.channel_2;
@@ -115,8 +122,8 @@ for pair_index = 1:numel(selection.pairs)
         end
         comparison = compare_sync_waveforms(waveforms, time_samples, local_sync, ...
             channel, channels_kept, options.n_repeats);
-        side = waveform_side(cluster_id, partner_id, area, channel, ...
-            n_spikes, n_interval, comparison, continuous_file);
+        side = waveform_side(cluster_id, partner_id, partner_area, partner_channel, ...
+            area, channel, n_spikes, n_interval, comparison, continuous_file);
         if sides(side_index) == 1
             record.neuron_1 = side;
         else
@@ -261,7 +268,8 @@ end
 
 function rows = empty_waveform_rows()
 rows = struct('session_id', {}, 'pair_index', {}, 'cluster_id', {}, ...
-    'partner_id', {}, 'area', {}, 'channel', {}, ...
+    'partner_id', {}, 'partner_area', {}, 'partner_channel', {}, ...
+    'area', {}, 'channel', {}, ...
     'n_spikes', {}, 'n_interval', {}, 'n_sync', {}, 'n_nonsync', {}, ...
     'channels_kept', {}, 'time_samples', {}, ...
     'nonsync_mean', {}, 'sync_mean', {}, ...
@@ -280,6 +288,8 @@ row.session_id = session_id;
 row.pair_index = pair_index;
 row.cluster_id = side.cluster_id;
 row.partner_id = side.partner_id;
+row.partner_area = side.partner_area;
+row.partner_channel = side.partner_channel;
 row.area = side.area;
 row.channel = side.channel;
 row.n_spikes = side.n_spikes;
@@ -331,6 +341,8 @@ side.ok = false;
 side.reason = '';
 side.cluster_id = NaN;
 side.partner_id = NaN;
+side.partner_area = '';
+side.partner_channel = NaN;
 side.area = '';
 side.channel = NaN;
 side.n_spikes = 0;
@@ -358,13 +370,15 @@ side.neuron_channel_tail_fraction = NaN;
 side.continuous_file = '';
 end
 
-function side = waveform_side(cluster_id, partner_id, area, channel, ...
-    n_spikes, n_interval, comparison, continuous_file)
+function side = waveform_side(cluster_id, partner_id, partner_area, partner_channel, ...
+    area, channel, n_spikes, n_interval, comparison, continuous_file)
 side = empty_waveform_side();
 side.ok = comparison.ok;
 side.reason = comparison.reason;
 side.cluster_id = cluster_id;
 side.partner_id = partner_id;
+side.partner_area = partner_area;
+side.partner_channel = partner_channel;
 side.area = area;
 side.channel = channel;
 side.n_spikes = n_spikes;

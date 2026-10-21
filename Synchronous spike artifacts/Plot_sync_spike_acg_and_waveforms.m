@@ -273,8 +273,9 @@ end
 set(gca, 'YTick', y_ticks, 'YTickLabel', tick_labels);
 xlabel('Time (ms)')
 ylabel('Channel')
-title(sprintf('%s   cluster %g   %s   ch %g   %d sync', ...
-    row.session_id, row.cluster_id, row_area(row), row.channel, row_count(row, 'n_sync')), ...
+title(sprintf('%s   cluster %g   %s   ch %g   with %s   %d sync', ...
+    row.session_id, row.cluster_id, row_area(row), row.channel, ...
+    partner_label(row), row_count(row, 'n_sync')), ...
     'Interpreter', 'none');
 if show_legend && ~isempty(sync_line)
     if ~isempty(reference_line)
@@ -389,10 +390,11 @@ xlim(span * [-1.15 1.15]);
 xlabel('Distance from peak channel (\mum)')
 ylabel('Peak-to-peak range')
 if profile.center_channel == row.channel
-    range_title = sprintf('cluster %g   ch %g', row.cluster_id, row.channel);
+    range_title = sprintf('cluster %g   ch %g   with %s', ...
+        row.cluster_id, row.channel, partner_label(row));
 else
-    range_title = sprintf('cluster %g   peak ch %g   assigned %g', ...
-        row.cluster_id, profile.center_channel, row.channel);
+    range_title = sprintf('cluster %g   peak ch %g   assigned %g   with %s', ...
+        row.cluster_id, profile.center_channel, row.channel, partner_label(row));
 end
 title(range_title, 'Interpreter', 'none');
 box off
@@ -686,10 +688,11 @@ xlim(acg_window);
 xlabel('Lag (s)')
 ylabel('Count')
 if isempty(spike_times)
-    title(sprintf('cluster %g   autocorrelogram unavailable', row.cluster_id), ...
-        'Interpreter', 'none');
+    title(sprintf('cluster %g   with %s   autocorrelogram unavailable', ...
+        row.cluster_id, partner_label(row)), 'Interpreter', 'none');
 else
-    title(sprintf('cluster %g   %d synchronous spikes', row.cluster_id, numel(spike_times)), ...
+    title(sprintf('cluster %g   %d synchronous spikes with %s', ...
+        row.cluster_id, numel(spike_times), partner_label(row)), ...
         'Interpreter', 'none');
 end
 box off
@@ -831,6 +834,29 @@ if iscell(value)
 end
 if ischar(value)
     name = strtrim(value(:).');
+end
+end
+
+function label = partner_label(row)
+partner_id = NaN;
+if isfield(row, 'partner_id') && ~isempty(row.partner_id) && isnumeric(row.partner_id)
+    partner_id = row.partner_id(1);
+end
+area = '';
+if isfield(row, 'partner_area')
+    area = area_text(row.partner_area);
+end
+partner_channel = NaN;
+if isfield(row, 'partner_channel') && ~isempty(row.partner_channel) ...
+        && isnumeric(row.partner_channel)
+    partner_channel = row.partner_channel(1);
+end
+if isfinite(partner_id) && ~isempty(area) && isfinite(partner_channel)
+    label = sprintf('partner %g %s ch %g', partner_id, area, partner_channel);
+elseif isfinite(partner_id)
+    label = sprintf('partner %g', partner_id);
+else
+    label = 'partner unknown';
 end
 end
 

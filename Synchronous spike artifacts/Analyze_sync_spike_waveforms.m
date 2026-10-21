@@ -58,11 +58,12 @@ fprintf(['%d neurons. Median distance percentile %.2f. ' ...
     n_neurons, median([neuron_rows.percentile]), n_high, 0.05 * n_neurons, n_high_channel);
 for row_index = 1:n_neurons
     row = neuron_rows(row_index);
-    fprintf(['%s  pair %d  cluster %g  partner %g  %s  ch %g  ' ...
+    fprintf(['%s  pair %d  cluster %g  partner %g %s ch %g  %s  ch %g  ' ...
         'spikes %d  interval %d  sync %d  nonsync %d  ' ...
         'percentile %.3f  channel percentile %.3f  ' ...
         'extreme sample %.0f  abs percentile %.3f\n'], ...
         row.session_id, row.pair_index, row.cluster_id, row.partner_id, ...
+        row_text_field(row, 'partner_area'), row_number_field(row, 'partner_channel'), ...
         row.area, row.channel, row.n_spikes, row.n_interval, row.n_sync, row.n_nonsync, ...
         row.percentile, row.percentile_channel, ...
         row.extreme_time_samples, row.extreme_abs_percentile);
@@ -128,6 +129,8 @@ side = blank_side();
 side.ok = true;
 side.cluster_id = row.cluster_id;
 side.partner_id = row.partner_id;
+side.partner_area = row_text_field(row, 'partner_area');
+side.partner_channel = row_number_field(row, 'partner_channel');
 side.area = row.area;
 side.channel = row.channel;
 side.n_spikes = row.n_spikes;
@@ -153,6 +156,9 @@ function side = blank_side()
 side.ok = false;
 side.reason = 'missing neuron';
 side.cluster_id = NaN;
+side.partner_id = NaN;
+side.partner_area = '';
+side.partner_channel = NaN;
 side.area = '';
 side.channel = NaN;
 side.channels_kept = [];
@@ -289,4 +295,26 @@ if isfield(side, 'session_id') && ~isempty(side.session_id)
 else
     label = '';
 end
+end
+
+function text = row_text_field(row, field_name)
+text = '';
+if ~isfield(row, field_name) || isempty(row.(field_name))
+    return
+end
+value = row.(field_name);
+if exist('isstring', 'builtin') && isstring(value)
+    value = char(value(1));
+end
+if ischar(value)
+    text = strtrim(value(:).');
+end
+end
+
+function value = row_number_field(row, field_name)
+value = NaN;
+if ~isfield(row, field_name) || isempty(row.(field_name)) || ~isnumeric(row.(field_name))
+    return
+end
+value = row.(field_name)(1);
 end
