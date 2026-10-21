@@ -4,25 +4,29 @@ function session_result = GENERATE_SYNC_SPIKE_LFP_POWER(npx_data_dir, options)
 % Called by Estimate_sync_spike_lfp_power. Do not start here.
 %
 % The pairs are the same play-bout coincidences as
-% GENERATE_SYNC_SPIKE_WAVEFORMS. For each neuron the value at a spike is
-% one sample of raw-LFP power on that neuron's channel (cluster ch + 1):
+% GENERATE_SYNC_SPIKE_WAVEFORMS. For each neuron the value at a synchronous
+% spike is one sample of raw-LFP power on that neuron's channel
+% (cluster ch + 1):
 %
 %   raw = LFP_PAG on that channel, unfiltered
 %   power = abs(hilbert(double(raw))).^2
-%   power_at_spike = interp1(lfp_time, power, spike_time, 'linear', NaN)
-%   lfp_time = (1:numel(power))' / 2500
+%   sample = round(spike_time * 2500)     nearest LFP sample, time k/2500
 %
-% This is not a cut of LFP samples around the spike, and it is not the
-% 1-5 Hz delta power used for phase locking. The Hilbert transform uses
-% the whole trace; the number kept for each spike is the power at that
-% instant. The comparison pool is the spikes inside the play-bout windows,
-% the same windows used for the waveform pipeline. The observed statistic
-% is the mean of power at the synchronous spikes. Each of 500 nulls is the
-% mean of the same count of this pair's non-synchronous spikes in those
-% windows. A high percentile means the synchronous spikes sit on larger
-% raw-LFP power. Each LFP channel is read once. mean_power_nonsync is the
-% mean of every non-synchronous spike in the windows. mean_power_all is
-% the mean of every spike in the windows, including the synchronous ones.
+% This is not a cut of LFP samples around the spike, and it is not 1-5 Hz
+% delta power. The 1-5 Hz band is used only to name the phase. Phase is
+% angle(hilbert(filtfilt(b, 1, raw))) with the same FIR as the coincidence
+% pipeline: bandpassfir, order 2000, Hamming, 1-5 Hz, 2500 Hz. The angle
+% is not passed through circular_uniformize and is not rotated so that
+% peaks share one phase. Angle 0 is the positive peak of that filtered
+% oscillation, and +/- pi is the trough.
+%
+% The null is random LFP samples inside the same play-bout windows
+% [bout_start-1.5, bout_start+1] s. Each synchronous event is matched to
+% samples in the same 10-degree delta-phase bin. Samples within +/- 10 ms
+% of that pair's synchronous spikes are left out, so the event is not
+% compared with itself. A high percentile means the synchronous spikes sit
+% on larger raw-LFP power than other moments at the same delta phase.
+% Each LFP channel is read once.
 
 if nargin < 2 || isempty(options)
     options = struct();
@@ -51,53 +55,22 @@ if ~isempty(seed)
 end
 session_result.n_pairs = numel(selection.pairs);
 
-cache = power_at_spikes(npx_data_dir, selection, options);
+coefficients = delta_fir_coefficients(options);
 rows = empty_power_rows();
-for pair_index = 1:numel(selection.pairs)
-    pair = selection.pairs(pair_index);
-    sides = [1 2];
-    for side_index = 1:numel(sides)
-        if sides(side_index) == 1
-            cluster_id = pair.cluster_id_1;
-            partner_id = pair.cluster_id_2;
-            sync_index = pair.sync_index_1;
-            area = pair.area_1;
-            channel = pair.channel_1;
-            n_spikes = pair.n_spikes_1;
-        else
-            cluster_id = pair.cluster_id_2;
-            partner_id = pair.cluster_id_1;
-            sync_index = pair.sync_index_2;
-            area = pair.area_2;
-            channel = pair.channel_2;
-            n_spikes = pair.n_spikes_2;
-        end
-        neuron = neuron_by_id(selection.neurons, cluster_id);
-        power = power_by_id(cache, cluster_id);
-        if isempty(power) || isempty(neuron)
-            note = sprintf('%s cluster %g pair %d: no LFP power', ...
-                session_result.session_id, cluster_id, pair_index);
-            session_result.notes{end + 1} = note; %#ok<AGROW>
-            fprintf('  %s\n', note);
-            continue
-        end
-        local_sync = local_sync_index(sync_index, neuron.interval_index);
-        comparison = compare_sync_scalar(power, local_sync, options.n_repeats);
-        if ~comparison.ok
-            note = sprintf('%s cluster %g pair %d: %s', ...
-                session_result.session_id, cluster_id, pair_index, comparison.reason);
-            session_result.notes{end + 1} = note; %#ok<AGROW>
-            fprintf('  %s\n', note);
-            continue
-        end
-        rows = append_power_row(rows, power_row( ...
-            session_result.session_id, pair_index, cluster_id, partner_id, ...
-            area, channel, n_spikes, comparison, options.power_definition));
-        fprintf(['%s  cluster %g  interval %d  sync %d  sync power %.3g  ' ...
-            'nonsync power %.3g  percentile %.1f\n'], ...
-            session_result.session_id, cluster_id, comparison.n_pool, comparison.n_sync, ...
-            comparison.mean_sync, comparison.mean_nonsync, 100 * comparison.percentile);
-    end
+channels = unique([selection.neurons.channel]);
+for channel_index = 1:numel(channels)
+    channel = channels(channel_index);
+    started = tic;
+    raw = double(read_lfp_channel(npx_data_dir, channel, options.n_lfp_channels));
+    raw = raw(:);
+    power = abs(hilbert(raw)) .^ 2;
+    phase = angle(hilbert(filtfilt(coefficients, 1, raw)));
+    clear raw
+    fprintf('%s  LFP channel %g  %d samples  %.1f s\n', ...
+        session_result.session_id, channel, numel(power), toc(started));
+    [rows, session_result] = record_channel_pairs(rows, session_result, selection, ...
+        channel, power, phase, options);
+    clear power phase
 end
 session_result.rows = rows;
 if isempty(rows)
@@ -107,39 +80,82 @@ else
 end
 end
 
-function cache = power_at_spikes(session_dir, selection, options)
-cache = struct('cluster_id', {}, 'power', {});
-channels = unique([selection.neurons.channel]);
-for channel_index = 1:numel(channels)
-    channel = channels(channel_index);
-    started = tic;
-    raw = read_lfp_channel(session_dir, channel, options.n_lfp_channels);
-    envelope = abs(hilbert(double(raw(:))));
-    clear raw
-    power = envelope .^ 2;
-    clear envelope
-    lfp_time = (1:numel(power))' / options.lfp_sample_rate;
-    fprintf('%s  LFP channel %g  %d samples  %.1f s\n', ...
-        selection.session_id, channel, numel(power), toc(started));
-    neuron_ids = neurons_on_channel(selection.neurons, channel);
-    for neuron_index = 1:numel(neuron_ids)
-        neuron = neuron_by_id(selection.neurons, neuron_ids(neuron_index));
-        cache(end + 1).cluster_id = neuron.cluster_id; %#ok<AGROW>
-        cache(end).power = interp1(lfp_time, power, ...
-            neuron.spike_times(neuron.interval_index), 'linear', NaN);
+function [rows, session_result] = record_channel_pairs(rows, session_result, selection, ...
+    channel, power, phase, options)
+n_samples = numel(power);
+for pair_index = 1:numel(selection.pairs)
+    pair = selection.pairs(pair_index);
+    for side_index = 1:2
+        side = pair_side(pair, side_index);
+        if side.channel ~= channel
+            continue
+        end
+        neuron = neuron_by_id(selection.neurons, side.cluster_id);
+        if isempty(neuron)
+            note = sprintf('%s cluster %g pair %d: neuron missing from the selection', ...
+                session_result.session_id, side.cluster_id, pair_index);
+            session_result.notes{end + 1} = note; %#ok<AGROW>
+            fprintf('  %s\n', note);
+            continue
+        end
+        [pool_index, sync_sample] = lfp_phase_pool(n_samples, options.lfp_sample_rate, ...
+            selection.bout_starts, options.hist_range, ...
+            neuron.spike_times(side.sync_index), options.phase_guard_seconds);
+        kept = sync_sample >= 1;
+        comparison = compare_phase_matched_lfp( ...
+            power(sync_sample(kept)), phase(sync_sample(kept)), ...
+            power(pool_index), phase(pool_index), ...
+            options.n_repeats, options.n_phase_bins);
+        if ~comparison.ok
+            note = sprintf('%s cluster %g pair %d: %s', ...
+                session_result.session_id, side.cluster_id, pair_index, comparison.reason);
+            session_result.notes{end + 1} = note; %#ok<AGROW>
+            fprintf('  %s\n', note);
+            continue
+        end
+        rows = append_power_row(rows, power_row( ...
+            session_result.session_id, pair_index, side, neuron, ...
+            comparison, options.power_definition));
+        fprintf(['%s  cluster %g  interval spikes %d  sync %d  phase pool %d  ' ...
+            'sync power %.3g  phase-matched %.3g  percentile %.1f\n'], ...
+            session_result.session_id, side.cluster_id, numel(neuron.interval_index), ...
+            comparison.n_sync, comparison.n_pool, comparison.mean_sync, ...
+            comparison.mean_phase_matched, 100 * comparison.percentile);
     end
-    clear power lfp_time
 end
 end
 
-function ids = neurons_on_channel(neurons, channel)
-ids = [];
-for index = 1:numel(neurons)
-    if neurons(index).channel == channel
-        ids(end + 1) = neurons(index).cluster_id; %#ok<AGROW>
-    end
+function side = pair_side(pair, side_index)
+if side_index == 1
+    side.cluster_id = pair.cluster_id_1;
+    side.partner_id = pair.cluster_id_2;
+    side.sync_index = pair.sync_index_1;
+    side.area = pair.area_1;
+    side.channel = pair.channel_1;
+    side.n_spikes = pair.n_spikes_1;
+else
+    side.cluster_id = pair.cluster_id_2;
+    side.partner_id = pair.cluster_id_1;
+    side.sync_index = pair.sync_index_2;
+    side.area = pair.area_2;
+    side.channel = pair.channel_2;
+    side.n_spikes = pair.n_spikes_2;
 end
-ids = unique(ids);
+end
+
+function coefficients = delta_fir_coefficients(options)
+if exist('designfilt', 'file') ~= 2 && exist('designfilt', 'builtin') ~= 5
+    error('GENERATE_SYNC_SPIKE_LFP_POWER:designfilt', ...
+        'designfilt is required for the 1-5 Hz delta filter.');
+end
+    delta_filter = designfilt('bandpassfir', ...
+    'FilterOrder', options.delta_filter_order, ...
+    'CutoffFrequency1', options.delta_freq(1), ...
+    'CutoffFrequency2', options.delta_freq(2), ...
+    'SampleRate', options.lfp_sample_rate, ...
+    'DesignMethod', 'window', ...
+    'Window', 'hamming');
+coefficients = delta_filter.Coefficients;
 end
 
 function raw = read_lfp_channel(session_dir, channel, n_lfp_channels)
@@ -180,21 +196,6 @@ if count ~= n_samples
 end
 end
 
-function local = local_sync_index(sync_index, interval_index)
-[is_in, local] = ismember(sync_index(:), interval_index(:));
-local = local(is_in);
-end
-
-function power = power_by_id(cache, cluster_id)
-power = [];
-for index = 1:numel(cache)
-    if cache(index).cluster_id == cluster_id
-        power = cache(index).power;
-        return
-    end
-end
-end
-
 function neuron = neuron_by_id(neurons, cluster_id)
 neuron = [];
 for index = 1:numel(neurons)
@@ -221,26 +222,27 @@ end
 function rows = empty_power_rows()
 rows = struct('session_id', {}, 'pair_index', {}, 'cluster_id', {}, ...
     'partner_id', {}, 'area', {}, 'channel', {}, ...
-    'n_spikes', {}, 'n_interval', {}, 'n_sync', {}, 'n_nonsync', {}, ...
-    'mean_power_all', {}, 'mean_power_nonsync', {}, 'mean_power_sync', {}, ...
+    'n_spikes', {}, 'n_interval', {}, 'n_sync', {}, 'n_phase_pool', {}, ...
+    'min_phase_candidates', {}, 'phase_bin_width', {}, ...
+    'mean_power_sync', {}, 'mean_power_phase_matched', {}, ...
     'null_mean_power', {}, 'percentile', {}, 'power_definition', {});
 end
 
-function row = power_row(session_id, pair_index, cluster_id, partner_id, ...
-    area, channel, n_spikes, comparison, power_definition)
+function row = power_row(session_id, pair_index, side, neuron, comparison, power_definition)
 row.session_id = session_id;
 row.pair_index = pair_index;
-row.cluster_id = cluster_id;
-row.partner_id = partner_id;
-row.area = area;
-row.channel = channel;
-row.n_spikes = n_spikes;
-row.n_interval = comparison.n_pool;
+row.cluster_id = side.cluster_id;
+row.partner_id = side.partner_id;
+row.area = side.area;
+row.channel = side.channel;
+row.n_spikes = side.n_spikes;
+row.n_interval = numel(neuron.interval_index);
 row.n_sync = comparison.n_sync;
-row.n_nonsync = comparison.n_nonsync;
-row.mean_power_all = comparison.mean_all;
-row.mean_power_nonsync = comparison.mean_nonsync;
+row.n_phase_pool = comparison.n_pool;
+row.min_phase_candidates = comparison.min_candidates;
+row.phase_bin_width = comparison.phase_bin_width;
 row.mean_power_sync = comparison.mean_sync;
+row.mean_power_phase_matched = comparison.mean_phase_matched;
 row.null_mean_power = comparison.null_means;
 row.percentile = comparison.percentile;
 row.power_definition = power_definition;

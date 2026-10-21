@@ -2,15 +2,18 @@
 % Run this first. It loops NPX sessions, calls GENERATE_SYNC_SPIKE_LFP_POWER,
 % and saves one mat file per session. Then run Analyze_sync_spike_lfp_power.
 %
-% Power at a spike is one sample of abs(hilbert(raw LFP)).^2 on that
-% neuron's channel. The raw trace is not delta-filtered. The comparison
-% pool is the spikes inside the play-bout windows, with this pair's
-% synchronous spikes left out of the 500 draws. Pairs follow the waveform
-% sample: at least 90% of neurons with 1000 spikes in each of SC, DLPAG,
-% LPAG, VLPAG, and DR, and no extra pair among neurons already observed.
-% Each LFP channel is read once per session. Re-run with
-% RECOMPUTE_EXISTING = true so older mats, which stopped at 80 pairs, are
-% rebuilt.
+% Power at a synchronous spike is the nearest sample of
+% abs(hilbert(raw LFP)).^2 on that neuron's channel. The raw trace is not
+% delta-filtered. Phase, used only to build the null, is the analytic angle
+% of the same 1-5 Hz FIR as the coincidence pipeline. Each of 500 nulls is
+% the mean of one random LFP sample per synchronous event, drawn inside the
+% play-bout windows from the same 10-degree delta-phase bin. Samples within
+% 10 ms of that pair's synchronous spikes are left out. Pairs follow the
+% waveform sample: at least 90% of neurons with 1000 spikes in each of SC,
+% DLPAG, LPAG, VLPAG, and DR, and no extra pair among neurons already
+% observed. Each LFP channel is read once per session. Mats saved before
+% this phase-matched null still compare against other spikes. Re-run with
+% RECOMPUTE_EXISTING = true to rebuild them.
 %
 % Results:
 %   Data/Analysis results/synchronous spike waveforms/
@@ -41,9 +44,10 @@ if exist(saving_folder, 'dir') ~= 7
 end
 
 fprintf(['Synchronous-spike raw-LFP power. Seed %d. Target %.0f%% of neurons ' ...
-    'with >= %d spikes in each area. %d null draws.\n%s\n'], ...
+    'with >= %d spikes in each area. %d null draws in %d delta-phase bins.\n%s\n'], ...
     generator_options.random_seed, 100 * generator_options.min_neuron_fraction, ...
-    generator_options.min_spikes, generator_options.n_repeats, saving_folder);
+    generator_options.min_spikes, generator_options.n_repeats, ...
+    generator_options.n_phase_bins, saving_folder);
 
 animal_list = dir(npx_raw_data);
 animal_list = animal_list([animal_list.isdir]);
@@ -117,11 +121,12 @@ for file_index = 1:numel(session_files)
     if ~isfield(loaded, 'this_lfp_power')
         continue
     end
-    if ~isfield(loaded.this_lfp_power, 'n_interval') && isfield(loaded.this_lfp_power, 'rows') ...
-            && ~isempty(loaded.this_lfp_power.rows) && ~isfield(loaded.this_lfp_power.rows, 'n_interval')
+    if isfield(loaded.this_lfp_power, 'rows') && ~isempty(loaded.this_lfp_power.rows) ...
+            && ~isfield(loaded.this_lfp_power.rows, 'mean_power_phase_matched')
         warning('Estimate_sync_spike_lfp_power:oldFile', ...
-            ['%s was saved before the play-bout window sample. ' ...
-             'Set RECOMPUTE_EXISTING = true and run again to rebuild it.'], ...
+            ['%s still compares synchronous spikes with other spikes. ' ...
+             'Set RECOMPUTE_EXISTING = true and run again so the null is ' ...
+             'phase-matched LFP inside the play-bout windows.'], ...
             session_path);
     end
     if ~isfield(loaded.this_lfp_power, 'coverage') || isempty(loaded.this_lfp_power.coverage)

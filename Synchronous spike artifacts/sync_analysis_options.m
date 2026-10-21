@@ -36,11 +36,17 @@ options = fill_option(options, 'min_spike_scale', 1);
 options = fill_option(options, 'max_first_load_seconds', 600);
 options = fill_option(options, 'lfp_sample_rate', 2500);
 options = fill_option(options, 'n_lfp_channels', 384);
+options = fill_option(options, 'delta_freq', [1 5]);
+options = fill_option(options, 'delta_filter_order', 2000);
+options = fill_option(options, 'n_phase_bins', 36);
+options = fill_option(options, 'phase_guard_seconds', 0.01);
 options = fill_option(options, 'raw_folders_file', fullfile(options.data_root, ...
     'NPX data', 'NPX_raw_data_folders.xlsx'));
 options = fill_option(options, 'power_definition', ...
-    ['square of the Hilbert envelope of unfiltered LFP_PAG, ' ...
-     'one sample interpolated at each spike time']);
+    ['square of the Hilbert envelope of unfiltered LFP_PAG, the nearest ' ...
+     'sample at each synchronous spike. The null is random LFP samples ' ...
+     'inside the same play-bout windows whose 1-5 Hz delta phase falls in ' ...
+     'the same 10-degree bin, excluding 10 ms around those spikes']);
 end
 
 function options = fill_option(options, name, value)

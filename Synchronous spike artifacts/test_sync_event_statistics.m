@@ -1,7 +1,7 @@
 function test_sync_event_statistics()
 %TEST_SYNC_EVENT_STATISTICS  Checks that do not need the experiment file system.
 %
-% Coincidence mask, pair caps, waveform distance, raw-power percentile,
+% Coincidence mask, pair caps, waveform distance, phase-matched LFP power,
 % and continuous-file choice. Run this file by name after add_repo_paths.
 
 this_dir = fileparts(mfilename('fullpath'));
@@ -83,6 +83,44 @@ assert(low_power.ok && low_power.percentile <= 0.05, ...
     'Low synchronous values were not below the null.');
 blocked = compare_sync_scalar(ones(20, 1), 1:20, 10);
 assert(~blocked.ok, 'A neuron with no non-synchronous spikes should be skipped.');
+
+phase_options = sync_analysis_options();
+assert(isequal(phase_options.delta_freq, [1 5]), 'Delta band is not 1-5 Hz.');
+assert(phase_options.delta_filter_order == 2000, 'Delta FIR order is not 2000.');
+assert(phase_options.n_phase_bins == 36, 'Delta phase is not split into 36 bins.');
+assert(phase_options.phase_guard_seconds == 0.01, 'The phase guard is not 10 ms.');
+matched_phase = 0.05 * ones(80, 1);
+other_phase = (pi - 0.05) * ones(80, 1);
+pool_phase = [matched_phase; other_phase];
+pool_power = [ones(80, 1); 50 * ones(80, 1)];
+high_phase = compare_phase_matched_lfp(10 * ones(20, 1), 0.05 * ones(20, 1), ...
+    pool_power, pool_phase, 40, 36);
+assert(high_phase.ok, high_phase.reason);
+assert(all(abs(high_phase.null_means - 1) < 1e-12), ...
+    'The phase-matched null used LFP from a different delta phase.');
+assert(high_phase.percentile == 1, ...
+    'Synchronous power above the matched phase was not percentile 1.');
+assert(abs(high_phase.mean_phase_matched - 1) < 1e-12, ...
+    'The phase-matched mean included the other phase bin.');
+assert(high_phase.min_candidates == 80 && high_phase.n_pool == 160, ...
+    'The phase pool count is not the full window sample.');
+low_phase = compare_phase_matched_lfp(zeros(20, 1), 0.05 * ones(20, 1), ...
+    pool_power, pool_phase, 40, 36);
+assert(low_phase.ok && low_phase.percentile == 0, ...
+    'Synchronous power below the matched phase was not percentile 0.');
+empty_phase = compare_phase_matched_lfp(10, pi / 2, pool_power, pool_phase, 10, 36);
+assert(~empty_phase.ok, 'A synchronous phase with no pool samples was accepted.');
+trough = compare_phase_matched_lfp(10, pi, 1, -pi, 5, 36);
+assert(trough.ok && abs(trough.mean_phase_matched - 1) < 1e-12, ...
+    '+pi and -pi were treated as different delta phases.');
+same_peak = compare_phase_matched_lfp(4, 0, 2, 0.05, 5, 36);
+assert(same_peak.ok && abs(same_peak.mean_phase_matched - 2) < 1e-12, ...
+    'Phase 0 and a sample 0.05 rad later fell in different bins.');
+[pool_index, sync_sample] = lfp_phase_pool(100, 10, 5, [-1 1], [5; 0; 20], 0.1);
+assert(sync_sample(1) == 50 && sync_sample(2) == 0 && sync_sample(3) == 0, ...
+    'Synchronous spikes were not mapped to the nearest in-trace LFP sample.');
+assert(isequal(pool_index(:), [40:48, 52:60]'), ...
+    'The phase pool is not the bout window with 10 ms around the event removed.');
 
 time_samples = -20:10;
 [~, peak_at] = ismember(0, time_samples);
