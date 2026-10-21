@@ -215,6 +215,7 @@ assert(abs(summary.ci_high(2) - (0.5 + half_width)) < 1e-12, ...
 
 check_location_lookup();
 check_spatial_range();
+check_spatial_stack();
 fprintf('Synchronous-event statistic checks passed.\n');
 end
 
@@ -372,4 +373,30 @@ function delete_if_present(path)
 if exist(path, 'file') == 2
     delete(path);
 end
+end
+
+function check_spatial_stack()
+local = {[-20; 0; 40], [1; 4; 1]};
+flat = {[-20; 0; 40], [2; 2; 2]};
+summary = spatial_range_stack({local{1}, flat{1}}, {local{2}, flat{2}}, -40:20:40);
+assert(summary.n == 2, 'Both spatial profiles should enter the stack.');
+center = summary.centers == 0;
+assert(abs(summary.mean_range(center) - 1) < 1e-12, ...
+    'The mean range at the neuron channel is not 1.');
+side = summary.centers == -20;
+assert(abs(summary.mean_range(side) - 0.625) < 1e-12, ...
+    'The mean of the normalized side channels is wrong.');
+local_row = summary.normalized(:, summary.centers == 40) == 0.25;
+assert(any(local_row) && abs(summary.normalized(local_row, center) - 1) < 1e-12, ...
+    'The local profile was not divided by the range at its own channel.');
+dropped = spatial_range_stack({0}, {0}, -40:20:40);
+assert(dropped.n == 0, 'A flat neuron channel stayed in the spatial stack.');
+times = [9 + (0:24)' * 0.05; 100 + (0:9)'];
+samples = (1:numel(times))';
+picked = template_spike_samples(times, samples, 10, [-1.5 1], 5, 20);
+assert(numel(picked) == 5 && all(picked <= 25), ...
+    'The template did not keep evenly spaced spikes from the play-bout windows.');
+few = template_spike_samples(times(1:10), samples(1:10), 10, [-1.5 1], 100, 20);
+assert(numel(few) == 10, ...
+    'A short train was replaced when it had fewer than the window minimum.');
 end

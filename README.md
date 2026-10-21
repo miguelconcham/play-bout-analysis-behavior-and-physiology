@@ -73,6 +73,8 @@ play bout analysis behavior and physiology/
 │   ├── Plot_sync_spike_acg_and_waveforms.m  # Profile, autocorrelogram, spatial range
 │   ├── sync_waveform_spatial_range.m   # Peak-to-peak versus signed probe distance
 │   ├── normalized_acg_stack.m          # Normalized autocorrelograms and their mean CI
+│   ├── spatial_range_stack.m           # Normalized inverted-U profiles and their mean CI
+│   ├── template_spike_samples.m        # Spikes used for good units outside the pairs
 │   ├── read_npx_channel_geometry.m     # x,y in um from chann_map_PAG.mat
 │   ├── GENERATE_SYNC_SPIKE_LFP_POWER.m
 │   ├── compare_phase_matched_lfp.m    # Null: same-window LFP at the same delta phase

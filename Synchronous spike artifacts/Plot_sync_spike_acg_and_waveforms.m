@@ -1,6 +1,7 @@
 %% Waveform profile and autocorrelogram of the extracted synchronous spikes
 % Run this after Estimate_sync_spike_waveforms. It does not repeat the
-% 500 null draws and it does not read the continuous file again.
+% 500 null draws. Paired neurons reuse the saved synchronous mean. Other
+% good units are read from the continuous file, at most 100 spikes each.
 %
 % The waveform is the saved synchronous mean, drawn on every channel that
 % was kept, low channel at the bottom. The non-synchronous in-window mean
@@ -19,8 +20,10 @@
 %
 % One figure per session, six pairs per figure. Each pair is one row:
 % neuron 1 waveform, neuron 1 spatial range, neuron 1 autocorrelogram,
-% then the same three panels for neuron 2. The normalized stack is one
-% figure for every neuron that had at least one spike pair.
+% then the same three panels for neuron 2. The normalized autocorrelogram
+% stack is one figure for every neuron that had at least one spike pair.
+% The spatial stack is a separate figure and includes every good unit in
+% the five areas, not only the neurons drawn in the pair panels.
 
 repo_root = fileparts(fileparts(mfilename('fullpath')));
 if ~isempty(repo_root)
@@ -30,6 +33,9 @@ end
 acg_window = [-0.05 0.05];
 acg_bin = 0.001;
 pairs_per_figure = 6;
+template_max_spikes = 100;
+template_min_in_window = 20;
+spatial_distance_um = -400:20:400;
 
 data_root = sync_analysis_options().data_root;
 saving_folder = fullfile(data_root, 'Analysis results', 'synchronous spike waveforms');
@@ -62,12 +68,16 @@ end
 
 session_ids = unique({neuron_rows.session_id}, 'stable');
 neuron_spikes = empty_neuron_spikes();
+spatial_profiles = empty_spatial_profiles();
 for session_index = 1:numel(session_ids)
     session_id = session_ids{session_index};
     session_rows = neuron_rows(strcmp({neuron_rows.session_id}, session_id));
     [trains, bout_starts, time_options] = load_session_trains( ...
         npx_raw_data, session_id, session_rows(1));
     geometry = load_channel_geometry(npx_raw_data, session_id);
+    spatial_profiles = append_spatial_profiles(spatial_profiles, ...
+        collect_session_profiles(session_id, session_rows, trains, bout_starts, ...
+        geometry, time_options, template_max_spikes, template_min_in_window));
     pair_ids = unique([session_rows.pair_index], 'stable');
     n_figures = ceil(numel(pair_ids) / pairs_per_figure);
     for figure_index = 1:n_figures
@@ -106,6 +116,7 @@ for session_index = 1:numel(session_ids)
 end
 [acg_centers, acg_counts] = neuron_acg_counts(neuron_spikes, acg_window, acg_bin);
 draw_normalized_acg_figure(acg_centers, acg_counts, acg_window);
+draw_spatial_stack_figure(spatial_profiles, spatial_distance_um);
 
 function rows = attach_plot_options(rows, session_result)
 if ~isfield(session_result, 'options')
@@ -339,6 +350,262 @@ xlim(acg_window);
 xlabel('Lag (s)')
 ylabel('Fraction of spike pairs')
 title(sprintf('Mean normalized autocorrelogram, 95%% CI, n = %d', summary.n));
+box off
+end
+
+function profiles = empty_spatial_profiles()
+profiles = struct('session_id', {}, 'cluster_id', {}, 'distance_um', {}, 'range', {});
+end
+
+function profiles = append_spatial_profiles(profiles, more)
+if isempty(more)
+    return
+end
+if isempty(profiles)
+    profiles = more;
+    return
+end
+profiles = [profiles, more];
+end
+
+function profiles = collect_session_profiles(session_id, session_rows, trains, ...
+    bout_starts, geometry, time_options, max_spikes, min_in_window)
+profiles = empty_spatial_profiles();
+if isempty(geometry)
+    return
+end
+saved_ids = [];
+if ~isempty(session_rows) && isfield(session_rows, 'cluster_id')
+    saved_ids = [session_rows.cluster_id];
+end
+n_paired = 0;
+for index = 1:numel(saved_ids)
+    cluster_id = saved_ids(index);
+    if index > 1 && any(saved_ids(1:index - 1) == cluster_id)
+        continue
+    end
+    members = session_rows([session_rows.cluster_id] == cluster_id);
+    [distance_um, range] = profile_from_saved(members, geometry);
+    if isempty(distance_um)
+        continue
+    end
+    profiles = add_spatial_profile(profiles, session_id, cluster_id, distance_um, range);
+    n_paired = n_paired + 1;
+end
+[n_other, n_skipped] = add_other_neurons(profiles, session_id, session_rows, trains, ...
+    saved_ids, bout_starts, geometry, time_options, max_spikes, min_in_window);
+profiles = n_other.profiles;
+fprintf(['%s  spatial stack  %d paired neurons  %d other good units  ' ...
+    '%d skipped\n'], session_id, n_paired, n_other.n_added, n_skipped);
+end
+
+function [added, n_skipped] = add_other_neurons(profiles, session_id, session_rows, trains, ...
+    saved_ids, bout_starts, geometry, time_options, max_spikes, min_in_window)
+added.profiles = profiles;
+added.n_added = 0;
+n_skipped = 0;
+if isempty(trains)
+    return
+end
+missing = true(1, numel(trains));
+for index = 1:numel(trains)
+    if any(saved_ids == trains(index).cluster_id)
+        missing(index) = false;
+    end
+end
+if ~any(missing)
+    return
+end
+continuous_file = session_continuous_file(session_rows, session_id, time_options, ...
+    trains(find(missing, 1)));
+if isempty(continuous_file)
+    n_skipped = sum(missing);
+    warning('Plot_sync_spike_acg_and_waveforms:continuous', ...
+        ['%s  %d good units outside the pairs were left out of the spatial ' ...
+         'stack because the continuous file was not available.'], ...
+        session_id, n_skipped);
+    return
+end
+for index = find(missing)
+    try
+        [distance_um, range] = profile_from_continuous(trains(index), bout_starts, ...
+            geometry, time_options, continuous_file, max_spikes, min_in_window);
+    catch read_error
+        n_skipped = n_skipped + 1;
+        warning('Plot_sync_spike_acg_and_waveforms:template', ...
+            '%s cluster %g waveform was not read (%s).', ...
+            session_id, trains(index).cluster_id, read_error.message);
+        continue
+    end
+    if isempty(distance_um)
+        n_skipped = n_skipped + 1;
+        continue
+    end
+    added.profiles = add_spatial_profile(added.profiles, session_id, ...
+        trains(index).cluster_id, distance_um, range);
+    added.n_added = added.n_added + 1;
+end
+end
+
+function [distance_um, range] = profile_from_saved(members, geometry)
+distance_um = [];
+range = [];
+for index = 1:numel(members)
+    row = members(index);
+    if ~isfield(row, 'sync_mean') || isempty(row.sync_mean) ...
+            || ~isfield(row, 'channels_kept') || isempty(row.channels_kept)
+        continue
+    end
+    profile = sync_waveform_spatial_range(row.channels_kept, row.sync_mean, ...
+        row.channel, geometry.chan_map, geometry.xcoords, geometry.ycoords);
+    distance_um = [distance_um; profile.distance_um(:)]; %#ok<AGROW>
+    range = [range; profile.range(:)]; %#ok<AGROW>
+end
+end
+
+function [distance_um, range] = profile_from_continuous(neuron, bout_starts, ...
+    geometry, time_options, continuous_file, max_spikes, min_in_window)
+distance_um = [];
+range = [];
+samples = template_spike_samples(neuron.spike_times, neuron.spike_samples, ...
+    bout_starts, time_options.hist_range, max_spikes, min_in_window);
+if isempty(samples)
+    return
+end
+[waveforms, channels_kept, time_samples] = load_waveforms_from_continuous( ...
+    continuous_file, samples, neuron.channel, time_options.channel_range, ...
+    'NChannels', time_options.n_ap_channels, ...
+    'SamplesBefore', time_options.samples_before, ...
+    'SamplesAfter', time_options.samples_after);
+waveforms = center_waveform_snippets(waveforms, time_samples);
+profile = sync_waveform_spatial_range(channels_kept, mean_waveform_pages(waveforms), ...
+    neuron.channel, geometry.chan_map, geometry.xcoords, geometry.ycoords);
+distance_um = profile.distance_um(:);
+range = profile.range(:);
+end
+
+function mean_wf = mean_waveform_pages(waveforms)
+n_channels = size(waveforms, 2);
+n_times = size(waveforms, 3);
+mean_wf = nan(n_channels, n_times);
+for channel_index = 1:n_channels
+    traces = reshape(waveforms(:, channel_index, :), size(waveforms, 1), n_times);
+    for time_index = 1:n_times
+        values = traces(:, time_index);
+        values = values(isfinite(values));
+        if ~isempty(values)
+            mean_wf(channel_index, time_index) = mean(values);
+        end
+    end
+end
+end
+
+function text = path_text(value)
+text = '';
+if exist('isstring', 'builtin') && isstring(value)
+    value = char(value);
+end
+if ischar(value)
+    text = strtrim(value);
+end
+end
+
+function path = session_continuous_file(session_rows, session_id, time_options, example_neuron)
+path = '';
+if ~isempty(session_rows) && isfield(session_rows, 'continuous_file')
+    for index = 1:numel(session_rows)
+        candidate = path_text(session_rows(index).continuous_file);
+        if ~isempty(candidate) && exist(candidate, 'file') == 2
+            path = candidate;
+            return
+        end
+    end
+end
+try
+    candidates = read_npx_continuous_locations(time_options.raw_folders_file, session_id);
+    choice.min_scale = time_options.min_spike_scale;
+    choice.n_channels = time_options.n_ap_channels;
+    choice.n_check = time_options.n_check_spikes;
+    choice.samples_before = time_options.samples_before;
+    choice.samples_after = time_options.samples_after;
+    path = choose_continuous_file(candidates, example_neuron.spike_samples, ...
+        example_neuron.channel, time_options.channel_range, choice);
+catch
+    path = '';
+end
+end
+
+function profiles = add_spatial_profile(profiles, session_id, cluster_id, distance_um, range)
+profiles(end + 1).session_id = session_id; %#ok<AGROW>
+profiles(end).cluster_id = cluster_id;
+profiles(end).distance_um = distance_um(:);
+profiles(end).range = range(:);
+end
+
+function draw_spatial_stack_figure(profiles, centers)
+if isempty(profiles)
+    warning('Plot_sync_spike_acg_and_waveforms:spatial', ...
+        'No spatial profiles were available for the inverted-U stack.');
+    return
+end
+distances = cell(1, numel(profiles));
+ranges = cell(1, numel(profiles));
+for index = 1:numel(profiles)
+    distances{index} = profiles(index).distance_um;
+    ranges{index} = profiles(index).range;
+end
+summary = spatial_range_stack(distances, ranges, centers);
+if summary.n < 1
+    warning('Plot_sync_spike_acg_and_waveforms:spatial', ...
+        'No neuron had a usable range on its own channel.');
+    return
+end
+used = any(isfinite(summary.normalized), 1) | any(isfinite(summary.mean_range));
+if ~any(used)
+    return
+end
+centers = summary.centers(used);
+normalized = summary.normalized(:, used);
+mean_range = summary.mean_range(used);
+ci_low = summary.ci_low(used);
+ci_high = summary.ci_high(used);
+span = max(abs(centers));
+if ~isfinite(span) || span == 0
+    span = 1;
+end
+figure('Color', 'w', 'Name', 'Normalized spatial range', ...
+    'Position', [120 40 760 860]);
+subplot(2, 1, 1);
+image_handle = imagesc(centers, 1:summary.n, normalized);
+set(image_handle, 'AlphaData', double(isfinite(normalized)));
+set(gca, 'YDir', 'reverse');
+xlim(span * [-1.05 1.05]);
+xlabel('Distance from neuron channel (\mum)')
+ylabel('Neuron, sorted by peak distance')
+title(sprintf('Range / range at the neuron channel, %d neurons', summary.n));
+color_bar = colorbar;
+ylabel(color_bar, 'Normalized range');
+color_peak = max(normalized(isfinite(normalized)));
+if isempty(color_peak) || ~isfinite(color_peak) || color_peak < 1
+    color_peak = 1;
+elseif color_peak > 2
+    color_peak = 2;
+end
+caxis([0 color_peak]);
+box off
+
+subplot(2, 1, 2);
+hold on
+for row_index = 1:summary.n
+    plot(centers, normalized(row_index, :), 'Color', [0.85 0.55 0.55], 'LineWidth', 0.4);
+end
+fill([centers, fliplr(centers)], [ci_low, fliplr(ci_high)], ...
+    [0.85 0.1 0.1], 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+plot(centers, mean_range, 'Color', [0.85 0.1 0.1], 'LineWidth', 2);
+xlim(span * [-1.05 1.05]);
+xlabel('Distance from neuron channel (\mum)')
+ylabel('Range / range at the neuron channel')
+title(sprintf('Mean spatial range, 95%% CI, n = %d', summary.n));
 box off
 end
 
