@@ -180,10 +180,54 @@ results = run_behavior_aligned_kcsd_from_root(
 )
 ```
 
-Notebook users can open `CSD_1D_general.ipynb` and run all cells under
-**Section C: Behavior/play-bout onset and offset (self-locating)**. That
-section searches both experimentFS hostnames and does not depend on Jupyter's
-current working directory.
+Notebook users can open `CSD_1D_general.ipynb`. Every cell starts with a
+code (`0B`, `A2`, `C7`, …). Section C searches both experimentFS hostnames
+and does not depend on Jupyter's current working directory. For the
+animal-level play bouts and categories, run **C2**, then **C3**, then **C7**.
+
+For play bouts and the play, aggression, and exploration categories, sessions
+from the same implanted animal can be combined before kCSD.
+`estimate_animal_pooled_kcsd` reads each session's trials, weights that
+session's PSTH by its trial count, and fits kCSD once to the pooled PSTH.
+A session with more trials therefore counts more, which is the same result
+as concatenating the trials and then averaging. Individual behaviors are not
+pooled. When electrode depths differ between days, each probe column is
+aligned only inside the depth range present in every session. The pooled PSTH and its kCSD matrices stay under
+`animal_pooled/category/<play|aggression|exploration>/onset|offset/<animal>/`
+and `animal_pooled/play_bout/all/onset|offset/<animal>/`, in
+`csd_1d_onset_baseline/`. Each of those leaves is one animal: the sessions
+for that animal are already averaged, so there is not a separate image per
+recording.
+
+The averaged images are copied under the existing figure folder, in their
+own section. Because the recordings are already merged, the two views are
+`by_animal` and `by_behavior`, each split into onset and offset:
+
+```text
+sorted_figures/animal_pooling/
+  by_animal/onset/Batch1RatA2__category__play__NPX1__xmean.png
+  by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png
+  figure_index.csv
+```
+
+`sorted_figures/by_session` remains the per-recording analysis. Rebuilding
+those session copies does not delete `animal_pooling`. Notebook cell **C7**
+writes the animal-pooling copies. Cell **C17** rebuilds only those copies
+when the PNGs already exist.
+
+The matrix behind each averaged image is saved as `csd_mean_columns.npy`
+in the same `csd_1d_onset_baseline/` folder, with `y_mean_columns.npy` and
+`time_mean_columns.npy`. Cell **C19** redraws `kcsd_xmean.png` from those
+files with a color scale you choose. It does not estimate kCSD again.
+
+```python
+from behavior_aligned_kcsd import (
+    estimate_animal_pooled_kcsd,
+    organize_animal_pooled_figures,
+)
+estimate_animal_pooled_kcsd(r"...\behavior aligned CSD")
+organize_animal_pooled_figures(r"...\behavior aligned CSD")
+```
 
 Defaults are raw LFP, no rereference, −1000…+2000 ms response epochs, onset
 baseline −1000…0 ms, and the same spatial kCSD parameters as the delta
@@ -214,8 +258,8 @@ removed by default. Averaged outputs include `csd_mean_columns.npy`,
 
 ### Sorted figure copies
 
-If per-column kCSD matrices are already saved, do **not** rerun kCSD. Run the
-final Section C notebook cell, which first averages the existing matrices:
+If per-column kCSD matrices are already saved, do **not** rerun kCSD. Run
+notebook cell **C9**, which first averages the existing matrices:
 
 ```python
 from behavior_aligned_kcsd import (

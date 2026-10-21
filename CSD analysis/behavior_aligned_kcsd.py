@@ -24,6 +24,11 @@ Alignment folders may occur anywhere below a root, for example:
 
 Discovery replaces the ``onset`` path component with ``offset``, so behavior
 and play-bout datasets use exactly the same processing code.
+
+``estimate_animal_pooled_kcsd`` is separate from that per-session run. It
+concatenates trials from sessions of the same animal for play bouts and the
+play, aggression, and exploration categories, forms the trial-weighted PSTH,
+and only then estimates kCSD.
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from scipy.interpolate import interp1d
 
+from area_csd_consistency import animal_key_from_session
 from csd_1d_pipeline import (
     DELTA_CSD_DEFAULTS,
     DatasetConfig,
@@ -72,6 +78,14 @@ BEHAVIOR_ALIGNED_CSD_DEFAULTS: Dict[str, Any] = {
     "save_column_plots": False,
     "save_mean_plot": True,
 }
+
+ANIMAL_POOLED_FOLDER = "animal_pooled"
+ANIMAL_POOLED_DATASETS = (
+    ("category", "play"),
+    ("category", "aggression"),
+    ("category", "exploration"),
+    ("play_bout", "all"),
+)
 
 
 def _load_event_ids(folder: PathLike) -> Optional[np.ndarray]:
@@ -817,6 +831,10 @@ def discover_behavior_aligned_pairs(root: PathLike) -> List[Dict[str, str]]:
         if not required.issubset(filenames):
             continue
         rel_parts = list(os.path.relpath(dirpath, root).split(os.sep))
+        # Animal-level PSTHs are written back under this root. They are not
+        # another session and must not be estimated or averaged again.
+        if ANIMAL_POOLED_FOLDER in rel_parts:
+            continue
         onset_positions = [i for i, part in enumerate(rel_parts) if part == "onset"]
         if not onset_positions:
             continue
@@ -857,8 +875,9 @@ def organize_behavior_aligned_figures(
     """
     Copy every behavior kCSD PNG into session-first and behavior-first views.
 
-    Original figures are never changed. With ``refresh=True``, only the
-    generated ``sorted_figures`` folder is rebuilt, preventing stale copies.
+    Original figures are never changed. With ``refresh=True``, the per-session
+    ``by_session`` and ``by_behavior`` copies are rebuilt. ``animal_pooling``
+    is left in place because that folder holds the merged-animal figures.
     """
     root = os.path.abspath(os.fspath(root))
     pairs = discover_behavior_aligned_pairs(root)
@@ -869,8 +888,11 @@ def organize_behavior_aligned_figures(
 
     output_root = os.path.join(root, output_folder_name)
     if refresh and os.path.isdir(output_root):
-        shutil.rmtree(output_root)
-    os.makedirs(output_root, exist_ok=True)
+        # Keep sorted_figures/animal_pooling. That view is the merged-animal
+        # analysis, and refreshing the per-session copies must not remove it.
+        for name in ("by_session", "by_behavior", "figure_index.csv"):
+            _remove_figure_entry(os.path.join(output_root, name))
+    _ensure_directory(output_root)
 
     rows: List[Dict[str, str]] = []
     destinations: Dict[str, str] = {}
@@ -950,7 +972,7 @@ def organize_behavior_aligned_figures(
                             f"{prior_source} and {source} both map to {destination}"
                         )
                     destinations[destination] = source
-                    os.makedirs(os.path.dirname(destination), exist_ok=True)
+                    _ensure_directory(os.path.dirname(destination))
                     shutil.copy2(source, destination)
                     print(
                         f"    Saved sorted copy: "
@@ -1007,6 +1029,381 @@ def organize_behavior_aligned_figures(
         "n_copies": 2 * len(rows),
         "missing_figure_folders": missing_figure_folders,
     }
+
+
+def _remove_figure_entry(path: str) -> None:
+    """Delete one sorted-figure file or folder, overwriting if delete is denied."""
+    if not os.path.lexists(path):
+        return
+    try:
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+    except OSError as exc:
+        print(
+            f"Could not delete {path}: {exc}. "
+            "Existing figure copies will be overwritten.",
+            flush=True,
+        )
+
+
+def _directory_is_usable(path: str) -> bool:
+    """True when ``path`` can be used as a folder, including on a lagging share."""
+    if os.path.isdir(path):
+        return True
+    try:
+        os.listdir(path)
+    except OSError:
+        return False
+    return True
+
+
+def _ensure_directory(path: str) -> None:
+    """
+    Create ``path`` and its parents.
+
+    experimentFS can raise WinError 183 from ``mkdir`` while ``isdir`` is still
+    false. The folder is usable when listing it succeeds.
+    """
+    last_error: Optional[OSError] = None
+    for _attempt in range(3):
+        try:
+            os.makedirs(path, exist_ok=True)
+            return
+        except OSError as exc:
+            last_error = exc
+            winerror = getattr(exc, "winerror", None)
+            already_exists = isinstance(exc, FileExistsError) or winerror in {17, 183}
+            if not already_exists:
+                raise
+            if _directory_is_usable(path):
+                return
+    if _directory_is_usable(path):
+        return
+    if last_error is not None:
+        raise last_error
+    raise FileExistsError(path)
+
+
+def organize_animal_pooled_figures(
+    root: PathLike,
+    *,
+    pooled_folder_name: str = ANIMAL_POOLED_FOLDER,
+    sorted_folder_name: str = "sorted_figures",
+    output_folder_name: str = "animal_pooling",
+    csd_output_subdir: str = "csd_1d_onset_baseline",
+    refresh: bool = True,
+    missing_ok: bool = False,
+) -> Dict[str, Any]:
+    """
+    Copy one merged-animal kCSD PNG per animal into ``sorted_figures/animal_pooling``.
+
+    Sessions of one animal are already averaged, so each file is one animal.
+    The two views are ``by_animal`` and ``by_behavior``, each split into
+    onset and offset:
+
+    ``sorted_figures/animal_pooling/by_animal/onset/Batch1RatA2__category__play__NPX1__xmean.png``
+    ``sorted_figures/animal_pooling/by_behavior/onset/category__play__Batch1RatA2__NPX1__xmean.png``
+    """
+    root = os.path.abspath(os.fspath(root))
+    pooled_root = os.path.join(root, pooled_folder_name)
+    if not os.path.isdir(pooled_root):
+        raise FileNotFoundError(
+            f"No animal-pooled results at {pooled_root}. Run "
+            "estimate_animal_pooled_kcsd first."
+        )
+
+    stale_copies = os.path.join(pooled_root, sorted_folder_name)
+    if os.path.isdir(stale_copies):
+        print(
+            f"Removing figure copies stored under {stale_copies}. "
+            "Merged-animal figures now go to "
+            f"{os.path.join(root, sorted_folder_name, output_folder_name)}.",
+            flush=True,
+        )
+        _remove_figure_entry(stale_copies)
+
+    figure_dirs: List[str] = []
+    for dirpath, _dirnames, filenames in os.walk(pooled_root):
+        relative = os.path.relpath(dirpath, pooled_root).split(os.sep)
+        if sorted_folder_name in relative or output_folder_name in relative:
+            continue
+        if (
+            relative[-1] == "figures"
+            and len(relative) >= 2
+            and relative[-2] == csd_output_subdir
+            and any(name.lower().endswith(".png") and name.startswith("kcsd_x") for name in filenames)
+        ):
+            figure_dirs.append(dirpath)
+    figure_dirs.sort()
+
+    output_root = os.path.join(root, sorted_folder_name, output_folder_name)
+    if not figure_dirs:
+        message = (
+            f"No animal-pooled kCSD PNGs under {pooled_root}. "
+            "Estimation may have been run with save_plots=False."
+        )
+        if missing_ok:
+            print(message, flush=True)
+            return {
+                "output_root": output_root,
+                "index_path": None,
+                "n_source_figures": 0,
+                "n_copies": 0,
+            }
+        raise FileNotFoundError(message)
+
+    # Keep this folder. Deleting and recreating it on experimentFS raises
+    # WinError 183 even when the directory is already there.
+    _ensure_directory(output_root)
+    if refresh:
+        for name in ("by_animal", "by_behavior", "figure_index.csv"):
+            _remove_figure_entry(os.path.join(output_root, name))
+
+    rows: List[Dict[str, str]] = []
+    destinations: Dict[str, str] = {}
+    print(
+        f"Copying animal-pooled kCSD figures from {len(figure_dirs)} "
+        f"folders into {output_root}",
+        flush=True,
+    )
+    for figure_dir in figure_dirs:
+        relative = os.path.relpath(figure_dir, pooled_root).split(os.sep)
+        leaf = relative[:-2]
+        if len(leaf) not in (4, 5) or leaf[2] not in {"onset", "offset"}:
+            print(f"  Skipping unrecognized figure folder: {figure_dir}", flush=True)
+            continue
+        scope, behavior, alignment, animal = leaf[:4]
+        probe = leaf[4] if len(leaf) == 5 else "NPX1"
+        all_figure_names = sorted(
+            name
+            for name in os.listdir(figure_dir)
+            if name.lower().endswith(".png") and name.startswith("kcsd_x")
+        )
+        if "kcsd_xmean.png" in all_figure_names:
+            figure_names = ["kcsd_xmean.png"]
+        else:
+            figure_names = all_figure_names
+        safe_scope = _safe_figure_name_part(scope)
+        safe_behavior = _safe_figure_name_part(behavior)
+        safe_animal = _safe_figure_name_part(animal)
+        safe_probe = _safe_figure_name_part(probe)
+        for figure_name in figure_names:
+            source = os.path.join(figure_dir, figure_name)
+            xpos = _safe_figure_name_part(
+                os.path.splitext(figure_name)[0].removeprefix("kcsd_")
+            )
+            animal_name = (
+                f"{safe_animal}__{safe_scope}__{safe_behavior}__"
+                f"{safe_probe}__{xpos}.png"
+            )
+            behavior_name = (
+                f"{safe_scope}__{safe_behavior}__{safe_animal}__"
+                f"{safe_probe}__{xpos}.png"
+            )
+            by_animal = os.path.join(output_root, "by_animal", alignment, animal_name)
+            by_behavior = os.path.join(
+                output_root, "by_behavior", alignment, behavior_name
+            )
+            for destination in (by_animal, by_behavior):
+                prior_source = destinations.get(destination)
+                if prior_source is not None and prior_source != source:
+                    raise RuntimeError(
+                        "Figure-name collision: "
+                        f"{prior_source} and {source} both map to {destination}"
+                    )
+                destinations[destination] = source
+                _ensure_directory(os.path.dirname(destination))
+                shutil.copy2(source, destination)
+                print(
+                    f"    Saved sorted copy: "
+                    f"{os.path.relpath(destination, output_root)}",
+                    flush=True,
+                )
+            rows.append(
+                {
+                    "alignment": alignment,
+                    "scope": scope,
+                    "behavior": behavior,
+                    "animal": animal,
+                    "probe": probe,
+                    "xpos": xpos,
+                    "original_file": os.path.relpath(source, root),
+                    "by_animal_file": os.path.relpath(by_animal, root),
+                    "by_behavior_file": os.path.relpath(by_behavior, root),
+                }
+            )
+
+    index_path = os.path.join(output_root, "figure_index.csv")
+    fieldnames = [
+        "alignment",
+        "scope",
+        "behavior",
+        "animal",
+        "probe",
+        "xpos",
+        "original_file",
+        "by_animal_file",
+        "by_behavior_file",
+    ]
+    with open(index_path, "w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(
+        f"Animal-pooled figure sorting complete: {len(rows)} source PNGs, "
+        f"{2 * len(rows)} copies, index={index_path}",
+        flush=True,
+    )
+    return {
+        "output_root": output_root,
+        "index_path": index_path,
+        "n_source_figures": len(rows),
+        "n_copies": 2 * len(rows),
+    }
+
+
+def _resolve_color_limit(
+    color_limit: Union[float, Tuple[float, float], None],
+    observed_abs_max: float,
+) -> Tuple[float, float]:
+    """Turn a user limit into ``(vmin, vmax)``. ``None`` uses one shared ±max."""
+    if color_limit is None:
+        limit = float(observed_abs_max)
+        if not np.isfinite(limit) or limit <= 0:
+            limit = 1.0
+        return (-limit, limit)
+    if isinstance(color_limit, (int, float, np.floating)):
+        limit = abs(float(color_limit))
+        if not np.isfinite(limit) or limit <= 0:
+            raise ValueError("color_limit must be a positive number or (vmin, vmax)")
+        return (-limit, limit)
+    if len(color_limit) != 2:
+        raise ValueError("color_limit must be a positive number or (vmin, vmax)")
+    vmin = float(color_limit[0])
+    vmax = float(color_limit[1])
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin >= vmax:
+        raise ValueError("color_limit (vmin, vmax) must be finite with vmin < vmax")
+    return (vmin, vmax)
+
+
+def _iter_saved_mean_maps(search_root: str, output_subdir: str) -> List[str]:
+    found: List[str] = []
+    if not os.path.isdir(search_root):
+        return found
+    for dirpath, dirnames, filenames in os.walk(search_root):
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name not in {
+                "sorted_figures",
+                "area_consistency",
+                "figures",
+                "by_animal",
+                "by_behavior",
+                "by_session",
+            }
+        ]
+        if os.path.basename(dirpath) != output_subdir:
+            continue
+        required = {"csd_mean_columns.npy", "y_mean_columns.npy", "time_mean_columns.npy"}
+        if required.issubset(filenames):
+            found.append(dirpath)
+    found.sort()
+    return found
+
+
+def replot_saved_mean_kcsd(
+    root: PathLike,
+    *,
+    color_limit: Union[float, Tuple[float, float], None] = None,
+    output_subdir: str = "csd_1d_onset_baseline",
+    pooled_folder_name: str = ANIMAL_POOLED_FOLDER,
+    pooled_only: bool = True,
+    refresh_animal_copies: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Redraw saved ``kcsd_xmean.png`` files from ``csd_mean_columns.npy``.
+
+    kCSD is not estimated again. ``color_limit`` is one scale for every map:
+    a positive number means ± that value, ``(vmin, vmax)`` is used as given,
+    and ``None`` uses the largest absolute value in the selected maps.
+    With ``pooled_only=True`` only the merged-animal maps are redrawn.
+    """
+    root = os.path.abspath(os.fspath(root))
+    search_root = os.path.join(root, pooled_folder_name) if pooled_only else root
+    map_dirs = _iter_saved_mean_maps(search_root, output_subdir)
+    if not map_dirs:
+        scope = "animal-pooled" if pooled_only else "saved"
+        raise FileNotFoundError(
+            f"No {scope} csd_mean_columns.npy maps under {search_root}. "
+            "The averaged matrix is written when kCSD is estimated or when "
+            "saved columns are averaged."
+        )
+
+    loaded = []
+    observed = 0.0
+    for map_dir in map_dirs:
+        csd = np.load(os.path.join(map_dir, "csd_mean_columns.npy"))
+        depth = np.load(os.path.join(map_dir, "y_mean_columns.npy")).reshape(-1)
+        time_ms = np.load(os.path.join(map_dir, "time_mean_columns.npy")).reshape(-1)
+        if csd.ndim != 2 or csd.shape != (len(depth), len(time_ms)):
+            raise ValueError(
+                f"Saved mean CSD shape {csd.shape} does not match "
+                f"y={len(depth)} and time={len(time_ms)} in {map_dir}"
+            )
+        finite = csd[np.isfinite(csd)]
+        if finite.size:
+            observed = max(observed, float(np.max(np.abs(finite))))
+        loaded.append((map_dir, csd, depth, time_ms))
+
+    clim = _resolve_color_limit(color_limit, observed)
+    print(
+        f"Replotting {len(loaded)} saved mean maps. "
+        f"Largest |kCSD| = {observed:g}. Color limits = ({clim[0]:g}, {clim[1]:g}). "
+        "kCSD will NOT be rerun.",
+        flush=True,
+    )
+    results: List[Dict[str, Any]] = []
+    replotted_animal = False
+    for map_dir, csd, depth, time_ms in loaded:
+        alignment_folder = os.path.dirname(map_dir)
+        relative_name = os.path.relpath(alignment_folder, root)
+        parts = relative_name.split(os.sep)
+        label = "offset" if "offset" in parts else "onset"
+        averaged = {"csd_mean": csd, "y": depth}
+        _plot_averaged_alignment(
+            label,
+            relative_name,
+            alignment_folder,
+            output_subdir,
+            averaged,
+            time_ms,
+            np.arange(time_ms.size),
+            clim=clim,
+            show=False,
+            save_plot=True,
+        )
+        if parts and parts[0] == pooled_folder_name:
+            replotted_animal = True
+        results.append(
+            {
+                "folder": alignment_folder,
+                "name": relative_name,
+                "color_limit": clim,
+                "abs_max": float(np.nanmax(np.abs(csd))),
+            }
+        )
+    if refresh_animal_copies and replotted_animal:
+        organize_animal_pooled_figures(
+            root,
+            pooled_folder_name=pooled_folder_name,
+            csd_output_subdir=output_subdir,
+            refresh=True,
+            missing_ok=True,
+        )
+    return results
 
 
 def _load_and_average_saved_columns(
@@ -1216,6 +1613,415 @@ def average_saved_behavior_kcsd_from_root(
     return results
 
 
+def _order_channels(
+    x: np.ndarray,
+    y: np.ndarray,
+    onset: np.ndarray,
+    offset: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    order = np.lexsort((np.asarray(y, dtype=float), np.asarray(x, dtype=float)))
+    return x[order], y[order], onset[order], offset[order]
+
+
+def _same_electrode_grid(records: Sequence[Dict[str, Any]]) -> bool:
+    reference_x = records[0]["x"]
+    reference_y = records[0]["y"]
+    return all(
+        record["x"].shape == reference_x.shape
+        and np.allclose(record["x"], reference_x)
+        and np.allclose(record["y"], reference_y)
+        for record in records[1:]
+    )
+
+
+def _column_profiles(
+    x: np.ndarray,
+    y: np.ndarray,
+    onset: np.ndarray,
+    offset: np.ndarray,
+) -> Dict[float, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    profiles = {}
+    for ux in np.unique(np.asarray(x, dtype=float)):
+        indices = np.where(x == ux)[0]
+        order = np.argsort(y[indices])
+        yy = np.asarray(y[indices][order], dtype=float)
+        onset_column = np.asarray(onset[indices][order], dtype=float)
+        offset_column = np.asarray(offset[indices][order], dtype=float)
+        unique_y, inverse = np.unique(yy, return_inverse=True)
+        if len(unique_y) < len(yy):
+            onset_sum = np.zeros((len(unique_y), onset_column.shape[1]), dtype=float)
+            offset_sum = np.zeros_like(onset_sum)
+            counts = np.zeros(len(unique_y), dtype=float)
+            for index, group in enumerate(inverse):
+                onset_sum[group] += onset_column[index]
+                offset_sum[group] += offset_column[index]
+                counts[group] += 1.0
+            onset_column = onset_sum / counts[:, None]
+            offset_column = offset_sum / counts[:, None]
+            yy = unique_y
+        profiles[float(ux)] = (yy, onset_column, offset_column)
+    return profiles
+
+
+def _weighted_mean(records: Sequence[Dict[str, Any]], key: str) -> np.ndarray:
+    total = float(sum(int(record["n_events"]) for record in records))
+    accumulator = np.zeros_like(records[0][key], dtype=float)
+    for record in records:
+        accumulator += int(record["n_events"]) * np.asarray(record[key], dtype=float)
+    return accumulator / total
+
+
+def trial_weighted_psth(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Average session PSTHs with weight equal to the number of trials.
+
+    This is the mean that concatenation of the trials would produce. Sessions
+    with the same electrode coordinates are averaged directly. When depths
+    differ between days, each probe column is interpolated onto depths inside
+    the range covered by every session, and those aligned PSTHs are averaged.
+    Values are not extrapolated past a session's own electrodes.
+    """
+    if not records:
+        raise ValueError("No session PSTHs to combine")
+    ordered = []
+    for record in records:
+        x, y, onset, offset = _order_channels(
+            np.asarray(record["x"], dtype=float),
+            np.asarray(record["y"], dtype=float),
+            np.asarray(record["onset_evoked"], dtype=float),
+            np.asarray(record["offset_evoked"], dtype=float),
+        )
+        ordered.append({**record, "x": x, "y": y, "onset_evoked": onset, "offset_evoked": offset})
+    reference_time = np.asarray(ordered[0]["time_ms"], dtype=float)
+    for record in ordered[1:]:
+        if not np.allclose(record["time_ms"], reference_time):
+            raise ValueError(
+                f"Time axis for {record['session']} does not match "
+                f"{ordered[0]['session']}"
+            )
+    total_events = int(sum(int(record["n_events"]) for record in ordered))
+    if _same_electrode_grid(ordered):
+        return {
+            "x": ordered[0]["x"],
+            "y": ordered[0]["y"],
+            "onset_evoked": _weighted_mean(ordered, "onset_evoked"),
+            "offset_evoked": _weighted_mean(ordered, "offset_evoked"),
+            "time_ms": reference_time,
+            "n_events": total_events,
+            "aligned_by": "identical_electrodes",
+        }
+
+    column_sets = [_column_profiles(r["x"], r["y"], r["onset_evoked"], r["offset_evoked"]) for r in ordered]
+    shared_x = set(column_sets[0])
+    for columns in column_sets[1:]:
+        shared_x &= set(columns)
+    if not shared_x:
+        raise ValueError("Sessions have no probe column in common")
+    x_values = []
+    y_values = []
+    onset_rows = []
+    offset_rows = []
+    for ux in sorted(shared_x):
+        profiles = [columns[ux] for columns in column_sets]
+        overlap_min = max(float(profile[0][0]) for profile in profiles)
+        overlap_max = min(float(profile[0][-1]) for profile in profiles)
+        if overlap_min >= overlap_max:
+            raise ValueError(f"Column x={ux:g} has no shared depth range")
+        observed = [
+            profile[0][(profile[0] >= overlap_min) & (profile[0] <= overlap_max)]
+            for profile in profiles
+        ]
+        common_y = np.unique(np.concatenate(observed))
+        if common_y.size < 2:
+            raise ValueError(f"Column x={ux:g} has fewer than two shared depths")
+        onset_acc = np.zeros((common_y.size, reference_time.size), dtype=float)
+        offset_acc = np.zeros_like(onset_acc)
+        for record, (yy, onset_column, offset_column) in zip(ordered, profiles):
+            onset_acc += record["n_events"] * interp1d(
+                yy, onset_column, axis=0, bounds_error=True
+            )(common_y)
+            offset_acc += record["n_events"] * interp1d(
+                yy, offset_column, axis=0, bounds_error=True
+            )(common_y)
+        onset_acc /= total_events
+        offset_acc /= total_events
+        x_values.append(np.full(common_y.size, ux, dtype=float))
+        y_values.append(common_y)
+        onset_rows.append(onset_acc)
+        offset_rows.append(offset_acc)
+    return {
+        "x": np.concatenate(x_values),
+        "y": np.concatenate(y_values),
+        "onset_evoked": np.vstack(onset_rows),
+        "offset_evoked": np.vstack(offset_rows),
+        "time_ms": reference_time,
+        "n_events": total_events,
+        "aligned_by": "shared_column_depths",
+    }
+
+
+def _session_psth(
+    onset_folder: str,
+    offset_folder: str,
+    *,
+    epoch_settings: Dict[str, Any],
+) -> Dict[str, Any]:
+    paired = load_paired_raw(onset_folder, offset_folder)
+    fs = float(paired["fs_loaded"]) if paired["fs_loaded"] is not None else float(
+        epoch_settings["fs"]
+    )
+    prepared = epoch_paired_with_onset_baseline(
+        paired["onset"],
+        paired["offset"],
+        paired["t0_onset"],
+        paired["t0_offset"],
+        fs,
+        float(epoch_settings["t_pre"]),
+        float(epoch_settings["t_post"]),
+        float(epoch_settings["step_ms"]),
+        onset_baseline_window_ms=tuple(epoch_settings["onset_baseline_window_ms"]),
+        baseline_correct=bool(epoch_settings["baseline_correct"]),
+        normalize=str(epoch_settings["normalize"]),
+        retain_epochs=False,
+    )
+    return {
+        "x": np.asarray(paired["x"], dtype=float),
+        "y": np.asarray(paired["y"], dtype=float),
+        "onset_evoked": prepared["onset_evoked"],
+        "offset_evoked": prepared["offset_evoked"],
+        "time_ms": prepared["time_ms"],
+        "n_events": int(paired["onset"].shape[0]),
+        "fs": fs,
+    }
+
+
+def _write_pooled_leaf(
+    folder: str,
+    evoked: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    time_ms: np.ndarray,
+    fs: float,
+) -> None:
+    os.makedirs(folder, exist_ok=True)
+    pre_samples = int(np.argmin(np.abs(time_ms)))
+    if not np.isclose(time_ms[pre_samples], 0.0):
+        raise ValueError("Pooled PSTH time axis does not contain 0 ms")
+    np.save(os.path.join(folder, "lfp.npy"), evoked.astype(np.float32)[None, :, :])
+    np.save(os.path.join(folder, "x_coords.npy"), np.asarray(x, dtype=float))
+    np.save(os.path.join(folder, "y_coords.npy"), np.asarray(y, dtype=float))
+    np.save(os.path.join(folder, "T0.npy"), np.array(pre_samples))
+    np.save(os.path.join(folder, "fs.npy"), np.array(fs))
+    np.save(os.path.join(folder, "time_ms.npy"), np.asarray(time_ms, dtype=float))
+    np.save(os.path.join(folder, "event_ids.npy"), np.array([1], dtype=np.int64))
+
+
+def estimate_animal_pooled_kcsd(
+    root: PathLike,
+    *,
+    output_folder_name: str = ANIMAL_POOLED_FOLDER,
+    datasets: Sequence[Tuple[str, str]] = ANIMAL_POOLED_DATASETS,
+    stop_on_error: bool = False,
+    refresh: bool = True,
+    **overrides: Any,
+) -> List[Dict[str, Any]]:
+    """
+    Pool trials from sessions of one animal, then estimate paired kCSD.
+
+    Only play bouts and the play, aggression, and exploration categories are
+    included. Individual behaviors are left as session-level exports. The
+    pooled PSTH weights each session by its trial count, which is the same
+    mean as concatenating the trials before averaging. kCSD is fit to that
+    pooled PSTH, not to each session and then averaged.
+    """
+    root = os.path.abspath(os.fspath(root))
+    selected = {tuple(item) for item in datasets}
+    grouped: Dict[Tuple[str, str, str, str], List[Dict[str, str]]] = {}
+    for pair in discover_behavior_aligned_pairs(root):
+        parts = pair["name"].replace("\\", "/").split("/")
+        if output_folder_name in parts or len(parts) < 3:
+            continue
+        scope, behavior, session = parts[:3]
+        if (scope, behavior) not in selected:
+            continue
+        probe = parts[3] if len(parts) > 3 else ""
+        try:
+            animal_key = animal_key_from_session(session)
+        except ValueError as exc:
+            print(f"Skipping {pair['name']}: {exc}", flush=True)
+            continue
+        grouped.setdefault((scope, behavior, animal_key, probe), []).append(
+            {**pair, "session": session, "probe": probe}
+        )
+    if not grouped:
+        raise FileNotFoundError(
+            "No play-bout or category onset/offset exports were found under "
+            f"{root}. Individual behavior folders are not pooled."
+        )
+
+    settings = dict(BEHAVIOR_ALIGNED_CSD_DEFAULTS)
+    settings.update(overrides)
+    epoch_settings = {
+        "fs": float(settings.get("fs", 2500.0)),
+        "t_pre": float(settings["t_pre"]),
+        "t_post": float(settings["t_post"]),
+        "step_ms": float(settings["step_ms"]),
+        "onset_baseline_window_ms": tuple(settings["onset_baseline_window_ms"]),
+        "baseline_correct": bool(settings["baseline_correct"]),
+        "normalize": str(settings["normalize"]),
+    }
+    output_root = os.path.join(root, output_folder_name)
+    if refresh and os.path.isdir(output_root):
+        try:
+            shutil.rmtree(output_root)
+        except PermissionError as exc:
+            print(
+                f"Could not delete {output_root}: {exc}. "
+                "Existing pooled files will be overwritten.",
+                flush=True,
+            )
+    os.makedirs(output_root, exist_ok=True)
+
+    print(
+        f"Pooling trials within animal for {len(grouped)} "
+        "play-bout/category probe groups, then estimating kCSD",
+        flush=True,
+    )
+    results: List[Dict[str, Any]] = []
+    index_rows: List[Dict[str, Any]] = []
+    for group_number, key in enumerate(sorted(grouped), start=1):
+        scope, behavior, animal_key, probe = key
+        members = sorted(grouped[key], key=lambda item: item["session"])
+        label = f"{scope}/{behavior} {animal_key} {probe or 'NPX1'}"
+        print(
+            f"\n[{group_number}/{len(grouped)}] {label}: "
+            f"{len(members)} sessions",
+            flush=True,
+        )
+        try:
+            psths = []
+            for member in members:
+                print(f"  Reading trials: {member['session']}", flush=True)
+                psth = _session_psth(
+                    member["onset_folder"],
+                    member["offset_folder"],
+                    epoch_settings=epoch_settings,
+                )
+                psth["session"] = member["session"]
+                psths.append(psth)
+                print(f"    {psth['n_events']} trials", flush=True)
+            pooled = trial_weighted_psth(psths)
+            tail = [animal_key] if not probe else [animal_key, probe]
+            onset_folder = os.path.join(output_root, scope, behavior, "onset", *tail)
+            offset_folder = os.path.join(output_root, scope, behavior, "offset", *tail)
+            _write_pooled_leaf(
+                onset_folder,
+                pooled["onset_evoked"],
+                pooled["x"],
+                pooled["y"],
+                pooled["time_ms"],
+                psths[0]["fs"],
+            )
+            _write_pooled_leaf(
+                offset_folder,
+                pooled["offset_evoked"],
+                pooled["x"],
+                pooled["y"],
+                pooled["time_ms"],
+                psths[0]["fs"],
+            )
+            source_rows = [
+                {"session": item["session"], "n_events": int(item["n_events"])}
+                for item in psths
+            ]
+            pooling_record = {
+                "animal_key": animal_key,
+                "scope": scope,
+                "behavior": behavior,
+                "probe": probe or "NPX1",
+                "n_sessions": len(psths),
+                "n_events": int(pooled["n_events"]),
+                "aligned_by": pooled["aligned_by"],
+                "sessions": source_rows,
+            }
+            for folder in (onset_folder, offset_folder):
+                with open(os.path.join(folder, "animal_pooling.json"), "w", encoding="utf-8") as stream:
+                    json.dump(pooling_record, stream, indent=2)
+            print(
+                f"  Pooled {pooled['n_events']} trials by {pooled['aligned_by']}; "
+                "estimating kCSD",
+                flush=True,
+            )
+            result = run_behavior_aligned_kcsd(
+                onset_folder,
+                offset_folder,
+                name=f"{output_folder_name}/{scope}/{behavior}/{animal_key}"
+                + (f"/{probe}" if probe else ""),
+                **overrides,
+            )
+            result["animal_pooling"] = pooling_record
+            results.append(result)
+            index_rows.append(
+                {
+                    "scope": scope,
+                    "behavior": behavior,
+                    "animal_key": animal_key,
+                    "probe": probe or "NPX1",
+                    "n_sessions": len(psths),
+                    "n_events": int(pooled["n_events"]),
+                    "sessions": "; ".join(
+                        f"{item['session']} ({item['n_events']})" for item in source_rows
+                    ),
+                    "aligned_by": pooled["aligned_by"],
+                    "onset_folder": os.path.relpath(onset_folder, root),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - one animal should not stop the rest
+            print(f"  ERROR {label}: {exc}", flush=True)
+            if stop_on_error:
+                raise
+            results.append({"name": label, "error": str(exc)})
+    index_path = os.path.join(output_root, "index.csv")
+    with open(index_path, "w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=[
+                "scope",
+                "behavior",
+                "animal_key",
+                "probe",
+                "n_sessions",
+                "n_events",
+                "sessions",
+                "aligned_by",
+                "onset_folder",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(index_rows)
+    n_failed = sum("error" in result for result in results)
+    print(
+        f"\nAnimal-pooled kCSD finished: {len(results) - n_failed} successful, "
+        f"{n_failed} failed. Index: {index_path}",
+        flush=True,
+    )
+    try:
+        organize_animal_pooled_figures(
+            root,
+            pooled_folder_name=output_folder_name,
+            csd_output_subdir=str(settings.get("output_subdir", "csd_1d_onset_baseline")),
+            refresh=refresh,
+            missing_ok=True,
+        )
+    except OSError as exc:
+        print(
+            "Animal-pooled kCSD was saved, but the gathered figures were not "
+            f"updated: {exc}",
+            flush=True,
+        )
+    return results
+
+
 def run_behavior_aligned_kcsd_from_root(
     root: PathLike,
     *,
@@ -1265,10 +2071,16 @@ __all__: Sequence[str] = (
     "BEHAVIOR_ALIGNED_CSD_DEFAULTS",
     "average_kcsd_columns",
     "average_saved_behavior_kcsd_from_root",
+    "ANIMAL_POOLED_FOLDER",
+    "ANIMAL_POOLED_DATASETS",
     "discover_behavior_aligned_pairs",
     "epoch_paired_with_onset_baseline",
+    "estimate_animal_pooled_kcsd",
     "load_paired_raw",
+    "organize_animal_pooled_figures",
+    "replot_saved_mean_kcsd",
     "organize_behavior_aligned_figures",
     "run_behavior_aligned_kcsd",
     "run_behavior_aligned_kcsd_from_root",
+    "trial_weighted_psth",
 )
