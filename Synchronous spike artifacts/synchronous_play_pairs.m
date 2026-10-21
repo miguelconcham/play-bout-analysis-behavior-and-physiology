@@ -16,6 +16,10 @@ function selection = synchronous_play_pairs(npx_data_dir, options)
 % selection.neurons    only the neurons that appear in the kept pairs.
 %                      interval_index lists spikes inside the bout windows.
 % selection.coverage   how many good units in the areas were observed.
+%
+% options.spikes_only skips pair ranking and returns selection.all_neurons
+% and selection.bout_starts. The waveform script uses that to build
+% autocorrelograms without reading the continuous file again.
 
 if nargin < 2 || isempty(options)
     options = struct();
@@ -26,6 +30,8 @@ selection.session_id = session_id;
 selection.pairs = empty_pairs();
 selection.neurons = empty_neurons();
 selection.coverage = [];
+selection.all_neurons = empty_neurons();
+selection.bout_starts = [];
 if options.max_pairs < 1
     [selection.pairs, selection.neurons, selection.coverage] = ...
         select_synchronous_pairs(empty_neurons(), [], options);
@@ -51,6 +57,11 @@ if isempty(bout_starts)
     return
 end
 neurons = neurons_in_session(npx_data_dir, name_parts, options);
+selection.all_neurons = neurons;
+selection.bout_starts = bout_starts;
+if isfield(options, 'spikes_only') && options.spikes_only
+    return
+end
 [selection.pairs, selection.neurons, selection.coverage] = select_synchronous_pairs( ...
     neurons, bout_starts, options);
 selection.session_id = session_id;

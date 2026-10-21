@@ -70,6 +70,7 @@ play bout analysis behavior and physiology/
 │   ├── GENERATE_SYNC_SPIKE_WAVEFORMS.m
 │   ├── Estimate_sync_spike_waveforms.m
 │   ├── Analyze_sync_spike_waveforms.m
+│   ├── Plot_sync_spike_acg_and_waveforms.m  # Saved sync waveform profile and autocorrelogram
 │   ├── GENERATE_SYNC_SPIKE_LFP_POWER.m
 │   ├── Estimate_sync_spike_lfp_power.m
 │   ├── Analyze_sync_spike_lfp_power.m

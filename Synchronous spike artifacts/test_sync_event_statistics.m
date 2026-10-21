@@ -7,6 +7,7 @@ function test_sync_event_statistics()
 this_dir = fileparts(mfilename('fullpath'));
 if ~isempty(this_dir)
     addpath(this_dir);
+    addpath(fullfile(fileparts(this_dir), 'Custom functions'));
 end
 
 mask = sync_spike_mask([0; 1; 1.004; 5], 1.003, 1, [-1.5 1], 0.005);
@@ -154,6 +155,14 @@ assert(isempty(combined(1).pairs) && combined(2).pairs.pair_index == 1, ...
 rows = append_struct_array(struct('percentile', 0.2), struct('percentile', 0.9, 'nonsync_mean', 1));
 assert(isempty(rows(1).nonsync_mean) && rows(2).nonsync_mean == 1, ...
     'Neuron rows with different fields were not combined.');
+
+[centers, counts] = sync_event_acg([0; 0.002; 0.004], [-0.05 0.05], 0.001);
+assert(sum(counts(centers > 0 & centers < 0.003)) == 2, ...
+    'The autocorrelogram missed a pair of synchronous spikes 2 ms apart.');
+assert(sum(counts(centers > 0.003 & centers < 0.005)) == 1, ...
+    'The autocorrelogram missed the pair 4 ms apart.');
+assert(sum(counts(abs(centers) <= 0.0005)) == 0, ...
+    'The zero lag was left in the autocorrelogram.');
 
 check_location_lookup();
 fprintf('Synchronous-event statistic checks passed.\n');
