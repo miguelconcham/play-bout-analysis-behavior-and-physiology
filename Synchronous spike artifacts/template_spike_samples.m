@@ -1,6 +1,6 @@
 function samples = template_spike_samples(spike_times, spike_samples, ...
     bout_starts, hist_range, max_spikes, min_in_window)
-%TEMPLATE_SPIKE_SAMPLES  Spikes used for a mean waveform outside the pairs.
+%TEMPLATE_SPIKE_SAMPLES  Choose spike samples inside play-bout windows.
 %
 % Spikes inside the play-bout windows are kept when there are at least
 % min_in_window of them. Otherwise the whole train is used. When more than

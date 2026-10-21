@@ -1,7 +1,9 @@
 %% Waveform profile and autocorrelogram of the extracted synchronous spikes
 % Run this after Estimate_sync_spike_waveforms. It does not repeat the
-% 500 null draws. Paired neurons reuse the saved synchronous mean. Other
-% good units are read from the continuous file, at most 100 spikes each.
+% 500 null draws. Both summary stacks keep only neurons that took part in a
+% synchronous event in DLPAG, LPAG, VLPAG, DR, and SupCol. Those curves
+% come from the saved analysis. Good units that were never in a synchronous
+% pair are left out, and the continuous file is not read again.
 %
 % The waveform is the saved synchronous mean, drawn on every channel that
 % was kept, low channel at the bottom. The non-synchronous in-window mean
@@ -12,18 +14,19 @@
 % The autocorrelogram uses only spikes that belong to a synchronous event,
 % reloaded from the sorting and the play-bout windows. ±50 ms, 1 ms bins.
 % The zero lag is omitted. The summary figure stacks one normalized
-% autocorrelogram for every neuron saved by the synchronous-spike analysis,
-% not only the neurons drawn on one page. Each row is that neuron's
-% synchronous-spike pair counts divided by their sum. A neuron that belongs
-% to several pairs contributes the union of its synchronous spikes once.
-% The upper panel is the stack. The lower panel is every neuron as a thin
-% line, the mean across neurons, and the 95% confidence interval of that mean.
+% autocorrelogram for every such neuron, not only the neurons drawn on one
+% page. Each row is that neuron's synchronous-spike pair counts divided by
+% their sum. A neuron that belongs to several pairs contributes the union
+% of its synchronous spikes once. The upper panel is the stack. The lower
+% panel is every neuron as a thin line, the mean across neurons, and the
+% 95% confidence interval of that mean.
 %
 % One figure per session, six pairs per figure. Each pair is one row:
 % neuron 1 waveform, neuron 1 spatial range, neuron 1 autocorrelogram,
 % then the same three panels for neuron 2.
-% The spatial stack is a separate figure and includes every good unit in
-% the five areas, not only the neurons drawn in the pair panels.
+% The spatial stack is a separate figure. Each curve is the peak-to-peak
+% range of that neuron's saved synchronous mean, divided by the range on
+% its own channel.
 
 repo_root = fileparts(fileparts(mfilename('fullpath')));
 if ~isempty(repo_root)
@@ -33,8 +36,6 @@ end
 acg_window = [-0.05 0.05];
 acg_bin = 0.001;
 pairs_per_figure = 6;
-template_max_spikes = 100;
-template_min_in_window = 20;
 spatial_distance_um = -400:20:400;
 
 data_root = sync_analysis_options().data_root;
@@ -78,8 +79,7 @@ for session_index = 1:numel(session_ids)
         session_rows, trains, bout_starts, time_options);
     geometry = load_channel_geometry(npx_raw_data, session_id);
     spatial_profiles = append_spatial_profiles(spatial_profiles, ...
-        collect_session_profiles(session_id, session_rows, trains, bout_starts, ...
-        geometry, time_options, template_max_spikes, template_min_in_window));
+        collect_session_profiles(session_id, session_rows, geometry, time_options));
     pair_ids = unique([session_rows.pair_index], 'stable');
     n_figures = ceil(numel(pair_ids) / pairs_per_figure);
     for figure_index = 1:n_figures
@@ -141,7 +141,7 @@ try
     selection = synchronous_play_pairs(session_dir, time_options);
     trains = selection.all_neurons;
     bout_starts = selection.bout_starts;
-    fprintf('%s  reloaded %d neurons for autocorrelograms, no continuous-file read\n', ...
+    fprintf('%s  reloaded %d spike trains for synchronous-event autocorrelograms\n', ...
         session_id, numel(trains));
 catch load_error
     warning('Plot_sync_spike_acg_and_waveforms:times', ...
@@ -285,21 +285,34 @@ end
 function entries = remember_analysis_neurons(entries, session_id, session_rows, ...
     trains, bout_starts, time_options)
 n_before = numel(entries);
-for index = 1:numel(session_rows)
-    row = session_rows(index);
-    if ~isfield(row, 'cluster_id') || ~isfield(row, 'partner_id')
+areas = analysis_areas(time_options);
+saved_ids = [];
+if ~isempty(session_rows) && isfield(session_rows, 'cluster_id')
+    saved_ids = [session_rows.cluster_id];
+end
+n_analyzed = 0;
+for index = 1:numel(saved_ids)
+    cluster_id = saved_ids(index);
+    if index > 1 && any(saved_ids(1:index - 1) == cluster_id)
         continue
     end
-    spike_times = synchronous_times(trains, row, bout_starts, time_options);
-    entries = remember_neuron_spikes(entries, session_id, row.cluster_id, spike_times);
+    members = session_rows([session_rows.cluster_id] == cluster_id);
+    if ~members_in_analysis_area(members, areas)
+        continue
+    end
+    n_analyzed = n_analyzed + 1;
+    for member_index = 1:numel(members)
+        row = members(member_index);
+        if ~isfield(row, 'partner_id') || ~row_in_analysis_area(row, areas)
+            continue
+        end
+        spike_times = synchronous_times(trains, row, bout_starts, time_options);
+        entries = remember_neuron_spikes(entries, session_id, cluster_id, spike_times);
+    end
 end
 n_neurons = numel(entries) - n_before;
-n_analyzed = 0;
-if ~isempty(session_rows) && isfield(session_rows, 'cluster_id')
-    n_analyzed = numel(unique([session_rows.cluster_id]));
-end
-fprintf(['%s  autocorrelogram stack  %d analyzed neurons with synchronous ' ...
-    'spikes, %d neurons in the saved analysis\n'], session_id, n_neurons, n_analyzed);
+fprintf(['%s  autocorrelogram stack  %d neurons with synchronous spikes, ' ...
+    '%d neurons saved in the analysis areas\n'], session_id, n_neurons, n_analyzed);
 end
 
 function entries = remember_neuron_spikes(entries, session_id, cluster_id, spike_times)
@@ -338,7 +351,7 @@ function draw_normalized_acg_figure(centers, counts, acg_window)
 if isempty(counts)
     warning('Plot_sync_spike_acg_and_waveforms:acg', ...
         ['No synchronous-spike autocorrelograms were available. The stack uses ' ...
-         'only spikes from synchronous events, for neurons saved by the analysis.']);
+         'only synchronous-event spikes of neurons in DLPAG, LPAG, VLPAG, DR, and SupCol.']);
     return
 end
 summary = normalized_acg_stack(counts);
@@ -353,7 +366,7 @@ set(gca, 'YDir', 'reverse');
 xlim(acg_window);
 xlabel('Lag (s)')
 ylabel('Neuron, sorted by peak lag')
-title(sprintf('Synchronous spikes only, %d analyzed neurons', summary.n));
+title(sprintf('Synchronous spikes only, %d neurons in the analysis areas', summary.n));
 color_bar = colorbar;
 ylabel(color_bar, 'Fraction of spike pairs');
 box off
@@ -389,83 +402,35 @@ end
 profiles = [profiles, more];
 end
 
-function profiles = collect_session_profiles(session_id, session_rows, trains, ...
-    bout_starts, geometry, time_options, max_spikes, min_in_window)
+function profiles = collect_session_profiles(session_id, session_rows, geometry, time_options)
 profiles = empty_spatial_profiles();
 if isempty(geometry)
     return
 end
+areas = analysis_areas(time_options);
 saved_ids = [];
 if ~isempty(session_rows) && isfield(session_rows, 'cluster_id')
     saved_ids = [session_rows.cluster_id];
 end
-n_paired = 0;
+n_kept = 0;
 for index = 1:numel(saved_ids)
     cluster_id = saved_ids(index);
     if index > 1 && any(saved_ids(1:index - 1) == cluster_id)
         continue
     end
     members = session_rows([session_rows.cluster_id] == cluster_id);
+    if ~members_in_analysis_area(members, areas)
+        continue
+    end
     [distance_um, range] = profile_from_saved(members, geometry);
     if isempty(distance_um)
         continue
     end
     profiles = add_spatial_profile(profiles, session_id, cluster_id, distance_um, range);
-    n_paired = n_paired + 1;
+    n_kept = n_kept + 1;
 end
-[n_other, n_skipped] = add_other_neurons(profiles, session_id, session_rows, trains, ...
-    saved_ids, bout_starts, geometry, time_options, max_spikes, min_in_window);
-profiles = n_other.profiles;
-fprintf(['%s  spatial stack  %d paired neurons  %d other good units  ' ...
-    '%d skipped\n'], session_id, n_paired, n_other.n_added, n_skipped);
-end
-
-function [added, n_skipped] = add_other_neurons(profiles, session_id, session_rows, trains, ...
-    saved_ids, bout_starts, geometry, time_options, max_spikes, min_in_window)
-added.profiles = profiles;
-added.n_added = 0;
-n_skipped = 0;
-if isempty(trains)
-    return
-end
-missing = true(1, numel(trains));
-for index = 1:numel(trains)
-    if any(saved_ids == trains(index).cluster_id)
-        missing(index) = false;
-    end
-end
-if ~any(missing)
-    return
-end
-continuous_file = session_continuous_file(session_rows, session_id, time_options, ...
-    trains(find(missing, 1)));
-if isempty(continuous_file)
-    n_skipped = sum(missing);
-    warning('Plot_sync_spike_acg_and_waveforms:continuous', ...
-        ['%s  %d good units outside the pairs were left out of the spatial ' ...
-         'stack because the continuous file was not available.'], ...
-        session_id, n_skipped);
-    return
-end
-for index = find(missing)
-    try
-        [distance_um, range] = profile_from_continuous(trains(index), bout_starts, ...
-            geometry, time_options, continuous_file, max_spikes, min_in_window);
-    catch read_error
-        n_skipped = n_skipped + 1;
-        warning('Plot_sync_spike_acg_and_waveforms:template', ...
-            '%s cluster %g waveform was not read (%s).', ...
-            session_id, trains(index).cluster_id, read_error.message);
-        continue
-    end
-    if isempty(distance_um)
-        n_skipped = n_skipped + 1;
-        continue
-    end
-    added.profiles = add_spatial_profile(added.profiles, session_id, ...
-        trains(index).cluster_id, distance_um, range);
-    added.n_added = added.n_added + 1;
-end
+fprintf(['%s  spatial stack  %d synchronous-event neurons in the analysis areas\n'], ...
+    session_id, n_kept);
 end
 
 function [distance_um, range] = profile_from_saved(members, geometry)
@@ -484,78 +449,6 @@ for index = 1:numel(members)
 end
 end
 
-function [distance_um, range] = profile_from_continuous(neuron, bout_starts, ...
-    geometry, time_options, continuous_file, max_spikes, min_in_window)
-distance_um = [];
-range = [];
-samples = template_spike_samples(neuron.spike_times, neuron.spike_samples, ...
-    bout_starts, time_options.hist_range, max_spikes, min_in_window);
-if isempty(samples)
-    return
-end
-[waveforms, channels_kept, time_samples] = load_waveforms_from_continuous( ...
-    continuous_file, samples, neuron.channel, time_options.channel_range, ...
-    'NChannels', time_options.n_ap_channels, ...
-    'SamplesBefore', time_options.samples_before, ...
-    'SamplesAfter', time_options.samples_after);
-waveforms = center_waveform_snippets(waveforms, time_samples);
-profile = sync_waveform_spatial_range(channels_kept, mean_waveform_pages(waveforms), ...
-    neuron.channel, geometry.chan_map, geometry.xcoords, geometry.ycoords);
-distance_um = profile.distance_um(:);
-range = profile.range(:);
-end
-
-function mean_wf = mean_waveform_pages(waveforms)
-n_channels = size(waveforms, 2);
-n_times = size(waveforms, 3);
-mean_wf = nan(n_channels, n_times);
-for channel_index = 1:n_channels
-    traces = reshape(waveforms(:, channel_index, :), size(waveforms, 1), n_times);
-    for time_index = 1:n_times
-        values = traces(:, time_index);
-        values = values(isfinite(values));
-        if ~isempty(values)
-            mean_wf(channel_index, time_index) = mean(values);
-        end
-    end
-end
-end
-
-function text = path_text(value)
-text = '';
-if exist('isstring', 'builtin') && isstring(value)
-    value = char(value);
-end
-if ischar(value)
-    text = strtrim(value);
-end
-end
-
-function path = session_continuous_file(session_rows, session_id, time_options, example_neuron)
-path = '';
-if ~isempty(session_rows) && isfield(session_rows, 'continuous_file')
-    for index = 1:numel(session_rows)
-        candidate = path_text(session_rows(index).continuous_file);
-        if ~isempty(candidate) && exist(candidate, 'file') == 2
-            path = candidate;
-            return
-        end
-    end
-end
-try
-    candidates = read_npx_continuous_locations(time_options.raw_folders_file, session_id);
-    choice.min_scale = time_options.min_spike_scale;
-    choice.n_channels = time_options.n_ap_channels;
-    choice.n_check = time_options.n_check_spikes;
-    choice.samples_before = time_options.samples_before;
-    choice.samples_after = time_options.samples_after;
-    path = choose_continuous_file(candidates, example_neuron.spike_samples, ...
-        example_neuron.channel, time_options.channel_range, choice);
-catch
-    path = '';
-end
-end
-
 function profiles = add_spatial_profile(profiles, session_id, cluster_id, distance_um, range)
 profiles(end + 1).session_id = session_id; %#ok<AGROW>
 profiles(end).cluster_id = cluster_id;
@@ -566,7 +459,8 @@ end
 function draw_spatial_stack_figure(profiles, centers)
 if isempty(profiles)
     warning('Plot_sync_spike_acg_and_waveforms:spatial', ...
-        'No spatial profiles were available for the inverted-U stack.');
+        ['No spatial profiles were available. The stack keeps synchronous-event ' ...
+         'neurons in DLPAG, LPAG, VLPAG, DR, and SupCol.']);
     return
 end
 distances = cell(1, numel(profiles));
@@ -603,7 +497,7 @@ set(gca, 'YDir', 'reverse');
 xlim(span * [-1.05 1.05]);
 xlabel('Distance from neuron channel (\mum)')
 ylabel('Neuron, sorted by peak distance')
-title(sprintf('Range / range at the neuron channel, %d neurons', summary.n));
+title(sprintf('Synchronous-event neurons, range / own channel, n = %d', summary.n));
 color_bar = colorbar;
 ylabel(color_bar, 'Normalized range');
 color_peak = max(normalized(isfinite(normalized)));
@@ -626,7 +520,7 @@ plot(centers, mean_range, 'Color', [0.85 0.1 0.1], 'LineWidth', 2);
 xlim(span * [-1.05 1.05]);
 xlabel('Distance from neuron channel (\mum)')
 ylabel('Range / range at the neuron channel')
-title(sprintf('Mean spatial range, 95%% CI, n = %d', summary.n));
+title(sprintf('Mean spatial range of synchronous-event neurons, 95%% CI, n = %d', summary.n));
 box off
 end
 
@@ -696,6 +590,91 @@ if isfield(row, 'cluster_id')
     label = sprintf('cluster %g has no saved waveform', row.cluster_id);
 else
     label = 'No saved waveform';
+end
+end
+
+function areas = analysis_areas(time_options)
+areas = sync_analysis_options().areas_to_keep;
+if isstruct(time_options) && isfield(time_options, 'areas_to_keep') ...
+        && ~isempty(time_options.areas_to_keep)
+    areas = time_options.areas_to_keep;
+end
+end
+
+function keep = row_in_analysis_area(row, areas)
+if ~isfield(row, 'area')
+    keep = true;
+    return
+end
+keep = area_label_kept(row.area, areas);
+end
+
+function keep = members_in_analysis_area(members, areas)
+labeled = false;
+for index = 1:numel(members)
+    if ~isfield(members(index), 'area')
+        continue
+    end
+    name = area_text(members(index).area);
+    if isempty(name)
+        continue
+    end
+    labeled = true;
+    if area_matches(name, areas)
+        keep = true;
+        return
+    end
+end
+keep = ~labeled;
+end
+
+function keep = area_label_kept(value, areas)
+name = area_text(value);
+if isempty(name)
+    keep = true;
+    return
+end
+keep = area_matches(name, areas);
+end
+
+function matches = area_matches(name, areas)
+matches = false;
+if ischar(areas)
+    matches = strcmp(strtrim(areas), name);
+    return
+end
+if exist('isstring', 'builtin') && isstring(areas)
+    areas = cellstr(areas);
+end
+if iscell(areas)
+    for index = 1:numel(areas)
+        if strcmp(area_text(areas{index}), name)
+            matches = true;
+            return
+        end
+    end
+end
+end
+
+function name = area_text(value)
+name = '';
+if exist('isstring', 'builtin') && isstring(value)
+    if numel(value) < 1
+        return
+    end
+    value = char(value(1));
+end
+if iscell(value)
+    if isempty(value)
+        return
+    end
+    value = value{1};
+    if exist('isstring', 'builtin') && isstring(value)
+        value = char(value);
+    end
+end
+if ischar(value)
+    name = strtrim(value(:).');
 end
 end
 
