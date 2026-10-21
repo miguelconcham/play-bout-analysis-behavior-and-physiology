@@ -16,5 +16,6 @@ addpath(fullfile(repo_root, 'Figure 3', 'Supporting codes'));
 addpath(fullfile(repo_root, 'Figure 6', 'Supplementary codes'));
 addpath(fullfile(repo_root, 'Complementary figures'));
 addpath(fullfile(repo_root, 'CSD analysis'));
+addpath(fullfile(repo_root, 'Synchronous spike artifacts'));
 
 disp(['Repo paths added from ', repo_root])

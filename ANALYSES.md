@@ -67,6 +67,10 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Delta peak/trough raw LFP snippets for CSD (LPAG center, Partners session) | extra | `CSD analysis/Estimate_delta_peak_trough_csd.m` (calls `GENERATE_DELTA_PEAK_TROUGH_CSD_LFP.m`) | writes `Data/Analysis results/delta peak trough CSD/{peak,trough}/...` |
 | Plot delta peak/trough evoked LFP (before CSD) | extra | — | `CSD analysis/Plot_delta_peak_trough_evoked.m` |
 | 1D CSD (kCSD / finite-difference) on LFP stacks | extra | `CSD analysis/CSD_1D_general.ipynb` or `python csd_1d_pipeline.py <delta-root>` | same (saves `csd_1d_*.npy` + plots) |
+| Waveforms around a neuron channel, for synchronous-spike artifact checks | extra | — | `Synchronous spike artifacts/load_waveforms_from_continuous.m` (check: `test_load_waveforms_from_continuous.m`) |
+| Four best-sampled good units per NPX session: waveforms from the continuous file in `NPX_raw_data_folders.xlsx`, plus autocorrelograms | extra | — | `Synchronous spike artifacts/Check_NPX_folders_and_load_waveforms.m` |
+| Synchronous-spike waveforms versus non-synchronous spikes inside the same play-bout windows | extra | `Synchronous spike artifacts/Estimate_sync_spike_waveforms.m` (calls `GENERATE_SYNC_SPIKE_WAVEFORMS.m`) | `Synchronous spike artifacts/Analyze_sync_spike_waveforms.m` |
+| Raw-LFP power at synchronous play-bout spikes versus phase-matched LFP in the same windows | extra | `Synchronous spike artifacts/Estimate_sync_spike_lfp_power.m` (calls `GENERATE_SYNC_SPIKE_LFP_POWER.m`) | `Synchronous spike artifacts/Analyze_sync_spike_lfp_power.m` |
 
 ---
 
@@ -116,6 +120,19 @@ BC / dithering variants (same question, different shuffle): `Estimate suprise st
 | LIF with shared vs independent oscillatory drive | notebook Estimate grid | `Complementary figures/LIF neuron model.ipynb` |
 
 Older one-file versions (do not start here unless you need the original session walkthrough): `Complementary figures/Phase_locking in acute experiments.m`, `Complementary figures/spike_train_parsing_phase_lock.m`.
+
+---
+
+### Synchronous spike artifacts
+
+Both estimates use the same play-bout pairs (`synchronous_play_pairs.m`): good units in DLPAG, LPAG, VLPAG, DR, and SupCol, 5 ms coincidence inside [−1.5, 1] s of bout onset, at least 1000 spikes in the session, every coincident spike kept. For waveforms, the null pool is the other spikes inside those same windows, across every play bout, and it must be at least as large as the synchronous set. A spike that is synchronous only with a different partner can still be drawn. The LFP null is different: random samples of the unfiltered LFP inside those same windows, restricted to the same 1–5 Hz delta-phase bin as each synchronous event. Pairs are added until each of those areas has an observation for at least 90% of its neurons with 1000 spikes. A pair is kept only when it includes a neuron that is not yet in the sample, so already-observed neurons are reused only to bring a new one in. Results go to `Data/Analysis results/synchronous spike waveforms/`. Run Estimate, then Analyze. `test_sync_event_statistics.m` checks the mask, the coverage target, distances, time-by-time percentiles, and the phase-matched power percentile without the experiment files.
+
+| What | Estimate | Analyze |
+|------|----------|---------|
+| For each neuron in a pair: the synchronous mean, the mean of non-synchronous spikes in the bout windows, and the percentile of that synchronous mean against 500 null means at every channel and time. The scalar distance from the non-synchronous mean is kept, with the 500 scalar null distances, the pointwise 2.5% and 97.5% null waveforms, and the time of the strongest absolute departure on the neuron channel. The 500 waveform tensors are not saved. Only the in-window snippets are read from the continuous file named in `NPX_raw_data_folders.xlsx`. Each neuron is read once. Both neurons of a pair are stored together. Each neuron row also stores the partner that formed that synchronous event: cluster id, area, and channel. | `Estimate_sync_spike_waveforms.m` (`GENERATE_SYNC_SPIKE_WAVEFORMS.m`) | `Analyze_sync_spike_waveforms.m`. Channel profile, autocorrelogram, and spatial range. The autocorrelogram stack uses only synchronous-event spikes. The spatial-range stack uses the saved synchronous mean of those same neurons, with distance 0 on the channel that has the largest peak-to-peak range. Detailed example panels are limited by `max_example_neurons` (default 3), and each example waveform shows ±3 channels around its largest-range channel. Every other synchronous-event neuron stays in the stacks. The same autocorrelogram and spatial-range stacks are drawn again for pairs whose channels are at least `min_pair_distance_um` apart (default 500 micrometers). Both stacks keep neurons in DLPAG, LPAG, VLPAG, DR, and SupCol that participated in a synchronous event. Neither repeats the 500 null draws: `Plot_sync_spike_acg_and_waveforms.m` |
+| Mean raw-LFP power at the synchronous spikes versus random LFP samples in the same play-bout windows that share the synchronous 1–5 Hz delta phase (36 bins of 10 degrees). Power is the nearest sample of `abs(hilbert(unfiltered LFP_PAG)).^2` on the neuron channel (`ch + 1`). Samples within 10 ms of that pair's synchronous spikes are left out of the null. Each LFP channel is read once. | `Estimate_sync_spike_lfp_power.m` (`GENERATE_SYNC_SPIKE_LFP_POWER.m`, `compare_phase_matched_lfp.m`) | `Analyze_sync_spike_lfp_power.m` |
+| Cut multi-channel waveforms from a continuous int16 file. The channel window is `neuron_channel ± channel_range`, capped at channel 1 and at 384. | — | `load_waveforms_from_continuous.m` (check: `test_load_waveforms_from_continuous.m`) |
+| Four good units with the most spikes in each session: waveforms from that session's continuous file and autocorrelograms. The waveform axis follows the mean spike after the pre-spike baseline is removed. | — | `Check_NPX_folders_and_load_waveforms.m` |
 
 ---
 
