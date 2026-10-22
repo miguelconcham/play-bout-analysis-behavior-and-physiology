@@ -4,10 +4,13 @@
 % The image is the full spectrum at every channel, sorted by depth within
 % each shank. The profile figure is a line plot, not an image: mean power
 % in delta (1-5 Hz), theta (6-12 Hz), and gamma (30-45 Hz) against depth.
-% Both use the same saved spectrum. No cross-session summary is made here.
+% Both use the same saved spectrum. Area depth limits from the area table
+% are drawn on both figures, together with the mid-LPAG channel.
+% No cross-session summary is made here.
 
 %% Which recording and session to inspect
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
+area_limit_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
 
 % Empty recording_index plots every saved recording. Empty session_index
 % plots every partner session in the selected recording(s).
@@ -60,6 +63,8 @@ for file_n = recording_index(:).'
         error('Saved spectra have no field "%s".', spectrum_field);
     end
 
+    area_borders = area_borders_for_recording(probe_spectra, area_limit_file);
+
     if isempty(session_index)
         sessions_in_file = 1:probe_spectra.n_sessions;
     else
@@ -80,17 +85,19 @@ for file_n = recording_index(:).'
             this_session.n_windows);
 
         plot_depth_spectrum(frequency, channel_table, ...
-            welch_spectrum, fourier_spectrum, spectrum_field, session_label);
+            welch_spectrum, fourier_spectrum, spectrum_field, ...
+            session_label, area_borders);
         plot_band_profiles(frequency, channel_table, ...
             welch_spectrum, fourier_spectrum, ...
             delta_band, theta_band, gamma_band, ...
-            spectrum_field, session_label);
+            spectrum_field, session_label, area_borders);
         drawnow
     end
 end
 
 function plot_depth_spectrum(frequency, channel_table, ...
-        welch_spectrum, fourier_spectrum, spectrum_field, session_label)
+        welch_spectrum, fourier_spectrum, spectrum_field, ...
+        session_label, area_borders)
 probe_groups = probe_groups_by_depth(channel_table);
 n_groups = numel(probe_groups);
 spectra = {welch_spectrum, fourier_spectrum};
@@ -130,7 +137,12 @@ for method_n = 1:2
         if all(isfinite(color_limits))
             caxis(color_limits);
         end
+        these_borders = borders_for_probe(area_borders, this_group.probe_number);
+        if use_depth_axis
+            ylim(depth_limits_with_borders(depth, these_borders))
+        end
         mark_depth_lines(center_y)
+        draw_area_borders(these_borders, depth, use_depth_axis)
         xlabel('Frequency (Hz)')
         if group_n == 1
             ylabel('Depth (µm)')
@@ -145,7 +157,8 @@ end
 
 function plot_band_profiles(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, ...
-        delta_band, theta_band, gamma_band, spectrum_field, session_label)
+        delta_band, theta_band, gamma_band, spectrum_field, ...
+        session_label, area_borders)
 probe_groups = probe_groups_by_depth(channel_table);
 n_groups = numel(probe_groups);
 spectra = {welch_spectrum, fourier_spectrum};
@@ -183,12 +196,15 @@ for method_n = 1:2
         center_depth = center_depth(isfinite(center_depth));
         for center_n = 1:numel(center_depth)
             yline(center_depth(center_n), '--k', 'LPAG center', ...
-                'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+                'LabelHorizontalAlignment', 'left', 'FontSize', 8, ...
+                'HandleVisibility', 'off');
         end
         set(gca, 'YDir', 'reverse')
+        these_borders = borders_for_probe(area_borders, this_group.probe_number);
         if ~isempty(finite_depth)
-            ylim([min(finite_depth) max(finite_depth)])
+            ylim(depth_limits_with_borders(finite_depth, these_borders))
         end
+        draw_area_borders(these_borders, this_group.depth_um, true)
         xlabel(profile_xlabel(spectrum_field))
         if group_n == 1
             ylabel('Depth (µm)')
@@ -217,6 +233,7 @@ end
 
 probe_groups = repmat(struct( ...
     'label', '', ...
+    'probe_number', [], ...
     'channel_index', [], ...
     'depth_um', [], ...
     'is_lpag_center', []), numel(group_probe_ids), 1);
@@ -236,6 +253,7 @@ for group_n = 1:numel(group_probe_ids)
     [~, order] = sortrows([depth_key, x_key], [1 2]);
     channel_index = channel_index(order);
     probe_groups(group_n).label = labels{group_n};
+    probe_groups(group_n).probe_number = group_probe_ids(group_n);
     probe_groups(group_n).channel_index = channel_index;
     probe_groups(group_n).depth_um = channel_table.Yum(channel_index);
     probe_groups(group_n).is_lpag_center = ...
@@ -333,6 +351,159 @@ function mark_depth_lines(y_values)
 y_values = y_values(isfinite(y_values));
 for line_n = 1:numel(y_values)
     yline(y_values(line_n), '--k', 'LPAG center', ...
-        'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+        'LabelHorizontalAlignment', 'left', 'FontSize', 8, ...
+        'HandleVisibility', 'off');
 end
+end
+
+function borders = area_borders_for_recording(probe_spectra, area_limit_file)
+borders = repmat(struct( ...
+    'probe_number', [], 'name', '', 'depth_start', [], ...
+    'depth_end', [], 'color', []), 0, 1);
+if ~isfield(probe_spectra, 'animal_area_table_name') || ...
+        ~isfield(probe_spectra, 'npx_type')
+    fprintf('Saved spectra have no area-table name. Area borders are omitted.\n');
+    return
+end
+if ~isfile(area_limit_file)
+    fprintf('Area-limit table not found. Area borders are omitted.\n%s\n', ...
+        area_limit_file);
+    return
+end
+
+area_limit = readtable(area_limit_file);
+area_limit = area_limit(ismember(area_limit.AnimalName, ...
+    probe_spectra.animal_area_table_name), :);
+if isempty(area_limit)
+    fprintf('No area limits for %s.\n', probe_spectra.animal_area_table_name);
+    return
+end
+
+names = cellstr(string(area_limit.area));
+depth_start = double(area_limit.depth_start);
+depth_end = double(area_limit.depth_end);
+probe_number = double(area_limit.ProbeNum);
+keep = isfinite(depth_start) & isfinite(depth_end) & ~strcmp(names, '');
+if probe_spectra.npx_type == 1
+    if ~ismember('Probe_Area', area_limit.Properties.VariableNames)
+        fprintf('Area table has no Probe_Area column. NPX1 borders are omitted.\n');
+        return
+    end
+    keep = keep & ismember(area_limit.Probe_Area, 'PAG');
+    probe_number(:) = 1;
+else
+    keep = keep & isfinite(probe_number);
+end
+names = names(keep);
+depth_start = depth_start(keep);
+depth_end = depth_end(keep);
+probe_number = probe_number(keep);
+if isempty(names)
+    fprintf('No area borders for %s.\n', probe_spectra.animal_area_table_name);
+    return
+end
+
+palette = lines(numel(unique(names, 'stable')));
+name_list = unique(names, 'stable');
+borders = repmat(struct( ...
+    'probe_number', [], 'name', '', 'depth_start', [], ...
+    'depth_end', [], 'color', []), numel(names), 1);
+for border_n = 1:numel(names)
+    color_index = find(strcmp(name_list, names{border_n}), 1);
+    borders(border_n).probe_number = probe_number(border_n);
+    borders(border_n).name = names{border_n};
+    borders(border_n).depth_start = depth_start(border_n);
+    borders(border_n).depth_end = depth_end(border_n);
+    borders(border_n).color = palette(color_index, :);
+end
+fprintf('Area borders for %s: %d\n', ...
+    probe_spectra.animal_area_table_name, numel(borders));
+end
+
+function these = borders_for_probe(area_borders, probe_number)
+if isempty(area_borders) || ~isfinite(probe_number)
+    these = area_borders([]);
+    return
+end
+these = area_borders([area_borders.probe_number] == probe_number);
+end
+
+function limits = depth_limits_with_borders(depth_um, borders)
+finite_depth = depth_um(isfinite(depth_um));
+limits = [min(finite_depth), max(finite_depth)];
+if isempty(borders)
+    return
+end
+edges = [[borders.depth_start].'; [borders.depth_end].'];
+edges = edges(isfinite(edges));
+near = edges >= limits(1) - 50 & edges <= limits(2) + 50;
+if any(near)
+    limits(1) = min([limits(1); edges(near)]);
+    limits(2) = max([limits(2); edges(near)]);
+end
+end
+
+function draw_area_borders(borders, depth_um, use_depth_axis)
+if isempty(borders)
+    return
+end
+hold on
+x_limits = xlim;
+for border_n = 1:numel(borders)
+    edges = [borders(border_n).depth_start, borders(border_n).depth_end];
+    [~, shallow] = min(edges);
+    for edge_n = 1:2
+        if use_depth_axis
+            y_value = edges(edge_n);
+            if ~isfinite(y_value)
+                continue
+            end
+            y_limits = ylim;
+            if y_value < y_limits(1) || y_value > y_limits(2)
+                continue
+            end
+        else
+            y_value = depth_to_row(depth_um, edges(edge_n));
+            if ~isfinite(y_value)
+                continue
+            end
+        end
+        yline(y_value, ':', 'Color', borders(border_n).color, ...
+            'LineWidth', 1, 'HandleVisibility', 'off');
+        if edge_n == shallow
+            text(x_limits(1), y_value, ['  ' borders(border_n).name], ...
+                'Color', borders(border_n).color, 'FontSize', 7, ...
+                'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom', ...
+                'Interpreter', 'none', 'Clipping', 'on');
+        end
+    end
+end
+end
+
+function row = depth_to_row(depth_um, border_depth)
+row = NaN;
+if ~isfinite(border_depth)
+    return
+end
+finite = isfinite(depth_um(:));
+if nnz(finite) < 2
+    return
+end
+depth_values = depth_um(finite);
+row_index = find(finite);
+if border_depth < depth_values(1) || border_depth > depth_values(end)
+    return
+end
+upper = find(depth_values >= border_depth, 1, 'first');
+if upper == 1
+    row = row_index(1);
+    return
+end
+span = depth_values(upper) - depth_values(upper - 1);
+if span == 0
+    row = row_index(upper);
+    return
+end
+fraction = (border_depth - depth_values(upper - 1)) / span;
+row = row_index(upper - 1) + fraction * (row_index(upper) - row_index(upper - 1));
 end
