@@ -7,6 +7,8 @@ function pli_struct = Compute_pli_wpli_segments(...
 %   'Selection'   : 'random' (default) or 'sequential'
 %   'PowerThresh' : k for artifact rejection (median + k*MAD). [] disables. Default = 5.
 %   'Verbose'     : true/false (default true)
+%   'ReferenceChannel' : if set, compute only vs this LFP row (nCh vectors
+%                        instead of nCh x nCh maps). Used by the LPAG-ref pipeline.
 
 %% Parse inputs
 p = inputParser;
@@ -14,15 +16,20 @@ addParameter(p, 'Overlap', [], @(x) isempty(x) || (isnumeric(x) && x >= 0 && x <
 addParameter(p, 'Selection', 'random', @(s) any(strcmpi(s, {'random', 'sequential'})));
 addParameter(p, 'PowerThresh', 5, @(x) isempty(x) || (isnumeric(x) && x >= 0));
 addParameter(p, 'Verbose', true, @islogical);
+addParameter(p, 'ReferenceChannel', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x >= 1));
 parse(p, varargin{:});
 userOverlap = p.Results.Overlap;
 selection = lower(p.Results.Selection);
 power_k = p.Results.PowerThresh;
 verbose = p.Results.Verbose;
+ref_ch = p.Results.ReferenceChannel;
 
 [nCh, nTime] = size(PAG_LFP);
 if sample_length > nTime
     error('sample_length (%d) > total recording length (%d).', sample_length, nTime);
+end
+if ~isempty(ref_ch) && (ref_ch < 1 || ref_ch > nCh)
+    error('ReferenceChannel (%d) is outside 1:%d.', ref_ch, nCh);
 end
 
 %% Filter and compute analytic signals
@@ -131,68 +138,119 @@ if verbose
 end
 
 %% Compute PLI/wPLI per segment
-PLI_vals = nan(n_used, nCh, nCh);
-wPLI_vals = nan(n_used, nCh, nCh);
-phaseLag_vals = nan(n_used, nCh, nCh);
+vs_ref = ~isempty(ref_ch);
+if vs_ref
+    PLI_vals = nan(n_used, nCh);
+    wPLI_vals = nan(n_used, nCh);
+    phaseLag_vals = nan(n_used, nCh);
+else
+    PLI_vals = nan(n_used, nCh, nCh);
+    wPLI_vals = nan(n_used, nCh, nCh);
+    phaseLag_vals = nan(n_used, nCh, nCh);
+end
 
-if verbose, fprintf('Computing PLI/wPLI over segments...\n'); end
+if verbose
+    if vs_ref
+        fprintf('Computing PLI/wPLI vs reference channel %d over segments...\n', ref_ch);
+    else
+        fprintf('Computing PLI/wPLI over segments...\n');
+    end
+end
 for s = 1:n_used
     if verbose && mod(s, 50) == 1
         fprintf('  segment %d / %d\n', s, n_used);
     end
     idx = starts(s):(starts(s) + sample_length - 1);
     seg_analytic = analytic(:, idx);
-    for i = 1:nCh
-        xi = seg_analytic(i, :);
-        for j = i:nCh
-            yj = seg_analytic(j, :);
-            cs = xi .* conj(yj);
-            phlag = angle(mean(cs));
+    if vs_ref
+        xref = seg_analytic(ref_ch, :);
+        for i = 1:nCh
+            cs = seg_analytic(i, :) .* conj(xref);
             im_part = imag(cs);
-            pli = abs(mean(sign(im_part)));
             numer = abs(mean(im_part));
             denom = mean(abs(im_part));
-            wpli = numer / (denom + eps);
-            PLI_vals(s, i, j)      = pli;
-            PLI_vals(s, j, i)      = pli;
-            wPLI_vals(s, i, j)     = wpli;
-            wPLI_vals(s, j, i)     = wpli;
-            phaseLag_vals(s, i, j) = phlag;
-            phaseLag_vals(s, j, i) = -phlag;
+            PLI_vals(s, i) = abs(mean(sign(im_part)));
+            wPLI_vals(s, i) = numer / (denom + eps);
+            phaseLag_vals(s, i) = angle(mean(cs));
+        end
+    else
+        for i = 1:nCh
+            xi = seg_analytic(i, :);
+            for j = i:nCh
+                yj = seg_analytic(j, :);
+                cs = xi .* conj(yj);
+                phlag = angle(mean(cs));
+                im_part = imag(cs);
+                pli = abs(mean(sign(im_part)));
+                numer = abs(mean(im_part));
+                denom = mean(abs(im_part));
+                wpli = numer / (denom + eps);
+                PLI_vals(s, i, j)      = pli;
+                PLI_vals(s, j, i)      = pli;
+                wPLI_vals(s, i, j)     = wpli;
+                wPLI_vals(s, j, i)     = wpli;
+                phaseLag_vals(s, i, j) = phlag;
+                phaseLag_vals(s, j, i) = -phlag;
+            end
         end
     end
 end
 
 %% Aggregate results
-PLI_matrix  = squeeze(mean(PLI_vals, 1));
-wPLI_matrix = squeeze(mean(wPLI_vals, 1));
-mean_phaseLag_matrix = squeeze(angle(mean(exp(1i * phaseLag_vals), 1)));
+if vs_ref
+    PLI_vs_ref = squeeze(mean(PLI_vals, 1));
+    wPLI_vs_ref = squeeze(mean(wPLI_vals, 1));
+    mean_phaseLag_vs_ref = squeeze(angle(mean(exp(1i * phaseLag_vals), 1)));
+    phase_deg = mod(rad2deg(phaseLag_vals) + 360, 360);
+    phaseLag_vs_ref_pctls = deg2rad(prctile(phase_deg, pctls, 1));
+    PLI_vs_ref_pctls = squeeze(prctile(PLI_vals, pctls, 1));
+    wPLI_vs_ref_pctls = squeeze(prctile(wPLI_vals, pctls, 1));
 
-phase_deg = mod(rad2deg(phaseLag_vals) + 360, 360);
-phaseLag_matrix_pctls = nan(numel(pctls), nCh, nCh);
-for i = 1:nCh
-    for j = 1:nCh
-        phaseLag_matrix_pctls(:, i, j) = prctile(phase_deg(:, i, j), pctls);
+    pli_struct.PLI_vs_ref            = PLI_vs_ref(:);
+    pli_struct.wPLI_vs_ref           = wPLI_vs_ref(:);
+    pli_struct.mean_phaseLag_vs_ref  = mean_phaseLag_vs_ref(:);
+    pli_struct.PLI_vs_ref_pctls      = PLI_vs_ref_pctls;
+    pli_struct.wPLI_vs_ref_pctls     = wPLI_vs_ref_pctls;
+    pli_struct.phaseLag_vs_ref_pctls = phaseLag_vs_ref_pctls;
+    pli_struct.reference_channel     = ref_ch;
+    pli_struct.pctls                 = pctls;
+    pli_struct.sample_length         = sample_length;
+    pli_struct.n_samples_requested   = n_samples;
+    pli_struct.n_used                = n_used;
+    pli_struct.used_starts           = starts;
+    pli_struct.Hd                    = Hd;
+    pli_struct.mean_overlap          = mean_overlap;
+else
+    PLI_matrix  = squeeze(mean(PLI_vals, 1));
+    wPLI_matrix = squeeze(mean(wPLI_vals, 1));
+    mean_phaseLag_matrix = squeeze(angle(mean(exp(1i * phaseLag_vals), 1)));
+
+    phase_deg = mod(rad2deg(phaseLag_vals) + 360, 360);
+    phaseLag_matrix_pctls = nan(numel(pctls), nCh, nCh);
+    for i = 1:nCh
+        for j = 1:nCh
+            phaseLag_matrix_pctls(:, i, j) = prctile(phase_deg(:, i, j), pctls);
+        end
     end
+    phaseLag_matrix_pctls = deg2rad(phaseLag_matrix_pctls);
+
+    PLI_matrix_pctls  = squeeze(prctile(PLI_vals, pctls, 1));
+    wPLI_matrix_pctls = squeeze(prctile(wPLI_vals, pctls, 1));
+
+    pli_struct.PLI_matrix            = PLI_matrix;
+    pli_struct.wPLI_matrix           = wPLI_matrix;
+    pli_struct.PLI_matrix_pctls      = PLI_matrix_pctls;
+    pli_struct.wPLI_matrix_pctls     = wPLI_matrix_pctls;
+    pli_struct.pctls                 = pctls;
+    pli_struct.sample_length         = sample_length;
+    pli_struct.n_samples_requested   = n_samples;
+    pli_struct.n_used                = n_used;
+    pli_struct.used_starts           = starts;
+    pli_struct.Hd                    = Hd;
+    pli_struct.mean_overlap          = mean_overlap;
+    pli_struct.mean_phaseLag_matrix  = mean_phaseLag_matrix;
+    pli_struct.phaseLag_matrix_pctls = phaseLag_matrix_pctls;
 end
-phaseLag_matrix_pctls = deg2rad(phaseLag_matrix_pctls);
-
-PLI_matrix_pctls  = squeeze(prctile(PLI_vals, pctls, 1));
-wPLI_matrix_pctls = squeeze(prctile(wPLI_vals, pctls, 1));
-
-pli_struct.PLI_matrix            = PLI_matrix;
-pli_struct.wPLI_matrix           = wPLI_matrix;
-pli_struct.PLI_matrix_pctls      = PLI_matrix_pctls;
-pli_struct.wPLI_matrix_pctls     = wPLI_matrix_pctls;
-pli_struct.pctls                 = pctls;
-pli_struct.sample_length         = sample_length;
-pli_struct.n_samples_requested   = n_samples;
-pli_struct.n_used                = n_used;
-pli_struct.used_starts           = starts;
-pli_struct.Hd                    = Hd;
-pli_struct.mean_overlap          = mean_overlap;
-pli_struct.mean_phaseLag_matrix  = mean_phaseLag_matrix;
-pli_struct.phaseLag_matrix_pctls = phaseLag_matrix_pctls;
 try
     pli_struct.freq_range = [Hd.CutoffFrequency1 Hd.CutoffFrequency2];
 catch

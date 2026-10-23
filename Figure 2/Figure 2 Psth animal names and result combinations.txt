@@ -192,3 +192,26 @@ when they were not already present.
    Phase reset at bout onset (circular stats + surrogate test).
    See PHASE section above.
    Loaded by      : Analyze_phase_psth.m
+
+8) Analyze_coherence_maps.m
+   Delta phase vs distance from the LPAG-center channel (full pairwise maps).
+   pli_struct     : coherence_pli_struct_2026.mat (or the newest *merged* /
+                    *all_together* / *combined* pairwise coherence mat)
+   animal_names   : coherence_pli_structure_animal_names2026.mat
+   Path           : Data\Analysis results\psth power by frequency and behavior\
+   Loaded by      : Analyze_coherence_maps.m
+   Saved by       : Estimate_coherence_maps.m (GENERATE_COHERNECE_MAPS_STRUCT)
+   Note           : load the newest pairwise combined save only. Do not
+                    restitch satellite mats, load the original
+                    coherence_structure.mat, or load *lpag_ref* files.
+
+9) Analyze_coherence_maps_lpag_ref.m
+   Same plots as (8), from the faster mid-LPAG-only Estimate (nCh vectors
+   vs the LPAG-center channel on each probe that has LPAG).
+   pli_struct     : coherence_pli_struct_lpag_ref_2026.mat
+   animal_names   : coherence_pli_struct_lpag_ref_animal_names_2026.mat
+   Path           : Data\Analysis results\psth power by frequency and behavior\
+   Loaded by      : Analyze_coherence_maps_lpag_ref.m
+   Saved by       : Estimate_coherence_maps_lpag_ref.m
+                    (GENERATE_COHERENCE_MAPS_LPAG_REF)
+   Note           : do not load the full pairwise 2026 / merged maps here.
