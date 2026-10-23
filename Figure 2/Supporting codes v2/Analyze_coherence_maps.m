@@ -17,7 +17,10 @@
 % region borders (same x/y as plot 1).
 %
 % Plot 3 — scatter of every stacked point, colored by area, with marker
-% face blending.
+% face blending. Only DR / PAG subregions / SupCol are colored.
+%
+% Plot 4 — mean and 95% CI of those colored areas after interpolating each
+% session onto a shared distance axis.
 
 this_file = mfilename('fullpath');
 if isempty(this_file)
@@ -126,6 +129,7 @@ for animal_n = 1:numel(animal_ids)
 end
 
 %% Plot 3 — all stacked points, colored by area
+areas_in_color = {'DR', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
 scatter_fig = figure('Name', 'Delta phase vs distance by area', ...
     'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
 hold on
@@ -137,13 +141,22 @@ for k = 1:numel(area_labels)
 end
 area_names = unique(area_labels, 'stable');
 area_colors = generateDistinctColors(numel(area_names));
+index = ~ismember(area_names, areas_in_color);
+area_colors(index, :) = 0.72;
 for area_n = 1:numel(area_names)
     mask = strcmp(area_labels, area_names{area_n}) & ...
         isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
-    scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
-        22, area_colors(area_n, :), 'filled', ...
-        'MarkerFaceAlpha', 0.28, 'MarkerEdgeAlpha', 0.12, ...
-        'DisplayName', area_names{area_n})
+    if index(area_n)
+        scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
+            16, area_colors(area_n, :), 'filled', ...
+            'MarkerFaceAlpha', 0.12, 'MarkerEdgeAlpha', 0.05, ...
+            'HandleVisibility', 'off')
+    else
+        scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
+            22, area_colors(area_n, :), 'filled', ...
+            'MarkerFaceAlpha', 0.28, 'MarkerEdgeAlpha', 0.12, ...
+            'DisplayName', area_names{area_n})
+    end
 end
 xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
 yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
@@ -154,6 +167,48 @@ legend('Location', 'eastoutside', 'Interpreter', 'none')
 local_set_radian_ticks(gca)
 box off
 local_save_figure(scatter_fig, fullfile(figure_folder, 'all_points_by_area.png'));
+
+%% Plot 4 — session-interpolated mean and 95% CI for colored areas
+colored_mask = ismember(stack_table.area, areas_in_color) & ...
+    isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
+if ~any(colored_mask)
+    warning('Analyze_coherence_maps:NoColoredAreas', ...
+        'No DR / PAG / SupCol points for the interpolated CI plot.');
+else
+    step_um = 5;
+    dmin = min(stack_table.distance_um(colored_mask));
+    dmax = max(stack_table.distance_um(colored_mask));
+    distance_axis = (floor(dmin / step_um) * step_um : step_um : ...
+        ceil(dmax / step_um) * step_um)';
+    colored_names = area_names(~index);
+    colored_colors = area_colors(~index, :);
+
+    ci_fig = figure('Name', 'Delta phase vs distance, area CI', ...
+        'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
+    hold on
+    for area_n = 1:numel(colored_names)
+        mask = strcmp(stack_table.area, colored_names{area_n}) & colored_mask;
+        scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
+            14, colored_colors(area_n, :), 'filled', ...
+            'MarkerFaceAlpha', 0.12, 'MarkerEdgeAlpha', 0.05, ...
+            'HandleVisibility', 'off')
+        [mean_phase, ci_lo, ci_hi] = local_session_interpolated_ci( ...
+            stack_table, colored_names{area_n}, distance_axis);
+        local_fill_ci(distance_axis, ci_lo, ci_hi, colored_colors(area_n, :));
+        plot(distance_axis, mean_phase, '-', ...
+            'Color', colored_colors(area_n, :), 'LineWidth', 1.8, ...
+            'DisplayName', colored_names{area_n})
+    end
+    xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
+    yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
+    xlabel('Distance from LPAG center (\mum)')
+    ylabel('Phase difference vs LPAG center (rad)')
+    title('Delta phase vs distance, 95% CI by area')
+    legend('Location', 'eastoutside', 'Interpreter', 'none')
+    local_set_radian_ticks(gca)
+    box off
+    local_save_figure(ci_fig, fullfile(figure_folder, 'area_interpolated_ci.png'));
+end
 
 %% -------------------------------------------------------------------------
 function [distance_um, phase_rad, area] = local_sorted_trace(trace)
@@ -170,6 +225,61 @@ else
 end
 if isstring(area)
     area = cellstr(area);
+end
+end
+
+function [mean_phase, ci_lo, ci_hi] = local_session_interpolated_ci( ...
+    stack_table, area_name, distance_axis)
+% Interpolate each session onto distance_axis, then mean ± 1.96 SEM.
+sessions = unique(stack_table.session, 'stable');
+phase_mat = nan(numel(distance_axis), numel(sessions));
+for session_n = 1:numel(sessions)
+    mask = strcmp(stack_table.session, sessions{session_n}) & ...
+        strcmp(stack_table.area, area_name) & ...
+        isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
+    if sum(mask) < 2
+        continue
+    end
+    distance_um = stack_table.distance_um(mask);
+    phase_rad = stack_table.phase_rad(mask);
+    [distance_um, order] = sort(distance_um);
+    phase_rad = phase_rad(order);
+    [distance_um, first] = unique(distance_um, 'first');
+    phase_rad = phase_rad(first);
+    if numel(distance_um) < 2
+        continue
+    end
+    in_range = distance_axis >= distance_um(1) & distance_axis <= distance_um(end);
+    phase_mat(in_range, session_n) = interp1(distance_um, phase_rad, ...
+        distance_axis(in_range), 'linear');
+end
+n = sum(isfinite(phase_mat), 2);
+mean_phase = nan(size(distance_axis));
+ci_lo = nan(size(distance_axis));
+ci_hi = nan(size(distance_axis));
+enough = n >= 2;
+if ~any(enough)
+    return
+end
+mean_phase(enough) = mean(phase_mat(enough, :), 2, 'omitnan');
+sem = std(phase_mat(enough, :), 0, 2, 'omitnan') ./ sqrt(n(enough));
+half = 1.96 * sem;
+ci_lo(enough) = mean_phase(enough) - half;
+ci_hi(enough) = mean_phase(enough) + half;
+end
+
+function local_fill_ci(x, y_lo, y_hi, color)
+ok = isfinite(x) & isfinite(y_lo) & isfinite(y_hi);
+d = diff([false; ok(:); false]);
+starts = find(d == 1);
+ends = find(d == -1) - 1;
+for k = 1:numel(starts)
+    sl = starts(k):ends(k);
+    if numel(sl) < 2
+        continue
+    end
+    fill([x(sl); flipud(x(sl))], [y_lo(sl); flipud(y_hi(sl))], color, ...
+        'FaceAlpha', 0.25, 'EdgeColor', 'none', 'HandleVisibility', 'off')
 end
 end
 
