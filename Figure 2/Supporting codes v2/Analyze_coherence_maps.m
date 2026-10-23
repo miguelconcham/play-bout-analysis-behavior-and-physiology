@@ -18,11 +18,12 @@
 % outliers are interpolated for the colored line. Y-axis follows the
 % interpolated traces.
 %
-% Plot 3–4 — scatter and session-interpolated 95% CI for sessions without
-% DR. Original points are faint black; interpolated values are colored.
+% Plot 3–4 — scatter and session-interpolated 95% CI for probes without
+% DR or OcNuc. Original points are faint black; interpolated values are
+% colored.
 %
-% Plot 5 — same scatter + CI for sessions that have DR (SupCol often
-% inverted).
+% Plot 5 — same scatter + CI for probes that have DR or OcNuc (SupCol
+% often inverted).
 
 this_file = mfilename('fullpath');
 if isempty(this_file)
@@ -152,39 +153,42 @@ end
 %% Interpolate per-session outliers; keep the original table for faint overlays
 stack_table = local_interpolate_session_trend_outliers(stack_table_raw);
 
-%% Split probes that have DR (often inverted SupCol) from the rest
-% A row belongs to the DR set only if that session+probe has at least one
-% 'DR' channel. Other probes from the same folder stay in the no-DR set.
-areas_in_color = {'DR', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
-has_dr = local_group_has_dr(stack_table);
-has_dr_raw = local_group_has_dr(stack_table_raw);
-dr_groups = unique(local_group_key(stack_table(has_dr, :)), 'stable');
-no_dr_groups = unique(local_group_key(stack_table(~has_dr, :)), 'stable');
-fprintf('%d probes with DR, %d without\n', numel(dr_groups), numel(no_dr_groups));
-disp('Probes in the DR figures:')
-disp(dr_groups)
-disp('Probes in the no-DR figures:')
-disp(no_dr_groups)
+%% Split probes that have DR or OcNuc (often inverted SupCol) from the rest
+% A row belongs to the excluded set if that session+probe has at least one
+% DR or OcNuc channel. Other probes from the same folder stay in the main
+% set.
+areas_in_color = {'DR', 'OcNuc', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
+exclude_areas = {'DR', 'OcNuc'};
+has_excluded = local_group_has_areas(stack_table, exclude_areas);
+has_excluded_raw = local_group_has_areas(stack_table_raw, exclude_areas);
+excluded_groups = unique(local_group_key(stack_table(has_excluded, :)), 'stable');
+kept_groups = unique(local_group_key(stack_table(~has_excluded, :)), 'stable');
+fprintf('%d probes with DR/OcNuc, %d without\n', ...
+    numel(excluded_groups), numel(kept_groups));
+disp('Probes in the DR/OcNuc figures:')
+disp(excluded_groups)
+disp('Probes in the no-DR/OcNuc figures:')
+disp(kept_groups)
 
-local_plot_colored_scatter(stack_table(~has_dr, :), areas_in_color, ...
-    'Delta phase vs distance by area (no DR)', ...
+local_plot_colored_scatter(stack_table(~has_excluded, :), areas_in_color, ...
+    'Delta phase vs distance by area (no DR/OcNuc)', ...
     fullfile(figure_folder, 'all_points_by_area.png'));
-local_plot_area_scatter_ci(stack_table(~has_dr, :), stack_table_raw(~has_dr_raw, :), ...
-    areas_in_color, ...
-    'Delta phase vs distance, 95% CI by area (no DR)', ...
+local_plot_area_scatter_ci(stack_table(~has_excluded, :), ...
+    stack_table_raw(~has_excluded_raw, :), areas_in_color, ...
+    'Delta phase vs distance, 95% CI by area (no DR/OcNuc)', ...
     fullfile(figure_folder, 'area_interpolated_ci.png'));
 
-if any(has_dr)
-    local_plot_colored_scatter(stack_table(has_dr, :), areas_in_color, ...
-        'Delta phase vs distance by area (DR probes)', ...
+if any(has_excluded)
+    local_plot_colored_scatter(stack_table(has_excluded, :), areas_in_color, ...
+        'Delta phase vs distance by area (DR/OcNuc probes)', ...
         fullfile(figure_folder, 'all_points_by_area_dr_sessions.png'));
-    local_plot_area_scatter_ci(stack_table(has_dr, :), stack_table_raw(has_dr_raw, :), ...
-        areas_in_color, ...
-        'Delta phase vs distance, 95% CI by area (DR probes)', ...
+    local_plot_area_scatter_ci(stack_table(has_excluded, :), ...
+        stack_table_raw(has_excluded_raw, :), areas_in_color, ...
+        'Delta phase vs distance, 95% CI by area (DR/OcNuc probes)', ...
         fullfile(figure_folder, 'area_interpolated_ci_dr_sessions.png'));
 else
     warning('Analyze_coherence_maps:NoDRSessions', ...
-        'No probes with DR channels; skipped the DR-only scatter/CI figures.');
+        'No probes with DR or OcNuc channels; skipped those scatter/CI figures.');
 end
 
 %% -------------------------------------------------------------------------
@@ -292,11 +296,21 @@ for g = 1:numel(groups)
 end
 end
 
-function tf = local_group_has_dr(tbl)
+function tf = local_group_has_areas(tbl, area_names)
 key = local_group_key(tbl);
-is_dr = strcmp(tbl.area, 'DR');
-dr_keys = unique(key(is_dr), 'stable');
-tf = ismember(key, dr_keys);
+is_hit = false(height(tbl), 1);
+for k = 1:height(tbl)
+    label = tbl.area{k};
+    if iscell(label)
+        if isempty(label)
+            continue
+        end
+        label = label{1};
+    end
+    is_hit(k) = any(strcmpi(strtrim(char(label)), area_names));
+end
+hit_keys = unique(key(is_hit), 'stable');
+tf = ismember(key, hit_keys);
 end
 
 function stack_clean = local_interpolate_session_trend_outliers(stack_table)
