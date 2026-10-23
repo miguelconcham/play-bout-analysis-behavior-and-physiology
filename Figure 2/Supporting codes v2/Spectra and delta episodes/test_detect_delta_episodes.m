@@ -7,7 +7,7 @@ function test_detect_delta_episodes()
 this_dir = fileparts(mfilename('fullpath'));
 if ~isempty(this_dir)
     addpath(this_dir);
-    addpath(fullfile(fileparts(fileparts(this_dir)), 'Custom functions'));
+    addpath(fullfile(fileparts(fileparts(fileparts(this_dir))), 'Custom functions'));
 end
 
 options = delta_episode_options(struct( ...

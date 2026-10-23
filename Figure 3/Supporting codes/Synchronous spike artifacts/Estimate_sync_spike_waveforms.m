@@ -16,7 +16,7 @@
 %     {session}_sync_spike_waveforms.mat
 %     sync_spike_waveforms_all_sessions.mat
 
-repo_root = fileparts(fileparts(mfilename('fullpath')));
+repo_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 if ~isempty(repo_root)
     run(fullfile(repo_root, 'add_repo_paths.m'));
 end

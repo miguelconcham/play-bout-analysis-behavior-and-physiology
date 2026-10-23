@@ -35,8 +35,8 @@
 % Optional save:
 %   set save_results = true to write a .mat under saving_folder.
 
-this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_full_spectrogram_fooof_sliding.m';
-repo_root = fileparts(fileparts(fileparts(this_file)));
+this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Event aligned LFP\Analyze_psth_full_spectrogram_fooof_sliding.m';
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 

@@ -22,8 +22,8 @@
 % Extra: aperiodic-subtracted delta onset PSTH (Figure 2 style).
 %   Edit delta_band and aperiodic_template ('before'|'after'|'combined').
 %
-this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_full_spectrogram_fooof.m';
-repo_root = fileparts(fileparts(fileparts(this_file)));
+this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Event aligned LFP\Analyze_psth_full_spectrogram_fooof.m';
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 

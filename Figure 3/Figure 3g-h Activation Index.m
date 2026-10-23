@@ -1,5 +1,5 @@
 %% Figure 3 — Activation index plots
-% Checkpoint from Supporting codes/Estiamte_activation_index_and_other_variables.m.
+% Checkpoint from Supporting codes/Single neuron modulation/Estiamte_activation_index_and_other_variables.m.
 % Sections 2–4: primary activation-index views (how extreme a cell type’s
 % activity is relative to other neurons in the same structure).
 % Sections 5–9: alternative summaries of that same within-structure ranking.

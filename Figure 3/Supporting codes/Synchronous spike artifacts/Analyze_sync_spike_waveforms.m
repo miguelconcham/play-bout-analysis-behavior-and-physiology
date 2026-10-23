@@ -16,7 +16,7 @@
 %
 % neuron_rows and pair_records are left in the workspace.
 
-repo_root = fileparts(fileparts(mfilename('fullpath')));
+repo_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 if ~isempty(repo_root)
     run(fullfile(repo_root, 'add_repo_paths.m'));
 end

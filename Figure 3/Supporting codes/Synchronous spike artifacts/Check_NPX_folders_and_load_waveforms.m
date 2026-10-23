@@ -24,7 +24,7 @@ npx_raw_data = ['\\experimentfs.home.bccn-berlin.de\experiment\' ...
     'PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\' ...
     'play bout analysis behavior and physiology\Data\NPX data\NPX raw data'];
 
-repo_root = fileparts(fileparts(mfilename('fullpath')));
+repo_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 if ~isempty(repo_root)
     run(fullfile(repo_root, 'add_repo_paths.m'));
 end

@@ -7,7 +7,7 @@ function test_sync_event_statistics()
 this_dir = fileparts(mfilename('fullpath'));
 if ~isempty(this_dir)
     addpath(this_dir);
-    addpath(fullfile(fileparts(this_dir), 'Custom functions'));
+    addpath(fullfile(fileparts(fileparts(fileparts(this_dir))), 'Custom functions'));
 end
 
 mask = sync_spike_mask([0; 1; 1.004; 5], 1.003, 1, [-1.5 1], 0.005);

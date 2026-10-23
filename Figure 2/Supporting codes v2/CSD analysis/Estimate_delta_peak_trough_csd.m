@@ -9,7 +9,7 @@
 %   trough/<animal>/probe<N>/
 % Each leaf folder: lfp.npy, x_coords.npy, y_coords.npy, T0.npy, fs.npy, meta.mat
 
-data_root     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root     = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 npx_Raw_Data  = fullfile(data_root, 'NPX data', 'NPX raw data');
 saving_folder = fullfile(data_root, 'Analysis results', 'delta peak trough CSD');
 peak_root     = fullfile(saving_folder, 'peak');
@@ -20,11 +20,11 @@ trough_root   = fullfile(saving_folder, 'trough');
 % fallback UNC path below.
 this_file = mfilename('fullpath');
 if isempty(this_file)
-    this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\CSD analysis\Estimate_delta_peak_trough_csd.m';
+    this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\CSD analysis\Estimate_delta_peak_trough_csd.m';
 end
-repo_root = fileparts(fileparts(this_file));  % .../CSD analysis -> repo root
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));  % CSD analysis -> Supporting codes v2 -> Figure 2 -> repo root
 run(fullfile(repo_root, 'add_repo_paths.m'));
-addpath(fullfile(repo_root, 'CSD analysis'));
+addpath(fullfile(repo_root, 'Figure 2', 'Supporting codes v2', 'CSD analysis'));
 
 if ~exist(saving_folder, 'dir'); mkdir(saving_folder); end
 if ~exist(peak_root, 'dir');     mkdir(peak_root);     end

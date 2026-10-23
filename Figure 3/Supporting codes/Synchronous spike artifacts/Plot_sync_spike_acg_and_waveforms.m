@@ -38,7 +38,7 @@
 % has a closer partner contributes only the spikes and the synchronous mean
 % from the pairs that meet the distance. The default is 500 micrometers.
 
-repo_root = fileparts(fileparts(mfilename('fullpath')));
+repo_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 if ~isempty(repo_root)
     run(fullfile(repo_root, 'add_repo_paths.m'));
 end

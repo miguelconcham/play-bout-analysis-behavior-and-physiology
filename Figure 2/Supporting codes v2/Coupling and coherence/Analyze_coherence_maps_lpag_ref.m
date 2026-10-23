@@ -17,11 +17,11 @@
 
 this_file = mfilename('fullpath');
 if isempty(this_file)
-    this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_coherence_maps_lpag_ref.m';
+    this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Coupling and coherence\Analyze_coherence_maps_lpag_ref.m';
 end
-repo_root = fileparts(fileparts(fileparts(this_file)));
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 addpath(fullfile(repo_root, 'Custom functions'));
-addpath(fullfile(repo_root, 'Figure 2', 'Supporting codes v2'));
+addpath(genpath(fullfile(repo_root, 'Figure 2', 'Supporting codes v2')));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 figure_folder = fullfile(saving_folder, 'delta phase vs lpag distance lpag ref');

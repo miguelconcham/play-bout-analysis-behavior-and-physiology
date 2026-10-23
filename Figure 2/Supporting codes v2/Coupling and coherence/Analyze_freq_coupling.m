@@ -1,7 +1,7 @@
 %% Analyze_freq_coupling
 % Cross-frequency coupling analysis (delta phase vs gamma amplitude).
 
-repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+repo_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 npx_Raw_Data = fullfile(data_root, 'NPX data', 'NPX raw data');

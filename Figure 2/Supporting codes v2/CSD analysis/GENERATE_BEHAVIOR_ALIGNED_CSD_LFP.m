@@ -28,7 +28,7 @@ if t1 >= 0 || t2 <= 0
     error('GENERATE_BEHAVIOR_ALIGNED_CSD_LFP:Window', 'Need t1 < 0 < t2');
 end
 
-data_root        = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root        = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 synch_directory  = fullfile(data_root, 'Synch data');
 area_limit_table = fullfile(data_root, 'Area_limits_GoodLooking.xlsx');
 behavior_data    = fullfile(data_root, 'Behavior backups');

@@ -24,11 +24,11 @@ What this repository actually implements.
 - Leaky integrate-and-fire (LIF) networks with synaptic current, refractory period, and Poisson background vs oscillatory drive
 - Shared vs independent oscillatory input; parameter grid over oscillation amplitude $A$ and background rate $R_{\mathrm{bg}}$
 - Downstream metrics on simulated spikes: MVL, PPC, cycle PSTHs, coincidence-event phases
-- Notebook: `Complementary figures/LIF neuron model.ipynb` (define → estimate grid → save → analyze)
+- Notebook: `Figure 3/Supporting codes/Pairwise spike timing/LIF neuron model.ipynb` (define → estimate grid → save → analyze)
 
 **Machine learning**
 - Linear discriminant analysis (LDA) for multi-class behavior classification — `Figure 1/Figure 1 LDA.m`
-- Support vector machines (RBF `fitcsvm`; Classification Learner `SVM_model`) for play probability / play score from the 14 motion–USV features (HMM engaged vs unengaged) and for behavior from population rates — `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m`, `Complementary figures/spike_train_parsing_phase_lock.m`
+- Support vector machines (RBF `fitcsvm`; Classification Learner `SVM_model`) for play probability / play score from the 14 motion–USV features (HMM engaged vs unengaged) and for behavior from population rates — `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m`, `Figure 3/Supporting codes/Single neuron modulation/spike_train_parsing_phase_lock.m`
 - UMAP embeddings of high-dimensional feature space — `run_umap`
 - Hidden Markov models (sticky HMM with Gaussian emissions) — `Figure 1/HMM modeling/`
 - Generalized linear models (binomial and Poisson) and unique $R^2$ with k-fold CV — `fitglm`, `cvpartition`
@@ -56,53 +56,25 @@ What this repository actually implements.
 play bout analysis behavior and physiology/
 ├── ANALYSES.md                        # Catalog: analysis → script to run
 ├── Paper figures/                     # Paper PDFs + PNG previews used below
-├── Complementary figures/             # LIF, parsing, acute locking, stim/call PSTHs
-│   ├── LIF neuron model.ipynb
-│   ├── GENERATE_SPIKE_TRAIN_PARSING.m
-│   ├── Estimate_spike_train_parsing.m
-│   ├── Analyze_spike_train_parsing.m
-│   ├── GENERATE_ACUTE_PHASE_LOCKING.m
-│   ├── Estimate_acute_phase_locking.m
-│   ├── Analyze_acute_phase_locking.m
-│   ├── GENERATE_STIM_CALL_RESPONSES.m
-│   └── Estimate_stim_call_responses.m
-├── Synchronous spike artifacts/       # Synchronous-spike waveform and raw-LFP power checks
-│   ├── GENERATE_SYNC_SPIKE_WAVEFORMS.m
-│   ├── Estimate_sync_spike_waveforms.m
-│   ├── Analyze_sync_spike_waveforms.m
-│   ├── Plot_sync_spike_acg_and_waveforms.m  # Profile, autocorrelogram, spatial range
-│   ├── sync_waveform_spatial_range.m   # Peak-to-peak versus distance from the peak channel
-│   ├── pair_channel_distance.m         # Euclidean separation of two neurons on the probe
-│   ├── normalized_acg_stack.m          # Normalized autocorrelograms and their mean CI
-│   ├── spatial_range_stack.m           # Normalized inverted-U profiles and their mean CI
-│   ├── template_spike_samples.m        # Caps spike samples inside play-bout windows
-│   ├── read_npx_channel_geometry.m     # x,y in um from chann_map_PAG.mat
-│   ├── GENERATE_SYNC_SPIKE_LFP_POWER.m
-│   ├── compare_phase_matched_lfp.m    # Null: same-window LFP at the same delta phase
-│   ├── lfp_phase_pool.m               # Bout-window samples, excluding +/- 10 ms of the event
-│   ├── Estimate_sync_spike_lfp_power.m
-│   ├── Analyze_sync_spike_lfp_power.m
-│   ├── synchronous_play_pairs.m       # Shared play-bout pairs, 90% of each area
-│   ├── summarize_sync_coverage.m      # How many neurons in each area were observed
-│   ├── load_waveforms_from_continuous.m
-│   ├── test_load_waveforms_from_continuous.m
-│   ├── test_sync_event_statistics.m
-│   └── Check_NPX_folders_and_load_waveforms.m
+├── Acute recordings/                  # Acute NPX: breathing lock and stim/call PSTHs
 ├── Custom functions/                  # Shared helpers (play_bout, kernel_rate, ppc, …)
-├── manual traking/
-│   └── manual_traking.m               # Click tracking for focal animal and partner
 ├── Figure 1/
 │   ├── Figure 1 Play Bouts.m
 │   ├── Figure 1 LDA.m
 │   ├── Figure 1 HMM.m
-│   ├── LDA analysis/              # Features + CNN autoencoder notebook
+│   ├── manual_traking.m               # Click tracking for focal animal and partner
+│   ├── LDA analysis/                  # Features + CNN autoencoder notebook
 │   └── HMM modeling/
 ├── Figure 2/
 │   ├── Figure 2.m                     # Main Figure 2 + Supp Fig 4 plotting
 │   ├── Play partner.m                 # Supp Fig 3g–i
 │   ├── Reciprocity.m                  # Fig 2h + Supp Fig 3a–f
-│   ├── Freq coupling.m
-│   └── Supporting codes v2/           # GENERATE / Estimate / Analyze pipelines
+│   ├── CrossFreq coupling.m
+│   └── Supporting codes v2/
+│       ├── Event aligned LFP/         # Play, behavior, calls, speed, phase reset
+│       ├── Spectra and delta episodes/
+│       ├── Coupling and coherence/    # CFC, PLI/wPLI, phase vs distance
+│       └── CSD analysis/
 ├── Figure 3/
 │   ├── Figure 3a-e.m
 │   ├── Figure 3g-h Activation Index.m
@@ -111,6 +83,9 @@ play bout analysis behavior and physiology/
 │   ├── Figure 3k Coincident events.m
 │   ├── SuppFig4 ActivationIndex Example.m   # Supp Fig 5a–c
 │   └── Supporting codes/
+│       ├── Single neuron modulation/  # Phase locking, activation index, parsing
+│       ├── Pairwise spike timing/     # CCG, surprise, coincidence, LIF model
+│       └── Synchronous spike artifacts/
 ├── Figure 4/
 │   ├── Figure_4_Panels_abc_Extended_Fig_6_ab_v2.m
 │   └── Extended_Fig_6_c_v2.m
@@ -120,11 +95,12 @@ play bout analysis behavior and physiology/
 ├── Figure 6/
 │   ├── Figure 6 Basic MI.m
 │   ├── Fig 6f.m
-│   └── Fig 6i.m
+│   ├── Fig 6i.m
+│   └── Supplementary codes/           # Dual-animal MI and cross-correlation
 └── Data/                              # Local copies (not in git)
 ```
 
-Run `add_repo_paths.m` once per MATLAB session so `Custom functions/`, `Complementary figures/`, and the GENERATE folders are on the path. CircStat (`circ_r`, `circ_mean`, `circ_cmtest`) and npy-matlab (`readNPY`) still need to be installed separately.
+Run `add_repo_paths.m` once per MATLAB session so `Custom functions/`, `Acute recordings/`, and the GENERATE folders are on the path. CircStat (`circ_r`, `circ_mean`, `circ_cmtest`) and npy-matlab (`readNPY`) still need to be installed separately.
 
 Panel letters below match the uploaded files in `Paper figures/` where previews exist. In the Nature Neuroscience manuscript, Supplementary Figures 1–5 are Extended Data Figs. 1–5. Schematics, histology, and camera-rig drawings are not generated by these scripts. Figure 4 / Extended Data Fig. 6 and Figure 5 plotting scripts live in [`Figure 4/`](Figure%204/) and [`Figure 5/`](Figure%205/); paper PNG previews for those panels are not yet in `Paper figures/`.
 
@@ -155,9 +131,9 @@ Panel letters below match the uploaded files in `Paper figures/` where previews 
 | Build HMM inputs | `Figure 1/HMM modeling/CreateHMMFIiles.m` |
 | Train CNN autoencoder (PyTorch) | `Figure 1/LDA analysis/Convolutional classification.ipynb` |
 | Fit HMMs in Python | `Figure 1/HMM modeling/python hmm estimate.txt` |
-| Manual tracking of both animals | `manual traking/manual_traking.m` |
+| Manual tracking of both animals | `Figure 1/manual_traking.m` |
 
-`manual traking/manual_traking.m` writes the `traking_structure` `.mat` files. That output goes in `Data/Traking backups/`. Figure 1 and Figure 2 load those files from that folder.
+`Figure 1/manual_traking.m` writes the `traking_structure` `.mat` files. That output goes in `Data/Traking backups/`. Figure 1 and Figure 2 load those files from that folder.
 
 HMM pipeline order: `Figure 1/HMM modeling/README.md`.
 
@@ -180,7 +156,7 @@ HMM pipeline order: `Figure 1/HMM modeling/README.md`.
 | g | Unique $R^2$ for delta-power regressors | `Figure 2/Figure 2.m` | `%% 7 (Figre 2g, Supp Fig 4c,f)` |
 | h | Delta power, reciprocal vs nonreciprocal play | `Figure 2/Reciprocity.m` | `%% 11 (Fig 2h, Supp Fig 3b,c)` |
 
-Related analysis (not a main-figure panel): speed vs theta in `Figure 2/Figure 2.m` sections `%% 18`–`%% 21` and `Figure 2/Supporting codes v2/Analyze_speed_freq_relation.m`.
+Related analysis (not a main-figure panel): speed vs theta in `Figure 2/Figure 2.m` sections `%% 18`–`%% 21` and `Figure 2/Supporting codes v2/Event aligned LFP/Analyze_speed_freq_relation.m`.
 
 ### Supporting codes v2
 
@@ -206,7 +182,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | Reciprocity | (uses regressor PSTH) | `Reciprocity.m` |
 | Partner identity | (uses play-bout PSTH) | `Play partner.m` |
 | Speed vs band power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m`; `Figure 2.m` `%% 18`–`%% 21` |
-| Cross-frequency coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m`; `Freq coupling.m` |
+| Cross-frequency coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m`; `CrossFreq coupling.m` |
 
 The original (pre-v2) Figure 2 pipeline lives outside this repository, in the parent folder `PlayBout Analysis/Figure 2 Supporting codes/`.
 
@@ -223,14 +199,14 @@ The original (pre-v2) Figure 2 pipeline lives outside this repository, in the pa
 | c | Population preferred-phase histogram | `Figure 3/Figure 3a-e.m` | `%% 7 (Fig 3c)` |
 | d | Locked / unlocked / unclassified fractions by area | `Figure 3/Figure 3a-e.m` | `%% 13 (Fig 3d)` |
 | e | Phase locking during play vs non-play | `Figure 3/Figure 3a-e.m` | `%% 14`–`%% 15 (Fig 3e)` |
-| f | Modulated locked and unlocked neurons by area | `Figure 3/Supporting codes/Estiamte_activation_index_and_other_variables.m` | inhibition / excitation block |
+| f | Modulated locked and unlocked neurons by area | `Figure 3/Supporting codes/Single neuron modulation/Estiamte_activation_index_and_other_variables.m` | inhibition / excitation block |
 | g | LPAG activation index by locking type and behavior | `Figure 3/Figure 3g-h Activation Index.m` | `%% 4 Fig 3g` |
 | h | Activation-index time course, LPAG and VLPAG | `Figure 3/Figure 3g-h Activation Index.m` | `%% 3: Fig 3h` (same section also yields Supp Fig 5d for SC, DLPAG, DR) |
 | i | Example coincident-spike cross-correlogram | `Figure 3/Figure 3i cross correlogram.m` | `%% 7 Fig 3i, and Supp Fig 5g` (`GENERATE_CROSS_CORR_EXAMPLE`) |
 | j | Delta phase of coincident spikes | `Figure 3/Fig 3j.m` | `%% Fig 3j` |
 | k | Between-area coincidence change around play | `Figure 3/Figure 3k Coincident events.m` | `%% Fig 3k` |
 
-`Figure 3/Supporting codes/` holds GENERATE / Estimate / ANALYZE pipelines that build the `.mat` files those plots load. `Estiamte_activation_index_and_other_variables.m` section 8 writes the example-plot checkpoint used by `SuppFig4 ActivationIndex Example.m`.
+`Figure 3/Supporting codes/` holds the GENERATE / Estimate / ANALYZE pipelines in `Single neuron modulation/`, `Pairwise spike timing/`, and `Synchronous spike artifacts/`. `Estiamte_activation_index_and_other_variables.m` section 8 writes the example-plot checkpoint used by `SuppFig4 ActivationIndex Example.m`.
 
 ### Figure 3e delta-power control
 
@@ -307,13 +283,13 @@ Rebuild MI / CCG structs from two-animal recordings with `Figure 6/Supplementary
 
 ---
 
-## Complementary figures
+## Acute recordings
 
-Same GENERATE → Estimate → Analyze layout as Figure 2/3, for analyses that are not numbered paper panels. Full run table: [`ANALYSES.md`](ANALYSES.md).
+Breathing-locked LFP and stim/call PSTHs from the acute NPX experiments. Spike-train parsing and the LIF notebook now live under Figure 3 supporting codes. Full run table: [`ANALYSES.md`](ANALYSES.md).
 
 ### LIF neuron model
 
-`Complementary figures/LIF neuron model.ipynb` — leaky integrate-and-fire network (Python / NumPy / SciPy).
+`Figure 3/Supporting codes/Pairwise spike timing/LIF neuron model.ipynb` — leaky integrate-and-fire network (Python / NumPy / SciPy).
 
 | Step | What it does |
 |------|----------------|
@@ -435,7 +411,7 @@ Which PSTH / CV files to load for each band is listed in `Figure 2/Figure 2 Psth
 | e | Dual-probe histology | — (illustration) | — |
 | f | Example coincident spikes (two trough cells) | `Figure 3/Figure 3i cross correlogram.m` | `%% 7` (`GENERATE_CROSS_CORR_EXAMPLE`) |
 | g | Coincidence raster and mean count vs play onset | `Figure 3/Figure 3i cross correlogram.m` | `%% 7 Fig 3i, and Supp Fig 5g` |
-| h | Coincidence change, play vs non-play, by area pair | `Figure 3/Supporting codes/ANALYSE suprise statistics  all aniamls.m` | `%% X Plot (with empty bar plotS, as on Supp Figure)` |
+| h | Coincidence change, play vs non-play, by area pair | `Figure 3/Supporting codes/Pairwise spike timing/ANALYSE suprise statistics  all aniamls.m` | `%% X Plot (with empty bar plotS, as on Supp Figure)` |
 
 Phase of coincident events (not a numbered paper panel here): `Figure 3/Former Supplementary Figure Phase of coincident events.m`. Activation index vs delta power: `Figure 3/Former Supplementary Figure Correlation between power and activation index.m`.
 
@@ -448,7 +424,7 @@ Phase of coincident events (not a numbered paper panel here): `Figure 3/Former S
 3. Extract so `Data/` sits next to `Figure 1/`–`Figure 6/`.
 4. Scripts use UNC paths under  
    `...\play bout analysis behavior and physiology\Data\`.
-5. Add `Figure 2/Supporting codes v2` and `Figure 3/Supporting codes` to the MATLAB path before running estimate / example-CCG scripts.
+5. Run `add_repo_paths.m` before estimate / example-CCG scripts. It puts each supporting-code subfolder on the MATLAB path.
 6. Add shared helpers (`play_bout`, `readNPY`, `run_umap`, `wrap_probe_values`, circular statistics).
 
 ---
@@ -460,7 +436,7 @@ Phase of coincident events (not a numbered paper panel here): `Figure 3/Former S
 ### Figure 1
 
 - `Behavior backups/` — manual annotations (`.txt`)
-- `Traking backups/` — output of `manual traking/manual_traking.m` (`traking_structure` `.mat` files). On disk this is `Data/Traking backups/`.
+- `Traking backups/` — output of `Figure 1/manual_traking.m` (`traking_structure` `.mat` files). On disk this is `Data/Traking backups/`.
 - `Analysis results/locomotive behaviors 2 partners/`
 - `Analysis results/Behavior classification/` — trained LDA models
 - `Analysis results/HMM 2 and 3 states 2 partners/`
@@ -480,7 +456,7 @@ Example traces also need `Data/Synch data/<animal>/` and `Data/NPX data/NPX raw 
 
 - `Data/Analysis results/phase locking data/`
 - `Data/Analysis results/Cross_correlogram/`
-- `Data/Analysis results/activation index/` — `activation_index_section6.mat` for Fig 3g–h / Supp Fig 5d; `activation_index_example_plot.mat` for `SuppFig4 ActivationIndex Example.m` (Supp Fig 5a–c). Rebuild both with `Figure 3/Supporting codes/Estiamte_activation_index_and_other_variables.m` (sections 6 and 8).
+- `Data/Analysis results/activation index/` — `activation_index_section6.mat` for Fig 3g–h / Supp Fig 5d; `activation_index_example_plot.mat` for `SuppFig4 ActivationIndex Example.m` (Supp Fig 5a–c). Rebuild both with `Figure 3/Supporting codes/Single neuron modulation/Estiamte_activation_index_and_other_variables.m` (sections 6 and 8).
 
 ### Figures 4–5 and Extended Data Fig. 6
 
@@ -492,13 +468,13 @@ Example traces also need `Data/Synch data/<animal>/` and `Data/NPX data/NPX raw 
 - `Data/Analysis results/Theta psth/` — MI and two-animal CCG structs
 - `Data/TWO ANIMALS/` — raw dual-animal sessions (to rebuild structs)
 
-### Complementary figures
+### Acute recordings and related saves
 
 - `Data/Analysis results/spike train parsing/` — pooled and per-animal parsing structs
 - `Data/Analysis results/phase locking data/delta_all_neurons_v2.mat` — delta-lock labels used by `Analyze_spike_train_parsing.m`
 - `Data/Acute data/` — acute sessions (`YYYYMMDD_N`) plus `population analysis/`
 - `Data/Analysis results/acute phase locking/` — pooled `acute_phase_locking_*.mat`, `stim_call_responses_*.mat`, and interval figures
-- `Complementary figures/sim_shared_grid.pkl` and `sim_NOT_shared_grid.pkl` — LIF grid checkpoints (local only; not in git)
+- `Figure 3/Supporting codes/Pairwise spike timing/sim_shared_grid.pkl` and `sim_NOT_shared_grid.pkl` — LIF grid checkpoints (local only; not in git)
 
 ### Where to download data
 

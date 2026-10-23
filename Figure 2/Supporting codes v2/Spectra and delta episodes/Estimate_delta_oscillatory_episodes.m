@@ -36,9 +36,9 @@ if isempty(this_file)
     this_file = ['\\experimentfs.home.bccn-berlin.de\experiment\' ...
         'PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\' ...
         'play bout analysis behavior and physiology\Figure 2\' ...
-        'Supporting codes v2\Estimate_delta_oscillatory_episodes.m'];
+        'Supporting codes v2\Spectra and delta episodes\Estimate_delta_oscillatory_episodes.m'];
 end
-repo_root = fileparts(fileparts(fileparts(this_file)));
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 run(fullfile(repo_root, 'add_repo_paths.m'));
 
 options = delta_episode_options();

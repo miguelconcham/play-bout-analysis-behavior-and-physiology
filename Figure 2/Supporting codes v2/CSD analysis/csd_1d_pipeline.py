@@ -968,7 +968,7 @@ EXAMPLE_DATASETS: List[Dict[str, Any]] = [
     {
         "name": "230516_USV",
         "folder": (
-            "//experimentfs.bccn-berlin.pri/experiment/share/Miguel/"
+            "//experimentfs.home.bccn-berlin.de/experiment/share/Miguel/"
             "LOMBARD EFFECT NPX files and analysis/CSD analysis/230516/USV CSD"
         ),
         "chan_start": 0,
@@ -983,7 +983,7 @@ EXAMPLE_DATASETS: List[Dict[str, Any]] = [
     {
         "name": "230516",
         "folder": (
-            "//experimentfs.bccn-berlin.pri/experiment/share/Miguel/"
+            "//experimentfs.home.bccn-berlin.de/experiment/share/Miguel/"
             "LOMBARD EFFECT NPX files and analysis/CSD analysis/230516"
         ),
         "chan_start": 100,
@@ -998,7 +998,7 @@ EXAMPLE_DATASETS: List[Dict[str, Any]] = [
     {
         "name": "230606_TONE",
         "folder": (
-            "//experimentfs.bccn-berlin.pri/experiment/share/Miguel/"
+            "//experimentfs.home.bccn-berlin.de/experiment/share/Miguel/"
             "LOMBARD EFFECT NPX files and analysis/CSD analysis/230606/TONE responses"
         ),
         "chan_start": 75,
@@ -1013,7 +1013,7 @@ EXAMPLE_DATASETS: List[Dict[str, Any]] = [
     {
         "name": "230608_USV",
         "folder": (
-            "//experimentfs.bccn-berlin.pri/experiment/share/Miguel/"
+            "//experimentfs.home.bccn-berlin.de/experiment/share/Miguel/"
             "LOMBARD EFFECT NPX files and analysis/CSD analysis/230608/USV sitm"
         ),
         "chan_start": 100,
@@ -1028,7 +1028,7 @@ EXAMPLE_DATASETS: List[Dict[str, Any]] = [
     {
         "name": "250320_USV",
         "folder": (
-            "//experimentfs.bccn-berlin.pri/experiment/share/Miguel/"
+            "//experimentfs.home.bccn-berlin.de/experiment/share/Miguel/"
             "LOMBARD EFFECT NPX files and analysis/CSD analysis/250320/USV stim"
         ),
         "chan_start": 0,

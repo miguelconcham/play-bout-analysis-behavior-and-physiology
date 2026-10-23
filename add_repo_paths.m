@@ -11,11 +11,9 @@ repo_root = fileparts(this_file);
 addpath(genpath(fullfile(repo_root, 'Custom functions')));
 addpath(fullfile(repo_root, 'Figure 1', 'LDA analysis'));
 addpath(fullfile(repo_root, 'Figure 1', 'HMM modeling'));
-addpath(fullfile(repo_root, 'Figure 2', 'Supporting codes v2'));
-addpath(fullfile(repo_root, 'Figure 3', 'Supporting codes'));
+addpath(genpath(fullfile(repo_root, 'Figure 2', 'Supporting codes v2')));
+addpath(genpath(fullfile(repo_root, 'Figure 3', 'Supporting codes')));
 addpath(fullfile(repo_root, 'Figure 6', 'Supplementary codes'));
-addpath(fullfile(repo_root, 'Complementary figures'));
-addpath(fullfile(repo_root, 'CSD analysis'));
-addpath(fullfile(repo_root, 'Synchronous spike artifacts'));
+addpath(fullfile(repo_root, 'Acute recordings'));
 
 disp(['Repo paths added from ', repo_root])

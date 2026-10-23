@@ -18,17 +18,17 @@
 % evoked_lfp.npy is the LFP PSTH after applying each event's onset baseline
 % to both its onset and offset trials.
 
-data_root     = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+data_root     = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 npx_raw_data  = fullfile(data_root, 'NPX data', 'NPX raw data');
 saving_folder = fullfile(data_root, 'Analysis results', 'behavior aligned CSD');
 
 this_file = mfilename('fullpath');
 if isempty(this_file)
-    this_file = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\CSD analysis\Estimate_behavior_aligned_csd.m';
+    this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\CSD analysis\Estimate_behavior_aligned_csd.m';
 end
-repo_root = fileparts(fileparts(this_file));
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 run(fullfile(repo_root, 'add_repo_paths.m'));
-addpath(fullfile(repo_root, 'CSD analysis'));
+addpath(fullfile(repo_root, 'Figure 2', 'Supporting codes v2', 'CSD analysis'));
 
 if ~exist(saving_folder, 'dir')
     mkdir(saving_folder);

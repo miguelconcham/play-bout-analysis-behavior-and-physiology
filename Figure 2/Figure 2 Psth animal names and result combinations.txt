@@ -12,8 +12,8 @@ MATLAB path setup (use in Figure 2.m):
   data_root = fullfile(repo_root, '..', 'Data');
   saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
-For scripts in Supporting codes v2/ (three fileparts: script -> v2 -> Figure 2 -> repo):
-  repo_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+For scripts in a Supporting codes v2 theme folder (four fileparts: script -> theme -> v2 -> Figure 2 -> repo):
+  repo_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
   data_root = fullfile(repo_root, 'Data');
   saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 

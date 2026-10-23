@@ -16,8 +16,6 @@
 
 %% User settings
 root_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\delta peak trough CSD';
-% Fallback if you still use the .pri host:
-% root_folder = '\\experimentfs.bccn-berlin.pri\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\delta peak trough CSD';
 
 save_figures     = true;   % write .fig (and optional PNG) under root_folder/figures
 save_png         = false;  % also write PNG next to the .fig
@@ -32,7 +30,7 @@ ci_level         = 0.95;   % confidence level for event-wise CI (normal approx v
 this_file = mfilename('fullpath');
 if isempty(this_file)
     % Editable fallback if mfilename is empty (unsaved / pasted run)
-    this_file = fullfile(root_folder, '..', '..', '..', 'CSD analysis', 'Plot_delta_peak_trough_evoked.m');
+    this_file = fullfile(root_folder, '..', '..', '..', 'Figure 2', 'Supporting codes v2', 'CSD analysis', 'Plot_delta_peak_trough_evoked.m');
 end
 csd_code_dir = fileparts(this_file);
 addpath(csd_code_dir);

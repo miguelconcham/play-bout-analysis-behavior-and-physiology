@@ -20,7 +20,7 @@
 %     {session}_sync_spike_lfp_power.mat
 %     sync_spike_lfp_power_all_sessions.mat
 
-repo_root = fileparts(fileparts(mfilename('fullpath')));
+repo_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 if ~isempty(repo_root)
     run(fullfile(repo_root, 'add_repo_paths.m'));
 end

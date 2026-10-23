@@ -4,8 +4,8 @@
 %   Figure 2/Figure 2 Psth animal names and result combinations.txt
 % Calls GENERATE_PHASE_EXPLORATORY_ONSET (change behavior list inside GENERATE for other bout types).
 
-this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Estimate_phase_psth.m';
-repo_root = fileparts(fileparts(fileparts(this_file)));
+this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Event aligned LFP\Estimate_phase_psth.m';
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 combo_file = fullfile(repo_root, 'Figure 2', 'Figure 2 Psth animal names and result combinations.txt');
 
 %% Paths and animal selection

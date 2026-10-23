@@ -3,9 +3,9 @@
 % (former sections 15–16): browse trough–trough CCGs for one area pair,
 % then recompute a chosen pair at higher time precision.
 %
-% Needs Supporting codes/GENERATE_CROSS_CORR_EXAMPLE.m on the MATLAB path.
+% Needs Supporting codes/Pairwise spike timing/GENERATE_CROSS_CORR_EXAMPLE.m on the MATLAB path.
 
-addpath('\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 3\Supporting codes');
+addpath(genpath('\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 3\Supporting codes'));
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 
 %% 1 Load cross-correlograms
