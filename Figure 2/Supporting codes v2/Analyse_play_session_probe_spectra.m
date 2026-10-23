@@ -13,8 +13,10 @@
 % artifact_trend_sd robust deviations from the local shank trend is removed.
 % The scale is a median absolute deviation, and channels at the ends of the
 % probe are judged against the trend of the sites inward from those ends.
-% SupCol channels stay in the analysis only at distances to mid-LPAG that
-% more than half of the SupCol sessions also reach.
+% SupCol and VLPAG channels stay in the analysis only at distances from
+% the LPAG-facing border of that area that more than half of the sessions
+% with that region also reach. A second comparison figure splits each
+% region into the proximal and distal halves of that available distance.
 % Each band and spectral method then has its own scatter of that
 % z-scored power against distance to mid-LPAG, with transparent markers.
 % A separate figure compares the selected regions with a nested
@@ -94,11 +96,12 @@ region_distance_scale = 'normalized';
 % trend estimated inward of those ends.
 artifact_trend_sd = 5;
 
-% SupCol distances to mid-LPAG are grouped in bins of this width. A bin
-% stays in the analysis only when more than half of the sessions that have
-% SupCol also have a SupCol channel in that bin. Far bins reached by only
-% a few sessions are left out.
-supcol_distance_bin_um = 100;
+% SupCol and VLPAG coverage is measured from the border of that area that
+% faces LPAG, in bins of this width. A bin stays when more than half of
+% the sessions with that region also have a channel there. Near-border
+% sites stay in even when LPAG itself is thin. The far tail, reached by
+% only a few sessions, is left out.
+region_border_bin_um = 100;
 
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
@@ -216,12 +219,14 @@ if isempty(placed)
     error('No probe channels were found in the selected recordings.');
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
-    spectrum_field, supcol_distance_bin_um);
+    spectrum_field, region_border_bin_um);
 plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 plot_region_power_comparison(power_table, delta_band, theta_band, gamma_band, ...
+    spectral_method, regions_to_display);
+plot_region_half_comparison(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 if isempty(tracks)
     fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
@@ -893,7 +898,7 @@ power_table = vertcat(pieces{:});
 end
 
 function power_table = write_lpag_distance_table(power_pieces, ...
-        saving_folder, spectrum_field, supcol_distance_bin_um)
+        saving_folder, spectrum_field, region_border_bin_um)
 kept = power_pieces(~cellfun(@isempty, power_pieces));
 if isempty(kept)
     fprintf(['No shank with a mid-LPAG channel was found; ' ...
@@ -904,7 +909,7 @@ end
 power_table = vertcat(kept{:});
 power_table = sortrows(power_table, ...
     {'Animal', 'Session', 'Shank', 'Method', 'DistanceToMidLPAG_um'});
-power_table = restrict_supcol_common_distances(power_table, supcol_distance_bin_um);
+power_table = restrict_region_border_distances(power_table, region_border_bin_um);
 table_file = fullfile(saving_folder, sprintf( ...
     'play_session_probe_power_by_lpag_distance_%s.csv', spectrum_field));
 writetable(power_table, table_file);
@@ -913,64 +918,27 @@ fprintf(['Wrote %d channel rows to %s\n' ...
     'centeredAtLPAG subtracts the mid-LPAG channel. ' ...
     'zWithinShank divides that difference by the standard deviation ' ...
     'of the same band on that shank. Band values left blank failed the ' ...
-    'shank-trend screen or sit at a SupCol distance reached by only a ' ...
-    'minority of sessions.\n'], height(power_table), table_file);
+    'shank-trend screen or lie beyond the SupCol or VLPAG border distance ' ...
+    'reached by most sessions.\n'], height(power_table), table_file);
 end
 
-function power_table = restrict_supcol_common_distances(power_table, bin_um)
+function power_table = restrict_region_border_distances(power_table, bin_um)
 if isempty(power_table) || ~isfinite(bin_um) || bin_um <= 0
     return
 end
 region_keys = region_keys_for_rows(power_table.Area);
-in_sc = region_row_has(region_keys, 'SC');
-distance_um = power_table.DistanceToMidLPAG_um;
-methods = unique(cellstr(string(power_table.Method)), 'stable');
-if isempty(methods)
-    return
+distance_um = power_table.DistanceToMidLPAG_um(:);
+border_um = distance_to_area_border(power_table, region_keys, distance_um);
+power_table.DistanceToAreaBorder_um = border_um;
+screen_regions = {'VLPAG', 'SC'};
+drop = false(height(power_table), 1);
+for region_n = 1:numel(screen_regions)
+    drop = drop | uncommon_border_rows(power_table, region_keys, ...
+        screen_regions{region_n}, bin_um);
 end
-in_count = in_sc & strcmp(power_table.Method, methods{1}) & isfinite(distance_um);
-if ~any(in_count)
-    fprintf('No SupCol channels with a distance to mid-LPAG.\n');
-    return
-end
-session_key = strcat(cellstr(string(power_table.Animal)), '|', ...
-    cellstr(string(power_table.Session)));
-n_sessions = numel(unique(session_key(in_count)));
-bin_id = floor(distance_um(:) / bin_um);
-bins = unique(bin_id(in_count));
-bins = sort(bins(:));
-n_at = zeros(numel(bins), 1);
-for bin_n = 1:numel(bins)
-    in_bin = in_count & bin_id == bins(bin_n);
-    n_at(bin_n) = numel(unique(session_key(in_bin)));
-end
-% More than half of the sessions that have SupCol.
-need = floor(n_sessions / 2) + 1;
-kept_bin = n_at >= need;
-if ~any(kept_bin)
-    kept_bin = n_at == max(n_at);
-    fprintf(['No SupCol distance bin reached %d sessions. ' ...
-        'Keeping bins with the largest coverage (%d sessions).\n'], ...
-        need, max(n_at));
-end
-fprintf(['SupCol coverage along distance to mid-LPAG ' ...
-    '(positive = dorsal, farther from the tip).\n' ...
-    '%d sessions have SupCol. Bins are %g µm. ' ...
-    'A bin stays when at least %d sessions have a SupCol channel there.\n'], ...
-    n_sessions, bin_um, need);
-for bin_n = 1:numel(bins)
-    bin_start = bins(bin_n) * bin_um;
-    if kept_bin(bin_n)
-        status = 'kept';
-    else
-        status = 'set aside';
-    end
-    fprintf('  %8g to %8g µm: %3d sessions  %s\n', ...
-        bin_start, bin_start + bin_um, n_at(bin_n), status);
-end
-drop = in_sc & isfinite(distance_um) & ~ismember(bin_id, bins(kept_bin));
 if ~any(drop)
-    fprintf('Every SupCol channel falls in a distance bin shared by most sessions.\n');
+    fprintf(['Every VLPAG and SupCol channel falls within a border distance ' ...
+        'shared by most sessions.\n']);
     return
 end
 power_fields = { ...
@@ -982,10 +950,115 @@ power_fields = { ...
 for field_n = 1:numel(power_fields)
     power_table.(power_fields{field_n})(drop) = NaN;
 end
+end
+
+function border_um = distance_to_area_border(power_table, region_keys, distance_um)
+border_um = nan(height(power_table), 1);
+regions = {'VLPAG', 'SC', 'LPAG'};
+for region_n = 1:numel(regions)
+    this_border = border_for_region(power_table, region_keys, ...
+        regions{region_n}, distance_um);
+    unset = isnan(border_um) & isfinite(this_border);
+    border_um(unset) = this_border(unset);
+end
+end
+
+function border_um = border_for_region(power_table, region_keys, ...
+        region_name, distance_um)
+border_um = nan(height(power_table), 1);
+group_key = strcat(cellstr(string(power_table.Animal)), '|', ...
+    cellstr(string(power_table.Session)), '|', ...
+    cellstr(string(power_table.Shank)), '|', ...
+    cellstr(string(power_table.Method)));
+[~, ~, group_id] = unique(group_key, 'stable');
+for group_n = 1:max(group_id)
+    rows = find(group_id == group_n);
+    in_region = region_row_has(region_keys(rows), region_name);
+    these = rows(in_region);
+    these = these(isfinite(distance_um(these)));
+    if isempty(these)
+        continue
+    end
+    if strcmp(region_name, 'LPAG')
+        border_um(these) = abs(distance_um(these));
+    else
+        border_um(these) = depth_from_lpag_border(distance_um(these));
+    end
+end
+end
+
+function depth = depth_from_lpag_border(distance_um)
+distance_um = distance_um(:);
+if median(distance_um, 'omitnan') >= 0
+    border = min(distance_um);
+    depth = distance_um - border;
+else
+    border = max(distance_um);
+    depth = border - distance_um;
+end
+end
+
+function drop = uncommon_border_rows(power_table, region_keys, ...
+        region_name, bin_um)
+drop = false(height(power_table), 1);
+distance_um = power_table.DistanceToMidLPAG_um(:);
+border_um = border_for_region(power_table, region_keys, region_name, distance_um);
+methods = unique(cellstr(string(power_table.Method)), 'stable');
+if isempty(methods)
+    return
+end
+in_region = region_row_has(region_keys, region_name);
+in_count = in_region & strcmp(power_table.Method, methods{1}) & ...
+    isfinite(border_um);
+if ~any(in_count)
+    fprintf('No %s channels with a border distance.\n', ...
+        region_display_name(region_name));
+    return
+end
+session_key = strcat(cellstr(string(power_table.Animal)), '|', ...
+    cellstr(string(power_table.Session)));
+n_sessions = numel(unique(session_key(in_count)));
+bin_id = floor(border_um(:) / bin_um);
+bins = sort(unique(bin_id(in_count)));
+n_at = zeros(numel(bins), 1);
+for bin_n = 1:numel(bins)
+    in_bin = in_count & bin_id == bins(bin_n);
+    n_at(bin_n) = numel(unique(session_key(in_bin)));
+end
+need = floor(n_sessions / 2) + 1;
+kept_bin = n_at >= need;
+if ~any(kept_bin)
+    kept_bin = n_at == max(n_at);
+    fprintf(['No %s border-distance bin reached %d sessions. ' ...
+        'Keeping bins with the largest coverage (%d sessions).\n'], ...
+        region_display_name(region_name), need, max(n_at));
+end
+fprintf(['%s distance to its LPAG-facing border. ' ...
+    '%d sessions have %s. Bins are %g µm. ' ...
+    'A bin stays when at least %d sessions have a channel there.\n'], ...
+    region_display_name(region_name), n_sessions, ...
+    region_display_name(region_name), bin_um, need);
+for bin_n = 1:numel(bins)
+    bin_start = bins(bin_n) * bin_um;
+    if kept_bin(bin_n)
+        status = 'kept';
+    else
+        status = 'set aside';
+    end
+    fprintf('  %8g to %8g µm: %3d sessions  %s\n', ...
+        bin_start, bin_start + bin_um, n_at(bin_n), status);
+end
+drop = in_region & isfinite(border_um) & ~ismember(bin_id, bins(kept_bin));
+if ~any(drop)
+    fprintf('Every %s channel is within a border distance shared by most sessions.\n', ...
+        region_display_name(region_name));
+    return
+end
 kept_ids = bins(kept_bin);
-fprintf(['Set aside %d SupCol rows outside %g to %g µm, ' ...
-    'the distances present in most sessions.\n'], nnz(drop), ...
-    min(kept_ids) * bin_um, (max(kept_ids) + 1) * bin_um);
+fprintf(['Set aside %d %s rows beyond %g µm from the border, ' ...
+    'a distance reached by only a minority of sessions.\n'], ...
+    nnz(drop), region_display_name(region_name), ...
+    (max(kept_ids) + 1) * bin_um);
 end
 
 function plot_normalized_power_scatters(power_table, ...
@@ -1116,10 +1189,29 @@ end
 end
 
 function label = region_display_name(name)
-if strcmp(name, 'SC')
-    label = 'SupCol';
+[parent, half] = split_region_half(name);
+if strcmp(parent, 'SC')
+    parent = 'SupCol';
+end
+if isempty(half)
+    label = parent;
 else
-    label = name;
+    label = [parent, ' ', half];
+end
+end
+
+function [parent, half] = split_region_half(name)
+half = '';
+parent = name;
+suffixes = {' proximal', ' distal'};
+for suffix_n = 1:numel(suffixes)
+    token = suffixes{suffix_n};
+    if numel(name) > numel(token) && ...
+            strcmp(name(end - numel(token) + 1:end), token)
+        parent = name(1:end - numel(token));
+        half = token(2:end);
+        return
+    end
 end
 end
 
@@ -1149,6 +1241,16 @@ end
 end
 
 function color = region_color(name)
+[parent, half] = split_region_half(name);
+color = base_region_color(parent);
+if strcmp(half, 'proximal')
+    color = color * 0.72;
+elseif strcmp(half, 'distal')
+    color = min(color + 0.28, 1);
+end
+end
+
+function color = base_region_color(name)
 switch name
     case 'SC'
         color = [0.90 0.45 0.05];
@@ -1252,6 +1354,103 @@ function plot_region_power_comparison(power_table, ...
 if isempty(power_table)
     return
 end
+region_keys = region_keys_for_rows(power_table.Area);
+region_names = selected_regions(regions_to_display);
+region_names = region_names(~strcmp(region_names, 'Other'));
+region_names = unique(region_names, 'stable');
+plot_nested_region_bars(power_table, delta_band, theta_band, gamma_band, ...
+    spectral_method, region_keys, region_names, ...
+    'nested region comparison', 'nested repeated measures', ...
+    ['Channels stay in the test, nested in the session. ' ...
+    'Lines join one session. Brackets are mixed-model contrasts, Bonferroni.']);
+end
+
+function plot_region_half_comparison(power_table, ...
+        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
+if isempty(power_table) || ~ismember('DistanceToAreaBorder_um', power_table.Properties.VariableNames)
+    return
+end
+region_names = selected_regions(regions_to_display);
+region_names = region_names(~strcmp(region_names, 'Other'));
+region_names = unique(region_names, 'stable');
+[half_keys, half_names] = proximal_distal_keys(power_table, region_names);
+if numel(half_names) < 2
+    fprintf(['Proximal and distal comparison needs two halves with channels ' ...
+        'in the selected regions.\n']);
+    return
+end
+plot_nested_region_bars(power_table, delta_band, theta_band, gamma_band, ...
+    spectral_method, half_keys, half_names, ...
+    'proximal and distal comparison', 'proximal and distal', ...
+    ['Proximal is the nearer half of the available distance. ' ...
+    'Distal is the farther half. Lines join one session. ' ...
+    'Brackets are mixed-model contrasts, Bonferroni.']);
+end
+
+function [half_keys, half_names] = proximal_distal_keys(power_table, region_names)
+region_keys = region_keys_for_rows(power_table.Area);
+distance_um = power_table.DistanceToMidLPAG_um(:);
+alive = isfinite(power_table.DeltaPower_zWithinShank) | ...
+    isfinite(power_table.ThetaPower_zWithinShank) | ...
+    isfinite(power_table.GammaPower_zWithinShank);
+half_keys = cell(height(power_table), 1);
+for row_n = 1:height(power_table)
+    half_keys{row_n} = {};
+end
+half_names = cell(1, 0);
+methods = unique(cellstr(string(power_table.Method)), 'stable');
+if isempty(methods)
+    return
+end
+in_reference = strcmp(power_table.Method, methods{1});
+for region_n = 1:numel(region_names)
+    this_region = region_names{region_n};
+    border_um = border_for_region(power_table, region_keys, ...
+        this_region, distance_um);
+    in_region = region_row_has(region_keys, this_region) & alive & ...
+        isfinite(border_um);
+    span_rows = in_region & in_reference;
+    span = border_um(span_rows);
+    if isempty(span)
+        span = border_um(in_region);
+    end
+    if isempty(span)
+        fprintf('%s has no channels left for a proximal and distal split.\n', ...
+            region_display_name(this_region));
+        continue
+    end
+    midpoint = (min(span) + max(span)) / 2;
+    proximal_name = [this_region, ' proximal'];
+    distal_name = [this_region, ' distal'];
+    if strcmp(this_region, 'LPAG')
+        reference = 'mid-LPAG';
+    else
+        reference = 'the LPAG-facing border';
+    end
+    fprintf(['%s available distance %g to %g µm from %s. ' ...
+        'Proximal is through %g µm. Distal is beyond that.\n'], ...
+        region_display_name(this_region), min(span), max(span), ...
+        reference, midpoint);
+    half_names{end + 1} = proximal_name; %#ok<AGROW>
+    half_names{end + 1} = distal_name; %#ok<AGROW>
+    for row_n = find(in_region).'
+        if border_um(row_n) <= midpoint
+            half_keys{row_n}{end + 1} = proximal_name; %#ok<AGROW>
+        else
+            half_keys{row_n}{end + 1} = distal_name; %#ok<AGROW>
+        end
+    end
+end
+end
+
+function plot_nested_region_bars(power_table, ...
+        delta_band, theta_band, gamma_band, spectral_method, ...
+        region_keys, region_names, figure_name, title_name, note)
+if numel(region_names) < 2
+    fprintf(['Region comparison needs at least two regions in ' ...
+        'regions_to_display.\n']);
+    return
+end
 [method_names, ~] = selected_spectral_methods(spectral_method);
 band_fields = { ...
     'DeltaPower_zWithinShank', ...
@@ -1261,15 +1460,6 @@ band_names = { ...
     sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
     sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
     sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
-region_keys = region_keys_for_rows(power_table.Area);
-region_names = selected_regions(regions_to_display);
-region_names = region_names(~strcmp(region_names, 'Other'));
-region_names = unique(region_names, 'stable');
-if numel(region_names) < 2
-    fprintf(['Region comparison needs at least two regions in ' ...
-        'regions_to_display.\n']);
-    return
-end
 for method_n = 1:numel(method_names)
     in_method = strcmp(power_table.Method, method_names{method_n});
     band_obs = cell(1, numel(band_fields));
@@ -1282,13 +1472,13 @@ for method_n = 1:numel(method_names)
             numel(band_obs{band_n}.region_names) >= 2;
     end
     if ~any(enough)
-        fprintf(['%s region comparison needs channels from at least two ' ...
-            'sessions in at least two selected regions.\n'], ...
-            method_names{method_n});
+        fprintf(['%s %s needs channels from at least two sessions in ' ...
+            'at least two regions.\n'], method_names{method_n}, figure_name);
         continue
     end
-    figure('Name', sprintf('%s | nested region comparison', method_names{method_n}), ...
-        'Color', 'w', 'Position', [110, 80, 1080, 520]);
+    figure('Name', sprintf('%s | %s', method_names{method_n}, figure_name), ...
+        'Color', 'w', ...
+        'Position', [110, 80, max(1080, 160 * numel(region_names)), 560]);
     for band_n = 1:numel(band_fields)
         subplot(1, numel(band_fields), band_n)
         obs = band_obs{band_n};
@@ -1296,8 +1486,9 @@ for method_n = 1:numel(method_names)
             axis off
             text(0.5, 0.5, sprintf('%s\nfewer than 2 sessions', ...
                 band_names{band_n}), 'HorizontalAlignment', 'center');
-            fprintf(['%s | %s: fewer than 2 sessions with channels in ' ...
-                'at least two regions.\n'], method_names{method_n}, band_names{band_n});
+            fprintf(['%s | %s | %s: fewer than 2 sessions with channels in ' ...
+                'at least two regions.\n'], method_names{method_n}, ...
+                figure_name, band_names{band_n});
             continue
         end
         result = fit_nested_region_model(obs);
@@ -1305,9 +1496,7 @@ for method_n = 1:numel(method_names)
             region_names, obs, result);
         draw_nested_region_comparison(obs, result, band_names{band_n});
     end
-    sgtitle({sprintf('%s | nested repeated measures', method_names{method_n}), ...
-        ['Channels stay in the test, nested in the session. ' ...
-        'Lines join one session. Brackets are mixed-model contrasts, Bonferroni.']}, ...
+    sgtitle({sprintf('%s | %s', method_names{method_n}, title_name), note}, ...
         'FontSize', 10)
 end
 end
@@ -1540,16 +1729,24 @@ L = weight_a - weight_b;
 end
 
 function idx = coefficient_index(coef_names, region_name)
-token = ['Region_' region_name];
-idx = find(strcmp(coef_names, token), 1);
-if ~isempty(idx)
-    return
+candidates = {['Region_' region_name], ...
+    ['Region_' strrep(region_name, ' ', '_')]};
+for candidate_n = 1:numel(candidates)
+    idx = find(strcmp(coef_names, candidates{candidate_n}), 1);
+    if ~isempty(idx)
+        return
+    end
 end
 idx = [];
+flat_name = strrep(region_name, ' ', '_');
 for name_n = 1:numel(coef_names)
-    pieces = strsplit(coef_names{name_n}, '_');
-    if numel(pieces) >= 2 && strcmp(pieces{1}, 'Region') && ...
-            strcmp(pieces{end}, region_name)
+    name = coef_names{name_n};
+    prefix = 'Region_';
+    if numel(name) <= numel(prefix) || ~strcmp(name(1:numel(prefix)), prefix)
+        continue
+    end
+    level = name(numel(prefix) + 1:end);
+    if strcmp(level, region_name) || strcmp(level, flat_name)
         idx = name_n;
         return
     end
@@ -1664,6 +1861,9 @@ ylim([y_low - margin, y_high + margin + n_pairs * (0.12 * span) + 0.12 * span]);
 xlim([0.4, n_regions + 0.6]);
 set(gca, 'XTick', 1:n_regions, 'XTickLabel', ...
     cellfun(@region_display_name, obs.region_names, 'UniformOutput', false));
+if n_regions > 4
+    xtickangle(30);
+end
 ylabel({'Power z-scored within shank', '0 = mid-LPAG channel'})
 if result.ok && isfinite(result.p_omnibus)
     omnibus_label = sprintf('nested p = %.3g', result.p_omnibus);
