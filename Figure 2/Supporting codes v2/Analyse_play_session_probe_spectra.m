@@ -10,6 +10,12 @@
 % that passes through DR are colored. Other territory stays gray. A 95%
 % confidence interval is drawn for those three track classes when at least
 % two tracks are available.
+%
+% Separate figures center each shank, when the region is present, on SC,
+% DLPAG, LPAG, VLPAG, and DR. The center is the midpoint of that region's
+% labeled span on the shank. Delta, theta, and gamma are drawn against
+% distance from that center, once toward the tip (ventral) and once toward
+% the brain surface (dorsal).
 
 %% Which recording and session to inspect
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
@@ -66,6 +72,7 @@ end
 %% Stack every selected shank at its mid-LPAG channel
 stacked_frequency = [];
 tracks = repmat(empty_track(), 0, 1);
+placed = repmat(empty_placed(), 0, 1);
 
 %% Plot each requested session on its own
 for file_n = recording_index(:).'
@@ -116,6 +123,9 @@ for file_n = recording_index(:).'
         tracks = [tracks; tracks_from_session(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
             delta_band, theta_band, gamma_band, session_label)]; %#ok<AGROW>
+        placed = [placed; placed_from_session(channel_table, ...
+            welch_spectrum, fourier_spectrum, frequency, ...
+            delta_band, theta_band, gamma_band, session_label)]; %#ok<AGROW>
 
         if plot_each_session
             plot_depth_spectrum(frequency, channel_table, ...
@@ -130,15 +140,22 @@ for file_n = recording_index(:).'
     end
 end
 
-if isempty(tracks)
-    error(['No shank with a mid-LPAG channel was found in the selected ' ...
-        'recordings.']);
+if isempty(placed)
+    error('No probe channels were found in the selected recordings.');
 end
-fprintf(['Aligned tracks: %d. Stay in PAG: %d. Upper side through SupCol: ' ...
-    '%d. Deeper side through DR: %d.\n'], numel(tracks), ...
-    sum([tracks.stays_pag]), sum([tracks.goes_sc]), sum([tracks.goes_dr]));
-plot_aligned_spectra(tracks, stacked_frequency, spectrum_field);
-plot_aligned_profiles(tracks, spectrum_field, delta_band, theta_band, gamma_band);
+if isempty(tracks)
+    fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
+        'stack is skipped.\n']);
+else
+    fprintf(['Aligned tracks: %d. Stay in PAG: %d. Upper side through SupCol: ' ...
+        '%d. Deeper side through DR: %d.\n'], numel(tracks), ...
+        sum([tracks.stays_pag]), sum([tracks.goes_sc]), sum([tracks.goes_dr]));
+    plot_aligned_spectra(tracks, stacked_frequency, spectrum_field);
+    plot_aligned_profiles(tracks, spectrum_field, ...
+        delta_band, theta_band, gamma_band);
+end
+plot_region_distances(placed, spectrum_field, ...
+    delta_band, theta_band, gamma_band);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
@@ -556,6 +573,44 @@ fraction = (border_depth - depth_values(upper - 1)) / span;
 row = row_index(upper - 1) + fraction * (row_index(upper) - row_index(upper - 1));
 end
 
+function item = empty_placed()
+item = struct( ...
+    'label', '', ...
+    'tip_um', [], ...
+    'areas', {{}}, ...
+    'welch_bands', [], ...
+    'fourier_bands', []);
+end
+
+function placed = placed_from_session(channel_table, welch_spectrum, ...
+        fourier_spectrum, frequency, delta_band, theta_band, gamma_band, ...
+        session_label)
+groups = probe_groups_by_depth(channel_table);
+placed = repmat(empty_placed(), 0, 1);
+for group_n = 1:numel(groups)
+    this_group = groups(group_n);
+    tip_um = this_group.depth_um(:);
+    if ~any(isfinite(tip_um))
+        continue
+    end
+    welch_rows = welch_spectrum(this_group.channel_index, :);
+    fourier_rows = fourier_spectrum(this_group.channel_index, :);
+    item = empty_placed();
+    item.label = sprintf('%s | %s', session_label, this_group.label);
+    item.tip_um = tip_um;
+    item.areas = this_group.areas;
+    item.welch_bands = [ ...
+        mean_in_band(welch_rows, frequency, delta_band), ...
+        mean_in_band(welch_rows, frequency, theta_band), ...
+        mean_in_band(welch_rows, frequency, gamma_band)];
+    item.fourier_bands = [ ...
+        mean_in_band(fourier_rows, frequency, delta_band), ...
+        mean_in_band(fourier_rows, frequency, theta_band), ...
+        mean_in_band(fourier_rows, frequency, gamma_band)];
+    placed(end + 1, 1) = item; %#ok<AGROW>
+end
+end
+
 function track = empty_track()
 track = struct( ...
     'label', '', ...
@@ -927,4 +982,233 @@ mean_spectrum = squeeze(mean(resampled, 1, 'omitnan'));
 if isvector(mean_spectrum)
     mean_spectrum = reshape(mean_spectrum, numel(grid), n_frequency);
 end
+end
+
+function plot_region_distances(placed, spectrum_field, ...
+        delta_band, theta_band, gamma_band)
+region_names = {'SC', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
+directions = {'ventral', 'dorsal'};
+direction_titles = { ...
+    'Ventral, toward the tip', ...
+    'Dorsal, toward the brain surface'};
+direction_xlabels = { ...
+    'Distance from region center toward the tip (µm)', ...
+    'Distance from region center toward the brain surface (µm)'};
+band_names = { ...
+    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
+    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
+    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+band_colors = [0.12 0.35 0.75; 0.85 0.40 0.10; 0.45 0.62 0.20];
+method_names = {'Welch', 'Fourier'};
+n_regions = numel(region_names);
+n_placed = numel(placed);
+centers = nan(n_placed, n_regions);
+for placed_n = 1:n_placed
+    for region_n = 1:n_regions
+        centers(placed_n, region_n) = region_center_um( ...
+            placed(placed_n).tip_um, placed(placed_n).areas, ...
+            region_names{region_n});
+    end
+end
+for region_n = 1:n_regions
+    fprintf('%s center available on %d of %d shanks.\n', ...
+        region_names{region_n}, nnz(isfinite(centers(:, region_n))), n_placed);
+end
+
+for method_n = 1:2
+    figure('Name', sprintf('%s power vs distance to region center', ...
+        method_names{method_n}), 'Color', 'w', ...
+        'Position', [40 40 980 1180]);
+    legend_drawn = false;
+    for region_n = 1:n_regions
+        for direction_n = 1:2
+            subplot(n_regions, 2, (region_n - 1) * 2 + direction_n)
+            available = find(isfinite(centers(:, region_n)));
+            if isempty(available)
+                axis off
+                text(0.5, 0.5, sprintf('%s\nnot available', ...
+                    region_names{region_n}), ...
+                    'HorizontalAlignment', 'center', 'Interpreter', 'none');
+                continue
+            end
+            hold on
+            side_tracks = repmat(empty_side_track(), 0, 1);
+            farthest = 0;
+            for placed_n = available(:).'
+                [distance, welch_power, fourier_power] = side_samples( ...
+                    placed(placed_n), centers(placed_n, region_n), ...
+                    directions{direction_n});
+                if isempty(distance)
+                    continue
+                end
+                draw_distance_track(distance, ...
+                    power_for_method(welch_power, fourier_power, method_n), ...
+                    band_colors);
+                farthest = max(farthest, max(distance(isfinite(distance))));
+                side_track = empty_side_track();
+                side_track.rel_um = distance;
+                side_track.welch_bands = welch_power;
+                side_track.fourier_bands = fourier_power;
+                side_tracks(end + 1, 1) = side_track; %#ok<AGROW>
+            end
+            if isempty(side_tracks)
+                axis off
+                text(0.5, 0.5, sprintf('%s\n%s\nno channels on this side', ...
+                    region_names{region_n}, direction_titles{direction_n}), ...
+                    'HorizontalAlignment', 'center', 'Interpreter', 'none');
+                continue
+            end
+            x_max = farthest;
+            if numel(side_tracks) >= 2
+                for band_n = 1:3
+                    [grid, mean_line, lower_line, upper_line] = ...
+                        class_interval(side_tracks, method_n, band_n);
+                    draw_band_interval(grid, mean_line, lower_line, ...
+                        upper_line, band_colors(band_n, :));
+                    finite_grid = grid(isfinite(mean_line));
+                    if ~isempty(finite_grid)
+                        x_max = max(x_max, max(finite_grid));
+                    end
+                end
+            end
+            if strcmp(spectrum_field, 'raw_aperiodic_subtracted')
+                yline(0, ':k', 'HandleVisibility', 'off');
+            end
+            xline(0, '--k', 'HandleVisibility', 'off');
+            if ~isfinite(x_max) || x_max <= 0
+                x_max = 20;
+            end
+            xlim([0, x_max]);
+            xlabel(direction_xlabels{direction_n})
+            if direction_n == 1
+                ylabel(profile_xlabel(spectrum_field))
+            end
+            title(sprintf('%s | %s (n=%d)', region_names{region_n}, ...
+                direction_titles{direction_n}, numel(side_tracks)))
+            if ~legend_drawn
+                guide = gobjects(3, 1);
+                for band_n = 1:3
+                    guide(band_n) = plot(nan, nan, ...
+                        'Color', band_colors(band_n, :), 'LineWidth', 2);
+                end
+                legend(guide, band_names, 'Location', 'best', 'FontSize', 7)
+                legend_drawn = true;
+            end
+            box off
+        end
+    end
+    sgtitle({sprintf('%s | %s', method_names{method_n}, ...
+        spectrum_title(spectrum_field)), ...
+        ['Distance 0 is the region center. Pale lines are shanks; ' ...
+        'the thick line and shade are the mean and 95% CI where n >= 2.']}, ...
+        'Interpreter', 'none')
+end
+end
+
+function center = region_center_um(tip_um, areas, region_name)
+center = NaN;
+tip_um = tip_um(:);
+in_region = false(numel(tip_um), 1);
+for site_n = 1:numel(tip_um)
+    if ~isfinite(tip_um(site_n))
+        continue
+    end
+    tokens = split_area_label(areas{site_n});
+    for token_n = 1:numel(tokens)
+        if token_is_region(tokens{token_n}, region_name)
+            in_region(site_n) = true;
+            break
+        end
+    end
+end
+span = tip_um(in_region);
+if isempty(span)
+    return
+end
+center = (min(span) + max(span)) / 2;
+end
+
+function tf = token_is_region(name, region_name)
+switch region_name
+    case 'SC'
+        tf = name_is_supcol(name);
+    case 'DR'
+        tf = name_is_dr(name);
+    case {'DLPAG', 'LPAG', 'VLPAG'}
+        tf = strcmp(name, region_name);
+    otherwise
+        tf = false;
+end
+end
+
+function [distance, welch_power, fourier_power] = side_samples(item, center, direction)
+tip_um = item.tip_um(:);
+if strcmp(direction, 'ventral')
+    keep = isfinite(tip_um) & tip_um <= center;
+    distance = center - tip_um(keep);
+else
+    keep = isfinite(tip_um) & tip_um >= center;
+    distance = tip_um(keep) - center;
+end
+welch_power = item.welch_bands(keep, :);
+fourier_power = item.fourier_bands(keep, :);
+finite_row = isfinite(distance) & ...
+    (any(isfinite(welch_power), 2) | any(isfinite(fourier_power), 2));
+distance = distance(finite_row);
+welch_power = welch_power(finite_row, :);
+fourier_power = fourier_power(finite_row, :);
+end
+
+function power = power_for_method(welch_power, fourier_power, method_n)
+if method_n == 1
+    power = welch_power;
+else
+    power = fourier_power;
+end
+end
+
+function item = empty_side_track()
+item = struct('rel_um', [], 'welch_bands', [], 'fourier_bands', []);
+end
+
+function draw_distance_track(distance, power, band_colors)
+[distance, order] = sort(distance(:));
+power = power(order, :);
+for band_n = 1:size(power, 2)
+    pale = 0.35 * band_colors(band_n, :) + 0.65 * [1 1 1];
+    this_power = power(:, band_n);
+    finite = isfinite(distance) & isfinite(this_power);
+    if nnz(finite) == 1
+        plot(distance(finite), this_power(finite), 'o', 'Color', pale, ...
+            'MarkerSize', 4, 'HandleVisibility', 'off');
+        continue
+    end
+    plot(distance, this_power, 'Color', pale, 'LineWidth', 0.6, ...
+        'HandleVisibility', 'off');
+end
+end
+
+function draw_band_interval(grid, mean_line, lower_line, upper_line, color)
+x = grid(:);
+y_low = lower_line(:);
+y_high = upper_line(:);
+finite = isfinite(x) & isfinite(y_low) & isfinite(y_high);
+if ~any(finite)
+    return
+end
+breaks = diff([false; finite; false]);
+starts = find(breaks == 1);
+stops = find(breaks == -1) - 1;
+for segment_n = 1:numel(starts)
+    index = starts(segment_n):stops(segment_n);
+    if numel(index) < 2
+        continue
+    end
+    segment_x = x(index).';
+    fill([segment_x, fliplr(segment_x)], ...
+        [y_low(index).', fliplr(y_high(index).')], color, ...
+        'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+end
+plot(grid, mean_line, 'Color', color, 'LineWidth', 2.0, ...
+    'HandleVisibility', 'off');
 end
