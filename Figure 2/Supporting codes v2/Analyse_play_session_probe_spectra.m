@@ -9,7 +9,11 @@
 % power, with no rescaling. A table written beside the spectra has the same
 % distance, the area, the saved delta/theta/gamma power, that power minus the
 % mid-LPAG channel, and that difference divided by the within-shank standard
-% deviation. Each band and spectral method then has its own scatter of that
+% deviation. Before that z-score, a channel whose band power is more than
+% artifact_trend_sd robust deviations from the local shank trend is removed.
+% The scale is a median absolute deviation, and channels at the ends of the
+% probe are judged against the trend of the sites inward from those ends.
+% Each band and spectral method then has its own scatter of that
 % z-scored power against distance to mid-LPAG, with transparent markers.
 % A separate figure compares the selected regions with a nested
 % repeated-measures model of that same z-scored power. Every channel
@@ -81,6 +85,12 @@ regions_to_display = {'LPAG', 'VLPAG', 'SupCol'};
 % shank and subtracts the power of the first channel on that side, so the
 % curve starts at 0. 'raw' draws the saved band power.
 region_distance_scale = 'normalized';
+
+% Drop a band value when it leaves the robust local trend of its shank by
+% more than this many median-absolute-deviation units. 5 is far beyond the
+% smooth change between neighboring sites. End-of-probe channels use the
+% trend estimated inward of those ends.
+artifact_trend_sd = 5;
 
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
@@ -168,14 +178,17 @@ for file_n = recording_index(:).'
         fprintf('Including %s\n', session_label);
         tracks = [tracks; tracks_from_session(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
-            delta_band, theta_band, gamma_band, session_label)]; %#ok<AGROW>
+            delta_band, theta_band, gamma_band, session_label, ...
+            artifact_trend_sd)]; %#ok<AGROW>
         placed = [placed; placed_from_session(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
-            delta_band, theta_band, gamma_band, session_label)]; %#ok<AGROW>
+            delta_band, theta_band, gamma_band, session_label, ...
+            artifact_trend_sd)]; %#ok<AGROW>
         power_pieces{end + 1} = lpag_distance_table(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
             delta_band, theta_band, gamma_band, ...
-            probe_spectra.animal_name, session_n, spectrum_field); %#ok<SAGROW>
+            probe_spectra.animal_name, session_n, spectrum_field, ...
+            artifact_trend_sd); %#ok<SAGROW>
 
         if plot_each_session
             plot_depth_spectrum(frequency, channel_table, ...
@@ -184,7 +197,8 @@ for file_n = recording_index(:).'
             plot_band_profiles(frequency, channel_table, ...
                 welch_spectrum, fourier_spectrum, ...
                 delta_band, theta_band, gamma_band, ...
-                spectrum_field, session_label, area_borders, spectral_method);
+                spectrum_field, session_label, area_borders, spectral_method, ...
+                artifact_trend_sd);
             drawnow
         end
     end
@@ -284,7 +298,7 @@ end
 function plot_band_profiles(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, ...
         delta_band, theta_band, gamma_band, spectrum_field, ...
-        session_label, area_borders, spectral_method)
+        session_label, area_borders, spectral_method, artifact_trend_sd)
 probe_groups = probe_groups_by_depth(channel_table);
 n_groups = numel(probe_groups);
 spectra = {welch_spectrum, fourier_spectrum};
@@ -309,6 +323,8 @@ for method_slot = 1:n_methods
             mean_in_band(this_spectrum, frequency, delta_band), ...
             mean_in_band(this_spectrum, frequency, theta_band), ...
             mean_in_band(this_spectrum, frequency, gamma_band)];
+        band_power = reject_trend_outliers(this_group.depth_um, ...
+            band_power, artifact_trend_sd);
         hold on
         line_handles = gobjects(3, 1);
         for band_n = 1:3
@@ -398,6 +414,128 @@ if ~any(in_band)
     return
 end
 band_power = mean(spectrum(:, in_band), 2, 'omitnan');
+end
+
+function [bands, n_removed, n_extreme] = reject_trend_outliers( ...
+        distance_um, bands, n_fence)
+n_removed = 0;
+n_extreme = 0;
+if isempty(bands) || ~isfinite(n_fence) || n_fence <= 0
+    return
+end
+distance_um = distance_um(:);
+for band_n = 1:size(bands, 2)
+    [bands(:, band_n), removed_n, extreme_n] = reject_one_band( ...
+        distance_um, bands(:, band_n), n_fence);
+    n_removed = n_removed + removed_n;
+    n_extreme = n_extreme + extreme_n;
+end
+end
+
+function [power, n_removed, n_extreme] = reject_one_band( ...
+        distance_um, power, n_fence)
+n_removed = 0;
+n_extreme = 0;
+power = power(:);
+finite = find(isfinite(distance_um) & isfinite(power));
+if numel(finite) < 8
+    return
+end
+[~, order] = sort(distance_um(finite));
+idx = finite(order);
+y = power(idx);
+n_edge = edge_count(numel(y));
+bad = false(numel(y), 1);
+trend = y;
+for pass_n = 1:4
+    trend = trend_holding_out(y, bad);
+    hold_edge = bad;
+    if n_edge >= 1
+        hold_edge(1:n_edge) = true;
+        hold_edge(end - n_edge + 1:end) = true;
+        trend_inside = trend_holding_out(y, hold_edge);
+        trend(1:n_edge) = trend_inside(1:n_edge);
+        trend(end - n_edge + 1:end) = trend_inside(end - n_edge + 1:end);
+    end
+    sigma_row = ~hold_edge & isfinite(y) & isfinite(trend);
+    if nnz(sigma_row) < 4
+        sigma_row = isfinite(y) & isfinite(trend);
+    end
+    sigma = robust_sigma(y(sigma_row) - trend(sigma_row));
+    data_sigma = robust_sigma(y(sigma_row));
+    if isfinite(data_sigma)
+        sigma = max(sigma, 0.05 * data_sigma);
+    end
+    if ~isfinite(sigma) || sigma == 0
+        break
+    end
+    newly = isfinite(y) & isfinite(trend) & abs(y - trend) > n_fence * sigma;
+    if ~any(newly & ~bad)
+        bad = newly;
+        break
+    end
+    bad = bad | newly;
+end
+n_removed = nnz(bad);
+if n_removed == 0
+    return
+end
+edge = false(numel(y), 1);
+if n_edge >= 1
+    edge(1:n_edge) = true;
+    edge(end - n_edge + 1:end) = true;
+end
+power(idx(bad)) = NaN;
+n_extreme = nnz(bad & edge);
+end
+
+function n_edge = edge_count(n_sites)
+n_edge = max(3, ceil(0.05 * n_sites));
+n_edge = min(n_edge, floor((n_sites - 4) / 2));
+n_edge = max(n_edge, 0);
+end
+
+function trend = trend_holding_out(y, hold_out)
+y_fit = y;
+y_fit(hold_out) = NaN;
+trend = local_robust_trend(y_fit);
+if all(isfinite(trend))
+    return
+end
+known = find(isfinite(trend));
+if numel(known) < 2
+    return
+end
+trend = interp1(known, trend(known), (1:numel(y)).', 'linear', 'extrap');
+end
+
+function trend = local_robust_trend(y)
+y = y(:);
+finite_n = nnz(isfinite(y));
+trend = y;
+if finite_n < 3
+    return
+end
+window = max(5, 2 * floor(finite_n / 8) + 1);
+window = min(window, finite_n);
+if mod(window, 2) == 0
+    window = max(window - 1, 3);
+end
+try
+    trend = smoothdata(y, 1, 'rlowess', window, 'omitnan');
+catch
+    trend = y;
+end
+end
+
+function sigma = robust_sigma(residual)
+residual = residual(isfinite(residual));
+if numel(residual) < 4
+    sigma = NaN;
+    return
+end
+center = median(residual);
+sigma = 1.4826 * median(abs(residual - center));
 end
 
 function color_limits = spectrum_color_limits(values, spectrum_field)
@@ -649,7 +787,7 @@ end
 
 function placed = placed_from_session(channel_table, welch_spectrum, ...
         fourier_spectrum, frequency, delta_band, theta_band, gamma_band, ...
-        session_label)
+        session_label, artifact_trend_sd)
 groups = probe_groups_by_depth(channel_table);
 placed = repmat(empty_placed(), 0, 1);
 for group_n = 1:numel(groups)
@@ -664,21 +802,21 @@ for group_n = 1:numel(groups)
     item.label = sprintf('%s | %s', session_label, this_group.label);
     item.tip_um = tip_um;
     item.areas = this_group.areas;
-    item.welch_bands = [ ...
+    item.welch_bands = reject_trend_outliers(tip_um, [ ...
         mean_in_band(welch_rows, frequency, delta_band), ...
         mean_in_band(welch_rows, frequency, theta_band), ...
-        mean_in_band(welch_rows, frequency, gamma_band)];
-    item.fourier_bands = [ ...
+        mean_in_band(welch_rows, frequency, gamma_band)], artifact_trend_sd);
+    item.fourier_bands = reject_trend_outliers(tip_um, [ ...
         mean_in_band(fourier_rows, frequency, delta_band), ...
         mean_in_band(fourier_rows, frequency, theta_band), ...
-        mean_in_band(fourier_rows, frequency, gamma_band)];
+        mean_in_band(fourier_rows, frequency, gamma_band)], artifact_trend_sd);
     placed(end + 1, 1) = item; %#ok<AGROW>
 end
 end
 
 function power_table = lpag_distance_table(channel_table, welch_spectrum, ...
         fourier_spectrum, frequency, delta_band, theta_band, gamma_band, ...
-        animal_name, session_n, spectrum_field)
+        animal_name, session_n, spectrum_field, artifact_trend_sd)
 groups = probe_groups_by_depth(channel_table);
 method_names = {'Welch', 'Fourier'};
 spectra = {welch_spectrum, fourier_spectrum};
@@ -691,6 +829,8 @@ variable_names = { ...
     'GammaPower_zWithinShank', ...
     'Animal', 'Session', 'Shank', 'Channel', 'Method', 'Spectrum'};
 pieces = cell(1, 0);
+n_removed = 0;
+n_extreme = 0;
 for group_n = 1:numel(groups)
     this_group = groups(group_n);
     center_mask = this_group.is_lpag_center(:);
@@ -708,6 +848,10 @@ for group_n = 1:numel(groups)
             mean_in_band(rows, frequency, delta_band), ...
             mean_in_band(rows, frequency, theta_band), ...
             mean_in_band(rows, frequency, gamma_band)];
+        [bands, removed_n, extreme_n] = reject_trend_outliers( ...
+            distance_um, bands, artifact_trend_sd);
+        n_removed = n_removed + removed_n;
+        n_extreme = n_extreme + extreme_n;
         reference = mean(bands(center_mask, :), 1, 'omitnan');
         centered = bands - reference;
         band_std = std(bands, 0, 1, 'omitnan');
@@ -726,6 +870,11 @@ for group_n = 1:numel(groups)
             repmat({spectrum_field}, n_sites, 1), ...
             'VariableNames', variable_names); %#ok<AGROW>
     end
+end
+if n_removed > 0
+    fprintf(['  Removed %d band values more than %g robust SD from the ' ...
+        'shank trend, %d of them at the probe ends.\n'], ...
+        n_removed, artifact_trend_sd, n_extreme);
 end
 if isempty(pieces)
     power_table = table();
@@ -752,7 +901,8 @@ fprintf(['Wrote %d channel rows to %s\n' ...
     'Distance is positive dorsal (farther from the tip). ' ...
     'centeredAtLPAG subtracts the mid-LPAG channel. ' ...
     'zWithinShank divides that difference by the standard deviation ' ...
-    'of the same band on that shank.\n'], height(power_table), table_file);
+    'of the same band on that shank. Band values left blank failed the ' ...
+    'shank-trend screen.\n'], height(power_table), table_file);
 end
 
 function plot_normalized_power_scatters(power_table, ...
@@ -1556,7 +1706,7 @@ end
 
 function tracks = tracks_from_session(channel_table, welch_spectrum, ...
         fourier_spectrum, frequency, delta_band, theta_band, gamma_band, ...
-        session_label)
+        session_label, artifact_trend_sd)
 groups = probe_groups_by_depth(channel_table);
 tracks = repmat(empty_track(), 0, 1);
 for group_n = 1:numel(groups)
@@ -1576,14 +1726,14 @@ for group_n = 1:numel(groups)
     track = empty_track();
     track.label = sprintf('%s | %s', session_label, this_group.label);
     track.rel_um = rel;
-    track.welch_bands = [ ...
+    track.welch_bands = reject_trend_outliers(rel, [ ...
         mean_in_band(welch_rows, frequency, delta_band), ...
         mean_in_band(welch_rows, frequency, theta_band), ...
-        mean_in_band(welch_rows, frequency, gamma_band)];
-    track.fourier_bands = [ ...
+        mean_in_band(welch_rows, frequency, gamma_band)], artifact_trend_sd);
+    track.fourier_bands = reject_trend_outliers(rel, [ ...
         mean_in_band(fourier_rows, frequency, delta_band), ...
         mean_in_band(fourier_rows, frequency, theta_band), ...
-        mean_in_band(fourier_rows, frequency, gamma_band)];
+        mean_in_band(fourier_rows, frequency, gamma_band)], artifact_trend_sd);
     track.welch_spectrum = welch_rows;
     track.fourier_spectrum = fourier_rows;
     track.segment_color = segment_color;
