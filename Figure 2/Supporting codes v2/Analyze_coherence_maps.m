@@ -14,14 +14,15 @@
 %   y = delta phase difference vs that LPAG center (radians)
 %
 % Plot 2 — one figure per animal, sessions overlaid, with vertical lines at
-% region borders (same x/y as plot 1).
+% region borders (same x/y as plot 1). Original traces are faint black;
+% outliers are interpolated for the colored line. Y-axis follows the
+% interpolated traces.
 %
-% Plot 3 — scatter of every stacked point, colored by area, with marker
-% face blending. Only DR / PAG subregions / SupCol are colored. Points far
-% from each session's phase-vs-distance trend are removed first.
+% Plot 3–4 — scatter and session-interpolated 95% CI for sessions without
+% DR. Original points are faint black; interpolated values are colored.
 %
-% Plot 4 — mean and 95% CI of those colored areas after interpolating each
-% session onto a shared distance axis.
+% Plot 5 — same scatter + CI for sessions that have DR (SupCol often
+% inverted).
 
 this_file = mfilename('fullpath');
 if isempty(this_file)
@@ -87,7 +88,7 @@ local_save_figure(session_fig, fullfile(figure_folder, 'all_sessions.png'));
 
 %% Plot 2 — one figure per animal, sessions pooled, region borders
 animal_ids = unique({traces.animal_id}, 'stable');
-stack_table = table(zeros(0, 1), zeros(0, 1), cell(0, 1), cell(0, 1), cell(0, 1), zeros(0, 1), ...
+stack_table_raw = table(zeros(0, 1), zeros(0, 1), cell(0, 1), cell(0, 1), cell(0, 1), zeros(0, 1), ...
     'VariableNames', {'distance_um', 'phase_rad', 'area', 'animal', 'session', 'probe'});
 for animal_n = 1:numel(animal_ids)
     animal_id = animal_ids{animal_n};
@@ -96,11 +97,25 @@ for animal_n = 1:numel(animal_ids)
         'Color', 'w', 'Units', 'normalized', 'Position', [0.12 0.16 0.62 0.66]);
     hold on
     animal_colors = generateDistinctColors(numel(these));
+    y_clean = [];
     for trace_n = 1:numel(these)
         [distance_um, phase_rad, area] = local_sorted_trace(these(trace_n));
-        plot(distance_um, phase_rad, ...
-            'Color', animal_colors(trace_n, :), 'LineWidth', 1.2, ...
+        [phase_clean, is_outlier] = local_interpolate_trace_outliers(distance_um, phase_rad);
+        raw_line = plot(distance_um, phase_rad, '-', ...
+            'Color', [0 0 0], 'LineWidth', 0.8, 'HandleVisibility', 'off');
+        try
+            raw_line.Color(4) = 0.22;
+        catch
+        end
+        if any(is_outlier)
+            scatter(distance_um(is_outlier), phase_rad(is_outlier), 10, ...
+                'k', 'filled', 'MarkerFaceAlpha', 0.28, 'MarkerEdgeAlpha', 0.08, ...
+                'HandleVisibility', 'off')
+        end
+        plot(distance_um, phase_clean, ...
+            'Color', animal_colors(trace_n, :), 'LineWidth', 1.4, ...
             'DisplayName', these(trace_n).line_label)
+        y_clean = [y_clean; phase_clean]; %#ok<AGROW>
         n_row = numel(distance_um);
         animal = repmat({char(these(trace_n).animal_id)}, n_row, 1);
         session = repmat({char(these(trace_n).session_name)}, n_row, 1);
@@ -109,7 +124,7 @@ for animal_n = 1:numel(animal_ids)
         else
             probe = ones(n_row, 1);
         end
-        stack_table = [stack_table; table(distance_um, phase_rad, area, animal, session, probe, ...
+        stack_table_raw = [stack_table_raw; table(distance_um, phase_rad, area, animal, session, probe, ...
             'VariableNames', {'distance_um', 'phase_rad', 'area', 'animal', 'session', 'probe'})]; %#ok<AGROW>
     end
     xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
@@ -128,99 +143,42 @@ for animal_n = 1:numel(animal_ids)
     ylabel('Phase difference vs LPAG center (rad)')
     title(['Delta phase difference vs LPAG center — ', animal_id])
     legend('Location', 'eastoutside', 'Interpreter', 'none')
-    local_set_radian_ticks(gca)
+    local_set_observed_radian_ylim(gca, y_clean, [])
     box off
     file_stem = regexprep(animal_id, '[^A-Za-z0-9]+', '_');
     local_save_figure(animal_fig, fullfile(figure_folder, [file_stem, '.png']));
 end
 
-%% Drop per-session points far from that recording's phase-vs-distance trend
-stack_table = local_remove_session_trend_outliers(stack_table);
+%% Interpolate per-session outliers; keep the original table for faint overlays
+stack_table = local_interpolate_session_trend_outliers(stack_table_raw);
 
-%% Plot 3 — all stacked points, colored by area
+%% Split sessions with DR (often inverted SupCol) from the rest
 areas_in_color = {'DR', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
-scatter_fig = figure('Name', 'Delta phase vs distance by area', ...
-    'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
-hold on
-area_labels = stack_table.area;
-for k = 1:numel(area_labels)
-    if isempty(area_labels{k})
-        area_labels{k} = '(unlabeled)';
-    end
-end
-area_names = unique(area_labels, 'stable');
-area_colors = generateDistinctColors(numel(area_names));
-index = ~ismember(area_names, areas_in_color);
-area_colors(index, :) = 0.72;
-for area_n = 1:numel(area_names)
-    mask = strcmp(area_labels, area_names{area_n}) & ...
-        isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
-    if index(area_n)
-        scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
-            16, area_colors(area_n, :), 'filled', ...
-            'MarkerFaceAlpha', 0.12, 'MarkerEdgeAlpha', 0.05, ...
-            'HandleVisibility', 'off')
-    else
-        scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
-            22, area_colors(area_n, :), 'filled', ...
-            'MarkerFaceAlpha', 0.28, 'MarkerEdgeAlpha', 0.12, ...
-            'DisplayName', area_names{area_n})
-    end
-end
-xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
-yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
-xlabel('Distance from LPAG center (\mum)')
-ylabel('Phase difference vs LPAG center (rad)')
-title('Delta phase vs distance, colored by area')
-legend('Location', 'eastoutside', 'Interpreter', 'none')
-local_set_radian_ticks(gca)
-box off
-local_save_figure(scatter_fig, fullfile(figure_folder, 'all_points_by_area.png'));
+dr_sessions = unique(stack_table.session(strcmp(stack_table.area, 'DR')), 'stable');
+has_dr = ismember(stack_table.session, dr_sessions);
+has_dr_raw = ismember(stack_table_raw.session, dr_sessions);
+fprintf('%d sessions with DR, %d without\n', ...
+    numel(dr_sessions), numel(unique(stack_table.session(~has_dr))));
 
-%% Plot 4 — session-interpolated mean and 95% CI for colored areas
-colored_mask = ismember(stack_table.area, areas_in_color) & ...
-    isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
-if ~any(colored_mask)
-    warning('Analyze_coherence_maps:NoColoredAreas', ...
-        'No DR / PAG / SupCol points for the interpolated CI plot.');
+local_plot_colored_scatter(stack_table(~has_dr, :), areas_in_color, ...
+    'Delta phase vs distance by area (no DR)', ...
+    fullfile(figure_folder, 'all_points_by_area.png'));
+local_plot_area_scatter_ci(stack_table(~has_dr, :), stack_table_raw(~has_dr_raw, :), ...
+    areas_in_color, ...
+    'Delta phase vs distance, 95% CI by area (no DR)', ...
+    fullfile(figure_folder, 'area_interpolated_ci.png'));
+
+if any(has_dr)
+    local_plot_colored_scatter(stack_table(has_dr, :), areas_in_color, ...
+        'Delta phase vs distance by area (DR sessions)', ...
+        fullfile(figure_folder, 'all_points_by_area_dr_sessions.png'));
+    local_plot_area_scatter_ci(stack_table(has_dr, :), stack_table_raw(has_dr_raw, :), ...
+        areas_in_color, ...
+        'Delta phase vs distance, 95% CI by area (DR sessions)', ...
+        fullfile(figure_folder, 'area_interpolated_ci_dr_sessions.png'));
 else
-    step_um = 5;
-    dmin = min(stack_table.distance_um(colored_mask));
-    dmax = max(stack_table.distance_um(colored_mask));
-    distance_axis = (floor(dmin / step_um) * step_um : step_um : ...
-        ceil(dmax / step_um) * step_um)';
-    colored_names = area_names(~index);
-    colored_colors = area_colors(~index, :);
-
-    ci_fig = figure('Name', 'Delta phase vs distance, area CI', ...
-        'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
-    hold on
-    y_scatter = [];
-    y_ci = [];
-    for area_n = 1:numel(colored_names)
-        mask = strcmp(stack_table.area, colored_names{area_n}) & colored_mask;
-        scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
-            14, colored_colors(area_n, :), 'filled', ...
-            'MarkerFaceAlpha', 0.12, 'MarkerEdgeAlpha', 0.05, ...
-            'HandleVisibility', 'off')
-        [mean_phase, ci_lo, ci_hi] = local_session_interpolated_ci( ...
-            stack_table, colored_names{area_n}, distance_axis);
-        local_fill_ci(distance_axis, ci_lo, ci_hi, colored_colors(area_n, :));
-        plot(distance_axis, mean_phase, '-', ...
-            'Color', colored_colors(area_n, :), 'LineWidth', 1.8, ...
-            'DisplayName', colored_names{area_n})
-        y_scatter = [y_scatter; stack_table.phase_rad(mask)]; %#ok<AGROW>
-        y_ci = [y_ci; mean_phase(:); ci_lo(:); ci_hi(:)]; %#ok<AGROW>
-    end
-    xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
-    yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
-    xlabel('Distance from LPAG center (\mum)')
-    ylabel('Phase difference vs LPAG center (rad)')
-    title('Delta phase vs distance, 95% CI by area')
-    legend('Location', 'eastoutside', 'Interpreter', 'none')
-    local_set_observed_radian_ylim(gca, y_scatter, y_ci)
-    box off
-    local_save_figure(ci_fig, fullfile(figure_folder, 'area_interpolated_ci.png'));
+    warning('Analyze_coherence_maps:NoDRSessions', ...
+        'No sessions with DR channels; skipped the DR-only scatter/CI figures.');
 end
 
 %% -------------------------------------------------------------------------
@@ -241,12 +199,43 @@ if isstring(area)
 end
 end
 
-function stack_table = local_remove_session_trend_outliers(stack_table)
-% Per session (and probe), fit a robust trend of phase vs distance and drop
-% points whose residual is more than 3 scaled MAD from that trend, with a
-% 0.5 rad floor so isolated jumps are still removed on a clean trace.
-n_row = height(stack_table);
-keep = true(n_row, 1);
+function [phase_clean, outlier] = local_interpolate_trace_outliers(distance_um, phase_rad)
+% Replace points far from the session trend by linear interpolation along depth.
+phase_clean = phase_rad;
+outlier = false(size(phase_rad));
+ok = isfinite(distance_um) & isfinite(phase_rad);
+if sum(ok) < 8
+    return
+end
+idx = find(ok);
+d = distance_um(idx);
+p = phase_rad(idx);
+[d, order] = sort(d);
+idx = idx(order);
+p = p(order);
+span = max(7, 2 * floor(numel(p) / 8) + 1);
+try
+    trend = smooth(d, p, span, 'rlowess');
+catch
+    trend = movmedian(p, span);
+end
+residual = p - trend;
+threshold = max(3 * 1.4826 * mad(residual, 1), 0.5);
+outlier_local = abs(residual - median(residual)) > threshold;
+outlier(idx(outlier_local)) = true;
+inlier = ~outlier_local;
+if sum(inlier) < 2 || ~any(outlier_local)
+    return
+end
+filled = interp1(d(inlier), p(inlier), d(outlier_local), 'linear');
+out_idx = idx(outlier_local);
+good = isfinite(filled);
+phase_clean(out_idx(good)) = filled(good);
+end
+
+function stack_clean = local_interpolate_session_trend_outliers(stack_table)
+% Per session (and probe), interpolate phase at trend-outlier channels.
+stack_clean = stack_table;
 session = stack_table.session;
 if ismember('probe', stack_table.Properties.VariableNames)
     probe_str = arrayfun(@(p) num2str(p), stack_table.probe, 'UniformOutput', false);
@@ -255,34 +244,116 @@ else
     group = session;
 end
 group_ids = unique(group, 'stable');
+n_filled = 0;
 for g = 1:numel(group_ids)
-    idx = find(strcmp(group, group_ids{g}) & ...
-        isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad));
-    if numel(idx) < 8
-        continue
-    end
-    distance_um = stack_table.distance_um(idx);
-    phase_rad = stack_table.phase_rad(idx);
-    [distance_um, order] = sort(distance_um);
-    idx = idx(order);
-    phase_rad = phase_rad(order);
-    span = max(7, 2 * floor(numel(phase_rad) / 8) + 1);
-    try
-        trend = smooth(distance_um, phase_rad, span, 'rlowess');
-    catch
-        trend = movmedian(phase_rad, span);
-    end
-    residual = phase_rad - trend;
-    med_res = median(residual);
-    scaled_mad = 1.4826 * mad(residual, 1);
-    threshold = max(3 * scaled_mad, 0.5);
-    outlier = abs(residual - med_res) > threshold;
-    keep(idx(outlier)) = false;
+    idx = find(strcmp(group, group_ids{g}));
+    [phase_clean, outlier] = local_interpolate_trace_outliers( ...
+        stack_table.distance_um(idx), stack_table.phase_rad(idx));
+    stack_clean.phase_rad(idx) = phase_clean;
+    n_filled = n_filled + sum(outlier);
 end
-n_removed = sum(~keep);
-fprintf('Removed %d / %d points far from the per-session phase-distance trend\n', ...
-    n_removed, n_row);
-stack_table = stack_table(keep, :);
+fprintf('Interpolated %d / %d points far from the per-session phase-distance trend\n', ...
+    n_filled, height(stack_table));
+end
+
+function local_plot_colored_scatter(stack_table, areas_in_color, fig_title, save_path)
+if isempty(stack_table) || height(stack_table) == 0
+    return
+end
+scatter_fig = figure('Name', fig_title, ...
+    'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
+hold on
+area_labels = stack_table.area;
+for k = 1:numel(area_labels)
+    if isempty(area_labels{k})
+        area_labels{k} = '(unlabeled)';
+    end
+end
+area_names = unique(area_labels, 'stable');
+area_colors = generateDistinctColors(max(numel(areas_in_color), 1));
+y_scatter = [];
+for area_n = 1:numel(area_names)
+    mask = strcmp(area_labels, area_names{area_n}) & ...
+        isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
+    color_n = find(strcmp(areas_in_color, area_names{area_n}), 1);
+    if isempty(color_n)
+        scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
+            16, [0.72 0.72 0.72], 'filled', ...
+            'MarkerFaceAlpha', 0.12, 'MarkerEdgeAlpha', 0.05, ...
+            'HandleVisibility', 'off')
+    else
+        scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
+            22, area_colors(color_n, :), 'filled', ...
+            'MarkerFaceAlpha', 0.28, 'MarkerEdgeAlpha', 0.12, ...
+            'DisplayName', area_names{area_n})
+        y_scatter = [y_scatter; stack_table.phase_rad(mask)]; %#ok<AGROW>
+    end
+end
+xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
+yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
+xlabel('Distance from LPAG center (\mum)')
+ylabel('Phase difference vs LPAG center (rad)')
+title(fig_title)
+legend('Location', 'eastoutside', 'Interpreter', 'none')
+local_set_observed_radian_ylim(gca, y_scatter, [])
+box off
+local_save_figure(scatter_fig, save_path);
+end
+
+function local_plot_area_scatter_ci(stack_clean, stack_raw, areas_in_color, ...
+    fig_title, save_path)
+colored_mask = ismember(stack_clean.area, areas_in_color) & ...
+    isfinite(stack_clean.distance_um) & isfinite(stack_clean.phase_rad);
+if ~any(colored_mask)
+    warning('Analyze_coherence_maps:NoColoredAreas', ...
+        'No colored-area points for %s.', fig_title);
+    return
+end
+step_um = 5;
+dmin = min(stack_clean.distance_um(colored_mask));
+dmax = max(stack_clean.distance_um(colored_mask));
+distance_axis = (floor(dmin / step_um) * step_um : step_um : ...
+    ceil(dmax / step_um) * step_um)';
+area_colors = generateDistinctColors(max(numel(areas_in_color), 1));
+present = areas_in_color(ismember(areas_in_color, stack_clean.area));
+
+ci_fig = figure('Name', fig_title, ...
+    'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
+hold on
+raw_mask = ismember(stack_raw.area, areas_in_color) & ...
+    isfinite(stack_raw.distance_um) & isfinite(stack_raw.phase_rad);
+if any(raw_mask)
+    scatter(stack_raw.distance_um(raw_mask), stack_raw.phase_rad(raw_mask), ...
+        8, 'k', 'filled', 'MarkerFaceAlpha', 0.08, 'MarkerEdgeAlpha', 0.04, ...
+        'HandleVisibility', 'off')
+end
+y_scatter = [];
+y_ci = [];
+for area_n = 1:numel(present)
+    color_n = find(strcmp(areas_in_color, present{area_n}), 1);
+    mask = strcmp(stack_clean.area, present{area_n}) & colored_mask;
+    scatter(stack_clean.distance_um(mask), stack_clean.phase_rad(mask), ...
+        14, area_colors(color_n, :), 'filled', ...
+        'MarkerFaceAlpha', 0.12, 'MarkerEdgeAlpha', 0.05, ...
+        'HandleVisibility', 'off')
+    [mean_phase, ci_lo, ci_hi] = local_session_interpolated_ci( ...
+        stack_clean, present{area_n}, distance_axis);
+    local_fill_ci(distance_axis, ci_lo, ci_hi, area_colors(color_n, :));
+    plot(distance_axis, mean_phase, '-', ...
+        'Color', area_colors(color_n, :), 'LineWidth', 1.8, ...
+        'DisplayName', present{area_n})
+    y_scatter = [y_scatter; stack_clean.phase_rad(mask)]; %#ok<AGROW>
+    y_ci = [y_ci; mean_phase(:); ci_lo(:); ci_hi(:)]; %#ok<AGROW>
+end
+xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
+yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
+xlabel('Distance from LPAG center (\mum)')
+ylabel('Phase difference vs LPAG center (rad)')
+title(fig_title)
+legend('Location', 'eastoutside', 'Interpreter', 'none')
+local_set_observed_radian_ylim(gca, y_scatter, y_ci)
+box off
+local_save_figure(ci_fig, save_path);
 end
 
 function [mean_phase, ci_lo, ci_hi] = local_session_interpolated_ci( ...

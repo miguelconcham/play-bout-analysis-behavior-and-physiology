@@ -17,6 +17,7 @@ from extract_delta_phase_vs_lpag_distance import (  # noqa: E402
     pooled_region_borders,
     probe_numbers,
     region_borders,
+    interpolate_session_trend_outliers,
     session_animal_id,
     session_trend_outlier_mask,
 )
@@ -345,6 +346,15 @@ class SessionTrendOutlierTests(unittest.TestCase):
         phase = 0.002 * distance + 0.01 * np.sin(distance / 40.0)
         outlier = session_trend_outlier_mask(distance, phase)
         self.assertFalse(np.any(outlier))
+
+    def test_interpolates_the_outlier_onto_the_session_trend(self):
+        distance = np.linspace(-200.0, 200.0, 41)
+        phase = 0.002 * distance
+        phase[20] = 3.0
+        filled, outlier = interpolate_session_trend_outliers(distance, phase)
+        self.assertTrue(outlier[20])
+        self.assertAlmostEqual(filled[20], 0.002 * distance[20], places=6)
+        self.assertAlmostEqual(filled[19], phase[19])
 
 
 if __name__ == "__main__":

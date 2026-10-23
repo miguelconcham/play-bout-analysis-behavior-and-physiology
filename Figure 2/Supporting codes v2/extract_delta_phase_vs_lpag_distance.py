@@ -474,6 +474,33 @@ def session_trend_outlier_mask(
     return outlier
 
 
+def interpolate_session_trend_outliers(
+    distance_um: np.ndarray,
+    phase_rad: np.ndarray,
+    threshold_factor: float = 3.0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Replace trend outliers by linear interpolation along distance."""
+    distance_um = np.asarray(distance_um, dtype=float).reshape(-1)
+    phase_clean = np.asarray(phase_rad, dtype=float).reshape(-1).copy()
+    outlier = session_trend_outlier_mask(distance_um, phase_clean, threshold_factor)
+    inlier = ~outlier & np.isfinite(distance_um) & np.isfinite(phase_clean)
+    query = outlier & np.isfinite(distance_um)
+    if np.count_nonzero(inlier) < 2 or not np.any(query):
+        return phase_clean, outlier
+    order = np.argsort(distance_um[inlier], kind="mergesort")
+    filled = np.interp(
+        distance_um[query],
+        distance_um[inlier][order],
+        phase_clean[inlier][order],
+        left=np.nan,
+        right=np.nan,
+    )
+    good = np.isfinite(filled)
+    query_idx = np.flatnonzero(query)
+    phase_clean[query_idx[good]] = filled[good]
+    return phase_clean, outlier
+
+
 def _field(session, name: str, default=None):
     if isinstance(session, dict):
         return session.get(name, default)
