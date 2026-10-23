@@ -46,11 +46,12 @@
 % set to 0 at its first channel. Set region_distance_scale to 'raw' for the
 % saved power. Each panel reports a Spearman correlation of distance and
 % power, with its p-value, after the same outlier screens. The center is
-% the midpoint of that region's labeled span on the shank. Delta, theta,
-% and gamma are drawn against distance from that center, once toward the
-% tip (ventral) and once toward the brain surface (dorsal). Individual
-% shanks are one figure. Another figure draws the same values and, at each
-% distance, the intercept from Power ~ 1 + (1|Animal).
+% the midpoint of that region's labeled span on the shank. bands_to_display
+% selects delta, theta, and gamma. Delta is the default, and the points are
+% a scatter. Curves run toward the tip (ventral) and toward the brain
+% surface (dorsal). Another figure draws the same values and, at each
+% distance, the intercept from Power ~ 1 + (1|Animal). A rectangle marks a
+% run of distances where that interval excludes 0.
 
 %% Which recording and session to inspect
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
@@ -83,10 +84,15 @@ delta_band = [1 5];
 theta_band = [6 12];
 gamma_band = [30 45];
 
-% Figures use the Fourier spectra. Welch is available when requested:
+% Power and correlation figures use the Fourier spectra. Welch is available:
 %   spectral_method = {'Welch'};
 %   spectral_method = {'Welch', 'Fourier'};
 spectral_method = {'Fourier'};
+
+% Bands on the power and correlation figures. Delta is the default.
+%   bands_to_display = {'delta', 'theta'};
+%   bands_to_display = {'delta', 'theta', 'gamma'};
+bands_to_display = {'delta'};
 
 % Regions drawn on the scatter, distance-model, region-comparison,
 % and region-distance figures. SupCol is the superior colliculus. Add 'DR'
@@ -120,6 +126,25 @@ plot_proximal_distal = false;
 % and the same session become one session power. At that distance the
 % model is an intercept with a random effect of animal.
 distance_model_bin_um = 20;
+
+%% Distance-figure appearance
+% Scatter dots, the confidence shade around each intercept, and the
+% rectangles that mark a significant stretch of distance.
+scatter_marker_size = 6;
+scatter_face_alpha = 0.08;
+ci_face_alpha = 0.45;
+significance_face_alpha = 0.16;
+% A rectangle is drawn only when the intercept interval excludes 0 for a
+% contiguous run of at least this many micrometres. The rectangle covers
+% the upper 90% of the y-axis.
+significance_min_um = 100;
+
+plot_style = struct( ...
+    'marker_size', scatter_marker_size, ...
+    'marker_alpha', scatter_face_alpha, ...
+    'ci_alpha', ci_face_alpha, ...
+    'significance_alpha', significance_face_alpha, ...
+    'significance_min_um', significance_min_um);
 
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
@@ -227,7 +252,7 @@ for file_n = recording_index(:).'
                 welch_spectrum, fourier_spectrum, ...
                 delta_band, theta_band, gamma_band, ...
                 spectrum_field, session_label, area_borders, spectral_method, ...
-                artifact_trend_sd);
+                artifact_trend_sd, bands_to_display);
             drawnow
         end
     end
@@ -240,14 +265,15 @@ power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
     spectrum_field, region_border_bin_um);
 placed = apply_screened_power_to_placed(placed, power_table);
 plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band, ...
-    spectral_method, regions_to_display);
+    spectral_method, regions_to_display, bands_to_display, plot_style);
 plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band, ...
-    spectral_method, regions_to_display, distance_model_bin_um);
+    spectral_method, regions_to_display, distance_model_bin_um, ...
+    bands_to_display, plot_style);
 plot_region_power_comparison(power_table, delta_band, theta_band, gamma_band, ...
-    spectral_method, regions_to_display);
+    spectral_method, regions_to_display, bands_to_display, plot_style);
 if plot_proximal_distal
     plot_region_half_comparison(power_table, delta_band, theta_band, gamma_band, ...
-        spectral_method, regions_to_display);
+        spectral_method, regions_to_display, bands_to_display, plot_style);
 end
 if isempty(tracks)
     fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
@@ -259,13 +285,14 @@ else
     plot_aligned_spectra(tracks, stacked_frequency, spectrum_field, ...
         spectral_method);
     plot_aligned_profiles(tracks, spectrum_field, ...
-        delta_band, theta_band, gamma_band, spectral_method);
+        delta_band, theta_band, gamma_band, spectral_method, bands_to_display);
     plot_aligned_intervals(tracks, spectrum_field, ...
-        delta_band, theta_band, gamma_band, spectral_method);
+        delta_band, theta_band, gamma_band, spectral_method, bands_to_display);
 end
 plot_region_distances(placed, spectrum_field, ...
     delta_band, theta_band, gamma_band, spectral_method, ...
-    regions_to_display, region_distance_scale, distance_model_bin_um);
+    regions_to_display, region_distance_scale, distance_model_bin_um, ...
+    bands_to_display, plot_style);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
@@ -333,17 +360,14 @@ end
 function plot_band_profiles(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, ...
         delta_band, theta_band, gamma_band, spectrum_field, ...
-        session_label, area_borders, spectral_method, artifact_trend_sd)
+        session_label, area_borders, spectral_method, artifact_trend_sd, ...
+        bands_to_display)
 probe_groups = probe_groups_by_depth(channel_table);
 n_groups = numel(probe_groups);
 spectra = {welch_spectrum, fourier_spectrum};
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 n_methods = numel(method_ids);
-band_names = { ...
-    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
-    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
-    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
-band_colors = [0.12 0.35 0.75; 0.85 0.40 0.10; 0.45 0.62 0.20];
+selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
 
 figure('Name', ['Band profiles | ', session_label], 'Color', 'w', ...
     'Position', [120 120 max(360, 280 * n_groups) 720]);
@@ -361,11 +385,12 @@ for method_slot = 1:n_methods
         band_power = reject_trend_outliers(this_group.depth_um, ...
             band_power, artifact_trend_sd);
         hold on
-        line_handles = gobjects(3, 1);
-        for band_n = 1:3
-            line_handles(band_n) = plot(band_power(:, band_n), ...
+        line_handles = gobjects(numel(selection.index), 1);
+        for slot_n = 1:numel(selection.index)
+            band_n = selection.index(slot_n);
+            line_handles(slot_n) = plot(band_power(:, band_n), ...
                 this_group.depth_um, ...
-                'Color', band_colors(band_n, :), 'LineWidth', 1.4);
+                'Color', selection.colors(slot_n, :), 'LineWidth', 1.4);
         end
         if strcmp(spectrum_field, 'raw_aperiodic_subtracted')
             xline(0, ':k');
@@ -390,7 +415,7 @@ for method_slot = 1:n_methods
         end
         title(sprintf('%s | %s', method_names{method_slot}, this_group.label))
         if method_slot == 1 && group_n == 1
-            legend(line_handles, band_names, 'Location', 'best')
+            legend(line_handles, selection.labels, 'Location', 'best')
         end
         box off
     end
@@ -1182,30 +1207,24 @@ fprintf(['Set aside %d %s rows beyond %g µm from the border, ' ...
 end
 
 function plot_normalized_power_scatters(power_table, ...
-        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
+        delta_band, theta_band, gamma_band, spectral_method, ...
+        regions_to_display, bands_to_display, plot_style)
 if isempty(power_table)
     return
 end
 [method_names, ~] = selected_spectral_methods(spectral_method);
-band_fields = { ...
-    'DeltaPower_zWithinShank', ...
-    'ThetaPower_zWithinShank', ...
-    'GammaPower_zWithinShank'};
-band_names = { ...
-    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
-    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
-    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
 region_keys = region_keys_for_rows(power_table.Area);
 region_names = selected_regions(regions_to_display);
 figure_n = 0;
 for method_n = 1:numel(method_names)
     in_method = strcmp(power_table.Method, method_names{method_n});
     distance_um = power_table.DistanceToMidLPAG_um;
-    for band_n = 1:numel(band_fields)
+    for slot_n = 1:numel(selection.index)
         figure_n = figure_n + 1;
-        power = power_table.(band_fields{band_n});
+        power = power_table.(selection.fields{slot_n});
         figure('Name', sprintf('%s | %s vs distance to mid-LPAG', ...
-            method_names{method_n}, band_names{band_n}), ...
+            method_names{method_n}, selection.labels{slot_n}), ...
             'Color', 'w', 'Position', [60 + 24 * figure_n, 60, 760, 560]);
         hold on
         yline(0, ':k', 'HandleVisibility', 'off');
@@ -1221,8 +1240,10 @@ for method_n = 1:numel(method_names)
                 continue
             end
             this_color = region_color(this_region);
-            scatter(distance_um(keep), power(keep), 22, this_color, 'filled', ...
-                'MarkerFaceAlpha', 0.22, 'MarkerEdgeAlpha', 0.22, ...
+            scatter(distance_um(keep), power(keep), plot_style.marker_size, ...
+                this_color, 'filled', ...
+                'MarkerFaceAlpha', plot_style.marker_alpha, ...
+                'MarkerEdgeAlpha', plot_style.marker_alpha, ...
                 'HandleVisibility', 'off');
             legend_handles(end + 1, 1) = plot(nan, nan, 'o', ...
                 'MarkerFaceColor', this_color, 'MarkerEdgeColor', this_color, ...
@@ -1233,7 +1254,7 @@ for method_n = 1:numel(method_names)
         xlabel({'Distance to mid-LPAG (µm)', ...
             'positive = dorsal, farther from the tip'})
         ylabel({'Power z-scored within shank', '0 = mid-LPAG channel'})
-        title(sprintf('%s | %s', method_names{method_n}, band_names{band_n}))
+        title(sprintf('%s | %s', method_names{method_n}, selection.labels{slot_n}))
         if ~isempty(legend_handles)
             legend(legend_handles, legend_labels, ...
                 'Location', 'eastoutside', 'FontSize', 8)
@@ -1284,6 +1305,41 @@ for item_n = 1:numel(requested)
     method_ids(item_n) = find(match, 1);
     method_names{item_n} = catalog{method_ids(item_n)};
 end
+end
+
+function selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band)
+catalog = {'delta', 'theta', 'gamma'};
+labels = { ...
+    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
+    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
+    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+fields = { ...
+    'DeltaPower_zWithinShank', ...
+    'ThetaPower_zWithinShank', ...
+    'GammaPower_zWithinShank'};
+colors = [0.12 0.35 0.75; 0.85 0.40 0.10; 0.45 0.62 0.20];
+if ischar(bands_to_display) || isstring(bands_to_display)
+    requested = cellstr(bands_to_display);
+else
+    requested = cellstr(string(bands_to_display));
+end
+requested = requested(:).';
+if isempty(requested)
+    error('bands_to_display must include delta, theta, gamma, or a combination.');
+end
+index = zeros(1, numel(requested));
+for item_n = 1:numel(requested)
+    match = strcmpi(catalog, strtrim(requested{item_n}));
+    if ~any(match)
+        error('bands_to_display must include delta, theta, gamma, or a combination.');
+    end
+    index(item_n) = find(match, 1);
+end
+selection = struct( ...
+    'index', index, ...
+    'labels', {labels(index)}, ...
+    'fields', {fields(index)}, ...
+    'colors', colors(index, :));
 end
 
 function region_names = selected_regions(regions_to_display)
@@ -1395,19 +1451,12 @@ end
 
 function plot_normalized_power_intervals(power_table, ...
         delta_band, theta_band, gamma_band, spectral_method, ...
-        regions_to_display, distance_model_bin_um)
+        regions_to_display, distance_model_bin_um, bands_to_display, plot_style)
 if isempty(power_table)
     return
 end
 [method_names, ~] = selected_spectral_methods(spectral_method);
-band_fields = { ...
-    'DeltaPower_zWithinShank', ...
-    'ThetaPower_zWithinShank', ...
-    'GammaPower_zWithinShank'};
-band_names = { ...
-    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
-    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
-    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
 region_keys = region_keys_for_rows(power_table.Area);
 region_names = selected_regions(regions_to_display);
 region_names = region_names(~strcmp(region_names, 'Other'));
@@ -1417,12 +1466,12 @@ figure_n = 0;
 for method_n = 1:numel(method_names)
     in_method = strcmp(power_table.Method, method_names{method_n});
     distance_um = power_table.DistanceToMidLPAG_um;
-    for band_n = 1:numel(band_fields)
+    for slot_n = 1:numel(selection.index)
         figure_n = figure_n + 1;
-        power = power_table.(band_fields{band_n});
+        power = power_table.(selection.fields{slot_n});
         figure('Name', sprintf( ...
             '%s | %s intercept by distance to mid-LPAG', ...
-            method_names{method_n}, band_names{band_n}), ...
+            method_names{method_n}, selection.labels{slot_n}), ...
             'Color', 'w', 'Position', [80 + 24 * figure_n, 100, 980, 560]);
         hold on
         yline(0, ':k', 'HandleVisibility', 'off');
@@ -1431,6 +1480,8 @@ for method_n = 1:numel(method_names)
         legend_handles = gobjects(0, 1);
         legend_labels = {};
         x_span = [];
+        drawn_profiles = cell(0, 1);
+        drawn_colors = zeros(0, 3);
         for region_n = 1:numel(region_names)
             this_region = region_names{region_n};
             keep = in_method & region_row_has(region_keys, this_region) & ...
@@ -1441,17 +1492,21 @@ for method_n = 1:numel(method_names)
             this_distance = distance_um(keep);
             this_power = power(keep);
             this_color = region_color(this_region);
-            scatter(this_distance, this_power, 18, this_color, 'filled', ...
-                'MarkerFaceAlpha', 0.18, 'MarkerEdgeAlpha', 0.18, ...
+            scatter(this_distance, this_power, plot_style.marker_size, ...
+                this_color, 'filled', ...
+                'MarkerFaceAlpha', plot_style.marker_alpha, ...
+                'MarkerEdgeAlpha', plot_style.marker_alpha, ...
                 'HandleVisibility', 'off');
             profile = fit_intercepts_by_distance(this_distance, this_power, ...
                 animal(keep), session(keep), distance_model_bin_um);
             [rho, p_rho] = rank_correlation(this_distance, this_power);
             report_intercept_profile(sprintf('%s | %s | %s', ...
-                method_names{method_n}, band_names{band_n}, ...
+                method_names{method_n}, selection.labels{slot_n}, ...
                 region_display_name(this_region)), profile, rho, p_rho);
-            draw_distance_intercepts(profile, this_color);
+            draw_distance_intercepts(profile, this_color, plot_style.ci_alpha);
             x_span = [x_span; this_distance(:)]; %#ok<AGROW>
+            drawn_profiles{end + 1, 1} = profile; %#ok<AGROW>
+            drawn_colors(end + 1, :) = this_color; %#ok<AGROW>
             legend_handles(end + 1, 1) = plot(nan, nan, '-o', ...
                 'Color', this_color, 'MarkerFaceColor', this_color, ...
                 'LineWidth', 2, 'MarkerSize', 4); %#ok<AGROW>
@@ -1462,11 +1517,18 @@ for method_n = 1:numel(method_names)
             pad = 0.02 * max(max(x_span) - min(x_span), 1);
             xlim([min(x_span) - pad, max(x_span) + pad]);
         end
+        y_limits = ylim;
+        for drawn_n = 1:numel(drawn_profiles)
+            draw_distance_significance(drawn_profiles{drawn_n}, ...
+                drawn_colors(drawn_n, :), plot_style.significance_alpha, ...
+                plot_style.significance_min_um, y_limits);
+        end
+        ylim(y_limits);
         xlabel({'Distance to mid-LPAG (µm)', ...
             'positive = dorsal, farther from the tip'})
         ylabel({'Power z-scored within shank', '0 = mid-LPAG channel'})
         title(sprintf('%s | %s | intercept at each %g µm', ...
-            method_names{method_n}, band_names{band_n}, distance_model_bin_um))
+            method_names{method_n}, selection.labels{slot_n}, distance_model_bin_um))
         if ~isempty(legend_handles)
             legend(legend_handles, legend_labels, ...
                 'Location', 'eastoutside', 'FontSize', 8, 'Interpreter', 'tex')
@@ -1476,9 +1538,11 @@ for method_n = 1:numel(method_names)
 end
 fprintf(['At each distance bin, one session power is the mean of that ' ...
     'session''s channels. Power ~ 1 + (1|Animal). The marker is the ' ...
-    'intercept and the shade is its 95%% interval. Spearman rho and p use ' ...
-    'the channel scatter, after extreme values and uncommon border ' ...
-    'distances are removed.\n']);
+    'intercept and the shade is its 95%% interval. A rectangle covers the ' ...
+    'upper 90%% of the axis where that interval excludes 0 for at least ' ...
+    '%g µm. Spearman rho and p use the channel scatter, after extreme ' ...
+    'values and uncommon border distances are removed.\n'], ...
+    plot_style.significance_min_um);
 end
 
 function profile = empty_distance_profile(bin_um)
@@ -1616,7 +1680,7 @@ lower = intercept - half;
 upper = intercept + half;
 end
 
-function draw_distance_intercepts(profile, color)
+function draw_distance_intercepts(profile, color, ci_alpha)
 if isempty(profile.distance_um)
     return
 end
@@ -1633,13 +1697,62 @@ for run_n = 1:numel(run_start)
         segment_x = x_um(index);
         fill([segment_x; flipud(segment_x)], ...
             [y_low(index); flipud(y_high(index))], color, ...
-            'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+            'FaceAlpha', ci_alpha, 'EdgeColor', 'none', 'HandleVisibility', 'off');
         plot(segment_x, y(index), '-', 'Color', color, 'LineWidth', 1.6, ...
             'HandleVisibility', 'off');
     end
     plot(x_um(index), y(index), 'o', 'Color', color, ...
         'MarkerFaceColor', color, 'MarkerSize', 4, 'HandleVisibility', 'off');
 end
+end
+
+function draw_distance_significance(profile, color, face_alpha, min_um, y_limits)
+if isempty(profile.distance_um) || ~isfinite(min_um) || numel(y_limits) < 2
+    return
+end
+span = y_limits(2) - y_limits(1);
+if ~isfinite(span) || span <= 0
+    return
+end
+[x_um, order] = sort(profile.distance_um(:));
+lower = profile.lower(order);
+upper = profile.upper(order);
+significant = isfinite(lower) & isfinite(upper) & (upper < 0 | lower > 0);
+y0 = y_limits(1) + 0.10 * span;
+y1 = y_limits(2);
+bin_um = profile.bin_um;
+run_start = 0;
+for point_n = 1:numel(x_um)
+    continues = significant(point_n) && run_start > 0 && ...
+        (x_um(point_n) - x_um(point_n - 1) <= bin_um * 1.5);
+    if continues
+        continue
+    end
+    if run_start > 0
+        mark_significant_span(x_um(run_start), x_um(point_n - 1), ...
+            bin_um, min_um, y0, y1, color, face_alpha);
+        run_start = 0;
+    end
+    if significant(point_n)
+        run_start = point_n;
+    end
+end
+if run_start > 0
+    mark_significant_span(x_um(run_start), x_um(end), ...
+        bin_um, min_um, y0, y1, color, face_alpha);
+end
+end
+
+function mark_significant_span(x_first, x_last, bin_um, min_um, y0, y1, color, face_alpha)
+width = x_last - x_first + bin_um;
+if width < min_um
+    return
+end
+x0 = x_first - bin_um / 2;
+x1 = x_last + bin_um / 2;
+rectangle_handle = fill([x0, x1, x1, x0], [y0, y0, y1, y1], color, ...
+    'FaceAlpha', face_alpha, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+uistack(rectangle_handle, 'bottom');
 end
 
 function label = intercept_legend(region_name, profile, rho, p_rho)
@@ -1693,7 +1806,8 @@ end
 end
 
 function plot_region_power_comparison(power_table, ...
-        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
+        delta_band, theta_band, gamma_band, spectral_method, ...
+        regions_to_display, bands_to_display, plot_style)
 if isempty(power_table)
     return
 end
@@ -1705,11 +1819,13 @@ plot_nested_region_bars(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, region_keys, region_names, ...
     'nested region comparison', 'nested repeated measures', ...
     ['Channels stay in the test, nested in the session. ' ...
-    'Lines join one session. Brackets are mixed-model contrasts, Bonferroni.']);
+    'Lines join one session. Brackets are mixed-model contrasts, Bonferroni.'], ...
+    bands_to_display, plot_style);
 end
 
 function plot_region_half_comparison(power_table, ...
-        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
+        delta_band, theta_band, gamma_band, spectral_method, ...
+        regions_to_display, bands_to_display, plot_style)
 if isempty(power_table) || ~ismember('DistanceToAreaBorder_um', power_table.Properties.VariableNames)
     return
 end
@@ -1727,7 +1843,8 @@ plot_nested_region_bars(power_table, delta_band, theta_band, gamma_band, ...
     'proximal and distal comparison', 'proximal and distal', ...
     ['Proximal is the nearer half of the available distance. ' ...
     'Distal is the farther half. Lines join one session. ' ...
-    'Brackets are mixed-model contrasts, Bonferroni.']);
+    'Brackets are mixed-model contrasts, Bonferroni.'], ...
+    bands_to_display, plot_style);
 end
 
 function [half_keys, half_names] = proximal_distal_keys(power_table, region_names)
@@ -1788,31 +1905,26 @@ end
 
 function plot_nested_region_bars(power_table, ...
         delta_band, theta_band, gamma_band, spectral_method, ...
-        region_keys, region_names, figure_name, title_name, note)
+        region_keys, region_names, figure_name, title_name, note, ...
+        bands_to_display, plot_style)
 if numel(region_names) < 2
     fprintf(['Region comparison needs at least two regions in ' ...
         'regions_to_display.\n']);
     return
 end
 [method_names, ~] = selected_spectral_methods(spectral_method);
-band_fields = { ...
-    'DeltaPower_zWithinShank', ...
-    'ThetaPower_zWithinShank', ...
-    'GammaPower_zWithinShank'};
-band_names = { ...
-    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
-    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
-    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
+n_bands = numel(selection.index);
 for method_n = 1:numel(method_names)
     in_method = strcmp(power_table.Method, method_names{method_n});
-    band_obs = cell(1, numel(band_fields));
-    enough = false(1, numel(band_fields));
-    for band_n = 1:numel(band_fields)
-        band_obs{band_n} = nested_channel_observations(power_table, ...
+    band_obs = cell(1, n_bands);
+    enough = false(1, n_bands);
+    for slot_n = 1:n_bands
+        band_obs{slot_n} = nested_channel_observations(power_table, ...
             in_method, region_keys, region_names, ...
-            power_table.(band_fields{band_n}));
-        enough(band_n) = band_obs{band_n}.n_sessions >= 2 && ...
-            numel(band_obs{band_n}.region_names) >= 2;
+            power_table.(selection.fields{slot_n}));
+        enough(slot_n) = band_obs{slot_n}.n_sessions >= 2 && ...
+            numel(band_obs{slot_n}.region_names) >= 2;
     end
     if ~any(enough)
         fprintf(['%s %s needs channels from at least two sessions in ' ...
@@ -1821,23 +1933,23 @@ for method_n = 1:numel(method_names)
     end
     figure('Name', sprintf('%s | %s', method_names{method_n}, figure_name), ...
         'Color', 'w', ...
-        'Position', [110, 80, max(1080, 160 * numel(region_names)), 560]);
-    for band_n = 1:numel(band_fields)
-        subplot(1, numel(band_fields), band_n)
-        obs = band_obs{band_n};
-        if ~enough(band_n)
+        'Position', [110, 80, max(720, 360 * n_bands), 560]);
+    for slot_n = 1:n_bands
+        subplot(1, n_bands, slot_n)
+        obs = band_obs{slot_n};
+        if ~enough(slot_n)
             axis off
             text(0.5, 0.5, sprintf('%s\nfewer than 2 sessions', ...
-                band_names{band_n}), 'HorizontalAlignment', 'center');
+                selection.labels{slot_n}), 'HorizontalAlignment', 'center');
             fprintf(['%s | %s | %s: fewer than 2 sessions with channels in ' ...
                 'at least two regions.\n'], method_names{method_n}, ...
-                figure_name, band_names{band_n});
+                figure_name, selection.labels{slot_n});
             continue
         end
         result = fit_nested_region_model(obs);
-        report_nested_region_tests(method_names{method_n}, band_names{band_n}, ...
+        report_nested_region_tests(method_names{method_n}, selection.labels{slot_n}, ...
             region_names, obs, result);
-        draw_nested_region_comparison(obs, result, band_names{band_n});
+        draw_nested_region_comparison(obs, result, selection.labels{slot_n}, plot_style);
     end
     sgtitle({sprintf('%s | %s', method_names{method_n}, title_name), note}, ...
         'FontSize', 10)
@@ -2140,7 +2252,7 @@ for pair_n = 1:size(result.pairs, 1)
 end
 end
 
-function draw_nested_region_comparison(obs, result, band_name)
+function draw_nested_region_comparison(obs, result, band_name, plot_style)
 n_sessions = obs.n_sessions;
 n_regions = numel(obs.region_names);
 if result.ok && all(isfinite(result.emm))
@@ -2182,8 +2294,9 @@ for region_n = 1:n_regions
     colors(in_region, :) = repmat(region_color(obs.region_names{region_n}), ...
         nnz(in_region), 1);
 end
-scatter(obs.region_id + jitter(obs.session_id), obs.power, 16, colors, ...
-    'filled', 'MarkerFaceAlpha', 0.28, 'MarkerEdgeColor', 'none', ...
+scatter(obs.region_id + jitter(obs.session_id), obs.power, ...
+    plot_style.marker_size, colors, 'filled', ...
+    'MarkerFaceAlpha', plot_style.marker_alpha, 'MarkerEdgeColor', 'none', ...
     'HandleVisibility', 'off');
 y_extent = [0; obs.power(:); (means + standard_error).'; (means - standard_error).'];
 y_extent = y_extent(isfinite(y_extent));
@@ -2383,20 +2496,19 @@ palette.other = [0.72 0.72 0.72];
 end
 
 function plot_aligned_profiles(tracks, spectrum_field, ...
-        delta_band, theta_band, gamma_band, spectral_method)
+        delta_band, theta_band, gamma_band, spectral_method, bands_to_display)
 palette = track_colors();
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 n_methods = numel(method_ids);
-band_names = { ...
-    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
-    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
-    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
+n_bands = numel(selection.index);
 figure('Name', 'Profiles aligned on mid-LPAG', 'Color', 'w', ...
-    'Position', [60 60 1100 720]);
+    'Position', [60 60 max(420, 360 * n_bands) 720]);
 for method_slot = 1:n_methods
     method_n = method_ids(method_slot);
-    for band_n = 1:3
-        subplot(n_methods, 3, (method_slot - 1) * 3 + band_n)
+    for slot_n = 1:n_bands
+        band_n = selection.index(slot_n);
+        subplot(n_methods, n_bands, (method_slot - 1) * n_bands + slot_n)
         hold on
         yline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
             'LabelHorizontalAlignment', 'left', 'FontSize', 8);
@@ -2416,12 +2528,12 @@ for method_slot = 1:n_methods
         guide_labels = {'Within PAG', 'Upper side through SupCol', ...
             'Deeper side through DR', 'Other'};
         xlabel(profile_xlabel(spectrum_field))
-        if band_n == 1
+        if slot_n == 1
             ylabel({'Distance to tip relative to mid-LPAG (µm)', ...
                 'positive = upper, further from tip'})
         end
-        title(sprintf('%s | %s', method_names{method_slot}, band_names{band_n}))
-        if method_slot == 1 && band_n == 3
+        title(sprintf('%s | %s', method_names{method_slot}, selection.labels{slot_n}))
+        if method_slot == 1 && slot_n == n_bands
             legend(guide, guide_labels, 'Location', 'best', 'FontSize', 7)
         end
         box off
@@ -2431,20 +2543,19 @@ sgtitle('Sessions stacked on the mid-LPAG channel', 'Interpreter', 'none')
 end
 
 function plot_aligned_intervals(tracks, spectrum_field, ...
-        delta_band, theta_band, gamma_band, spectral_method)
+        delta_band, theta_band, gamma_band, spectral_method, bands_to_display)
 palette = track_colors();
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 n_methods = numel(method_ids);
-band_names = { ...
-    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
-    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
-    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
+n_bands = numel(selection.index);
 figure('Name', 'Confidence intervals aligned on mid-LPAG', 'Color', 'w', ...
-    'Position', [100 100 1100 720]);
+    'Position', [100 100 max(420, 360 * n_bands) 720]);
 for method_slot = 1:n_methods
     method_n = method_ids(method_slot);
-    for band_n = 1:3
-        subplot(n_methods, 3, (method_slot - 1) * 3 + band_n)
+    for slot_n = 1:n_bands
+        band_n = selection.index(slot_n);
+        subplot(n_methods, n_bands, (method_slot - 1) * n_bands + slot_n)
         hold on
         yline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
             'LabelHorizontalAlignment', 'left', 'FontSize', 8);
@@ -2462,12 +2573,12 @@ for method_slot = 1:n_methods
             tracks, method_n, band_n, 'goes_dr', palette.deeper, ...
             'Through DR');
         xlabel(profile_xlabel(spectrum_field))
-        if band_n == 1
+        if slot_n == 1
             ylabel({'Distance to tip relative to mid-LPAG (µm)', ...
                 'positive = upper, further from tip'})
         end
-        title(sprintf('%s | %s', method_names{method_slot}, band_names{band_n}))
-        if method_slot == 1 && band_n == 3 && ~isempty(ci_handles)
+        title(sprintf('%s | %s', method_names{method_slot}, selection.labels{slot_n}))
+        if method_slot == 1 && slot_n == n_bands && ~isempty(ci_handles)
             legend(ci_handles, ci_labels, 'Location', 'best', 'FontSize', 7)
         end
         box off
@@ -2675,7 +2786,8 @@ end
 
 function plot_region_distances(placed, spectrum_field, ...
         delta_band, theta_band, gamma_band, spectral_method, ...
-        regions_to_display, region_distance_scale, distance_model_bin_um)
+        regions_to_display, region_distance_scale, distance_model_bin_um, ...
+        bands_to_display, plot_style)
 if ~any(strcmp(region_distance_scale, {'normalized', 'raw'}))
     error('region_distance_scale must be ''normalized'' or ''raw''.');
 end
@@ -2687,11 +2799,7 @@ direction_titles = { ...
 direction_xlabels = { ...
     'Distance from region center toward the tip (µm)', ...
     'Distance from region center toward the brain surface (µm)'};
-band_names = { ...
-    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
-    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
-    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
-band_colors = [0.12 0.35 0.75; 0.85 0.40 0.10; 0.45 0.62 0.20];
+selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 n_regions = numel(region_names);
 n_placed = numel(placed);
@@ -2724,6 +2832,9 @@ for kind_n = 1:numel(panel_kinds)
                 method_names{method_slot});
             figure_position = [90 40 980 max(480, 240 * n_regions)];
             figure_note = region_distance_note(region_distance_scale, true);
+            figure_note = sprintf(['%s Rectangles cover the upper 90%% of the ' ...
+                'axis where the intercept interval excludes 0 for at least %g µm.'], ...
+                figure_note, plot_style.significance_min_um);
         end
         figure('Name', figure_name, 'Color', 'w', 'Position', figure_position);
         legend_drawn = false;
@@ -2754,9 +2865,9 @@ for kind_n = 1:numel(panel_kinds)
                         distance, welch_power, fourier_power, ...
                         welch_std, fourier_std, region_distance_scale);
                     if strcmp(panel_kind, 'tracks')
-                        draw_distance_track(distance, ...
+                        draw_distance_scatter(distance, ...
                             power_for_method(welch_power, fourier_power, method_n), ...
-                            band_colors);
+                            selection, plot_style);
                     end
                     farthest = max(farthest, max(distance(isfinite(distance))));
                     side_track = empty_side_track();
@@ -2777,16 +2888,20 @@ for kind_n = 1:numel(panel_kinds)
                 end
                 x_max = farthest;
                 model_ok = false;
+                drawn_profiles = cell(0, 1);
+                drawn_colors = zeros(0, 3);
                 if strcmp(panel_kind, 'model')
-                    for band_n = 1:3
+                    for slot_n = 1:numel(selection.index)
+                        band_n = selection.index(slot_n);
                         [point_distance, point_power, point_animal, point_session] = ...
                             side_track_points(side_tracks, method_n, band_n);
                         finite_point = isfinite(point_distance) & isfinite(point_power);
                         if any(finite_point)
                             scatter(point_distance(finite_point), ...
-                                point_power(finite_point), 14, ...
-                                band_colors(band_n, :), 'filled', ...
-                                'MarkerFaceAlpha', 0.18, 'MarkerEdgeAlpha', 0.18, ...
+                                point_power(finite_point), plot_style.marker_size, ...
+                                selection.colors(slot_n, :), 'filled', ...
+                                'MarkerFaceAlpha', plot_style.marker_alpha, ...
+                                'MarkerEdgeAlpha', plot_style.marker_alpha, ...
                                 'HandleVisibility', 'off');
                         end
                         profile = fit_intercepts_by_distance( ...
@@ -2794,7 +2909,7 @@ for kind_n = 1:numel(panel_kinds)
                             point_session, distance_model_bin_um);
                         [rho, p_rho] = rank_correlation(point_distance, point_power);
                         report_intercept_profile(sprintf('%s | %s | %s | %s', ...
-                            method_names{method_slot}, band_names{band_n}, ...
+                            method_names{method_slot}, selection.labels{slot_n}, ...
                             region_display_name(region_names{region_n}), ...
                             direction_titles{direction_n}), ...
                             profile, rho, p_rho);
@@ -2802,7 +2917,10 @@ for kind_n = 1:numel(panel_kinds)
                             continue
                         end
                         model_ok = true;
-                        draw_distance_intercepts(profile, band_colors(band_n, :));
+                        draw_distance_intercepts(profile, selection.colors(slot_n, :), ...
+                            plot_style.ci_alpha);
+                        drawn_profiles{end + 1, 1} = profile; %#ok<AGROW>
+                        drawn_colors(end + 1, :) = selection.colors(slot_n, :); %#ok<AGROW>
                         x_max = max(x_max, max(profile.distance_um));
                     end
                 end
@@ -2815,6 +2933,15 @@ for kind_n = 1:numel(panel_kinds)
                     x_max = 20;
                 end
                 xlim([0, x_max]);
+                if strcmp(panel_kind, 'model')
+                    y_limits = ylim;
+                    for drawn_n = 1:numel(drawn_profiles)
+                        draw_distance_significance(drawn_profiles{drawn_n}, ...
+                            drawn_colors(drawn_n, :), plot_style.significance_alpha, ...
+                            plot_style.significance_min_um, y_limits);
+                    end
+                    ylim(y_limits);
+                end
                 xlabel(direction_xlabels{direction_n})
                 if direction_n == 1
                     ylabel(region_distance_ylabel(spectrum_field, region_distance_scale))
@@ -2822,19 +2949,21 @@ for kind_n = 1:numel(panel_kinds)
                 title(sprintf('%s | %s (n=%d)', ...
                     region_display_name(region_names{region_n}), ...
                     direction_titles{direction_n}, numel(side_tracks)))
-                draw_rank_correlations(side_tracks, method_n, band_colors);
+                draw_rank_correlations(side_tracks, method_n, selection);
                 if strcmp(panel_kind, 'model') && ~model_ok
                     text(0.5, 0.5, 'No distance had 2 animals', ...
                         'Units', 'normalized', 'HorizontalAlignment', 'center', ...
                         'FontSize', 8);
                 end
                 if ~legend_drawn
-                    guide = gobjects(3, 1);
-                    for band_n = 1:3
-                        guide(band_n) = plot(nan, nan, ...
-                            'Color', band_colors(band_n, :), 'LineWidth', 2);
+                    guide = gobjects(numel(selection.index), 1);
+                    for slot_n = 1:numel(selection.index)
+                        guide(slot_n) = plot(nan, nan, 'o', ...
+                            'Color', selection.colors(slot_n, :), ...
+                            'MarkerFaceColor', selection.colors(slot_n, :), ...
+                            'MarkerSize', 5);
                     end
-                    legend(guide, band_names, 'Location', 'best', 'FontSize', 7)
+                    legend(guide, selection.labels, 'Location', 'best', 'FontSize', 7)
                     legend_drawn = true;
                 end
                 box off
@@ -2893,17 +3022,18 @@ band_std(band_std == 0 | ~isfinite(band_std)) = NaN;
 power = (power - reference) ./ band_std;
 end
 
-function draw_rank_correlations(side_tracks, method_n, band_colors)
-for band_n = 1:3
+function draw_rank_correlations(side_tracks, method_n, selection)
+for slot_n = 1:numel(selection.index)
+    band_n = selection.index(slot_n);
     [rho, p_value] = panel_rank_correlation(side_tracks, method_n, band_n);
     if isfinite(rho)
         label = sprintf('\\rho = %.2f, p = %s', rho, format_p_value(p_value));
     else
         label = '\rho = n/a';
     end
-    text(0.98, 0.98 - (band_n - 1) * 0.09, label, ...
+    text(0.98, 0.98 - (slot_n - 1) * 0.09, label, ...
         'Units', 'normalized', 'HorizontalAlignment', 'right', ...
-        'VerticalAlignment', 'top', 'Color', band_colors(band_n, :), ...
+        'VerticalAlignment', 'top', 'Color', selection.colors(slot_n, :), ...
         'FontSize', 8, 'Interpreter', 'tex');
 end
 end
@@ -2997,19 +3127,19 @@ item = struct('rel_um', [], 'welch_bands', [], 'fourier_bands', [], ...
     'animal', '', 'session', NaN);
 end
 
-function draw_distance_track(distance, power, band_colors)
-[distance, order] = sort(distance(:));
-power = power(order, :);
-for band_n = 1:size(power, 2)
-    this_color = band_colors(band_n, :);
+function draw_distance_scatter(distance, power, selection, plot_style)
+distance = distance(:);
+for slot_n = 1:numel(selection.index)
+    band_n = selection.index(slot_n);
     this_power = power(:, band_n);
     finite = isfinite(distance) & isfinite(this_power);
-    if nnz(finite) == 1
-        plot(distance(finite), this_power(finite), 'o', 'Color', this_color, ...
-            'MarkerSize', 4, 'HandleVisibility', 'off');
+    if ~any(finite)
         continue
     end
-    plot(distance, this_power, 'Color', this_color, 'LineWidth', 1.0, ...
+    scatter(distance(finite), this_power(finite), plot_style.marker_size, ...
+        selection.colors(slot_n, :), 'filled', ...
+        'MarkerFaceAlpha', plot_style.marker_alpha, ...
+        'MarkerEdgeAlpha', plot_style.marker_alpha, ...
         'HandleVisibility', 'off');
 end
 end
