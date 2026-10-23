@@ -258,6 +258,29 @@ else
 end
 end
 
+function local_plot_session_profile_lines(stack_table)
+% Thin gray polyline per session/probe, sorted by distance.
+if isempty(stack_table) || height(stack_table) == 0
+    return
+end
+keys = local_group_key(stack_table);
+groups = unique(keys, 'stable');
+for g = 1:numel(groups)
+    mask = strcmp(keys, groups{g}) & ...
+        isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
+    if sum(mask) < 2
+        continue
+    end
+    distance_um = stack_table.distance_um(mask);
+    phase_rad = stack_table.phase_rad(mask);
+    [distance_um, order] = sort(distance_um);
+    phase_rad = phase_rad(order);
+    plot(distance_um, phase_rad, '-', ...
+        'Color', [0.7 0.7 0.7], 'LineWidth', 0.6, ...
+        'HandleVisibility', 'off')
+end
+end
+
 function tf = local_group_has_dr(tbl)
 key = local_group_key(tbl);
 is_dr = strcmp(tbl.area, 'DR');
@@ -295,6 +318,7 @@ end
 scatter_fig = figure('Name', fig_title, ...
     'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
 hold on
+local_plot_session_profile_lines(stack_table)
 area_labels = stack_table.area;
 for k = 1:numel(area_labels)
     if isempty(area_labels{k})
@@ -352,6 +376,7 @@ present = areas_in_color(ismember(areas_in_color, stack_clean.area));
 ci_fig = figure('Name', fig_title, ...
     'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
 hold on
+local_plot_session_profile_lines(stack_clean)
 raw_mask = ismember(stack_raw.area, areas_in_color) & ...
     isfinite(stack_raw.distance_um) & isfinite(stack_raw.phase_rad);
 if any(raw_mask)
