@@ -10,8 +10,11 @@
 % distance, the area, the saved delta/theta/gamma power, that power minus the
 % mid-LPAG channel, and that difference divided by the within-shank standard
 % deviation. Each band and spectral method then has its own scatter of that
-% z-scored power against distance to mid-LPAG, with transparent markers
-% colored by area. PAG sections,
+% z-scored power against distance to mid-LPAG, with transparent markers.
+% PAG columns, SupCol, and DR keep their own colors. Every other area is
+% black. A separate set of figures shows the 95% confidence interval of
+% those colored regions after each shank is interpolated onto a fine
+% distance axis. PAG sections,
 % an upper side that passes through SupCol, and a deeper side that passes
 % through DR are colored. Other territory stays gray. Those colored tracks
 % are one figure. The 95% confidence intervals for the three track classes
@@ -163,6 +166,7 @@ if isempty(placed)
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, spectrum_field);
 plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band);
+plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band);
 if isempty(tracks)
     fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
         'stack is skipped.\n']);
@@ -760,7 +764,7 @@ for method_n = 1:numel(method_names)
                 'MarkerFaceColor', this_color, 'MarkerEdgeColor', this_color, ...
                 'MarkerSize', 7); %#ok<AGROW>
             legend_labels{end + 1} = sprintf('%s (n=%d)', ...
-                this_region, nnz(keep)); %#ok<AGROW>
+                region_display_name(this_region), nnz(keep)); %#ok<AGROW>
         end
         xlabel({'Distance to mid-LPAG (µm)', ...
             'positive = dorsal, farther from the tip'})
@@ -781,7 +785,7 @@ keys = cell(numel(area_labels), 1);
 for row_n = 1:numel(area_labels)
     tokens = split_area_label(area_labels{row_n});
     if isempty(tokens)
-        keys{row_n} = {'Unlabeled'};
+        keys{row_n} = {'Other'};
         continue
     end
     names = cell(1, numel(tokens));
@@ -789,15 +793,30 @@ for row_n = 1:numel(area_labels)
         names{token_n} = canonical_region_name(tokens{token_n});
     end
     names = unique(names, 'stable');
-    keys{row_n} = names(:).';
+    colored = names(~strcmp(names, 'Other'));
+    if isempty(colored)
+        keys{row_n} = {'Other'};
+    else
+        keys{row_n} = colored(:).';
+    end
+end
+end
+
+function label = region_display_name(name)
+if strcmp(name, 'SC')
+    label = 'SupCol';
+else
+    label = name;
 end
 end
 
 function name = canonical_region_name(token)
 if name_is_supcol(token)
     name = 'SC';
-else
+elseif name_is_dr(token) || name_is_pag(token)
     name = token;
+else
+    name = 'Other';
 end
 end
 
@@ -832,11 +851,142 @@ switch name
         color = [0.05 0.55 0.58];
     case 'PAG'
         color = [0.20 0.38 0.30];
-    case 'Unlabeled'
-        color = [0.72 0.72 0.72];
+    case {'Other', 'Unlabeled'}
+        color = [0 0 0];
     otherwise
-        hue = mod(sum(double(char(name))), 11) / 11;
-        color = hsv2rgb([hue, 0.35, 0.62]);
+        color = [0 0 0];
+end
+end
+
+function plot_normalized_power_intervals(power_table, ...
+        delta_band, theta_band, gamma_band)
+if isempty(power_table)
+    return
+end
+distance_step_um = 5;
+method_names = {'Welch', 'Fourier'};
+band_fields = { ...
+    'DeltaPower_zWithinShank', ...
+    'ThetaPower_zWithinShank', ...
+    'GammaPower_zWithinShank'};
+band_names = { ...
+    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
+    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
+    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+region_keys = region_keys_for_rows(power_table.Area);
+region_names = unique([region_keys{:}], 'stable');
+region_names = region_draw_order(region_names(:).');
+region_names = region_names(~strcmp(region_names, 'Other'));
+figure_n = 0;
+for method_n = 1:numel(method_names)
+    in_method = strcmp(power_table.Method, method_names{method_n});
+    distance_um = power_table.DistanceToMidLPAG_um;
+    colored_row = false(height(power_table), 1);
+    for region_n = 1:numel(region_names)
+        colored_row = colored_row | region_row_has(region_keys, region_names{region_n});
+    end
+    colored_row = colored_row & in_method;
+    grid = fine_distance_grid(distance_um(colored_row), distance_step_um);
+    for band_n = 1:numel(band_fields)
+        figure_n = figure_n + 1;
+        power = power_table.(band_fields{band_n});
+        figure('Name', sprintf('%s | %s 95%% CI vs distance to mid-LPAG', ...
+            method_names{method_n}, band_names{band_n}), ...
+            'Color', 'w', 'Position', [80 + 24 * figure_n, 100, 760, 560]);
+        hold on
+        yline(0, ':k', 'HandleVisibility', 'off');
+        xline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
+            'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+        legend_handles = gobjects(0, 1);
+        legend_labels = {};
+        for region_n = 1:numel(region_names)
+            this_region = region_names{region_n};
+            in_region = in_method & region_row_has(region_keys, this_region);
+            [mean_line, lower_line, upper_line, n_profiles] = ...
+                interpolated_session_interval( ...
+                power_table, in_region, distance_um, power, grid);
+            if n_profiles < 2 || ~any(isfinite(mean_line))
+                continue
+            end
+            this_color = region_color(this_region);
+            draw_band_interval(grid, mean_line, lower_line, upper_line, this_color);
+            legend_handles(end + 1, 1) = plot(nan, nan, '-', ...
+                'Color', this_color, 'LineWidth', 2); %#ok<AGROW>
+            legend_labels{end + 1} = sprintf('%s (n=%d shanks)', ...
+                region_display_name(this_region), n_profiles); %#ok<AGROW>
+        end
+        if ~isempty(grid) && numel(grid) > 1
+            xlim([grid(1), grid(end)]);
+        end
+        xlabel({'Distance to mid-LPAG (µm)', ...
+            'positive = dorsal, farther from the tip'})
+        ylabel({'Power z-scored within shank', '0 = mid-LPAG channel'})
+        title(sprintf('%s | %s | 95%% CI on a %g µm grid', ...
+            method_names{method_n}, band_names{band_n}, distance_step_um))
+        if ~isempty(legend_handles)
+            legend(legend_handles, legend_labels, ...
+                'Location', 'eastoutside', 'FontSize', 8)
+        end
+        box off
+    end
+end
+fprintf(['Region confidence intervals use a %g µm distance axis. ' ...
+    'Each shank is interpolated on its own, and the interval is across shanks.\n'], ...
+    distance_step_um);
+end
+
+function grid = fine_distance_grid(distance_um, step_um)
+distance_um = distance_um(isfinite(distance_um));
+if isempty(distance_um)
+    grid = 0;
+    return
+end
+grid = (floor(min(distance_um) / step_um) * step_um):step_um: ...
+    (ceil(max(distance_um) / step_um) * step_um);
+end
+
+function [mean_line, lower_line, upper_line, n_profiles] = ...
+        interpolated_session_interval(power_table, row_mask, ...
+        distance_um, power, grid)
+group_index = session_shank_groups(power_table, row_mask);
+n_groups = numel(group_index);
+resampled = nan(n_groups, numel(grid));
+n_profiles = 0;
+for group_n = 1:n_groups
+    rows = group_index{group_n};
+    resampled(group_n, :) = resample_one( ...
+        distance_um(rows), power(rows), grid);
+    finite = isfinite(distance_um(rows)) & isfinite(power(rows));
+    if nnz(finite) >= 2
+        n_profiles = n_profiles + 1;
+    end
+end
+n_at_grid = sum(isfinite(resampled), 1);
+mean_line = mean(resampled, 1, 'omitnan');
+deviation = std(resampled, 0, 1, 'omitnan');
+standard_error = deviation ./ sqrt(n_at_grid);
+critical = nan(size(n_at_grid));
+enough = n_at_grid >= 2;
+critical(enough) = tinv(0.975, n_at_grid(enough) - 1);
+half_width = critical .* standard_error;
+lower_line = mean_line - half_width;
+upper_line = mean_line + half_width;
+mean_line(~enough) = NaN;
+lower_line(~enough) = NaN;
+upper_line(~enough) = NaN;
+end
+
+function group_index = session_shank_groups(power_table, row_mask)
+rows = find(row_mask);
+animal = cellstr(string(power_table.Animal(rows)));
+session_key = cellstr(string(power_table.Session(rows)));
+shank_key = cellstr(string(power_table.Shank(rows)));
+group_key = strcat(animal, '|', session_key, '|', shank_key);
+[~, ~, group_id] = unique(group_key, 'stable');
+n_groups = max([group_id; 0]);
+group_index = cell(n_groups, 1);
+for group_n = 1:n_groups
+    group_index{group_n} = rows(group_id == group_n);
 end
 end
 
