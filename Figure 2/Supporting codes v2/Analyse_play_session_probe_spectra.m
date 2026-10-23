@@ -11,10 +11,9 @@
 % mid-LPAG channel, and that difference divided by the within-shank standard
 % deviation. Each band and spectral method then has its own scatter of that
 % z-scored power against distance to mid-LPAG, with transparent markers.
-% PAG columns, SupCol, and DR keep their own colors. Every other area is
-% black. A separate set of figures shows the 95% confidence interval of
-% those colored regions after each shank is interpolated onto a fine
-% distance axis. PAG sections,
+% Figures use Fourier unless spectral_method is changed. The scatter,
+% confidence-interval, and region-distance figures draw regions_to_display,
+% which starts as LPAG, VLPAG, and SupCol. PAG sections,
 % an upper side that passes through SupCol, and a deeper side that passes
 % through DR are colored. Other territory stays gray. Those colored tracks
 % are one figure. The 95% confidence intervals for the three track classes
@@ -57,6 +56,16 @@ spectrum_field = 'raw_aperiodic_subtracted';
 delta_band = [1 5];
 theta_band = [6 12];
 gamma_band = [30 45];
+
+% Figures use the Fourier spectra. Welch is available when requested:
+%   spectral_method = {'Welch'};
+%   spectral_method = {'Welch', 'Fourier'};
+spectral_method = {'Fourier'};
+
+% Regions drawn on the scatter, confidence-interval, and region-distance
+% figures. SupCol is the superior colliculus. Add 'DR' to include it:
+%   regions_to_display = {'LPAG', 'VLPAG', 'SupCol', 'DR'};
+regions_to_display = {'LPAG', 'VLPAG', 'SupCol'};
 
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
@@ -156,11 +165,11 @@ for file_n = recording_index(:).'
         if plot_each_session
             plot_depth_spectrum(frequency, channel_table, ...
                 welch_spectrum, fourier_spectrum, spectrum_field, ...
-                session_label, area_borders);
+                session_label, area_borders, spectral_method);
             plot_band_profiles(frequency, channel_table, ...
                 welch_spectrum, fourier_spectrum, ...
                 delta_band, theta_band, gamma_band, ...
-                spectrum_field, session_label, area_borders);
+                spectrum_field, session_label, area_borders, spectral_method);
             drawnow
         end
     end
@@ -170,8 +179,10 @@ if isempty(placed)
     error('No probe channels were found in the selected recordings.');
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, spectrum_field);
-plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band);
-plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band);
+plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band, ...
+    spectral_method, regions_to_display);
+plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band, ...
+    spectral_method, regions_to_display);
 if isempty(tracks)
     fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
         'stack is skipped.\n']);
@@ -179,28 +190,31 @@ else
     fprintf(['Aligned tracks: %d. Stay in PAG: %d. Upper side through SupCol: ' ...
         '%d. Deeper side through DR: %d.\n'], numel(tracks), ...
         sum([tracks.stays_pag]), sum([tracks.goes_sc]), sum([tracks.goes_dr]));
-    plot_aligned_spectra(tracks, stacked_frequency, spectrum_field);
+    plot_aligned_spectra(tracks, stacked_frequency, spectrum_field, ...
+        spectral_method);
     plot_aligned_profiles(tracks, spectrum_field, ...
-        delta_band, theta_band, gamma_band);
+        delta_band, theta_band, gamma_band, spectral_method);
     plot_aligned_intervals(tracks, spectrum_field, ...
-        delta_band, theta_band, gamma_band);
+        delta_band, theta_band, gamma_band, spectral_method);
 end
 plot_region_distances(placed, spectrum_field, ...
-    delta_band, theta_band, gamma_band);
+    delta_band, theta_band, gamma_band, spectral_method, regions_to_display);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
-        session_label, area_borders)
+        session_label, area_borders, spectral_method)
 probe_groups = probe_groups_by_depth(channel_table);
 n_groups = numel(probe_groups);
 spectra = {welch_spectrum, fourier_spectrum};
-method_names = {'Welch', 'Fourier'};
+[method_names, method_ids] = selected_spectral_methods(spectral_method);
+n_methods = numel(method_ids);
 
 figure('Name', ['Spectrum by depth | ', session_label], 'Color', 'w', ...
     'Position', [80 80 max(360, 280 * n_groups) 720]);
 colors = diverging_or_sequential(spectrum_field);
 
-for method_n = 1:2
+for method_slot = 1:n_methods
+    method_n = method_ids(method_slot);
     panel_values = cell(n_groups, 1);
     finite_values = [];
     for group_n = 1:n_groups
@@ -212,7 +226,7 @@ for method_n = 1:2
     color_limits = spectrum_color_limits(finite_values, spectrum_field);
 
     for group_n = 1:n_groups
-        subplot(2, n_groups, (method_n - 1) * n_groups + group_n)
+        subplot(n_methods, n_groups, (method_slot - 1) * n_groups + group_n)
         this_group = probe_groups(group_n);
         depth = this_group.depth_um(:);
         use_depth_axis = numel(depth) > 1 && all(isfinite(depth)) && ...
@@ -241,7 +255,7 @@ for method_n = 1:2
         if group_n == 1
             ylabel('Distance to tip (µm)')
         end
-        title(sprintf('%s | %s', method_names{method_n}, this_group.label))
+        title(sprintf('%s | %s', method_names{method_slot}, this_group.label))
         box off
     end
     colorbar
@@ -252,11 +266,12 @@ end
 function plot_band_profiles(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, ...
         delta_band, theta_band, gamma_band, spectrum_field, ...
-        session_label, area_borders)
+        session_label, area_borders, spectral_method)
 probe_groups = probe_groups_by_depth(channel_table);
 n_groups = numel(probe_groups);
 spectra = {welch_spectrum, fourier_spectrum};
-method_names = {'Welch', 'Fourier'};
+[method_names, method_ids] = selected_spectral_methods(spectral_method);
+n_methods = numel(method_ids);
 band_names = { ...
     sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
     sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
@@ -266,9 +281,10 @@ band_colors = [0.12 0.35 0.75; 0.85 0.40 0.10; 0.45 0.62 0.20];
 figure('Name', ['Band profiles | ', session_label], 'Color', 'w', ...
     'Position', [120 120 max(360, 280 * n_groups) 720]);
 
-for method_n = 1:2
+for method_slot = 1:n_methods
+    method_n = method_ids(method_slot);
     for group_n = 1:n_groups
-        subplot(2, n_groups, (method_n - 1) * n_groups + group_n)
+        subplot(n_methods, n_groups, (method_slot - 1) * n_groups + group_n)
         this_group = probe_groups(group_n);
         this_spectrum = spectra{method_n}(this_group.channel_index, :);
         band_power = [ ...
@@ -303,8 +319,8 @@ for method_n = 1:2
         if group_n == 1
             ylabel('Distance to tip (µm)')
         end
-        title(sprintf('%s | %s', method_names{method_n}, this_group.label))
-        if method_n == 1 && group_n == 1
+        title(sprintf('%s | %s', method_names{method_slot}, this_group.label))
+        if method_slot == 1 && group_n == 1
             legend(line_handles, band_names, 'Location', 'best')
         end
         box off
@@ -722,11 +738,11 @@ fprintf(['Wrote %d channel rows to %s\n' ...
 end
 
 function plot_normalized_power_scatters(power_table, ...
-        delta_band, theta_band, gamma_band)
+        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
 if isempty(power_table)
     return
 end
-method_names = {'Welch', 'Fourier'};
+[method_names, ~] = selected_spectral_methods(spectral_method);
 band_fields = { ...
     'DeltaPower_zWithinShank', ...
     'ThetaPower_zWithinShank', ...
@@ -736,8 +752,7 @@ band_names = { ...
     sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
     sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
 region_keys = region_keys_for_rows(power_table.Area);
-region_names = unique([region_keys{:}], 'stable');
-region_names = region_draw_order(region_names(:).');
+region_names = selected_regions(regions_to_display);
 figure_n = 0;
 for method_n = 1:numel(method_names)
     in_method = strcmp(power_table.Method, method_names{method_n});
@@ -807,6 +822,48 @@ for row_n = 1:numel(area_labels)
 end
 end
 
+function [method_names, method_ids] = selected_spectral_methods(spectral_method)
+if ischar(spectral_method) || isstring(spectral_method)
+    requested = cellstr(spectral_method);
+else
+    requested = cellstr(string(spectral_method));
+end
+requested = requested(:).';
+catalog = {'Welch', 'Fourier'};
+method_names = cell(1, numel(requested));
+method_ids = zeros(1, numel(requested));
+for item_n = 1:numel(requested)
+    match = strcmpi(catalog, strtrim(requested{item_n}));
+    if ~any(match)
+        error('spectral_method must be Welch, Fourier, or both.');
+    end
+    method_ids(item_n) = find(match, 1);
+    method_names{item_n} = catalog{method_ids(item_n)};
+end
+end
+
+function region_names = selected_regions(regions_to_display)
+if ischar(regions_to_display) || isstring(regions_to_display)
+    requested = cellstr(regions_to_display);
+else
+    requested = cellstr(string(regions_to_display));
+end
+requested = requested(:).';
+region_names = cell(1, numel(requested));
+for item_n = 1:numel(requested)
+    token = strtrim(requested{item_n});
+    if strcmpi(token, 'Other')
+        region_names{item_n} = 'Other';
+        continue
+    end
+    region_names{item_n} = canonical_region_name(token);
+    if strcmp(region_names{item_n}, 'Other')
+        error(['Unknown region "%s". Use LPAG, VLPAG, SupCol, DR, ' ...
+            'DLPAG, DMPAG, or PAG.'], token);
+    end
+end
+end
+
 function label = region_display_name(name)
 if strcmp(name, 'SC')
     label = 'SupCol';
@@ -864,12 +921,12 @@ end
 end
 
 function plot_normalized_power_intervals(power_table, ...
-        delta_band, theta_band, gamma_band)
+        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
 if isempty(power_table)
     return
 end
 distance_step_um = 5;
-method_names = {'Welch', 'Fourier'};
+[method_names, ~] = selected_spectral_methods(spectral_method);
 band_fields = { ...
     'DeltaPower_zWithinShank', ...
     'ThetaPower_zWithinShank', ...
@@ -879,8 +936,7 @@ band_names = { ...
     sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
     sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
 region_keys = region_keys_for_rows(power_table.Area);
-region_names = unique([region_keys{:}], 'stable');
-region_names = region_draw_order(region_names(:).');
+region_names = selected_regions(regions_to_display);
 region_names = region_names(~strcmp(region_names, 'Other'));
 figure_n = 0;
 for method_n = 1:numel(method_names)
@@ -1117,18 +1173,20 @@ palette.other = [0.72 0.72 0.72];
 end
 
 function plot_aligned_profiles(tracks, spectrum_field, ...
-        delta_band, theta_band, gamma_band)
+        delta_band, theta_band, gamma_band, spectral_method)
 palette = track_colors();
-method_names = {'Welch', 'Fourier'};
+[method_names, method_ids] = selected_spectral_methods(spectral_method);
+n_methods = numel(method_ids);
 band_names = { ...
     sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
     sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
     sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
 figure('Name', 'Profiles aligned on mid-LPAG', 'Color', 'w', ...
     'Position', [60 60 1100 720]);
-for method_n = 1:2
+for method_slot = 1:n_methods
+    method_n = method_ids(method_slot);
     for band_n = 1:3
-        subplot(2, 3, (method_n - 1) * 3 + band_n)
+        subplot(n_methods, 3, (method_slot - 1) * 3 + band_n)
         hold on
         yline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
             'LabelHorizontalAlignment', 'left', 'FontSize', 8);
@@ -1152,8 +1210,8 @@ for method_n = 1:2
             ylabel({'Distance to tip relative to mid-LPAG (µm)', ...
                 'positive = upper, further from tip'})
         end
-        title(sprintf('%s | %s', method_names{method_n}, band_names{band_n}))
-        if method_n == 1 && band_n == 3
+        title(sprintf('%s | %s', method_names{method_slot}, band_names{band_n}))
+        if method_slot == 1 && band_n == 3
             legend(guide, guide_labels, 'Location', 'best', 'FontSize', 7)
         end
         box off
@@ -1163,18 +1221,20 @@ sgtitle('Sessions stacked on the mid-LPAG channel', 'Interpreter', 'none')
 end
 
 function plot_aligned_intervals(tracks, spectrum_field, ...
-        delta_band, theta_band, gamma_band)
+        delta_band, theta_band, gamma_band, spectral_method)
 palette = track_colors();
-method_names = {'Welch', 'Fourier'};
+[method_names, method_ids] = selected_spectral_methods(spectral_method);
+n_methods = numel(method_ids);
 band_names = { ...
     sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
     sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
     sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
 figure('Name', 'Confidence intervals aligned on mid-LPAG', 'Color', 'w', ...
     'Position', [100 100 1100 720]);
-for method_n = 1:2
+for method_slot = 1:n_methods
+    method_n = method_ids(method_slot);
     for band_n = 1:3
-        subplot(2, 3, (method_n - 1) * 3 + band_n)
+        subplot(n_methods, 3, (method_slot - 1) * 3 + band_n)
         hold on
         yline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
             'LabelHorizontalAlignment', 'left', 'FontSize', 8);
@@ -1196,8 +1256,8 @@ for method_n = 1:2
             ylabel({'Distance to tip relative to mid-LPAG (µm)', ...
                 'positive = upper, further from tip'})
         end
-        title(sprintf('%s | %s', method_names{method_n}, band_names{band_n}))
-        if method_n == 1 && band_n == 3 && ~isempty(ci_handles)
+        title(sprintf('%s | %s', method_names{method_slot}, band_names{band_n}))
+        if method_slot == 1 && band_n == 3 && ~isempty(ci_handles)
             legend(ci_handles, ci_labels, 'Location', 'best', 'FontSize', 7)
         end
         box off
@@ -1319,14 +1379,16 @@ step = 20;
 grid = (floor(min(samples) / step) * step):step:(ceil(max(samples) / step) * step);
 end
 
-function plot_aligned_spectra(tracks, frequency, spectrum_field)
-method_names = {'Welch', 'Fourier'};
+function plot_aligned_spectra(tracks, frequency, spectrum_field, spectral_method)
+[method_names, method_ids] = selected_spectral_methods(spectral_method);
+n_methods = numel(method_ids);
 class_fields = {'stays_pag', 'goes_sc', 'goes_dr'};
 class_titles = {'Stays in PAG', 'Through SupCol', 'Through DR'};
 figure('Name', 'Spectra aligned on mid-LPAG', 'Color', 'w', ...
     'Position', [80 80 1100 720]);
 colors = diverging_or_sequential(spectrum_field);
-for method_n = 1:2
+for method_slot = 1:n_methods
+    method_n = method_ids(method_slot);
     class_means = cell(1, 3);
     finite_values = [];
     for class_n = 1:3
@@ -1341,12 +1403,12 @@ for method_n = 1:2
     end
     color_limits = spectrum_color_limits(finite_values, spectrum_field);
     for class_n = 1:3
-        subplot(2, 3, (method_n - 1) * 3 + class_n)
+        subplot(n_methods, 3, (method_slot - 1) * 3 + class_n)
         this_class = class_means{class_n};
         if this_class.n == 0 || isempty(this_class.spectrum)
             axis off
             text(0.5, 0.5, sprintf('%s\n%s\nn = 0', ...
-                method_names{method_n}, class_titles{class_n}), ...
+                method_names{method_slot}, class_titles{class_n}), ...
                 'HorizontalAlignment', 'center', 'Interpreter', 'none');
             continue
         end
@@ -1364,7 +1426,7 @@ for method_n = 1:2
             ylabel({'Distance to tip relative to mid-LPAG (µm)', ...
                 'positive = upper, further from tip'})
         end
-        title(sprintf('%s | %s (n=%d)', method_names{method_n}, ...
+        title(sprintf('%s | %s (n=%d)', method_names{method_slot}, ...
             class_titles{class_n}, this_class.n))
         box off
     end
@@ -1402,8 +1464,8 @@ end
 end
 
 function plot_region_distances(placed, spectrum_field, ...
-        delta_band, theta_band, gamma_band)
-region_names = {'SC', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
+        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
+region_names = selected_regions(regions_to_display);
 directions = {'ventral', 'dorsal'};
 direction_titles = { ...
     'Ventral, toward the tip', ...
@@ -1416,7 +1478,7 @@ band_names = { ...
     sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
     sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
 band_colors = [0.12 0.35 0.75; 0.85 0.40 0.10; 0.45 0.62 0.20];
-method_names = {'Welch', 'Fourier'};
+[method_names, method_ids] = selected_spectral_methods(spectral_method);
 n_regions = numel(region_names);
 n_placed = numel(placed);
 centers = nan(n_placed, n_regions);
@@ -1429,22 +1491,24 @@ for placed_n = 1:n_placed
 end
 for region_n = 1:n_regions
     fprintf('%s center available on %d of %d shanks.\n', ...
-        region_names{region_n}, nnz(isfinite(centers(:, region_n))), n_placed);
+        region_display_name(region_names{region_n}), ...
+        nnz(isfinite(centers(:, region_n))), n_placed);
 end
 
 panel_kinds = {'tracks', 'interval'};
 for kind_n = 1:numel(panel_kinds)
     panel_kind = panel_kinds{kind_n};
-    for method_n = 1:2
+    for method_slot = 1:numel(method_ids)
+        method_n = method_ids(method_slot);
         if strcmp(panel_kind, 'tracks')
             figure_name = sprintf('%s power vs distance to region center', ...
-                method_names{method_n});
-            figure_position = [40 40 980 1180];
+                method_names{method_slot});
+            figure_position = [40 40 980 max(480, 240 * n_regions)];
             figure_note = 'Distance 0 is the region center. Each line is one shank.';
         else
             figure_name = sprintf('%s 95%% CI vs distance to region center', ...
-                method_names{method_n});
-            figure_position = [90 40 980 1180];
+                method_names{method_slot});
+            figure_position = [90 40 980 max(480, 240 * n_regions)];
             figure_note = ['Distance 0 is the region center. ' ...
                 'Thick line and shade are the mean and 95% CI where n >= 2.'];
         end
@@ -1457,7 +1521,7 @@ for kind_n = 1:numel(panel_kinds)
                 if isempty(available)
                     axis off
                     text(0.5, 0.5, sprintf('%s\nnot available', ...
-                        region_names{region_n}), ...
+                        region_display_name(region_names{region_n})), ...
                         'HorizontalAlignment', 'center', 'Interpreter', 'none');
                     continue
                 end
@@ -1486,7 +1550,8 @@ for kind_n = 1:numel(panel_kinds)
                 if isempty(side_tracks)
                     axis off
                     text(0.5, 0.5, sprintf('%s\n%s\nno channels on this side', ...
-                        region_names{region_n}, direction_titles{direction_n}), ...
+                        region_display_name(region_names{region_n}), ...
+                        direction_titles{direction_n}), ...
                         'HorizontalAlignment', 'center', 'Interpreter', 'none');
                     continue
                 end
@@ -1515,7 +1580,8 @@ for kind_n = 1:numel(panel_kinds)
                 if direction_n == 1
                     ylabel(profile_xlabel(spectrum_field))
                 end
-                title(sprintf('%s | %s (n=%d)', region_names{region_n}, ...
+                title(sprintf('%s | %s (n=%d)', ...
+                    region_display_name(region_names{region_n}), ...
                     direction_titles{direction_n}, numel(side_tracks)))
                 if strcmp(panel_kind, 'interval') && numel(side_tracks) < 2
                     text(0.5, 0.5, 'CI needs at least 2 shanks', ...
@@ -1534,7 +1600,7 @@ for kind_n = 1:numel(panel_kinds)
                 box off
             end
         end
-        sgtitle({sprintf('%s | %s', method_names{method_n}, ...
+        sgtitle({sprintf('%s | %s', method_names{method_slot}, ...
             spectrum_title(spectrum_field)), figure_note}, ...
             'Interpreter', 'none')
     end
