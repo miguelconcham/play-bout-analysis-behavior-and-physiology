@@ -356,6 +356,16 @@ class SessionTrendOutlierTests(unittest.TestCase):
         self.assertAlmostEqual(filled[20], 0.002 * distance[20], places=6)
         self.assertAlmostEqual(filled[19], phase[19])
 
+    def test_interpolates_when_two_channels_share_a_depth(self):
+        distance = np.array(
+            [-40.0, -20.0, -20.0, 0.0, 20.0, 20.0, 40.0, 60.0, 80.0, 100.0]
+        )
+        phase = 0.002 * distance
+        phase[4] = 3.0
+        filled, outlier = interpolate_session_trend_outliers(distance, phase)
+        self.assertTrue(outlier[4])
+        self.assertAlmostEqual(filled[4], 0.04, places=5)
+
 
 if __name__ == "__main__":
     unittest.main()

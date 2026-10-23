@@ -227,7 +227,12 @@ inlier = ~outlier_local;
 if sum(inlier) < 2 || ~any(outlier_local)
     return
 end
-filled = interp1(d(inlier), p(inlier), d(outlier_local), 'linear');
+[in_d, ~, ic] = unique(d(inlier));
+in_p = accumarray(ic(:), p(inlier), [], @mean);
+if numel(in_d) < 2
+    return
+end
+filled = interp1(in_d, in_p, d(outlier_local), 'linear');
 out_idx = idx(outlier_local);
 good = isfinite(filled);
 phase_clean(out_idx(good)) = filled(good);
@@ -372,8 +377,8 @@ for session_n = 1:numel(sessions)
     phase_rad = stack_table.phase_rad(mask);
     [distance_um, order] = sort(distance_um);
     phase_rad = phase_rad(order);
-    [distance_um, first] = unique(distance_um, 'first');
-    phase_rad = phase_rad(first);
+    [distance_um, ~, ic] = unique(distance_um);
+    phase_rad = accumarray(ic(:), phase_rad, [], @mean);
     if numel(distance_um) < 2
         continue
     end

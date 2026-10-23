@@ -487,11 +487,21 @@ def interpolate_session_trend_outliers(
     query = outlier & np.isfinite(distance_um)
     if np.count_nonzero(inlier) < 2 or not np.any(query):
         return phase_clean, outlier
-    order = np.argsort(distance_um[inlier], kind="mergesort")
+    in_d = distance_um[inlier]
+    in_p = phase_clean[inlier]
+    order = np.argsort(in_d, kind="mergesort")
+    in_d = in_d[order]
+    in_p = in_p[order]
+    unique_d = np.unique(in_d)
+    unique_p = np.array(
+        [np.mean(in_p[in_d == depth]) for depth in unique_d], dtype=float
+    )
+    if unique_d.size < 2:
+        return phase_clean, outlier
     filled = np.interp(
         distance_um[query],
-        distance_um[inlier][order],
-        phase_clean[inlier][order],
+        unique_d,
+        unique_p,
         left=np.nan,
         right=np.nan,
     )
