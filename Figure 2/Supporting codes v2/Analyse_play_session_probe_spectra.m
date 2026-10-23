@@ -5,17 +5,19 @@
 % is distance to the probe tip, not depth: larger values are further from the
 % tip (upper), smaller values are closer to the tip (deeper).
 %
-% Selected sessions are stacked on one pair of figures, with mid-LPAG at zero.
-% PAG sections, an upper side that passes through SupCol, and a deeper side
-% that passes through DR are colored. Other territory stays gray. A 95%
-% confidence interval is drawn for those three track classes when at least
-% two tracks are available.
+% Selected sessions are stacked with mid-LPAG at zero. Alignment is spatial
+% only: power is not divided or subtracted by the value at LPAG. PAG sections,
+% an upper side that passes through SupCol, and a deeper side that passes
+% through DR are colored. Other territory stays gray. Those colored tracks
+% are one figure. The 95% confidence intervals for the three track classes
+% are a separate figure, drawn when at least two tracks are available.
 %
 % Separate figures center each shank, when the region is present, on SC,
 % DLPAG, LPAG, VLPAG, and DR. The center is the midpoint of that region's
 % labeled span on the shank. Delta, theta, and gamma are drawn against
 % distance from that center, once toward the tip (ventral) and once toward
-% the brain surface (dorsal).
+% the brain surface (dorsal). Individual shanks and the confidence intervals
+% are separate figures.
 
 %% Which recording and session to inspect
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
@@ -152,6 +154,8 @@ else
         sum([tracks.stays_pag]), sum([tracks.goes_sc]), sum([tracks.goes_dr]));
     plot_aligned_spectra(tracks, stacked_frequency, spectrum_field);
     plot_aligned_profiles(tracks, spectrum_field, ...
+        delta_band, theta_band, gamma_band);
+    plot_aligned_intervals(tracks, spectrum_field, ...
         delta_band, theta_band, gamma_band);
 end
 plot_region_distances(placed, spectrum_field, ...
@@ -756,16 +760,6 @@ for method_n = 1:2
             draw_colored_profile(tracks(track_n).rel_um, power, ...
                 tracks(track_n).segment_color);
         end
-        ci_handles = gobjects(0, 1);
-        ci_labels = {};
-        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
-            tracks, method_n, band_n, 'stays_pag', palette.pag, 'Stays in PAG');
-        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
-            tracks, method_n, band_n, 'goes_sc', palette.upper, ...
-            'Through SupCol');
-        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
-            tracks, method_n, band_n, 'goes_dr', palette.deeper, ...
-            'Through DR');
         guide = [ ...
             plot(nan, nan, 'Color', palette.pag, 'LineWidth', 1.5); ...
             plot(nan, nan, 'Color', palette.upper, 'LineWidth', 1.5); ...
@@ -780,13 +774,56 @@ for method_n = 1:2
         end
         title(sprintf('%s | %s', method_names{method_n}, band_names{band_n}))
         if method_n == 1 && band_n == 3
-            legend([guide; ci_handles], [guide_labels, ci_labels], ...
-                'Location', 'best', 'FontSize', 7)
+            legend(guide, guide_labels, 'Location', 'best', 'FontSize', 7)
         end
         box off
     end
 end
 sgtitle('Sessions stacked on the mid-LPAG channel', 'Interpreter', 'none')
+end
+
+function plot_aligned_intervals(tracks, spectrum_field, ...
+        delta_band, theta_band, gamma_band)
+palette = track_colors();
+method_names = {'Welch', 'Fourier'};
+band_names = { ...
+    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
+    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
+    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+figure('Name', 'Confidence intervals aligned on mid-LPAG', 'Color', 'w', ...
+    'Position', [100 100 1100 720]);
+for method_n = 1:2
+    for band_n = 1:3
+        subplot(2, 3, (method_n - 1) * 3 + band_n)
+        hold on
+        yline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
+            'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+        if strcmp(spectrum_field, 'raw_aperiodic_subtracted')
+            xline(0, ':k', 'HandleVisibility', 'off');
+        end
+        ci_handles = gobjects(0, 1);
+        ci_labels = {};
+        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
+            tracks, method_n, band_n, 'stays_pag', palette.pag, 'Stays in PAG');
+        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
+            tracks, method_n, band_n, 'goes_sc', palette.upper, ...
+            'Through SupCol');
+        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
+            tracks, method_n, band_n, 'goes_dr', palette.deeper, ...
+            'Through DR');
+        xlabel(profile_xlabel(spectrum_field))
+        if band_n == 1
+            ylabel({'Distance to tip relative to mid-LPAG (µm)', ...
+                'positive = upper, further from tip'})
+        end
+        title(sprintf('%s | %s', method_names{method_n}, band_names{band_n}))
+        if method_n == 1 && band_n == 3 && ~isempty(ci_handles)
+            legend(ci_handles, ci_labels, 'Location', 'best', 'FontSize', 7)
+        end
+        box off
+    end
+end
+sgtitle('95% confidence intervals, centered on mid-LPAG', 'Interpreter', 'none')
 end
 
 function draw_colored_profile(rel_um, power, segment_color)
@@ -1015,93 +1052,112 @@ for region_n = 1:n_regions
         region_names{region_n}, nnz(isfinite(centers(:, region_n))), n_placed);
 end
 
-for method_n = 1:2
-    figure('Name', sprintf('%s power vs distance to region center', ...
-        method_names{method_n}), 'Color', 'w', ...
-        'Position', [40 40 980 1180]);
-    legend_drawn = false;
-    for region_n = 1:n_regions
-        for direction_n = 1:2
-            subplot(n_regions, 2, (region_n - 1) * 2 + direction_n)
-            available = find(isfinite(centers(:, region_n)));
-            if isempty(available)
-                axis off
-                text(0.5, 0.5, sprintf('%s\nnot available', ...
-                    region_names{region_n}), ...
-                    'HorizontalAlignment', 'center', 'Interpreter', 'none');
-                continue
-            end
-            hold on
-            side_tracks = repmat(empty_side_track(), 0, 1);
-            farthest = 0;
-            for placed_n = available(:).'
-                [distance, welch_power, fourier_power] = side_samples( ...
-                    placed(placed_n), centers(placed_n, region_n), ...
-                    directions{direction_n});
-                if isempty(distance)
+panel_kinds = {'tracks', 'interval'};
+for kind_n = 1:numel(panel_kinds)
+    panel_kind = panel_kinds{kind_n};
+    for method_n = 1:2
+        if strcmp(panel_kind, 'tracks')
+            figure_name = sprintf('%s power vs distance to region center', ...
+                method_names{method_n});
+            figure_position = [40 40 980 1180];
+            figure_note = 'Distance 0 is the region center. Each line is one shank.';
+        else
+            figure_name = sprintf('%s 95%% CI vs distance to region center', ...
+                method_names{method_n});
+            figure_position = [90 40 980 1180];
+            figure_note = ['Distance 0 is the region center. ' ...
+                'Thick line and shade are the mean and 95% CI where n >= 2.'];
+        end
+        figure('Name', figure_name, 'Color', 'w', 'Position', figure_position);
+        legend_drawn = false;
+        for region_n = 1:n_regions
+            for direction_n = 1:2
+                subplot(n_regions, 2, (region_n - 1) * 2 + direction_n)
+                available = find(isfinite(centers(:, region_n)));
+                if isempty(available)
+                    axis off
+                    text(0.5, 0.5, sprintf('%s\nnot available', ...
+                        region_names{region_n}), ...
+                        'HorizontalAlignment', 'center', 'Interpreter', 'none');
                     continue
                 end
-                draw_distance_track(distance, ...
-                    power_for_method(welch_power, fourier_power, method_n), ...
-                    band_colors);
-                farthest = max(farthest, max(distance(isfinite(distance))));
-                side_track = empty_side_track();
-                side_track.rel_um = distance;
-                side_track.welch_bands = welch_power;
-                side_track.fourier_bands = fourier_power;
-                side_tracks(end + 1, 1) = side_track; %#ok<AGROW>
-            end
-            if isempty(side_tracks)
-                axis off
-                text(0.5, 0.5, sprintf('%s\n%s\nno channels on this side', ...
-                    region_names{region_n}, direction_titles{direction_n}), ...
-                    'HorizontalAlignment', 'center', 'Interpreter', 'none');
-                continue
-            end
-            x_max = farthest;
-            if numel(side_tracks) >= 2
-                for band_n = 1:3
-                    [grid, mean_line, lower_line, upper_line] = ...
-                        class_interval(side_tracks, method_n, band_n);
-                    draw_band_interval(grid, mean_line, lower_line, ...
-                        upper_line, band_colors(band_n, :));
-                    finite_grid = grid(isfinite(mean_line));
-                    if ~isempty(finite_grid)
-                        x_max = max(x_max, max(finite_grid));
+                hold on
+                side_tracks = repmat(empty_side_track(), 0, 1);
+                farthest = 0;
+                for placed_n = available(:).'
+                    [distance, welch_power, fourier_power] = side_samples( ...
+                        placed(placed_n), centers(placed_n, region_n), ...
+                        directions{direction_n});
+                    if isempty(distance)
+                        continue
+                    end
+                    if strcmp(panel_kind, 'tracks')
+                        draw_distance_track(distance, ...
+                            power_for_method(welch_power, fourier_power, method_n), ...
+                            band_colors);
+                    end
+                    farthest = max(farthest, max(distance(isfinite(distance))));
+                    side_track = empty_side_track();
+                    side_track.rel_um = distance;
+                    side_track.welch_bands = welch_power;
+                    side_track.fourier_bands = fourier_power;
+                    side_tracks(end + 1, 1) = side_track; %#ok<AGROW>
+                end
+                if isempty(side_tracks)
+                    axis off
+                    text(0.5, 0.5, sprintf('%s\n%s\nno channels on this side', ...
+                        region_names{region_n}, direction_titles{direction_n}), ...
+                        'HorizontalAlignment', 'center', 'Interpreter', 'none');
+                    continue
+                end
+                x_max = farthest;
+                if strcmp(panel_kind, 'interval') && numel(side_tracks) >= 2
+                    for band_n = 1:3
+                        [grid, mean_line, lower_line, upper_line] = ...
+                            class_interval(side_tracks, method_n, band_n);
+                        draw_band_interval(grid, mean_line, lower_line, ...
+                            upper_line, band_colors(band_n, :));
+                        finite_grid = grid(isfinite(mean_line));
+                        if ~isempty(finite_grid)
+                            x_max = max(x_max, max(finite_grid));
+                        end
                     end
                 end
-            end
-            if strcmp(spectrum_field, 'raw_aperiodic_subtracted')
-                yline(0, ':k', 'HandleVisibility', 'off');
-            end
-            xline(0, '--k', 'HandleVisibility', 'off');
-            if ~isfinite(x_max) || x_max <= 0
-                x_max = 20;
-            end
-            xlim([0, x_max]);
-            xlabel(direction_xlabels{direction_n})
-            if direction_n == 1
-                ylabel(profile_xlabel(spectrum_field))
-            end
-            title(sprintf('%s | %s (n=%d)', region_names{region_n}, ...
-                direction_titles{direction_n}, numel(side_tracks)))
-            if ~legend_drawn
-                guide = gobjects(3, 1);
-                for band_n = 1:3
-                    guide(band_n) = plot(nan, nan, ...
-                        'Color', band_colors(band_n, :), 'LineWidth', 2);
+                if strcmp(spectrum_field, 'raw_aperiodic_subtracted')
+                    yline(0, ':k', 'HandleVisibility', 'off');
                 end
-                legend(guide, band_names, 'Location', 'best', 'FontSize', 7)
-                legend_drawn = true;
+                xline(0, '--k', 'HandleVisibility', 'off');
+                if ~isfinite(x_max) || x_max <= 0
+                    x_max = 20;
+                end
+                xlim([0, x_max]);
+                xlabel(direction_xlabels{direction_n})
+                if direction_n == 1
+                    ylabel(profile_xlabel(spectrum_field))
+                end
+                title(sprintf('%s | %s (n=%d)', region_names{region_n}, ...
+                    direction_titles{direction_n}, numel(side_tracks)))
+                if strcmp(panel_kind, 'interval') && numel(side_tracks) < 2
+                    text(0.5, 0.5, 'CI needs at least 2 shanks', ...
+                        'Units', 'normalized', 'HorizontalAlignment', 'center', ...
+                        'FontSize', 8);
+                end
+                if ~legend_drawn
+                    guide = gobjects(3, 1);
+                    for band_n = 1:3
+                        guide(band_n) = plot(nan, nan, ...
+                            'Color', band_colors(band_n, :), 'LineWidth', 2);
+                    end
+                    legend(guide, band_names, 'Location', 'best', 'FontSize', 7)
+                    legend_drawn = true;
+                end
+                box off
             end
-            box off
         end
+        sgtitle({sprintf('%s | %s', method_names{method_n}, ...
+            spectrum_title(spectrum_field)), figure_note}, ...
+            'Interpreter', 'none')
     end
-    sgtitle({sprintf('%s | %s', method_names{method_n}, ...
-        spectrum_title(spectrum_field)), ...
-        ['Distance 0 is the region center. Pale lines are shanks; ' ...
-        'the thick line and shade are the mean and 95% CI where n >= 2.']}, ...
-        'Interpreter', 'none')
 end
 end
 
@@ -1175,15 +1231,15 @@ function draw_distance_track(distance, power, band_colors)
 [distance, order] = sort(distance(:));
 power = power(order, :);
 for band_n = 1:size(power, 2)
-    pale = 0.35 * band_colors(band_n, :) + 0.65 * [1 1 1];
+    this_color = band_colors(band_n, :);
     this_power = power(:, band_n);
     finite = isfinite(distance) & isfinite(this_power);
     if nnz(finite) == 1
-        plot(distance(finite), this_power(finite), 'o', 'Color', pale, ...
+        plot(distance(finite), this_power(finite), 'o', 'Color', this_color, ...
             'MarkerSize', 4, 'HandleVisibility', 'off');
         continue
     end
-    plot(distance, this_power, 'Color', pale, 'LineWidth', 0.6, ...
+    plot(distance, this_power, 'Color', this_color, 'LineWidth', 1.0, ...
         'HandleVisibility', 'off');
 end
 end
