@@ -1,12 +1,15 @@
 %% Analyse_play_session_probe_spectra
 % Single-session view of the channel-wise periodic/aperiodic spectra.
 %
-% The image is the full spectrum at every channel, sorted by depth within
-% each shank. The profile figure is a line plot, not an image: mean power
-% in delta (1-5 Hz), theta (6-12 Hz), and gamma (30-45 Hz) against depth.
-% Both use the same saved spectrum. Area depth limits from the area table
-% are drawn on both figures, together with the mid-LPAG channel.
-% No cross-session summary is made here.
+% The image is the full spectrum at every channel. The kilosort y coordinate
+% is distance to the probe tip, not depth: larger values are further from the
+% tip (upper), smaller values are closer to the tip (deeper).
+%
+% Selected sessions are stacked on one pair of figures, with mid-LPAG at zero.
+% PAG sections, an upper side that passes through SupCol, and a deeper side
+% that passes through DR are colored. Other territory stays gray. A 95%
+% confidence interval is drawn for those three track classes when at least
+% two tracks are available.
 
 %% Which recording and session to inspect
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
@@ -24,8 +27,12 @@ area_limit_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\
 %   session_index = [];
 % recording_index = 1:12 and session_index = 1 plots only partner session 1
 % of each file, so every figure is labeled session 1.
-recording_index = 1;
-session_index = 1;
+recording_index = [];
+session_index = [];
+
+% The stack is always drawn for the recordings and sessions selected above.
+% Single-session figures are optional.
+plot_each_session = false;
 
 % log10 power minus the fitted aperiodic component. Switch to
 % 'log10_mean_power' to draw the session-mean spectrum itself.
@@ -56,6 +63,10 @@ for file_n = 1:numel(file_list)
     fprintf('  %d  %s\n', file_n, file_list(file_n).name);
 end
 
+%% Stack every selected shank at its mid-LPAG channel
+stacked_frequency = [];
+tracks = repmat(empty_track(), 0, 1);
+
 %% Plot each requested session on its own
 for file_n = recording_index(:).'
     input_file = fullfile(saving_folder, file_list(file_n).name);
@@ -63,6 +74,12 @@ for file_n = recording_index(:).'
     loaded = load(input_file, 'probe_spectra');
     probe_spectra = loaded.probe_spectra;
     frequency = probe_spectra.frequency(:).';
+    if isempty(stacked_frequency)
+        stacked_frequency = frequency;
+    elseif numel(stacked_frequency) ~= numel(frequency) || ...
+            max(abs(stacked_frequency - frequency)) > 1e-9
+        error('Frequency grids differ between saved recordings.');
+    end
     channel_table = probe_spectra.channel_table;
     if frequency(end) + 1e-9 < gamma_band(2)
         error('Spectra in %s end at %g Hz, before the gamma band upper edge.', ...
@@ -95,18 +112,33 @@ for file_n = recording_index(:).'
             probe_spectra.n_sessions, ...
             this_session.time_range(1), this_session.time_range(2), ...
             this_session.n_windows);
-        fprintf('Plotting %s\n', session_label);
+        fprintf('Including %s\n', session_label);
+        tracks = [tracks; tracks_from_session(channel_table, ...
+            welch_spectrum, fourier_spectrum, frequency, ...
+            delta_band, theta_band, gamma_band, session_label)]; %#ok<AGROW>
 
-        plot_depth_spectrum(frequency, channel_table, ...
-            welch_spectrum, fourier_spectrum, spectrum_field, ...
-            session_label, area_borders);
-        plot_band_profiles(frequency, channel_table, ...
-            welch_spectrum, fourier_spectrum, ...
-            delta_band, theta_band, gamma_band, ...
-            spectrum_field, session_label, area_borders);
-        drawnow
+        if plot_each_session
+            plot_depth_spectrum(frequency, channel_table, ...
+                welch_spectrum, fourier_spectrum, spectrum_field, ...
+                session_label, area_borders);
+            plot_band_profiles(frequency, channel_table, ...
+                welch_spectrum, fourier_spectrum, ...
+                delta_band, theta_band, gamma_band, ...
+                spectrum_field, session_label, area_borders);
+            drawnow
+        end
     end
 end
+
+if isempty(tracks)
+    error(['No shank with a mid-LPAG channel was found in the selected ' ...
+        'recordings.']);
+end
+fprintf(['Aligned tracks: %d. Stay in PAG: %d. Upper side through SupCol: ' ...
+    '%d. Deeper side through DR: %d.\n'], numel(tracks), ...
+    sum([tracks.stays_pag]), sum([tracks.goes_sc]), sum([tracks.goes_dr]));
+plot_aligned_spectra(tracks, stacked_frequency, spectrum_field);
+plot_aligned_profiles(tracks, spectrum_field, delta_band, theta_band, gamma_band);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
@@ -156,9 +188,10 @@ for method_n = 1:2
         end
         mark_depth_lines(center_y)
         draw_area_borders(these_borders, depth, use_depth_axis)
+        set(gca, 'YDir', 'normal')
         xlabel('Frequency (Hz)')
         if group_n == 1
-            ylabel('Depth (µm)')
+            ylabel('Distance to tip (µm)')
         end
         title(sprintf('%s | %s', method_names{method_n}, this_group.label))
         box off
@@ -212,7 +245,7 @@ for method_n = 1:2
                 'LabelHorizontalAlignment', 'left', 'FontSize', 8, ...
                 'HandleVisibility', 'off');
         end
-        set(gca, 'YDir', 'reverse')
+        set(gca, 'YDir', 'normal')
         these_borders = borders_for_probe(area_borders, this_group.probe_number);
         if ~isempty(finite_depth)
             ylim(depth_limits_with_borders(finite_depth, these_borders))
@@ -220,7 +253,7 @@ for method_n = 1:2
         draw_area_borders(these_borders, this_group.depth_um, true)
         xlabel(profile_xlabel(spectrum_field))
         if group_n == 1
-            ylabel('Depth (µm)')
+            ylabel('Distance to tip (µm)')
         end
         title(sprintf('%s | %s', method_names{method_n}, this_group.label))
         if method_n == 1 && group_n == 1
@@ -229,7 +262,7 @@ for method_n = 1:2
         box off
     end
 end
-sgtitle({session_label, 'Band means along depth'}, 'Interpreter', 'none')
+sgtitle({session_label, 'Band means along the probe'}, 'Interpreter', 'none')
 end
 
 function probe_groups = probe_groups_by_depth(channel_table)
@@ -249,6 +282,7 @@ probe_groups = repmat(struct( ...
     'probe_number', [], ...
     'channel_index', [], ...
     'depth_um', [], ...
+    'areas', {{}}, ...
     'is_lpag_center', []), numel(group_probe_ids), 1);
 
 for group_n = 1:numel(group_probe_ids)
@@ -269,6 +303,7 @@ for group_n = 1:numel(group_probe_ids)
     probe_groups(group_n).probe_number = group_probe_ids(group_n);
     probe_groups(group_n).channel_index = channel_index;
     probe_groups(group_n).depth_um = channel_table.Yum(channel_index);
+    probe_groups(group_n).areas = cellstr(string(channel_table.Area(channel_index)));
     probe_groups(group_n).is_lpag_center = ...
         logical(channel_table.IsLPAGCenter(channel_index));
 end
@@ -519,4 +554,377 @@ if span == 0
 end
 fraction = (border_depth - depth_values(upper - 1)) / span;
 row = row_index(upper - 1) + fraction * (row_index(upper) - row_index(upper - 1));
+end
+
+function track = empty_track()
+track = struct( ...
+    'label', '', ...
+    'rel_um', [], ...
+    'welch_bands', [], ...
+    'fourier_bands', [], ...
+    'welch_spectrum', [], ...
+    'fourier_spectrum', [], ...
+    'segment_color', [], ...
+    'goes_sc', false, ...
+    'goes_dr', false, ...
+    'stays_pag', false);
+end
+
+function tracks = tracks_from_session(channel_table, welch_spectrum, ...
+        fourier_spectrum, frequency, delta_band, theta_band, gamma_band, ...
+        session_label)
+groups = probe_groups_by_depth(channel_table);
+tracks = repmat(empty_track(), 0, 1);
+for group_n = 1:numel(groups)
+    this_group = groups(group_n);
+    center = this_group.depth_um(this_group.is_lpag_center);
+    center = center(isfinite(center));
+    if isempty(center)
+        fprintf(['  %s, %s has no mid-LPAG channel and is left out of ' ...
+            'the stack.\n'], session_label, this_group.label);
+        continue
+    end
+    rel = this_group.depth_um(:) - mean(center);
+    [segment_color, goes_sc, goes_dr, stays_pag] = ...
+        classify_track(rel, this_group.areas);
+    welch_rows = welch_spectrum(this_group.channel_index, :);
+    fourier_rows = fourier_spectrum(this_group.channel_index, :);
+    track = empty_track();
+    track.label = sprintf('%s | %s', session_label, this_group.label);
+    track.rel_um = rel;
+    track.welch_bands = [ ...
+        mean_in_band(welch_rows, frequency, delta_band), ...
+        mean_in_band(welch_rows, frequency, theta_band), ...
+        mean_in_band(welch_rows, frequency, gamma_band)];
+    track.fourier_bands = [ ...
+        mean_in_band(fourier_rows, frequency, delta_band), ...
+        mean_in_band(fourier_rows, frequency, theta_band), ...
+        mean_in_band(fourier_rows, frequency, gamma_band)];
+    track.welch_spectrum = welch_rows;
+    track.fourier_spectrum = fourier_rows;
+    track.segment_color = segment_color;
+    track.goes_sc = goes_sc;
+    track.goes_dr = goes_dr;
+    track.stays_pag = stays_pag;
+    tracks(end + 1, 1) = track; %#ok<AGROW>
+end
+end
+
+function [segment_color, goes_sc, goes_dr, stays_pag] = ...
+        classify_track(rel_um, area_labels)
+palette = track_colors();
+n_sites = numel(rel_um);
+segment_color = repmat(palette.other, n_sites, 1);
+is_pag = false(n_sites, 1);
+is_sc = false(n_sites, 1);
+is_dr = false(n_sites, 1);
+has_label = false(n_sites, 1);
+has_other = false(n_sites, 1);
+for site_n = 1:n_sites
+    tokens = split_area_label(area_labels{site_n});
+    if isempty(tokens)
+        continue
+    end
+    has_label(site_n) = true;
+    pag_token = cellfun(@name_is_pag, tokens);
+    sc_token = cellfun(@name_is_supcol, tokens);
+    dr_token = cellfun(@name_is_dr, tokens);
+    is_pag(site_n) = any(pag_token);
+    is_sc(site_n) = any(sc_token);
+    is_dr(site_n) = any(dr_token);
+    has_other(site_n) = any(~pag_token & ~sc_token & ~dr_token);
+end
+goes_sc = any(is_sc & rel_um(:) > 0);
+goes_dr = any(is_dr & rel_um(:) < 0);
+stays_pag = any(has_label) && ~goes_sc && ~goes_dr && ...
+    ~any(has_other) && ~any(is_sc) && ~any(is_dr);
+for site_n = 1:n_sites
+    if is_sc(site_n) && rel_um(site_n) > 0 && goes_sc
+        segment_color(site_n, :) = palette.upper;
+    elseif is_dr(site_n) && rel_um(site_n) < 0 && goes_dr
+        segment_color(site_n, :) = palette.deeper;
+    elseif is_pag(site_n) && ~has_other(site_n)
+        segment_color(site_n, :) = palette.pag;
+    end
+end
+end
+
+function tokens = split_area_label(label)
+if isempty(label) || (isstring(label) && ismissing(label))
+    tokens = {};
+    return
+end
+tokens = strtrim(strsplit(char(label), ','));
+tokens = tokens(~cellfun('isempty', tokens));
+end
+
+function tf = name_is_pag(name)
+tf = numel(name) >= 3 && strcmp(name(end - 2:end), 'PAG');
+end
+
+function tf = name_is_supcol(name)
+tf = strcmpi(name, 'SupCol') || strcmpi(name, 'SC');
+end
+
+function tf = name_is_dr(name)
+tf = strcmp(name, 'DR');
+end
+
+function palette = track_colors()
+palette.pag = [0.13 0.55 0.36];
+palette.upper = [0.90 0.45 0.05];
+palette.deeper = [0.36 0.28 0.72];
+palette.other = [0.72 0.72 0.72];
+end
+
+function plot_aligned_profiles(tracks, spectrum_field, ...
+        delta_band, theta_band, gamma_band)
+palette = track_colors();
+method_names = {'Welch', 'Fourier'};
+band_names = { ...
+    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
+    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
+    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+figure('Name', 'Profiles aligned on mid-LPAG', 'Color', 'w', ...
+    'Position', [60 60 1100 720]);
+for method_n = 1:2
+    for band_n = 1:3
+        subplot(2, 3, (method_n - 1) * 3 + band_n)
+        hold on
+        yline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
+            'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+        if strcmp(spectrum_field, 'raw_aperiodic_subtracted')
+            xline(0, ':k', 'HandleVisibility', 'off');
+        end
+        for track_n = 1:numel(tracks)
+            power = band_column(tracks(track_n), method_n, band_n);
+            draw_colored_profile(tracks(track_n).rel_um, power, ...
+                tracks(track_n).segment_color);
+        end
+        ci_handles = gobjects(0, 1);
+        ci_labels = {};
+        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
+            tracks, method_n, band_n, 'stays_pag', palette.pag, 'Stays in PAG');
+        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
+            tracks, method_n, band_n, 'goes_sc', palette.upper, ...
+            'Through SupCol');
+        [ci_handles, ci_labels] = add_class_interval(ci_handles, ci_labels, ...
+            tracks, method_n, band_n, 'goes_dr', palette.deeper, ...
+            'Through DR');
+        guide = [ ...
+            plot(nan, nan, 'Color', palette.pag, 'LineWidth', 1.5); ...
+            plot(nan, nan, 'Color', palette.upper, 'LineWidth', 1.5); ...
+            plot(nan, nan, 'Color', palette.deeper, 'LineWidth', 1.5); ...
+            plot(nan, nan, 'Color', palette.other, 'LineWidth', 1.5)];
+        guide_labels = {'Within PAG', 'Upper side through SupCol', ...
+            'Deeper side through DR', 'Other'};
+        xlabel(profile_xlabel(spectrum_field))
+        if band_n == 1
+            ylabel({'Distance to tip relative to mid-LPAG (µm)', ...
+                'positive = upper, further from tip'})
+        end
+        title(sprintf('%s | %s', method_names{method_n}, band_names{band_n}))
+        if method_n == 1 && band_n == 3
+            legend([guide; ci_handles], [guide_labels, ci_labels], ...
+                'Location', 'best', 'FontSize', 7)
+        end
+        box off
+    end
+end
+sgtitle('Sessions stacked on the mid-LPAG channel', 'Interpreter', 'none')
+end
+
+function draw_colored_profile(rel_um, power, segment_color)
+[rel_um, order] = sort(rel_um(:));
+power = power(order);
+segment_color = segment_color(order, :);
+for site_n = 1:numel(rel_um) - 1
+    if ~all(isfinite(rel_um(site_n:site_n + 1))) || ...
+            ~all(isfinite(power(site_n:site_n + 1)))
+        continue
+    end
+    plot(power(site_n:site_n + 1), rel_um(site_n:site_n + 1), ...
+        'Color', segment_color(site_n, :), 'LineWidth', 1, ...
+        'HandleVisibility', 'off');
+end
+end
+
+function [handles, labels] = add_class_interval(handles, labels, ...
+        tracks, method_n, band_n, field_name, color, class_label)
+selected = tracks([tracks.(field_name)]);
+n_tracks = numel(selected);
+if n_tracks == 0
+    return
+end
+[grid, mean_line, lower_line, upper_line] = class_interval( ...
+    selected, method_n, band_n);
+if strcmp(field_name, 'goes_sc')
+    off_side = grid < 0;
+    mean_line(off_side) = NaN;
+    lower_line(off_side) = NaN;
+    upper_line(off_side) = NaN;
+elseif strcmp(field_name, 'goes_dr')
+    off_side = grid > 0;
+    mean_line(off_side) = NaN;
+    lower_line(off_side) = NaN;
+    upper_line(off_side) = NaN;
+end
+if ~any(isfinite(mean_line))
+    fprintf('%s: %d tracks, no confidence interval (need at least 2).\n', ...
+        class_label, n_tracks);
+    return
+end
+handles(end + 1, 1) = plot(mean_line, grid, 'Color', color, ...
+    'LineWidth', 2.4); %#ok<AGROW>
+plot(lower_line, grid, 'Color', color, 'LineWidth', 1, ...
+    'HandleVisibility', 'off');
+plot(upper_line, grid, 'Color', color, 'LineWidth', 1, ...
+    'HandleVisibility', 'off');
+labels{end + 1} = sprintf('%s 95%% CI (n=%d)', class_label, n_tracks); %#ok<AGROW>
+end
+
+function power = band_column(track, method_n, band_n)
+if method_n == 1
+    power = track.welch_bands(:, band_n);
+else
+    power = track.fourier_bands(:, band_n);
+end
+end
+
+function [grid, mean_line, lower_line, upper_line] = class_interval( ...
+        tracks, method_n, band_n)
+[grid, resampled] = resample_tracks(tracks, method_n, band_n);
+n_at_grid = sum(isfinite(resampled), 1);
+mean_line = mean(resampled, 1, 'omitnan');
+deviation = std(resampled, 0, 1, 'omitnan');
+standard_error = deviation ./ sqrt(n_at_grid);
+critical = nan(size(n_at_grid));
+enough = n_at_grid >= 2;
+critical(enough) = tinv(0.975, n_at_grid(enough) - 1);
+half_width = critical .* standard_error;
+lower_line = mean_line - half_width;
+upper_line = mean_line + half_width;
+mean_line(~enough) = NaN;
+lower_line(~enough) = NaN;
+upper_line(~enough) = NaN;
+end
+
+function [grid, resampled] = resample_tracks(tracks, method_n, band_n)
+grid = alignment_grid(tracks);
+resampled = nan(numel(tracks), numel(grid));
+for track_n = 1:numel(tracks)
+    resampled(track_n, :) = resample_one(tracks(track_n).rel_um, ...
+        band_column(tracks(track_n), method_n, band_n), grid);
+end
+end
+
+function values = resample_one(rel_um, samples, grid)
+[rel_um, order] = sort(rel_um(:));
+samples = samples(order);
+keep = isfinite(rel_um) & isfinite(samples);
+rel_um = rel_um(keep);
+samples = samples(keep);
+[rel_um, unique_index] = unique(rel_um, 'stable');
+samples = samples(unique_index);
+values = nan(size(grid));
+if numel(rel_um) < 2
+    return
+end
+values = interp1(rel_um, samples, grid, 'linear', NaN);
+end
+
+function grid = alignment_grid(tracks)
+samples = [];
+for track_n = 1:numel(tracks)
+    samples = [samples; tracks(track_n).rel_um(:)]; %#ok<AGROW>
+end
+samples = samples(isfinite(samples));
+if isempty(samples)
+    grid = 0;
+    return
+end
+step = 20;
+grid = (floor(min(samples) / step) * step):step:(ceil(max(samples) / step) * step);
+end
+
+function plot_aligned_spectra(tracks, frequency, spectrum_field)
+method_names = {'Welch', 'Fourier'};
+class_fields = {'stays_pag', 'goes_sc', 'goes_dr'};
+class_titles = {'Stays in PAG', 'Through SupCol', 'Through DR'};
+figure('Name', 'Spectra aligned on mid-LPAG', 'Color', 'w', ...
+    'Position', [80 80 1100 720]);
+colors = diverging_or_sequential(spectrum_field);
+for method_n = 1:2
+    class_means = cell(1, 3);
+    finite_values = [];
+    for class_n = 1:3
+        selected = tracks([tracks.(class_fields{class_n})]);
+        [grid, mean_spectrum] = mean_aligned_spectrum(selected, method_n, frequency);
+        class_means{class_n} = struct('grid', grid, 'spectrum', mean_spectrum, ...
+            'n', numel(selected));
+        if ~isempty(mean_spectrum)
+            finite_values = [finite_values; ...
+                mean_spectrum(isfinite(mean_spectrum))]; %#ok<AGROW>
+        end
+    end
+    color_limits = spectrum_color_limits(finite_values, spectrum_field);
+    for class_n = 1:3
+        subplot(2, 3, (method_n - 1) * 3 + class_n)
+        this_class = class_means{class_n};
+        if this_class.n == 0 || isempty(this_class.spectrum)
+            axis off
+            text(0.5, 0.5, sprintf('%s\n%s\nn = 0', ...
+                method_names{method_n}, class_titles{class_n}), ...
+                'HorizontalAlignment', 'center', 'Interpreter', 'none');
+            continue
+        end
+        imagesc(frequency, this_class.grid, this_class.spectrum);
+        set(gca, 'YDir', 'normal')
+        axis tight
+        colormap(colors)
+        if all(isfinite(color_limits))
+            caxis(color_limits);
+        end
+        yline(0, '--k', 'mid-LPAG', 'LineWidth', 1, ...
+            'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+        xlabel('Frequency (Hz)')
+        if class_n == 1
+            ylabel({'Distance to tip relative to mid-LPAG (µm)', ...
+                'positive = upper, further from tip'})
+        end
+        title(sprintf('%s | %s (n=%d)', method_names{method_n}, ...
+            class_titles{class_n}, this_class.n))
+        box off
+    end
+    colorbar
+end
+sgtitle({spectrum_title(spectrum_field), ...
+    'Mean of tracks in each class, centered on mid-LPAG'}, ...
+    'Interpreter', 'none')
+end
+
+function [grid, mean_spectrum] = mean_aligned_spectrum(tracks, method_n, frequency)
+if isempty(tracks)
+    grid = [];
+    mean_spectrum = [];
+    return
+end
+grid = alignment_grid(tracks);
+n_frequency = numel(frequency);
+resampled = nan(numel(tracks), numel(grid), n_frequency);
+for track_n = 1:numel(tracks)
+    if method_n == 1
+        spectrum = tracks(track_n).welch_spectrum;
+    else
+        spectrum = tracks(track_n).fourier_spectrum;
+    end
+    for frequency_n = 1:n_frequency
+        resampled(track_n, :, frequency_n) = resample_one( ...
+            tracks(track_n).rel_um, spectrum(:, frequency_n), grid);
+    end
+end
+mean_spectrum = squeeze(mean(resampled, 1, 'omitnan'));
+if isvector(mean_spectrum)
+    mean_spectrum = reshape(mean_spectrum, numel(grid), n_frequency);
+end
 end
