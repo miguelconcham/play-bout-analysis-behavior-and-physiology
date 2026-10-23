@@ -36,7 +36,8 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Speed vs LFP band power | Supp 4b; extra | `Figure 2/Supporting codes v2/Estimate_speed_freq_relation.m` | `Figure 2/Supporting codes v2/Analyze_speed_freq_relation.m`; also `Figure 2.m` `%% 18`–`%% 21` |
 | Cross-frequency coupling (mid-PAG) | extra / CFC panel | `Figure 2/Supporting codes v2/Estimate_freq_coupling.m` | `Figure 2/Supporting codes v2/Analyze_freq_coupling.m`; `Figure 2/CrossFreq coupling.m` |
 | CFC maps along the probe | extra | `Figure 2/Supporting codes v2/Estimate_freq_coupling_maps.m` | `Figure 2/Supporting codes v2/Analyze_freq_coupling_maps.m` |
-| Inter-area PLI / wPLI / coherence maps | extra | `Figure 2/Supporting codes v2/Estimate_coherence_maps.m` | same script (Estimate also plots) |
+| Inter-area PLI / wPLI / coherence maps | extra | `Figure 2/Supporting codes v2/Estimate_coherence_maps.m` | `Figure 2/Supporting codes v2/Analyze_coherence_maps.m` (loads newest pairwise `coherence_pli_struct_2026.mat` / merged save) |
+| Coherence / phase lag vs mid-LPAG only | extra | `Figure 2/Supporting codes v2/Estimate_coherence_maps_lpag_ref.m` | `Figure 2/Supporting codes v2/Analyze_coherence_maps_lpag_ref.m` |
 | LFP phase reset at bout onset | extra / phase-reset panels | `Figure 2/Supporting codes v2/Estimate_phase_psth.m` | `Figure 2/Supporting codes v2/Analyze_phase_psth.m` |
 | Phase reset (supplementary layout) | extra | `Estimate_phase_psth.m` | `Figure 2/Supporting codes v2/Analyze_phase_psth_SuppFig.m` |
 | Play-bout PSTH maps by channel / area | extra | `Figure 2/Supporting codes v2/Estimate_psth_area_maps.m` | `Figure 2/Supporting codes v2/Analyze_psth_area_maps.m` |
@@ -89,10 +90,11 @@ These are the supporting / complementary pipelines. Rebuild with Estimate, then 
 | Speed vs band-limited power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m` |
 | Delta–gamma (or other) phase–amplitude coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m` or `Figure 2/CrossFreq coupling.m` |
 | CFC as depth maps | `Estimate_freq_coupling_maps.m` | `Analyze_freq_coupling_maps.m` |
-| PLI / wPLI coherence maps | `Estimate_coherence_maps.m` | same file |
+| PLI / wPLI coherence maps (full pairwise) | `Estimate_coherence_maps.m` | `Analyze_coherence_maps.m` (loads newest `coherence_pli_struct_2026.mat` / merged / all-together save; ignores `*lpag_ref*`) |
+| PLI / phase lag vs mid-LPAG only | `Estimate_coherence_maps_lpag_ref.m` | `Analyze_coherence_maps_lpag_ref.m` (loads `coherence_pli_struct_lpag_ref_2026.mat`) |
 | Hilbert phase at exploratory / play onset | `Estimate_phase_psth.m` | `Analyze_phase_psth.m` or `Analyze_phase_psth_SuppFig.m` |
 
-GENERATE functions live next to those Estimates (`GENERATE_PSTH_PLAY_BOUT.m`, `GENERATE_PSTH_ALL_BEHAVIORS.m`, `GENERATE_PSTH_CALLS.m`, `GENERATE_PSTH_CALL_LOC_REGRESSORS.m`, `GENERATE_SPEED_FREQ_RELATION.m`, `GENERATE_FREQ_COUPLING_STRUCT.m`, `GENERATE_FREQ_COUPLING_MAPS_STRUCT.m`, `GENERATE_COHERNECE_MAPS_STRUCT.m`, `GENERATE_PHASE_EXPLORATORY_ONSET.m`, `GENERATE_PSTH_AREA_MAPS.m`, `GENERATE_PSTH_SPECTROGRAM.m`).
+GENERATE functions live next to those Estimates (`GENERATE_PSTH_PLAY_BOUT.m`, `GENERATE_PSTH_ALL_BEHAVIORS.m`, `GENERATE_PSTH_CALLS.m`, `GENERATE_PSTH_CALL_LOC_REGRESSORS.m`, `GENERATE_SPEED_FREQ_RELATION.m`, `GENERATE_FREQ_COUPLING_STRUCT.m`, `GENERATE_FREQ_COUPLING_MAPS_STRUCT.m`, `GENERATE_COHERNECE_MAPS_STRUCT.m`, `GENERATE_COHERENCE_MAPS_LPAG_REF.m`, `GENERATE_PHASE_EXPLORATORY_ONSET.m`, `GENERATE_PSTH_AREA_MAPS.m`, `GENERATE_PSTH_SPECTROGRAM.m`).
 
 ### Spikes and locking (Figure 3 supporting)
 
