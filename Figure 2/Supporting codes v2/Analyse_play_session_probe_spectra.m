@@ -45,7 +45,9 @@
 % draw regions_to_display, which starts as LPAG, VLPAG, and SupCol. PAG sections,
 % an upper side that passes through SupCol, and a deeper side that passes
 % through DR are colored. Other territory stays gray. Those colored tracks
-% are one figure. The 95% confidence intervals for the three track classes
+% are one figure. Its spectrum has each theta Gaussian removed, and any
+% Gaussian whose center lies near twice that theta center (the first
+% harmonic). The 95% confidence intervals for the three track classes
 % are a separate figure, drawn when at least two tracks are available.
 %
 % Separate figures center each shank on the regions in regions_to_display.
@@ -249,7 +251,9 @@ for file_n = recording_index(:).'
         tracks = [tracks; tracks_from_session(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
             delta_band, theta_band, gamma_band, session_label, ...
-            artifact_trend_sd)]; %#ok<AGROW>
+            artifact_trend_sd, ...
+            gaussian_params_for(this_session.welch, size(welch_spectrum, 1)), ...
+            gaussian_params_for(this_session.fourier, size(fourier_spectrum, 1)))]; %#ok<AGROW>
         placed = [placed; placed_from_session(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
             delta_band, theta_band, gamma_band, session_label, ...
@@ -468,12 +472,7 @@ keep = isfinite(center) & isfinite(peak_height) & isfinite(width) & ...
 center = center(keep);
 peak_height = peak_height(keep);
 width = width(keep);
-theta_fit = zeros(1, numel(frequency));
-for gaussian_n = 1:numel(center)
-    theta_fit = theta_fit + peak_height(gaussian_n) .* exp( ...
-        -(frequency - center(gaussian_n)).^2 ./ (2 * width(gaussian_n).^2));
-end
-residual = residual - theta_fit;
+residual = residual - sum_gaussians(center, peak_height, width, frequency);
 end
 
 function plot_pooled_residual_spectra(sites, frequency, spectral_method, theta_band)
@@ -2688,9 +2687,18 @@ track = struct( ...
     'stays_pag', false);
 end
 
+function gaussians = gaussian_params_for(fitted, n_channels)
+if ~isfield(fitted, 'gaussian_params') || ~iscell(fitted.gaussian_params) || ...
+        numel(fitted.gaussian_params) ~= n_channels
+    error(['Saved spectra have no per-channel gaussian_params, so theta ' ...
+        'and its harmonic cannot be removed from the mid-LPAG spectra.']);
+end
+gaussians = fitted.gaussian_params;
+end
+
 function tracks = tracks_from_session(channel_table, welch_spectrum, ...
         fourier_spectrum, frequency, delta_band, theta_band, gamma_band, ...
-        session_label, artifact_trend_sd)
+        session_label, artifact_trend_sd, welch_gaussians, fourier_gaussians)
 groups = probe_groups_by_depth(channel_table);
 tracks = repmat(empty_track(), 0, 1);
 for group_n = 1:numel(groups)
@@ -2718,8 +2726,10 @@ for group_n = 1:numel(groups)
         mean_in_band(fourier_rows, frequency, delta_band), ...
         mean_in_band(fourier_rows, frequency, theta_band), ...
         mean_in_band(fourier_rows, frequency, gamma_band)], artifact_trend_sd);
-    track.welch_spectrum = welch_rows;
-    track.fourier_spectrum = fourier_rows;
+    track.welch_spectrum = welch_rows - theta_harmonic_image( ...
+        welch_gaussians, this_group.channel_index, frequency, theta_band);
+    track.fourier_spectrum = fourier_rows - theta_harmonic_image( ...
+        fourier_gaussians, this_group.channel_index, frequency, theta_band);
     track.segment_color = segment_color;
     track.goes_sc = goes_sc;
     track.goes_dr = goes_dr;
@@ -3054,8 +3064,59 @@ for method_slot = 1:n_methods
     colorbar
 end
 sgtitle({spectrum_title(spectrum_field), ...
+    'Theta Gaussians and their first harmonic removed', ...
     'Mean of tracks in each class, centered on mid-LPAG'}, ...
     'Interpreter', 'none')
+end
+
+function image = theta_harmonic_image(gaussians, channel_index, frequency, theta_band)
+n_rows = numel(channel_index);
+image = zeros(n_rows, numel(frequency));
+for row_n = 1:n_rows
+    image(row_n, :) = reconstruct_theta_and_harmonic( ...
+        gaussians{channel_index(row_n)}, frequency, theta_band);
+end
+end
+
+function fit = reconstruct_theta_and_harmonic(gaussians, frequency, theta_band)
+% Theta peaks are Gaussians with a center inside theta_band. The first
+% harmonic is another Gaussian whose center lies near twice that theta
+% center. The window is the larger of 1 Hz and 10% of the doubled
+% frequency. Each peak is included once.
+fit = zeros(1, numel(frequency));
+if isempty(gaussians) || size(gaussians, 2) < 3 || size(gaussians, 1) < 1
+    return
+end
+center = gaussians(:, 1);
+peak_height = gaussians(:, 2);
+width = gaussians(:, 3);
+keep = isfinite(center) & isfinite(peak_height) & isfinite(width) & width ~= 0;
+center = center(keep);
+peak_height = peak_height(keep);
+width = width(keep);
+if isempty(center)
+    return
+end
+is_theta = center >= theta_band(1) & center <= theta_band(2);
+is_harmonic = false(size(center));
+theta_index = find(is_theta);
+for theta_n = theta_index(:).'
+    expected = 2 * center(theta_n);
+    tolerance = max(1, 0.1 * expected);
+    is_harmonic = is_harmonic | (abs(center - expected) <= tolerance);
+end
+is_harmonic(is_theta) = false;
+selected = is_theta | is_harmonic;
+fit = sum_gaussians(center(selected), peak_height(selected), ...
+    width(selected), frequency);
+end
+
+function fit = sum_gaussians(center, peak_height, width, frequency)
+fit = zeros(1, numel(frequency));
+for gaussian_n = 1:numel(center)
+    fit = fit + peak_height(gaussian_n) .* exp( ...
+        -(frequency - center(gaussian_n)).^2 ./ (2 * width(gaussian_n).^2));
+end
 end
 
 function [grid, mean_spectrum] = mean_aligned_spectrum(tracks, method_n, frequency)
