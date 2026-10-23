@@ -280,7 +280,7 @@ end
 end
 
 function session_handles = local_plot_session_profile_lines(stack_table)
-% Thin gray polyline per session/probe, with distinct start/end marks.
+% Thin gray polyline per session/probe. Same marker and color at both ends.
 session_handles = gobjects(0, 1);
 if isempty(stack_table) || height(stack_table) == 0
     return
@@ -288,8 +288,7 @@ end
 keys = local_group_key(stack_table);
 groups = unique(keys, 'stable');
 session_colors = generateDistinctColors(max(numel(groups), 1));
-start_markers = {'^', 'o', 's', 'd', 'p', 'h', '>', '<'};
-end_markers = {'v', 's', 'o', 'h', 'd', 'p', '<', '>'};
+markers = {'^', 'o', 's', 'd', 'p', 'h', '>', '<'};
 for g = 1:numel(groups)
     mask = strcmp(keys, groups{g}) & ...
         isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
@@ -303,15 +302,14 @@ for g = 1:numel(groups)
     plot(distance_um, phase_rad, '-', ...
         'Color', [0.82 0.82 0.82], 'LineWidth', 0.3, ...
         'HandleVisibility', 'off')
-    mark_n = mod(g - 1, numel(start_markers)) + 1;
+    mark_n = mod(g - 1, numel(markers)) + 1;
     color = session_colors(g, :);
-    disp_name = sprintf('%s  (%s start, %s end)', groups{g}, ...
-        start_markers{mark_n}, end_markers{mark_n});
-    h_start = scatter(distance_um(1), phase_rad(1), 70, color, start_markers{mark_n}, ...
+    marker = markers{mark_n};
+    h_start = scatter(distance_um(1), phase_rad(1), 70, color, marker, ...
         'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 0.6, ...
         'MarkerFaceAlpha', 0.95, 'HandleVisibility', 'off', ...
-        'DisplayName', disp_name);
-    scatter(distance_um(end), phase_rad(end), 70, color, end_markers{mark_n}, ...
+        'DisplayName', groups{g});
+    scatter(distance_um(end), phase_rad(end), 70, color, marker, ...
         'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 0.6, ...
         'MarkerFaceAlpha', 0.95, 'HandleVisibility', 'off')
     session_handles(end + 1, 1) = h_start; %#ok<AGROW>
@@ -348,7 +346,7 @@ leg_sess = legend(ax, session_handles, ...
     'Location', 'southoutside', 'Interpreter', 'none', ...
     'NumColumns', n_col, 'FontSize', 8);
 try
-    title(leg_sess, 'Session (start / end markers, same color)');
+    title(leg_sess, 'Session');
 catch
 end
 try
