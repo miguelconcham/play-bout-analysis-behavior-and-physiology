@@ -11,9 +11,12 @@
 % mid-LPAG channel, and that difference divided by the within-shank standard
 % deviation. Each band and spectral method then has its own scatter of that
 % z-scored power against distance to mid-LPAG, with transparent markers.
+% A separate figure compares the selected regions with repeated measures
+% on that same z-scored power: one bar per region, the shank means as
+% connected points, and sign-rank brackets with Bonferroni correction.
 % Figures use Fourier unless spectral_method is changed. The scatter,
-% confidence-interval, and region-distance figures draw regions_to_display,
-% which starts as LPAG, VLPAG, and SupCol. PAG sections,
+% confidence-interval, region-comparison, and region-distance figures
+% draw regions_to_display, which starts as LPAG, VLPAG, and SupCol. PAG sections,
 % an upper side that passes through SupCol, and a deeper side that passes
 % through DR are colored. Other territory stays gray. Those colored tracks
 % are one figure. The 95% confidence intervals for the three track classes
@@ -65,8 +68,9 @@ gamma_band = [30 45];
 %   spectral_method = {'Welch', 'Fourier'};
 spectral_method = {'Fourier'};
 
-% Regions drawn on the scatter, confidence-interval, and region-distance
-% figures. SupCol is the superior colliculus. Add 'DR' to include it:
+% Regions drawn on the scatter, confidence-interval, region-comparison,
+% and region-distance figures. SupCol is the superior colliculus. Add 'DR'
+% to include it:
 %   regions_to_display = {'LPAG', 'VLPAG', 'SupCol', 'DR'};
 regions_to_display = {'LPAG', 'VLPAG', 'SupCol'};
 
@@ -190,6 +194,8 @@ power_table = write_lpag_distance_table(power_pieces, saving_folder, spectrum_fi
 plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band, ...
+    spectral_method, regions_to_display);
+plot_region_power_comparison(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 if isempty(tracks)
     fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
@@ -1003,6 +1009,251 @@ end
 fprintf(['Region confidence intervals use a %g µm distance axis. ' ...
     'Each shank is interpolated on its own, and the interval is across shanks.\n'], ...
     distance_step_um);
+end
+
+function plot_region_power_comparison(power_table, ...
+        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
+if isempty(power_table)
+    return
+end
+[method_names, ~] = selected_spectral_methods(spectral_method);
+band_fields = { ...
+    'DeltaPower_zWithinShank', ...
+    'ThetaPower_zWithinShank', ...
+    'GammaPower_zWithinShank'};
+band_names = { ...
+    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
+    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
+    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+region_keys = region_keys_for_rows(power_table.Area);
+region_names = selected_regions(regions_to_display);
+region_names = region_names(~strcmp(region_names, 'Other'));
+region_names = unique(region_names, 'stable');
+if numel(region_names) < 2
+    fprintf(['Region comparison needs at least two regions in ' ...
+        'regions_to_display.\n']);
+    return
+end
+region_list = strjoin(cellfun(@region_display_name, region_names, ...
+    'UniformOutput', false), ', ');
+for method_n = 1:numel(method_names)
+    in_method = strcmp(power_table.Method, method_names{method_n});
+    band_values = cell(1, numel(band_fields));
+    for band_n = 1:numel(band_fields)
+        band_values{band_n} = region_mean_matrix(power_table, in_method, ...
+            region_keys, region_names, power_table.(band_fields{band_n}));
+    end
+    n_complete = cellfun(@(values) size(values, 1), band_values);
+    if ~any(n_complete >= 2)
+        fprintf(['%s region comparison needs at least two shanks that ' ...
+            'contain %s.\n'], method_names{method_n}, region_list);
+        continue
+    end
+    figure('Name', sprintf('%s | region comparison', method_names{method_n}), ...
+        'Color', 'w', 'Position', [110, 80, 1080, 480]);
+    for band_n = 1:numel(band_fields)
+        subplot(1, numel(band_fields), band_n)
+        if n_complete(band_n) < 2
+            axis off
+            text(0.5, 0.5, sprintf('%s\nfewer than 2 complete shanks', ...
+                band_names{band_n}), 'HorizontalAlignment', 'center');
+            fprintf(['%s | %s: fewer than 2 shanks contain %s.\n'], ...
+                method_names{method_n}, band_names{band_n}, region_list);
+            continue
+        end
+        draw_region_comparison(band_values{band_n}, region_names, ...
+            band_names{band_n}, method_names{method_n}, region_list);
+    end
+    sgtitle({sprintf('%s | repeated-measures region comparison', ...
+        method_names{method_n}), ...
+        ['Mean z-scored power in each region (0 = mid-LPAG). ' ...
+        'Lines join one shank. Brackets: sign-rank, Bonferroni.']}, ...
+        'FontSize', 10)
+end
+end
+
+function values = region_mean_matrix(power_table, row_mask, ...
+        region_keys, region_names, power)
+group_index = session_shank_groups(power_table, row_mask);
+n_groups = numel(group_index);
+n_regions = numel(region_names);
+values = nan(n_groups, n_regions);
+for group_n = 1:n_groups
+    rows = group_index{group_n};
+    these_keys = region_keys(rows);
+    for region_n = 1:n_regions
+        in_region = region_row_has(these_keys, region_names{region_n});
+        samples = power(rows);
+        samples = samples(in_region);
+        samples = samples(isfinite(samples));
+        if isempty(samples)
+            continue
+        end
+        values(group_n, region_n) = mean(samples);
+    end
+end
+values = values(all(isfinite(values), 2), :);
+end
+
+function draw_region_comparison(values, region_names, band_name, ...
+        method_name, region_list)
+n_shanks = size(values, 1);
+n_regions = size(values, 2);
+means = mean(values, 1);
+standard_error = std(values, 0, 1) ./ sqrt(n_shanks);
+[p_raw, p_adjusted, pairs] = paired_region_tests(values);
+p_omnibus = friedman_p(values);
+report_region_tests(method_name, band_name, region_list, region_names, ...
+    n_shanks, p_omnibus, pairs, p_raw, p_adjusted);
+
+hold on
+yline(0, ':k', 'HandleVisibility', 'off');
+jitter_span = 0.22;
+jitter = ((1:n_shanks).' - (n_shanks + 1) / 2) / n_shanks * jitter_span;
+for shank_n = 1:n_shanks
+    plot((1:n_regions) + jitter(shank_n), values(shank_n, :), '-', ...
+        'Color', [0.45 0.45 0.45], 'LineWidth', 0.7, ...
+        'HandleVisibility', 'off');
+end
+bar_half = 0.275;
+for region_n = 1:n_regions
+    fill(region_n + [-bar_half, bar_half, bar_half, -bar_half], ...
+        [0, 0, means(region_n), means(region_n)], ...
+        region_color(region_names{region_n}), ...
+        'FaceAlpha', 0.35, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+end
+errorbar(1:n_regions, means, standard_error, 'k', 'LineStyle', 'none', ...
+    'LineWidth', 1, 'CapSize', 8, 'HandleVisibility', 'off');
+for region_n = 1:n_regions
+    scatter(region_n + jitter, values(:, region_n), 28, ...
+        region_color(region_names{region_n}), 'filled', ...
+        'MarkerFaceAlpha', 0.9, 'MarkerEdgeColor', [0.15 0.15 0.15], ...
+        'MarkerEdgeAlpha', 0.45, 'HandleVisibility', 'off');
+end
+y_extent = [0; values(:); (means + standard_error).'; (means - standard_error).'];
+y_extent = y_extent(isfinite(y_extent));
+y_low = min(y_extent);
+y_high = max(y_extent);
+span = y_high - y_low;
+if ~isfinite(span) || span < 0.5
+    span = 0.5;
+end
+draw_significance_brackets(pairs, p_adjusted, y_high, span);
+margin = 0.08 * span;
+n_pairs = size(pairs, 1);
+ylim([y_low - margin, y_high + margin + n_pairs * (0.12 * span) + 0.12 * span]);
+xlim([0.4, n_regions + 0.6]);
+set(gca, 'XTick', 1:n_regions, 'XTickLabel', ...
+    cellfun(@region_display_name, region_names, 'UniformOutput', false));
+ylabel({'Mean power z-scored within shank', '0 = mid-LPAG channel'})
+if n_regions >= 3
+    if isfinite(p_omnibus)
+        omnibus_label = sprintf('Friedman p = %.3g', p_omnibus);
+    else
+        omnibus_label = 'Friedman p = n/a';
+    end
+    title(sprintf('%s | %s | n = %d shanks', band_name, omnibus_label, n_shanks))
+else
+    title(sprintf('%s | n = %d shanks', band_name, n_shanks))
+end
+box off
+end
+
+function [p_raw, p_adjusted, pairs] = paired_region_tests(values)
+n_regions = size(values, 2);
+pairs = nchoosek(1:n_regions, 2);
+n_pairs = size(pairs, 1);
+p_raw = nan(n_pairs, 1);
+for pair_n = 1:n_pairs
+    sample_a = values(:, pairs(pair_n, 1));
+    sample_b = values(:, pairs(pair_n, 2));
+    if all(sample_a - sample_b == 0)
+        p_raw(pair_n) = 1;
+        continue
+    end
+    try
+        p_raw(pair_n) = signrank(sample_a, sample_b);
+    catch
+        p_raw(pair_n) = NaN;
+    end
+end
+p_adjusted = min(p_raw * n_pairs, 1);
+end
+
+function p_value = friedman_p(values)
+p_value = NaN;
+if size(values, 2) < 3 || size(values, 1) < 2
+    return
+end
+try
+    p_value = friedman(values, 1, 'off');
+catch
+    p_value = NaN;
+end
+end
+
+function report_region_tests(method_name, band_name, region_list, ...
+        region_names, n_shanks, p_omnibus, pairs, p_raw, p_adjusted)
+fprintf('%s | %s: %d shanks contain %s.\n', ...
+    method_name, band_name, n_shanks, region_list);
+if numel(region_names) >= 3
+    if isfinite(p_omnibus)
+        fprintf('  Friedman p = %.4g\n', p_omnibus);
+    else
+        fprintf('  Friedman p = n/a\n');
+    end
+end
+for pair_n = 1:size(pairs, 1)
+    fprintf('  %s vs %s: sign-rank p = %s, Bonferroni p = %s %s\n', ...
+        region_display_name(region_names{pairs(pair_n, 1)}), ...
+        region_display_name(region_names{pairs(pair_n, 2)}), ...
+        format_p_value(p_raw(pair_n)), format_p_value(p_adjusted(pair_n)), ...
+        significance_label(p_adjusted(pair_n)));
+end
+end
+
+function label = format_p_value(p_value)
+if ~isfinite(p_value)
+    label = 'n/a';
+else
+    label = sprintf('%.4g', p_value);
+end
+end
+
+function draw_significance_brackets(pairs, p_adjusted, y_high, span)
+if isempty(pairs)
+    return
+end
+span_width = pairs(:, 2) - pairs(:, 1);
+[~, draw_order] = sort(span_width, 'ascend');
+step = 0.12 * span;
+tick = 0.025 * span;
+base = y_high + 0.08 * span;
+for draw_n = 1:numel(draw_order)
+    pair_n = draw_order(draw_n);
+    x1 = pairs(pair_n, 1);
+    x2 = pairs(pair_n, 2);
+    y = base + (draw_n - 1) * step;
+    plot([x1, x1, x2, x2], [y - tick, y, y, y - tick], 'k-', ...
+        'LineWidth', 1, 'HandleVisibility', 'off');
+    text((x1 + x2) / 2, y, significance_label(p_adjusted(pair_n)), ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
+        'FontSize', 9, 'Interpreter', 'none');
+end
+end
+
+function label = significance_label(p_value)
+if ~isfinite(p_value)
+    label = 'n/a';
+elseif p_value < 0.001
+    label = '***';
+elseif p_value < 0.01
+    label = '**';
+elseif p_value < 0.05
+    label = '*';
+else
+    label = 'n.s.';
+end
 end
 
 function grid = fine_distance_grid(distance_um, step_um)
