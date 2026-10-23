@@ -1,22 +1,22 @@
 function file_name = probe_periodic_spectra_filename(animal_name)
 % File name shared by the channel-wise partner-session spectra.
 %
+% A Neuropixels folder named "B1D1 1007 Dual" is saved as
+% play_session_probe_periodic_spectra_B1D1_1007_Dual.mat.
+% Spaces in the folder name become single underscores. The three parts are
+% the animal, the date, and Single, Dual, or Single2.
+%
 % file_name = probe_periodic_spectra_filename()
-%   Cell of dir patterns. The current stem is
-%   play_session_probe_periodic_spectra_. The earlier stem
-%   play_session_probe_periodic_aperiodic_spectra_ is included so files
-%   saved under either name are found without editing the scripts.
+%   Dir pattern for every recording saved under this stem.
 % file_name = probe_periodic_spectra_filename(animal_name)
-%   Name used when saving one recording. Separators in animal_name become
-%   underscores.
+%   File name for one recording folder.
 
-current_stem = 'play_session_probe_periodic_spectra_';
+stem = 'play_session_probe_periodic_spectra_';
 if nargin < 1 || isempty(animal_name)
-    file_name = { ...
-        [current_stem, '*.mat'], ...
-        'play_session_probe_periodic_aperiodic_spectra_*.mat'};
+    file_name = {[stem, '*']};
     return
 end
-safe_name = regexprep(char(animal_name), '[^\w\-]+', '_');
-file_name = [current_stem, safe_name, '.mat'];
+session_name = strtrim(char(animal_name));
+session_name = regexprep(session_name, '\s+', '_');
+file_name = [stem, session_name, '.mat'];
 end

@@ -61,14 +61,19 @@ gamma_band = [30 45];
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
 file_list = dir(fullfile(saving_folder, file_patterns{1}));
-for pattern_n = 2:numel(file_patterns)
-    extra_files = dir(fullfile(saving_folder, file_patterns{pattern_n}));
-    if ~isempty(extra_files)
-        file_list = [file_list; extra_files]; %#ok<AGROW>
+if ~isempty(file_list)
+    keep = false(numel(file_list), 1);
+    for file_n = 1:numel(file_list)
+        [~, ~, extension] = fileparts(file_list(file_n).name);
+        keep(file_n) = ~file_list(file_n).isdir && ...
+            (isempty(extension) || strcmpi(extension, '.mat'));
     end
+    file_list = file_list(keep);
 end
 if isempty(file_list)
-    error('No channel-wise spectra found in %s.', saving_folder);
+    error(['No channel-wise spectra found in %s. Expected names such as ' ...
+        'play_session_probe_periodic_spectra_B1D1_1007_Dual.mat.'], ...
+        saving_folder);
 end
 [~, order] = sort({file_list.name});
 file_list = file_list(order);

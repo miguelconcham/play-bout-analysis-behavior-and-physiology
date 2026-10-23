@@ -4,7 +4,9 @@
 % Fourier spectra for every mapped channel and fits FOOOF.
 %
 % Frequency bands are not averaged here. Each recording is saved on its
-% own so a long run keeps completed animals.
+% own so a long run keeps completed animals. A folder named
+% "B1D1 1007 Dual" is written as
+% play_session_probe_periodic_spectra_B1D1_1007_Dual.mat.
 
 %% Paths and animal selection
 npx_Raw_Data = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
