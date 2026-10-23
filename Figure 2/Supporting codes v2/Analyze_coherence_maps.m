@@ -19,11 +19,11 @@
 % interpolated traces.
 %
 % Plot 3–4 — scatter and session-interpolated 95% CI for probes without
-% DR or OcNuc. Original points are faint black; interpolated values are
-% colored.
+% DR, OcNuc, or isRt. Original points are faint black; interpolated values
+% are colored. Labels isRT and isRt are the same area.
 %
-% Plot 5 — same scatter + CI for probes that have DR or OcNuc (SupCol
-% often inverted).
+% Plot 5 — same scatter + CI for probes that have DR, OcNuc, or isRt
+% (SupCol often inverted).
 
 this_file = mfilename('fullpath');
 if isempty(this_file)
@@ -153,42 +153,42 @@ end
 %% Interpolate per-session outliers; keep the original table for faint overlays
 stack_table = local_interpolate_session_trend_outliers(stack_table_raw);
 
-%% Split probes that have DR or OcNuc (often inverted SupCol) from the rest
+%% Split probes that have DR, OcNuc, or isRt (often inverted SupCol)
 % A row belongs to the excluded set if that session+probe has at least one
-% DR or OcNuc channel. Other probes from the same folder stay in the main
-% set.
-areas_in_color = {'DR', 'OcNuc', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
-exclude_areas = {'DR', 'OcNuc'};
+% DR, OcNuc, or isRt channel. Other probes from the same folder stay in the
+% main set. isRT and isRt are the same label.
+areas_in_color = {'DR', 'OcNuc', 'isRt', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
+exclude_areas = {'DR', 'OcNuc', 'isRt'};
 has_excluded = local_group_has_areas(stack_table, exclude_areas);
 has_excluded_raw = local_group_has_areas(stack_table_raw, exclude_areas);
 excluded_groups = unique(local_group_key(stack_table(has_excluded, :)), 'stable');
 kept_groups = unique(local_group_key(stack_table(~has_excluded, :)), 'stable');
-fprintf('%d probes with DR/OcNuc, %d without\n', ...
+fprintf('%d probes with DR/OcNuc/isRt, %d without\n', ...
     numel(excluded_groups), numel(kept_groups));
-disp('Probes in the DR/OcNuc figures:')
+disp('Probes in the DR/OcNuc/isRt figures:')
 disp(excluded_groups)
-disp('Probes in the no-DR/OcNuc figures:')
+disp('Probes in the no-DR/OcNuc/isRt figures:')
 disp(kept_groups)
 
 local_plot_colored_scatter(stack_table(~has_excluded, :), areas_in_color, ...
-    'Delta phase vs distance by area (no DR/OcNuc)', ...
+    'Delta phase vs distance by area (no DR/OcNuc/isRt)', ...
     fullfile(figure_folder, 'all_points_by_area.png'));
 local_plot_area_scatter_ci(stack_table(~has_excluded, :), ...
     stack_table_raw(~has_excluded_raw, :), areas_in_color, ...
-    'Delta phase vs distance, 95% CI by area (no DR/OcNuc)', ...
+    'Delta phase vs distance, 95% CI by area (no DR/OcNuc/isRt)', ...
     fullfile(figure_folder, 'area_interpolated_ci.png'));
 
 if any(has_excluded)
     local_plot_colored_scatter(stack_table(has_excluded, :), areas_in_color, ...
-        'Delta phase vs distance by area (DR/OcNuc probes)', ...
+        'Delta phase vs distance by area (DR/OcNuc/isRt probes)', ...
         fullfile(figure_folder, 'all_points_by_area_dr_sessions.png'));
     local_plot_area_scatter_ci(stack_table(has_excluded, :), ...
         stack_table_raw(has_excluded_raw, :), areas_in_color, ...
-        'Delta phase vs distance, 95% CI by area (DR/OcNuc probes)', ...
+        'Delta phase vs distance, 95% CI by area (DR/OcNuc/isRt probes)', ...
         fullfile(figure_folder, 'area_interpolated_ci_dr_sessions.png'));
 else
     warning('Analyze_coherence_maps:NoDRSessions', ...
-        'No probes with DR or OcNuc channels; skipped those scatter/CI figures.');
+        'No probes with DR, OcNuc, or isRt channels; skipped those scatter/CI figures.');
 end
 
 %% -------------------------------------------------------------------------
@@ -206,6 +206,23 @@ else
 end
 if isstring(area)
     area = cellstr(area);
+end
+for k = 1:numel(area)
+    area{k} = local_canonical_area(area{k});
+end
+end
+
+function label = local_canonical_area(label)
+if iscell(label)
+    if isempty(label)
+        label = '';
+        return
+    end
+    label = label{1};
+end
+label = strtrim(char(label));
+if strcmpi(label, 'isrt')
+    label = 'isRt';
 end
 end
 
@@ -503,8 +520,8 @@ for trace_n = 1:numel(these)
             continue
         end
         key = round(distance / bin_um) * bin_um;
-        pair = {these(trace_n).border_from_area{border_n}, ...
-            these(trace_n).border_to_area{border_n}};
+        pair = {local_canonical_area(these(trace_n).border_from_area{border_n}), ...
+            local_canonical_area(these(trace_n).border_to_area{border_n})};
         if isKey(buckets, key)
             bucket_pairs = buckets(key);
             bucket_pairs{end + 1} = pair; %#ok<AGROW>
