@@ -15,6 +15,9 @@
 %
 % Plot 2 — one figure per animal, sessions overlaid, with vertical lines at
 % region borders (same x/y as plot 1).
+%
+% Plot 3 — scatter of every stacked point, colored by area, with marker
+% face blending.
 
 this_file = mfilename('fullpath');
 if isempty(this_file)
@@ -121,6 +124,36 @@ for animal_n = 1:numel(animal_ids)
     file_stem = regexprep(animal_id, '[^A-Za-z0-9]+', '_');
     local_save_figure(animal_fig, fullfile(figure_folder, [file_stem, '.png']));
 end
+
+%% Plot 3 — all stacked points, colored by area
+scatter_fig = figure('Name', 'Delta phase vs distance by area', ...
+    'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
+hold on
+area_labels = stack_table.area;
+for k = 1:numel(area_labels)
+    if isempty(area_labels{k})
+        area_labels{k} = '(unlabeled)';
+    end
+end
+area_names = unique(area_labels, 'stable');
+area_colors = generateDistinctColors(numel(area_names));
+for area_n = 1:numel(area_names)
+    mask = strcmp(area_labels, area_names{area_n}) & ...
+        isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad);
+    scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
+        22, area_colors(area_n, :), 'filled', ...
+        'MarkerFaceAlpha', 0.28, 'MarkerEdgeAlpha', 0.12, ...
+        'DisplayName', area_names{area_n})
+end
+xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
+yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
+xlabel('Distance from LPAG center (\mum)')
+ylabel('Phase difference vs LPAG center (rad)')
+title('Delta phase vs distance, colored by area')
+legend('Location', 'eastoutside', 'Interpreter', 'none')
+local_set_radian_ticks(gca)
+box off
+local_save_figure(scatter_fig, fullfile(figure_folder, 'all_points_by_area.png'));
 
 %% -------------------------------------------------------------------------
 function [distance_um, phase_rad, area] = local_sorted_trace(trace)
