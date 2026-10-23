@@ -21,6 +21,39 @@ assert(isequal(options.delta_freq, [1 5]), 'The delta band is not 1-5 Hz.');
 assert(options.delta_filter_order == 2000, 'The delta FIR order is not 2000.');
 assert(isequal(options.histogram_ms, [50 1000]), ...
     'The cycle-period axis is not 50-1000 ms.');
+assert(strcmp(options.cycle_threshold_preset, 'motor_beta'), ...
+    'The default cycle preset is not the published motor-cortex set.');
+assert(options.amp_consistency_threshold == 0.3, ...
+    'Motor-cortex amplitude consistency is not 0.3.');
+assert(options.period_consistency_threshold == 0.5, ...
+    'Motor-cortex period consistency is not 0.5.');
+assert(options.monotonicity_threshold == 0.6, ...
+    'Motor-cortex monotonicity is not 0.6.');
+assert(options.cycle_amplitude_percentile == 20, ...
+    'The motor-cortex amplitude gate is not the 20th percentile.');
+assert(options.min_consecutive_cycles == 3, ...
+    'The published minimum is not 3 consecutive cycles.');
+assert(options.cycle_lowpass_hz == 20, ...
+    'The cycle low-pass is not 4 times the 5 Hz upper edge.');
+assert(options.cycle_lowpass_order == round(0.1 * options.sampling_rate), ...
+    'The cycle low-pass is not the published 100 ms duration.');
+
+simulation = delta_episode_options(struct('cycle_threshold_preset', 'simulation'));
+assert(simulation.amp_consistency_threshold == 0.6 && ...
+    simulation.period_consistency_threshold == 0.6 && ...
+    simulation.monotonicity_threshold == 0.9, ...
+    'The simulation preset is not 0.6, 0.6, 0.9.');
+assert(isnan(simulation.cycle_amplitude_percentile), ...
+    'The simulation preset should not apply an amplitude percentile.');
+overridden = delta_episode_options(struct( ...
+    'cycle_threshold_preset', 'simulation', ...
+    'amp_consistency_threshold', 0.25));
+assert(overridden.amp_consistency_threshold == 0.25 && ...
+    overridden.period_consistency_threshold == 0.6, ...
+    'An explicit consistency threshold was replaced by the preset.');
+wide = delta_episode_options(struct('delta_freq', [2 8], 'sampling_rate', 1000));
+assert(wide.cycle_lowpass_hz == 32 && wide.cycle_lowpass_order == 100, ...
+    'The low-pass did not follow 4x the upper cutoff and 100 ms.');
 
 failed = false;
 try
@@ -34,6 +67,8 @@ test_channel_selection();
 test_regular_episode();
 test_gap_and_rejection();
 test_summary();
+test_cycle_shape();
+test_cycle_boundaries_and_consistency();
 if exist('designfilt', 'file') == 2 || exist('designfilt', 'builtin') == 5
     test_filter_on_a_sine([]);
 elseif exist('fir1', 'file') == 2
@@ -218,6 +253,140 @@ assert(abs(detected.episodes(1).median_cycle_period_s - (1 / 3)) < 0.01, ...
     'The filtered sine median period was not near 1/3 s.');
 assert(max(abs(detected.lfp(1:40))) > 10, ...
     'The minimally processed trace no longer shows the transient.');
+assert(detected.episodes(1).n_trough_cycles >= 10, ...
+    'The filtered sine did not yield trough-to-trough cycles.');
+assert(abs(detected.episodes(1).median_trough_period_s - (1 / 3)) < 0.02, ...
+    'The trough-to-trough period was not near 1/3 s.');
+end
+
+function test_cycle_shape()
+sampling_rate = 250;
+n_nominal_cycles = 7;
+[broad, n_samples] = asymmetric_train(n_nominal_cycles, sampling_rate);
+episodes = struct('start_sample', 1, 'end_sample', n_samples);
+[episodes, cycles] = characterize_cycle_features(broad, broad, ...
+    sampling_rate, episodes, cycle_options(struct()));
+
+assert(numel(cycles) == 5, ...
+    'A 7-cycle train did not leave 5 cycles with a zero-crossing on both sides.');
+assert(abs(episodes.median_trough_period_s - 0.4) < 1e-9, ...
+    'The trough-to-trough period was not 0.4 s.');
+assert(abs(episodes.median_rdsym - 0.2) < 1e-9, ...
+    'Rise-decay symmetry was not the 20-sample rise over a 100-sample period.');
+assert(abs(episodes.median_cycle_amplitude - 4) < 1e-9, ...
+    'Cycle amplitude was not the mean of the two flank voltages.');
+assert(abs(episodes.median_ptsym - 0.49) < 1e-9, ...
+    'Peak-trough symmetry was not peak/(peak + previous trough).');
+assert(episodes.median_monotonicity == 1, ...
+    'A straight rise and decay was not fully monotonic.');
+assert(episodes.trough_period_cv == 0, ...
+    'Identical periods did not have CV 0.');
+assert(episodes.n_sustained_cycles == 3 && episodes.has_sustained_sequence, ...
+    'Three interior cycles were not a sustained sequence.');
+assert(~cycles(1).in_sustained_sequence && ~cycles(end).in_sustained_sequence, ...
+    'The first or last cycle was marked sustained without a neighbor.');
+assert(abs(cycles(3).frequency_hz - 2.5) < 1e-9, ...
+    'Cycle frequency was not 1/period.');
+
+shifted = broad;
+for cycle_n = 0:(n_nominal_cycles - 1)
+    shifted(1 + 100 * cycle_n + 40) = 3;
+end
+[shifted_episodes, shifted_cycles] = characterize_cycle_features( ...
+    shifted, broad, sampling_rate, episodes, cycle_options(struct()));
+assert(all(abs([shifted_cycles.rdsym] - 0.4) < 1e-9), ...
+    'The peak was not taken from the low-pass signal.');
+assert(abs(shifted_episodes.median_cycle_amplitude - 5) < 1e-9, ...
+    'The shifted peak did not set the flank amplitude.');
+end
+
+function test_cycle_boundaries_and_consistency()
+sampling_rate = 250;
+n_nominal_cycles = 7;
+[broad, n_samples] = asymmetric_train(n_nominal_cycles, sampling_rate);
+partial = struct('start_sample', 150, 'end_sample', 350);
+[partial_episodes, partial_cycles] = characterize_cycle_features( ...
+    broad, broad, sampling_rate, partial, cycle_options(struct()));
+assert(partial_episodes.n_trough_cycles == 1 && numel(partial_cycles) == 1, ...
+    'A cycle cut by the episode boundary was kept.');
+assert(~partial_episodes.has_sustained_sequence, ...
+    'One qualifying cycle was called a sustained sequence.');
+
+damaged = broad;
+% One decay step reversed on a cycle that would otherwise be interior.
+damaged(331) = damaged(330) + 0.2;
+damaged_options = cycle_options(struct('monotonicity_threshold', 0.995));
+[damaged_episodes, damaged_cycles] = characterize_cycle_features( ...
+    damaged, broad, sampling_rate, ...
+    struct('start_sample', 1, 'end_sample', n_samples), damaged_options);
+damaged_cycle = damaged_cycles([damaged_cycles.peak_sample] > 320 & ...
+    [damaged_cycles.peak_sample] < 360);
+assert(numel(damaged_cycle) == 1, 'The damaged cycle was not found.');
+assert(abs(damaged_cycle.monotonicity - 0.99) < 1e-9, ...
+    'Monotonicity was not the fraction of steps across both flanks.');
+assert(~damaged_cycle.meets_monotonicity, ...
+    'A 0.99 monotonicity passed a 0.995 threshold.');
+assert(~damaged_episodes.has_sustained_sequence, ...
+    'Breaking one interior cycle still left three consecutive cycles.');
+
+long = asymmetric_train_with_gap(sampling_rate);
+[long_episodes, long_cycles] = characterize_cycle_features( ...
+    long, long, sampling_rate, ...
+    struct('start_sample', 1, 'end_sample', numel(long)), cycle_options(struct()));
+long_cycle = long_cycles([long_cycles.period_s] > 0.6);
+assert(~isempty(long_cycle), 'The long cycle was not measured.');
+assert(long_cycle(1).period_consistency < 0.5, ...
+    'A neighbor twice as long still met period consistency 0.5.');
+assert(long_episodes.trough_period_cv > 0, ...
+    'Unequal periods did not produce a period CV.');
+assert(~long_episodes.has_sustained_sequence, ...
+    'Failed period consistency was still labeled a sustained sequence.');
+end
+
+function [broad, n_samples] = asymmetric_train(n_nominal_cycles, sampling_rate)
+% Piecewise-linear 2.5 Hz cycles at sampling_rate 250: 20 samples up,
+% 80 samples down, from -2 to +2. sampling_rate is accepted so the
+% caller and the signal stay tied together; the geometry is in samples.
+if sampling_rate ~= 250
+    error('This fixture is defined at 250 Hz.');
+end
+n_samples = 1 + 100 * n_nominal_cycles;
+broad = zeros(1, n_samples);
+for cycle_n = 0:(n_nominal_cycles - 1)
+    trough = 1 + 100 * cycle_n;
+    peak = trough + 20;
+    next_trough = trough + 100;
+    broad(trough:peak) = linspace(-2, 2, peak - trough + 1);
+    broad(peak:next_trough) = linspace(2, -2, next_trough - peak + 1);
+end
+end
+
+function broad = asymmetric_train_with_gap(sampling_rate)
+if sampling_rate ~= 250
+    error('This fixture is defined at 250 Hz.');
+end
+% Five 100-sample cycles, then one 250-sample cycle, then two more.
+lengths = [100 100 100 100 100 250 100 100];
+n_samples = 1 + sum(lengths);
+broad = zeros(1, n_samples);
+cursor = 1;
+for length_n = 1:numel(lengths)
+    span = lengths(length_n);
+    peak = cursor + round(0.2 * span);
+    next_trough = cursor + span;
+    broad(cursor:peak) = linspace(-2, 2, peak - cursor + 1);
+    broad(peak:next_trough) = linspace(2, -2, next_trough - peak + 1);
+    cursor = next_trough;
+end
+end
+
+function options = cycle_options(overrides)
+defaults = struct('edge_margin_seconds', 0);
+names = fieldnames(overrides);
+for name_n = 1:numel(names)
+    defaults.(names{name_n}) = overrides.(names{name_n});
+end
+options = delta_episode_options(defaults);
 end
 
 function options = detection_options(overrides)

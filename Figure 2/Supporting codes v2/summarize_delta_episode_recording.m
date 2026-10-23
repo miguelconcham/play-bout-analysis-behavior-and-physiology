@@ -5,6 +5,10 @@ function summary = summarize_delta_episode_recording(recording)
 % summarized across episodes by their median. Variability of an episode
 % is the interquartile range of its peak-to-peak periods. Pooled cycle
 % statistics use every peak-to-peak interval from the kept episodes.
+%
+% Trough-to-trough fields are the Cole & Voytek cycle measures. They are
+% left NaN when an older episode struct does not carry them. Period CV,
+% amplitude CV, and symmetry are continuous summaries, not cutoffs.
 
 episodes = recording.episodes;
 if isempty(recording.intervals)
@@ -45,8 +49,25 @@ summary.pooled_n_cycles = 0;
 summary.pooled_median_cycle_period_s = NaN;
 summary.pooled_fraction_cycles_in_delta_band = NaN;
 summary.episode_time_fraction = episode_fraction(0, analyzed_seconds);
+summary.median_n_trough_cycles = NaN;
+summary.median_trough_period_s = NaN;
+summary.median_trough_period_cv = NaN;
+summary.median_cycle_amplitude = NaN;
+summary.median_cycle_amplitude_cv = NaN;
+summary.median_rdsym = NaN;
+summary.median_ptsym = NaN;
+summary.median_monotonicity = NaN;
+summary.median_amplitude_consistency = NaN;
+summary.median_period_consistency = NaN;
+summary.n_episodes_with_sustained_sequence = NaN;
+summary.pooled_n_trough_cycles = NaN;
+summary.pooled_n_sustained_cycles = NaN;
+summary.pooled_median_trough_period_s = NaN;
+summary.pooled_median_rdsym = NaN;
+summary.pooled_median_ptsym = NaN;
 
 if n_episodes == 0
+    summary = add_trough_cycle_summary(summary, recording);
     return
 end
 
@@ -73,14 +94,47 @@ for episode_n = 1:n_episodes
     periods = [periods; episodes(episode_n).cycle_periods_s(:)]; %#ok<AGROW>
 end
 summary.pooled_n_cycles = numel(periods);
-if isempty(periods)
+if ~isempty(periods)
+    summary.pooled_median_cycle_period_s = median(periods);
+    band = [1 / recording.parameters.delta_freq(2), ...
+        1 / recording.parameters.delta_freq(1)];
+    summary.pooled_fraction_cycles_in_delta_band = ...
+        mean(periods >= band(1) & periods <= band(2));
+end
+summary = add_trough_cycle_summary(summary, recording);
+end
+
+function summary = add_trough_cycle_summary(summary, recording)
+episodes = recording.episodes;
+if ~isempty(episodes) && isfield(episodes, 'n_trough_cycles')
+    summary.median_n_trough_cycles = median([episodes.n_trough_cycles]');
+    summary.median_trough_period_s = median_finite([episodes.median_trough_period_s]');
+    summary.median_trough_period_cv = median_finite([episodes.trough_period_cv]');
+    summary.median_cycle_amplitude = median_finite([episodes.median_cycle_amplitude]');
+    summary.median_cycle_amplitude_cv = median_finite([episodes.cycle_amplitude_cv]');
+    summary.median_rdsym = median_finite([episodes.median_rdsym]');
+    summary.median_ptsym = median_finite([episodes.median_ptsym]');
+    summary.median_monotonicity = median_finite([episodes.median_monotonicity]');
+    summary.median_amplitude_consistency = ...
+        median_finite([episodes.median_amplitude_consistency]');
+    summary.median_period_consistency = ...
+        median_finite([episodes.median_period_consistency]');
+    summary.n_episodes_with_sustained_sequence = ...
+        nnz([episodes.has_sustained_sequence]);
+end
+if ~isfield(recording, 'cycles')
     return
 end
-summary.pooled_median_cycle_period_s = median(periods);
-band = [1 / recording.parameters.delta_freq(2), ...
-    1 / recording.parameters.delta_freq(1)];
-summary.pooled_fraction_cycles_in_delta_band = ...
-    mean(periods >= band(1) & periods <= band(2));
+cycles = recording.cycles;
+summary.pooled_n_trough_cycles = numel(cycles);
+if isempty(cycles)
+    summary.pooled_n_sustained_cycles = 0;
+    return
+end
+summary.pooled_n_sustained_cycles = nnz([cycles.in_sustained_sequence]);
+summary.pooled_median_trough_period_s = median([cycles.period_s]');
+summary.pooled_median_rdsym = median_finite([cycles.rdsym]');
+summary.pooled_median_ptsym = median_finite([cycles.ptsym]');
 end
 
 function value = median_finite(x)

@@ -9,7 +9,8 @@ function detected = characterize_delta_episodes(filtered, amplitude, sampling_ra
 % amplitude threshold. Positive peaks of the filtered signal inside that
 % run give peak-to-peak cycle durations. A run is kept when it has at
 % least min_cycles peak-to-peak intervals and is at least
-% min_duration_seconds long.
+% min_duration_seconds long. Trough-to-trough shape is added afterwards
+% by characterize_cycle_features; the fields below stay peak-to-peak.
 %
 % detected.episodes uses sample indices into this interval. The caller
 % maps them onto recording time.

@@ -6,6 +6,8 @@ function recordings = GENERATE_DELTA_OSCILLATORY_EPISODES(current_dir, options)
 % LFP_PAG. Partner-session blocks (Session_structure / Partners session)
 % are filtered with the existing 1-5 Hz Hamming FIR. Candidate episodes
 % are elevated Hilbert-amplitude runs with successive positive peaks.
+% Each kept episode is then split into trough-to-trough cycles on a
+% low-pass of the minimally processed LFP (Cole & Voytek 2019).
 %
 % Set options.interval_mode to 'full_recording' to use the whole file
 % instead of the partner-session rows. This does not cut play bouts.
@@ -19,6 +21,9 @@ end
 options = delta_episode_options(options);
 if isempty(options.filter_coefficients)
     options.filter_coefficients = delta_bandpass_coefficients(options);
+end
+if isempty(options.cycle_lowpass_coefficients)
+    options.cycle_lowpass_coefficients = delta_lowpass_coefficients(options);
 end
 
 [animal_code, table_name] = recording_names(current_dir);
@@ -85,6 +90,7 @@ recording.parameters = options;
 n_intervals = numel(sample_intervals);
 intervals = repmat(empty_interval(), n_intervals, 1);
 episodes = empty_saved_episodes();
+cycles = empty_saved_cycles();
 best_example = [];
 
 min_filter_samples = 3 * (numel(options.filter_coefficients) - 1);
@@ -127,14 +133,23 @@ for interval_n = 1:n_intervals
 
     saved = globalize_episodes(detected.episodes, intervals(interval_n), sampling_rate);
     saved = saved(:);
+    episode_offset = numel(episodes);
+    new_cycles = globalize_cycles(detected.cycles, intervals(interval_n), ...
+        episode_offset, sampling_rate);
+    new_cycles = new_cycles(:);
     if isempty(episodes)
         episodes = saved;
     elseif ~isempty(saved)
         episodes = [episodes(:); saved]; %#ok<AGROW>
     end
+    if isempty(cycles)
+        cycles = new_cycles;
+    elseif ~isempty(new_cycles)
+        cycles = [cycles(:); new_cycles]; %#ok<AGROW>
+    end
 
     snippet = make_snippet(detected, intervals(interval_n), sampling_rate, ...
-        options, best_saved_episode(saved));
+        options, best_saved_episode(saved), new_cycles);
     if isempty(best_example) || snippet.score > best_example.score
         best_example = snippet;
     end
@@ -142,6 +157,7 @@ end
 
 recording.intervals = intervals;
 recording.episodes = episodes;
+recording.cycles = cycles;
 if isempty(best_example)
     best_example = empty_example();
 end
@@ -150,7 +166,8 @@ recording.example = best_example;
 recording.summary = summarize_delta_episode_recording(recording);
 end
 
-function snippet = make_snippet(detected, interval, sampling_rate, options, episode)
+function snippet = make_snippet(detected, interval, sampling_rate, options, ...
+        episode, cycles)
 n_samples = numel(detected.lfp);
 if isempty(episode)
     local1 = min(n_samples, detected.edge_margin_samples + 1);
@@ -162,10 +179,16 @@ if isempty(episode)
     has_episode = false;
     episode_range = zeros(0, 2);
     peak_index = zeros(0, 1);
+    trough_index = zeros(0, 1);
+    cycle_peak_index = zeros(0, 1);
     duration_s = NaN;
     n_cycles = 0;
     median_period = NaN;
     period_iqr = NaN;
+    n_trough_cycles = 0;
+    median_trough_period = NaN;
+    trough_period_cv = NaN;
+    has_sustained_sequence = false;
     score = -inf;
 else
     pad = round(options.example_pad_seconds * sampling_rate);
@@ -184,10 +207,16 @@ else
         min(snippet_length, episode.end_sample - view1 + 1)];
     in_view = episode.peak_samples >= view1 & episode.peak_samples <= view2;
     peak_index = episode.peak_samples(in_view) - view1 + 1;
+    [trough_index, cycle_peak_index] = snippet_cycle_marks( ...
+        cycles, episode, view1, view2);
     duration_s = episode.duration_s;
     n_cycles = episode.n_cycles;
     median_period = episode.median_cycle_period_s;
     period_iqr = episode.cycle_period_iqr_s;
+    n_trough_cycles = episode.n_trough_cycles;
+    median_trough_period = episode.median_trough_period_s;
+    trough_period_cv = episode.trough_period_cv;
+    has_sustained_sequence = episode.has_sustained_sequence;
     score = n_cycles + 1e-3 * duration_s;
 end
 
@@ -202,11 +231,38 @@ snippet.amplitude = single(detected.amplitude(local1:local2));
 snippet.threshold = detected.threshold;
 snippet.episode_sample_range = episode_range;
 snippet.peak_index = peak_index(:);
+snippet.trough_index = trough_index(:);
+snippet.cycle_peak_index = cycle_peak_index(:);
 snippet.episode_duration_s = duration_s;
 snippet.n_cycles = n_cycles;
 snippet.median_cycle_period_s = median_period;
 snippet.cycle_period_iqr_s = period_iqr;
+snippet.n_trough_cycles = n_trough_cycles;
+snippet.median_trough_period_s = median_trough_period;
+snippet.trough_period_cv = trough_period_cv;
+snippet.has_sustained_sequence = has_sustained_sequence;
 snippet.score = score;
+end
+
+function [trough_index, cycle_peak_index] = snippet_cycle_marks( ...
+        cycles, episode, view1, view2)
+trough_index = zeros(0, 1);
+cycle_peak_index = zeros(0, 1);
+if isempty(cycles) || isempty(episode)
+    return
+end
+inside = ([cycles.start_sample] >= episode.start_sample & ...
+    [cycles.end_sample] <= episode.end_sample).';
+selected = cycles(inside);
+if isempty(selected)
+    return
+end
+boundaries = unique([selected.start_sample, selected.end_sample]);
+peaks = [selected.peak_sample];
+boundaries = boundaries(boundaries >= view1 & boundaries <= view2);
+peaks = peaks(peaks >= view1 & peaks <= view2);
+trough_index = boundaries(:) - view1 + 1;
+cycle_peak_index = peaks(:) - view1 + 1;
 end
 
 function episode = best_saved_episode(episodes)
@@ -240,8 +296,77 @@ for episode_n = 1:numel(local_episodes)
     saved(episode_n).cycle_period_std_s = local.cycle_period_std_s;
     saved(episode_n).cycle_period_cv = local.cycle_period_cv;
     saved(episode_n).fraction_cycles_in_delta_band = local.fraction_cycles_in_delta_band;
+    saved(episode_n).n_trough_cycles = local.n_trough_cycles;
+    saved(episode_n).trough_periods_s = local.trough_periods_s(:);
+    saved(episode_n).median_trough_period_s = local.median_trough_period_s;
+    saved(episode_n).trough_period_iqr_s = local.trough_period_iqr_s;
+    saved(episode_n).trough_period_cv = local.trough_period_cv;
+    saved(episode_n).median_trough_frequency_hz = local.median_trough_frequency_hz;
+    saved(episode_n).median_cycle_amplitude = local.median_cycle_amplitude;
+    saved(episode_n).cycle_amplitude_cv = local.cycle_amplitude_cv;
+    saved(episode_n).cycle_amplitude_iqr = local.cycle_amplitude_iqr;
+    saved(episode_n).median_rdsym = local.median_rdsym;
+    saved(episode_n).median_ptsym = local.median_ptsym;
+    saved(episode_n).median_monotonicity = local.median_monotonicity;
+    saved(episode_n).median_amplitude_consistency = local.median_amplitude_consistency;
+    saved(episode_n).median_period_consistency = local.median_period_consistency;
+    saved(episode_n).n_cycles_meeting_criteria = local.n_cycles_meeting_criteria;
+    saved(episode_n).n_sustained_cycles = local.n_sustained_cycles;
+    saved(episode_n).n_sustained_runs = local.n_sustained_runs;
+    saved(episode_n).has_sustained_sequence = local.has_sustained_sequence;
+    saved(episode_n).amplitude_percentile_cutoff = local.amplitude_percentile_cutoff;
 end
 saved = saved(:);
+end
+
+function saved = globalize_cycles(local_cycles, interval, episode_offset, sampling_rate)
+saved = empty_saved_cycles();
+if isempty(local_cycles)
+    return
+end
+for cycle_n = 1:numel(local_cycles)
+    local = local_cycles(cycle_n);
+    saved(cycle_n).interval_index = interval.index; %#ok<AGROW>
+    saved(cycle_n).episode_index = local.episode_index + episode_offset;
+    saved(cycle_n).start_sample = shift_sample(local.start_sample, interval);
+    saved(cycle_n).end_sample = shift_sample(local.end_sample, interval);
+    saved(cycle_n).peak_sample = shift_sample(local.peak_sample, interval);
+    saved(cycle_n).rise_midpoint_sample = shift_sample(local.rise_midpoint_sample, interval);
+    saved(cycle_n).decay_midpoint_sample = shift_sample(local.decay_midpoint_sample, interval);
+    saved(cycle_n).previous_decay_midpoint_sample = ...
+        shift_sample(local.previous_decay_midpoint_sample, interval);
+    saved(cycle_n).start_time_s = saved(cycle_n).start_sample / sampling_rate;
+    saved(cycle_n).end_time_s = saved(cycle_n).end_sample / sampling_rate;
+    saved(cycle_n).peak_time_s = saved(cycle_n).peak_sample / sampling_rate;
+    saved(cycle_n).period_s = local.period_s;
+    saved(cycle_n).frequency_hz = local.frequency_hz;
+    saved(cycle_n).rise_duration_s = local.rise_duration_s;
+    saved(cycle_n).decay_duration_s = local.decay_duration_s;
+    saved(cycle_n).rise_amplitude = local.rise_amplitude;
+    saved(cycle_n).decay_amplitude = local.decay_amplitude;
+    saved(cycle_n).amplitude = local.amplitude;
+    saved(cycle_n).rdsym = local.rdsym;
+    saved(cycle_n).peak_duration_s = local.peak_duration_s;
+    saved(cycle_n).trough_duration_s = local.trough_duration_s;
+    saved(cycle_n).ptsym = local.ptsym;
+    saved(cycle_n).monotonicity = local.monotonicity;
+    saved(cycle_n).amplitude_consistency = local.amplitude_consistency;
+    saved(cycle_n).period_consistency = local.period_consistency;
+    saved(cycle_n).meets_amplitude = local.meets_amplitude;
+    saved(cycle_n).meets_amplitude_consistency = local.meets_amplitude_consistency;
+    saved(cycle_n).meets_period_consistency = local.meets_period_consistency;
+    saved(cycle_n).meets_monotonicity = local.meets_monotonicity;
+    saved(cycle_n).meets_cycle_criteria = local.meets_cycle_criteria;
+    saved(cycle_n).in_sustained_sequence = local.in_sustained_sequence;
+end
+saved = saved(:);
+end
+
+function sample = shift_sample(sample, interval)
+if ~isfinite(sample)
+    return
+end
+sample = sample + interval.start_sample - 1;
 end
 
 function ranges = interval_sample_ranges(current_dir, data_root, animal_code, ...
@@ -446,6 +571,7 @@ recording = struct( ...
     'parameters', struct(), ...
     'intervals', empty_interval(), ...
     'episodes', empty_saved_episodes(), ...
+    'cycles', empty_saved_cycles(), ...
     'example', empty_example(), ...
     'summary', struct());
 end
@@ -488,7 +614,61 @@ episodes = struct( ...
     'cycle_period_iqr_s', {}, ...
     'cycle_period_std_s', {}, ...
     'cycle_period_cv', {}, ...
-    'fraction_cycles_in_delta_band', {});
+    'fraction_cycles_in_delta_band', {}, ...
+    'n_trough_cycles', {}, ...
+    'trough_periods_s', {}, ...
+    'median_trough_period_s', {}, ...
+    'trough_period_iqr_s', {}, ...
+    'trough_period_cv', {}, ...
+    'median_trough_frequency_hz', {}, ...
+    'median_cycle_amplitude', {}, ...
+    'cycle_amplitude_cv', {}, ...
+    'cycle_amplitude_iqr', {}, ...
+    'median_rdsym', {}, ...
+    'median_ptsym', {}, ...
+    'median_monotonicity', {}, ...
+    'median_amplitude_consistency', {}, ...
+    'median_period_consistency', {}, ...
+    'n_cycles_meeting_criteria', {}, ...
+    'n_sustained_cycles', {}, ...
+    'n_sustained_runs', {}, ...
+    'has_sustained_sequence', {}, ...
+    'amplitude_percentile_cutoff', {});
+end
+
+function cycles = empty_saved_cycles()
+cycles = struct( ...
+    'interval_index', {}, ...
+    'episode_index', {}, ...
+    'start_sample', {}, ...
+    'end_sample', {}, ...
+    'peak_sample', {}, ...
+    'rise_midpoint_sample', {}, ...
+    'decay_midpoint_sample', {}, ...
+    'previous_decay_midpoint_sample', {}, ...
+    'start_time_s', {}, ...
+    'end_time_s', {}, ...
+    'peak_time_s', {}, ...
+    'period_s', {}, ...
+    'frequency_hz', {}, ...
+    'rise_duration_s', {}, ...
+    'decay_duration_s', {}, ...
+    'rise_amplitude', {}, ...
+    'decay_amplitude', {}, ...
+    'amplitude', {}, ...
+    'rdsym', {}, ...
+    'peak_duration_s', {}, ...
+    'trough_duration_s', {}, ...
+    'ptsym', {}, ...
+    'monotonicity', {}, ...
+    'amplitude_consistency', {}, ...
+    'period_consistency', {}, ...
+    'meets_amplitude', {}, ...
+    'meets_amplitude_consistency', {}, ...
+    'meets_period_consistency', {}, ...
+    'meets_monotonicity', {}, ...
+    'meets_cycle_criteria', {}, ...
+    'in_sustained_sequence', {});
 end
 
 function example = empty_example()
@@ -502,9 +682,15 @@ example = struct( ...
     'threshold', NaN, ...
     'episode_sample_range', zeros(0, 2), ...
     'peak_index', zeros(0, 1), ...
+    'trough_index', zeros(0, 1), ...
+    'cycle_peak_index', zeros(0, 1), ...
     'episode_duration_s', NaN, ...
     'n_cycles', 0, ...
     'median_cycle_period_s', NaN, ...
     'cycle_period_iqr_s', NaN, ...
+    'n_trough_cycles', 0, ...
+    'median_trough_period_s', NaN, ...
+    'trough_period_cv', NaN, ...
+    'has_sustained_sequence', false, ...
     'score', -inf);
 end
