@@ -550,6 +550,7 @@ def plot_column(
     title: str = "",
     cbar_label: str = "CSD",
     clim: Optional[Tuple[float, float]] = None,
+    horizontal_lines: Optional[Sequence[float]] = None,
     save_path: Optional[PathLike] = None,
     show: bool = True,
 ):
@@ -565,6 +566,15 @@ def plot_column(
     )
     if clim is not None:
         im.set_clim(*clim)
+    if horizontal_lines:
+        for depth in horizontal_lines:
+            ax.axhline(
+                float(depth),
+                color="white",
+                linestyle="--",
+                linewidth=1.0,
+                zorder=3,
+            )
     fig.colorbar(im, ax=ax, label=cbar_label)
     ax.set_xlabel("Time (ms)")
     ax.set_ylabel("Depth (µm)")
@@ -855,6 +865,9 @@ def discover_delta_csd_datasets(
             continue
         rel = os.path.relpath(dirpath, root).replace("\\", "/")
         parts = rel.split("/")
+        # Pooled leaves live under animal_pooled/ and are not session exports.
+        if "animal_pooled" in parts:
+            continue
         # New layout: peak|trough is the first path component
         # Old layout: peak|trough is the last path component
         if not parts:
