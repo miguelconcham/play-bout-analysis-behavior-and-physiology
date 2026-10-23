@@ -12,8 +12,18 @@
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
 area_limit_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Area_limits_GoodLooking.xlsx';
 
-% Empty recording_index plots every saved recording. Empty session_index
-% plots every partner session in the selected recording(s).
+% recording_index selects files from the numbered list printed below.
+% session_index selects partner-session rows inside each of those files.
+% Leave either one empty to take every recording, or every session.
+%
+% Every session of every saved recording:
+%   recording_index = [];
+%   session_index = [];
+% Every session of recordings 1 through 12:
+%   recording_index = 1:12;
+%   session_index = [];
+% recording_index = 1:12 and session_index = 1 plots only partner session 1
+% of each file, so every figure is labeled session 1.
 recording_index = 1;
 session_index = 1;
 
@@ -79,10 +89,13 @@ for file_n = recording_index(:).'
         this_session = probe_spectra.sessions(session_n);
         welch_spectrum = this_session.welch.(spectrum_field);
         fourier_spectrum = this_session.fourier.(spectrum_field);
-        session_label = sprintf('%s | session %d | %.0f-%.0f s | %d windows', ...
-            probe_spectra.animal_name, session_n, ...
+        session_label = sprintf( ...
+            'recording %d | %s | session %d of %d | %.0f-%.0f s | %d windows', ...
+            file_n, probe_spectra.animal_name, session_n, ...
+            probe_spectra.n_sessions, ...
             this_session.time_range(1), this_session.time_range(2), ...
             this_session.n_windows);
+        fprintf('Plotting %s\n', session_label);
 
         plot_depth_spectrum(frequency, channel_table, ...
             welch_spectrum, fourier_spectrum, spectrum_field, ...
