@@ -22,10 +22,11 @@
 % It stays off unless plot_proximal_distal is set true.
 % Each band and spectral method then has its own scatter of that
 % z-scored power against distance to mid-LPAG, with transparent markers.
-% The matching distance figure fits a mixed model of that power on
-% distance. Every channel stays an observation, and sessions are nested
-% in the animal. The line is the fixed effect. Spearman rho and its
-% p-value use the same channels.
+% The matching distance figure keeps those scatter values. At each
+% distance bin, a session contributes one power (the mean of its channels
+% in the bin). The model at that distance is Power ~ 1 + (1|Animal):
+% a fixed intercept, with the animal's sessions as repeated measures.
+% Spearman rho and its p-value use the same channel values.
 % A separate figure compares the selected regions with a nested
 % repeated-measures model of that same z-scored power. Every channel
 % remains an observation nested in its partner session. Region is the
@@ -48,7 +49,8 @@
 % the midpoint of that region's labeled span on the shank. Delta, theta,
 % and gamma are drawn against distance from that center, once toward the
 % tip (ventral) and once toward the brain surface (dorsal). Individual
-% shanks are one figure. The mixed-model fit of power on distance is another.
+% shanks are one figure. Another figure draws the same values and, at each
+% distance, the intercept from Power ~ 1 + (1|Animal).
 
 %% Which recording and session to inspect
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
@@ -113,6 +115,11 @@ region_border_bin_um = 100;
 % The proximal/distal comparison is a second figure. It stays off until
 % this switch is set true.
 plot_proximal_distal = false;
+
+% Distance figures keep the scatter. Channels that fall in the same bin
+% and the same session become one session power. At that distance the
+% model is an intercept with a random effect of animal.
+distance_model_bin_um = 20;
 
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
@@ -235,7 +242,7 @@ placed = apply_screened_power_to_placed(placed, power_table);
 plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band, ...
-    spectral_method, regions_to_display);
+    spectral_method, regions_to_display, distance_model_bin_um);
 plot_region_power_comparison(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 if plot_proximal_distal
@@ -258,7 +265,7 @@ else
 end
 plot_region_distances(placed, spectrum_field, ...
     delta_band, theta_band, gamma_band, spectral_method, ...
-    regions_to_display, region_distance_scale);
+    regions_to_display, region_distance_scale, distance_model_bin_um);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
@@ -1387,7 +1394,8 @@ end
 end
 
 function plot_normalized_power_intervals(power_table, ...
-        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
+        delta_band, theta_band, gamma_band, spectral_method, ...
+        regions_to_display, distance_model_bin_um)
 if isempty(power_table)
     return
 end
@@ -1412,7 +1420,8 @@ for method_n = 1:numel(method_names)
     for band_n = 1:numel(band_fields)
         figure_n = figure_n + 1;
         power = power_table.(band_fields{band_n});
-        figure('Name', sprintf('%s | %s mixed model vs distance to mid-LPAG', ...
+        figure('Name', sprintf( ...
+            '%s | %s intercept by distance to mid-LPAG', ...
             method_names{method_n}, band_names{band_n}), ...
             'Color', 'w', 'Position', [80 + 24 * figure_n, 100, 980, 560]);
         hold on
@@ -1431,21 +1440,23 @@ for method_n = 1:numel(method_names)
             end
             this_distance = distance_um(keep);
             this_power = power(keep);
-            result = fit_distance_mixed_model(this_distance, this_power, ...
-                animal(keep), session(keep));
-            [rho, p_rho] = rank_correlation(this_distance, this_power);
-            report_distance_model(sprintf('%s | %s | %s', ...
-                method_names{method_n}, band_names{band_n}, ...
-                region_display_name(this_region)), result, rho, p_rho);
             this_color = region_color(this_region);
-            if result.ok
-                draw_distance_model_line(this_distance, result, this_color);
-                x_span = [x_span; this_distance(:)]; %#ok<AGROW>
-            end
-            legend_handles(end + 1, 1) = plot(nan, nan, '-', ...
-                'Color', this_color, 'LineWidth', 2); %#ok<AGROW>
-            legend_labels{end + 1} = distance_model_legend( ...
-                this_region, result, rho, p_rho); %#ok<AGROW>
+            scatter(this_distance, this_power, 18, this_color, 'filled', ...
+                'MarkerFaceAlpha', 0.18, 'MarkerEdgeAlpha', 0.18, ...
+                'HandleVisibility', 'off');
+            profile = fit_intercepts_by_distance(this_distance, this_power, ...
+                animal(keep), session(keep), distance_model_bin_um);
+            [rho, p_rho] = rank_correlation(this_distance, this_power);
+            report_intercept_profile(sprintf('%s | %s | %s', ...
+                method_names{method_n}, band_names{band_n}, ...
+                region_display_name(this_region)), profile, rho, p_rho);
+            draw_distance_intercepts(profile, this_color);
+            x_span = [x_span; this_distance(:)]; %#ok<AGROW>
+            legend_handles(end + 1, 1) = plot(nan, nan, '-o', ...
+                'Color', this_color, 'MarkerFaceColor', this_color, ...
+                'LineWidth', 2, 'MarkerSize', 4); %#ok<AGROW>
+            legend_labels{end + 1} = intercept_legend( ...
+                this_region, profile, rho, p_rho); %#ok<AGROW>
         end
         if numel(x_span) > 1
             pad = 0.02 * max(max(x_span) - min(x_span), 1);
@@ -1454,8 +1465,8 @@ for method_n = 1:numel(method_names)
         xlabel({'Distance to mid-LPAG (µm)', ...
             'positive = dorsal, farther from the tip'})
         ylabel({'Power z-scored within shank', '0 = mid-LPAG channel'})
-        title(sprintf('%s | %s | mixed model across animals', ...
-            method_names{method_n}, band_names{band_n}))
+        title(sprintf('%s | %s | intercept at each %g µm', ...
+            method_names{method_n}, band_names{band_n}, distance_model_bin_um))
         if ~isempty(legend_handles)
             legend(legend_handles, legend_labels, ...
                 'Location', 'eastoutside', 'FontSize', 8, 'Interpreter', 'tex')
@@ -1463,22 +1474,33 @@ for method_n = 1:numel(method_names)
         box off
     end
 end
-fprintf(['Distance fits are mixed models of channel power on distance, ' ...
-    'with sessions nested in the animal. Spearman rho and p use the same ' ...
-    'channels, after extreme values and uncommon border distances are removed.\n']);
+fprintf(['At each distance bin, one session power is the mean of that ' ...
+    'session''s channels. Power ~ 1 + (1|Animal). The marker is the ' ...
+    'intercept and the shade is its 95%% interval. Spearman rho and p use ' ...
+    'the channel scatter, after extreme values and uncommon border ' ...
+    'distances are removed.\n']);
 end
 
-function result = fit_distance_mixed_model(distance, power, animal, session)
-result = struct( ...
-    'ok', false, ...
-    'intercept', NaN, ...
-    'slope', NaN, ...
-    'p_slope', NaN, ...
-    'n_channels', 0, ...
-    'n_animals', 0, ...
-    'n_sessions', 0, ...
-    'formula', '', ...
-    'message', '');
+function profile = empty_distance_profile(bin_um)
+if nargin < 1
+    bin_um = NaN;
+end
+profile = struct( ...
+    'bin_um', bin_um, ...
+    'distance_um', [], ...
+    'intercept', [], ...
+    'lower', [], ...
+    'upper', [], ...
+    'n_animals', [], ...
+    'n_sessions', [], ...
+    'n_fit', 0, ...
+    'n_fallback', 0, ...
+    'n_skipped', 0);
+end
+
+function profile = fit_intercepts_by_distance( ...
+        distance, power, animal, session, bin_um)
+profile = empty_distance_profile(bin_um);
 distance = distance(:);
 power = power(:);
 animal = cellstr(string(animal(:)));
@@ -1488,103 +1510,143 @@ distance = distance(keep);
 power = power(keep);
 animal = animal(keep);
 session = session(keep);
-result.n_channels = numel(power);
-if result.n_channels == 0
-    result.message = 'No finite channels.';
+if isempty(power) || ~isfinite(bin_um) || bin_um <= 0
     return
 end
-session_id = strcat(animal, '|', session);
-result.n_animals = numel(unique(animal));
-result.n_sessions = numel(unique(session_id));
-if result.n_channels < 4 || numel(unique(distance)) < 2 || ...
-        numel(unique(power)) < 2
-    result.message = 'Not enough variation to fit distance.';
-    return
-end
-formulas = {};
-if result.n_animals >= 2 && result.n_sessions > result.n_animals
-    formulas{end + 1} = 'Power ~ Distance + (1|Animal) + (1|Session)'; %#ok<AGROW>
-end
-if result.n_animals >= 2
-    formulas{end + 1} = 'Power ~ Distance + (1|Animal)'; %#ok<AGROW>
-end
-if result.n_sessions >= 2
-    formulas{end + 1} = 'Power ~ Distance + (1|Session)'; %#ok<AGROW>
-end
-if isempty(formulas)
-    result.message = ['A mixed model needs repeated measures in more than ' ...
-        'one animal or session.'];
-    return
-end
-model_table = table(power, distance, categorical(animal), ...
-    categorical(session_id), ...
-    'VariableNames', {'Power', 'Distance', 'Animal', 'Session'});
-last_error = '';
-for formula_n = 1:numel(formulas)
-    try
-        lme = fitlme(model_table, formulas{formula_n}, 'FitMethod', 'REML');
-    catch ME
-        last_error = ME.message;
+bin_id = round(distance / bin_um);
+bins = unique(bin_id);
+bins = sort(bins);
+for bin_n = 1:numel(bins)
+    in_bin = bin_id == bins(bin_n);
+    [session_power, session_animal] = session_mean_power( ...
+        power(in_bin), animal(in_bin), session(in_bin));
+    n_animals = numel(unique(session_animal));
+    n_sessions = numel(session_power);
+    if n_animals < 2 || n_sessions < 2
+        profile.n_skipped = profile.n_skipped + 1;
         continue
     end
-    coef_names = coefficient_names(lme);
-    slope_index = find(strcmp(coef_names, 'Distance'), 1);
-    intercept_index = find(strcmp(coef_names, '(Intercept)'), 1);
-    if isempty(slope_index) || isempty(intercept_index)
-        last_error = 'The distance slope was not in the model.';
+    [intercept, lower, upper, used_fallback] = intercept_mixed_model( ...
+        session_power, session_animal);
+    if ~isfinite(intercept)
+        profile.n_skipped = profile.n_skipped + 1;
         continue
     end
-    beta = fixedEffects(lme);
-    contrast = zeros(1, numel(coef_names));
-    contrast(slope_index) = 1;
+    profile.distance_um(end + 1, 1) = bins(bin_n) * bin_um; %#ok<AGROW>
+    profile.intercept(end + 1, 1) = intercept; %#ok<AGROW>
+    profile.lower(end + 1, 1) = lower; %#ok<AGROW>
+    profile.upper(end + 1, 1) = upper; %#ok<AGROW>
+    profile.n_animals(end + 1, 1) = n_animals; %#ok<AGROW>
+    profile.n_sessions(end + 1, 1) = n_sessions; %#ok<AGROW>
+    profile.n_fit = profile.n_fit + 1;
+    if used_fallback
+        profile.n_fallback = profile.n_fallback + 1;
+    end
+end
+end
+
+function [session_power, session_animal] = session_mean_power( ...
+        power, animal, session)
+group_key = strcat(animal(:), '|', session(:));
+[~, ~, group_id] = unique(group_key, 'stable');
+n_groups = max(group_id);
+session_power = accumarray(group_id, power(:), [n_groups, 1], @mean);
+session_animal = cell(n_groups, 1);
+for group_n = 1:n_groups
+    session_animal{group_n} = animal{find(group_id == group_n, 1, 'first')};
+end
+end
+
+function [intercept, lower, upper, used_fallback] = intercept_mixed_model( ...
+        power, animal)
+intercept = NaN;
+lower = NaN;
+upper = NaN;
+used_fallback = false;
+power = power(:);
+animal = categorical(animal(:));
+try
+    model_table = table(power, animal, 'VariableNames', {'Power', 'Animal'});
+    lme = fitlme(model_table, 'Power ~ 1 + (1|Animal)', 'FitMethod', 'REML');
+    [beta, ~, stats] = fixedEffects(lme, 'DFMethod', 'satterthwaite');
+    intercept = beta(1);
     try
-        p_slope = coefTest(lme, contrast, 0, 'DFMethod', 'satterthwaite');
+        lower = stats.Lower(1);
+        upper = stats.Upper(1);
     catch
-        try
-            p_slope = coefTest(lme, contrast, 0);
-        catch ME
-            last_error = ME.message;
-            continue
-        end
+        [lower, upper] = interval_from_se(intercept, stats.SE(1), stats.DF(1));
     end
-    result.ok = isfinite(p_slope) && isfinite(beta(slope_index)) && ...
-        isfinite(beta(intercept_index));
-    if ~result.ok
-        last_error = 'The distance slope could not be tested.';
-        continue
+catch
+    try
+        model_table = table(power, animal, 'VariableNames', {'Power', 'Animal'});
+        lme = fitlme(model_table, 'Power ~ 1 + (1|Animal)', 'FitMethod', 'REML');
+        beta = fixedEffects(lme);
+        intercept = beta(1);
+        se = sqrt(max(lme.CoefficientCovariance(1, 1), 0));
+        [lower, upper] = interval_from_se(intercept, se, max(numel(unique(animal)) - 1, 1));
+    catch
+        intercept = NaN;
     end
-    result.intercept = beta(intercept_index);
-    result.slope = beta(slope_index);
-    result.p_slope = p_slope;
-    result.formula = formulas{formula_n};
-    result.message = '';
+end
+if isfinite(intercept) && isfinite(lower) && isfinite(upper)
     return
 end
-if isempty(last_error)
-    last_error = 'The distance model could not be fit.';
+used_fallback = true;
+[animal_id, ~, group_id] = unique(animal, 'stable');
+animal_mean = accumarray(group_id, power, [numel(animal_id), 1], @mean);
+if numel(animal_mean) < 2
+    intercept = NaN;
+    lower = NaN;
+    upper = NaN;
+    return
 end
-result.message = last_error;
+intercept = mean(animal_mean);
+se = std(animal_mean, 0) / sqrt(numel(animal_mean));
+[lower, upper] = interval_from_se(intercept, se, numel(animal_mean) - 1);
 end
 
-function draw_distance_model_line(distance, result, color)
-distance = distance(isfinite(distance));
-if ~result.ok || numel(distance) < 2
+function [lower, upper] = interval_from_se(intercept, se, df)
+if ~isfinite(intercept) || ~isfinite(se) || ~isfinite(df) || df <= 0
+    lower = NaN;
+    upper = NaN;
     return
 end
-x_line = [min(distance), max(distance)];
-if x_line(1) == x_line(2)
-    return
-end
-plot(x_line, result.intercept + result.slope * x_line, '-', ...
-    'Color', color, 'LineWidth', 2.0, 'HandleVisibility', 'off');
+half = tinv(0.975, df) * se;
+lower = intercept - half;
+upper = intercept + half;
 end
 
-function label = distance_model_legend(region_name, result, rho, p_rho)
-if result.ok
-    slope_text = sprintf('slope p = %s, %d animals', ...
-        format_p_value(result.p_slope), result.n_animals);
+function draw_distance_intercepts(profile, color)
+if isempty(profile.distance_um)
+    return
+end
+[x_um, order] = sort(profile.distance_um(:));
+y = profile.intercept(order);
+y_low = profile.lower(order);
+y_high = profile.upper(order);
+adjacent = [true; diff(x_um) <= profile.bin_um * 1.5];
+run_start = find([true; ~adjacent(2:end)]);
+run_stop = [run_start(2:end) - 1; numel(x_um)];
+for run_n = 1:numel(run_start)
+    index = run_start(run_n):run_stop(run_n);
+    if numel(index) >= 2 && all(isfinite(y_low(index))) && all(isfinite(y_high(index)))
+        segment_x = x_um(index);
+        fill([segment_x; flipud(segment_x)], ...
+            [y_low(index); flipud(y_high(index))], color, ...
+            'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+        plot(segment_x, y(index), '-', 'Color', color, 'LineWidth', 1.6, ...
+            'HandleVisibility', 'off');
+    end
+    plot(x_um(index), y(index), 'o', 'Color', color, ...
+        'MarkerFaceColor', color, 'MarkerSize', 4, 'HandleVisibility', 'off');
+end
+end
+
+function label = intercept_legend(region_name, profile, rho, p_rho)
+if profile.n_fit > 0
+    fit_text = sprintf('intercept, %d distances', profile.n_fit);
 else
-    slope_text = 'model unavailable';
+    fit_text = 'no distance with 2 animals';
 end
 if isfinite(rho)
     rho_text = sprintf('\\rho = %.2f, p = %s', rho, format_p_value(p_rho));
@@ -1592,30 +1654,22 @@ else
     rho_text = '\rho = n/a';
 end
 label = sprintf('%s | %s | %s', region_display_name(region_name), ...
-    slope_text, rho_text);
+    fit_text, rho_text);
 end
 
-function report_distance_model(context, result, rho, p_rho)
+function report_intercept_profile(context, profile, rho, p_rho)
 fprintf('%s\n', context);
-if result.ok
-    fprintf('  %s\n', result.formula);
-    if contains(result.formula, 'Session')
-        fprintf('  Session is the partner session within the animal.\n');
-    end
-    fprintf(['  slope = %s per µm, p = %s ' ...
-        '(%d channels, %d animals, %d sessions)\n'], ...
-        format_p_value(result.slope), format_p_value(result.p_slope), ...
-        result.n_channels, result.n_animals, result.n_sessions);
-else
-    if isempty(result.message)
-        detail = 'The distance model could not be fit.';
-    else
-        detail = result.message;
-    end
-    fprintf('  Mixed model was not fit: %s\n', detail);
+fprintf(['  Power ~ 1 + (1|Animal) at each %g µm bin. ' ...
+    'One power per session, sessions repeated within the animal.\n' ...
+    '  %d distances fit, %d skipped.\n'], ...
+    profile.bin_um, profile.n_fit, profile.n_skipped);
+if profile.n_fallback > 0
+    fprintf(['  %d distances used the mean of animal means because the ' ...
+        'mixed model did not return an intercept.\n'], profile.n_fallback);
 end
 if isfinite(rho)
-    fprintf('  Spearman rho = %.2f, p = %s\n', rho, format_p_value(p_rho));
+    fprintf('  Spearman rho = %.2f, p = %s on the channel values.\n', ...
+        rho, format_p_value(p_rho));
 else
     fprintf('  Spearman rho is undefined.\n');
 end
@@ -2621,7 +2675,7 @@ end
 
 function plot_region_distances(placed, spectrum_field, ...
         delta_band, theta_band, gamma_band, spectral_method, ...
-        regions_to_display, region_distance_scale)
+        regions_to_display, region_distance_scale, distance_model_bin_um)
 if ~any(strcmp(region_distance_scale, {'normalized', 'raw'}))
     error('region_distance_scale must be ''normalized'' or ''raw''.');
 end
@@ -2666,7 +2720,7 @@ for kind_n = 1:numel(panel_kinds)
             figure_position = [40 40 980 max(480, 240 * n_regions)];
             figure_note = region_distance_note(region_distance_scale, false);
         else
-            figure_name = sprintf('%s mixed model vs distance to region center', ...
+            figure_name = sprintf('%s intercept by distance to region center', ...
                 method_names{method_slot});
             figure_position = [90 40 980 max(480, 240 * n_regions)];
             figure_note = region_distance_note(region_distance_scale, true);
@@ -2722,32 +2776,34 @@ for kind_n = 1:numel(panel_kinds)
                     continue
                 end
                 x_max = farthest;
-                slope_p = nan(1, 3);
                 model_ok = false;
                 if strcmp(panel_kind, 'model')
                     for band_n = 1:3
                         [point_distance, point_power, point_animal, point_session] = ...
                             side_track_points(side_tracks, method_n, band_n);
-                        result = fit_distance_mixed_model(point_distance, ...
-                            point_power, point_animal, point_session);
+                        finite_point = isfinite(point_distance) & isfinite(point_power);
+                        if any(finite_point)
+                            scatter(point_distance(finite_point), ...
+                                point_power(finite_point), 14, ...
+                                band_colors(band_n, :), 'filled', ...
+                                'MarkerFaceAlpha', 0.18, 'MarkerEdgeAlpha', 0.18, ...
+                                'HandleVisibility', 'off');
+                        end
+                        profile = fit_intercepts_by_distance( ...
+                            point_distance, point_power, point_animal, ...
+                            point_session, distance_model_bin_um);
                         [rho, p_rho] = rank_correlation(point_distance, point_power);
-                        report_distance_model(sprintf('%s | %s | %s | %s', ...
+                        report_intercept_profile(sprintf('%s | %s | %s | %s', ...
                             method_names{method_slot}, band_names{band_n}, ...
                             region_display_name(region_names{region_n}), ...
                             direction_titles{direction_n}), ...
-                            result, rho, p_rho);
-                        slope_p(band_n) = result.p_slope;
-                        if ~result.ok
+                            profile, rho, p_rho);
+                        if profile.n_fit == 0
                             continue
                         end
                         model_ok = true;
-                        finite_distance = point_distance( ...
-                            isfinite(point_distance) & isfinite(point_power));
-                        draw_distance_model_line(finite_distance, result, ...
-                            band_colors(band_n, :));
-                        if ~isempty(finite_distance)
-                            x_max = max(x_max, max(finite_distance));
-                        end
+                        draw_distance_intercepts(profile, band_colors(band_n, :));
+                        x_max = max(x_max, max(profile.distance_um));
                     end
                 end
                 if strcmp(region_distance_scale, 'normalized') || ...
@@ -2766,10 +2822,9 @@ for kind_n = 1:numel(panel_kinds)
                 title(sprintf('%s | %s (n=%d)', ...
                     region_display_name(region_names{region_n}), ...
                     direction_titles{direction_n}, numel(side_tracks)))
-                draw_rank_correlations(side_tracks, method_n, band_colors, ...
-                    strcmp(panel_kind, 'model'), slope_p);
+                draw_rank_correlations(side_tracks, method_n, band_colors);
                 if strcmp(panel_kind, 'model') && ~model_ok
-                    text(0.5, 0.5, 'Mixed model was not fit', ...
+                    text(0.5, 0.5, 'No distance had 2 animals', ...
                         'Units', 'normalized', 'HorizontalAlignment', 'center', ...
                         'FontSize', 8);
                 end
@@ -2802,8 +2857,9 @@ else
         'after extreme values and uncommon border distances are removed.'];
 end
 if with_model
-    note = [note, [' The line is a mixed model of power on distance, ' ...
-        'with sessions nested in the animal.']];
+    note = [note, [' Dots are the channel values. At each distance, one ' ...
+        'session power enters Power ~ 1 + (1|Animal). The marker is the ' ...
+        'intercept and the shade is its 95% interval.']];
 end
 end
 
@@ -2837,17 +2893,7 @@ band_std(band_std == 0 | ~isfinite(band_std)) = NaN;
 power = (power - reference) ./ band_std;
 end
 
-function draw_rank_correlations(side_tracks, method_n, band_colors, ...
-        with_slope, slope_p)
-if nargin < 4
-    with_slope = false;
-    slope_p = nan(1, 3);
-end
-if with_slope
-    gap = 0.16;
-else
-    gap = 0.09;
-end
+function draw_rank_correlations(side_tracks, method_n, band_colors)
 for band_n = 1:3
     [rho, p_value] = panel_rank_correlation(side_tracks, method_n, band_n);
     if isfinite(rho)
@@ -2855,10 +2901,7 @@ for band_n = 1:3
     else
         label = '\rho = n/a';
     end
-    if with_slope
-        label = sprintf('%s\nslope p = %s', label, format_p_value(slope_p(band_n)));
-    end
-    text(0.98, 0.98 - (band_n - 1) * gap, label, ...
+    text(0.98, 0.98 - (band_n - 1) * 0.09, label, ...
         'Units', 'normalized', 'HorizontalAlignment', 'right', ...
         'VerticalAlignment', 'top', 'Color', band_colors(band_n, :), ...
         'FontSize', 8, 'Interpreter', 'tex');
