@@ -5,6 +5,13 @@
 % is distance to the probe tip, not depth: larger values are further from the
 % tip (upper), smaller values are closer to the tip (deeper).
 %
+% An optional figure pools every selected session of one animal. Each
+% channel is log10 power with the aperiodic fit and the theta Gaussians
+% removed, as in the LPAG analysis. Sites are averaged only when the shank
+% and the x and y coordinates match, so the same channel number can sit at
+% a different distance in another session. Frequency is the horizontal
+% axis and distance to the tip is the vertical axis.
+%
 % Selected sessions are stacked with mid-LPAG at zero. The figures keep saved
 % power, with no rescaling. A table written beside the spectra has the same
 % distance, the area, the saved delta/theta/gamma power, that power minus the
@@ -75,6 +82,14 @@ session_index = [];
 % The stack is always drawn for the recordings and sessions selected above.
 % Single-session figures are optional.
 plot_each_session = false;
+
+% Pooled spectrogram for each animal. Off until this switch is set true.
+% The color is log10 power minus the aperiodic fit minus theta Gaussians
+% whose centers fall inside theta_band, the same subtraction as the LPAG
+% analysis. Sessions of one animal are averaged only at identical
+% coordinates. Channel identity is ignored, because one channel can move
+% between sessions.
+plot_pooled_animal_spectra = false;
 
 % log10 power minus the fitted aperiodic component. Switch to
 % 'log10_mean_power' to draw the session-mean spectrum itself.
@@ -183,6 +198,7 @@ stacked_frequency = [];
 tracks = repmat(empty_track(), 0, 1);
 placed = repmat(empty_placed(), 0, 1);
 power_pieces = {};
+pooled_pieces = {};
 
 %% Plot each requested session on its own
 for file_n = recording_index(:).'
@@ -243,6 +259,11 @@ for file_n = recording_index(:).'
             delta_band, theta_band, gamma_band, ...
             probe_spectra.animal_name, session_n, spectrum_field, ...
             artifact_trend_sd); %#ok<SAGROW>
+        if plot_pooled_animal_spectra
+            pooled_pieces{end + 1} = residual_sites_from_session( ...
+                channel_table, this_session, frequency, theta_band, ...
+                probe_spectra.animal_name, spectral_method); %#ok<SAGROW>
+        end
 
         if plot_each_session
             plot_depth_spectrum(frequency, channel_table, ...
@@ -260,6 +281,15 @@ end
 
 if isempty(placed)
     error('No probe channels were found in the selected recordings.');
+end
+if plot_pooled_animal_spectra
+    if isempty(pooled_pieces)
+        pooled_sites = repmat(empty_residual_site(), 0, 1);
+    else
+        pooled_sites = vertcat(pooled_pieces{:});
+    end
+    plot_pooled_residual_spectra(pooled_sites, stacked_frequency, ...
+        spectral_method, theta_band);
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
     spectrum_field, region_border_bin_um);
@@ -355,6 +385,276 @@ for method_slot = 1:n_methods
     colorbar
 end
 sgtitle({session_label, spectrum_title(spectrum_field)}, 'Interpreter', 'none')
+end
+
+function item = empty_residual_site()
+item = struct( ...
+    'animal', '', ...
+    'shank', NaN, ...
+    'x_um', NaN, ...
+    'y_um', NaN, ...
+    'welch', [], ...
+    'fourier', []);
+end
+
+function sites = residual_sites_from_session(channel_table, session, ...
+        frequency, theta_band, animal_name, spectral_method)
+[~, method_ids] = selected_spectral_methods(spectral_method);
+method_fields = {'welch', 'fourier'};
+n_channels = height(channel_table);
+sites = repmat(empty_residual_site(), n_channels, 1);
+animal = char(string(animal_name));
+residuals = cell(1, 2);
+for slot_n = 1:numel(method_ids)
+    method_n = method_ids(slot_n);
+    residuals{method_n} = residual_matrix( ...
+        session.(method_fields{method_n}), frequency, theta_band, n_channels);
+end
+for channel_n = 1:n_channels
+    sites(channel_n).animal = animal;
+    sites(channel_n).shank = channel_table.ProbeNumber(channel_n);
+    sites(channel_n).x_um = channel_table.Xum(channel_n);
+    sites(channel_n).y_um = channel_table.Yum(channel_n);
+    if ~isempty(residuals{1})
+        sites(channel_n).welch = residuals{1}(channel_n, :);
+    end
+    if ~isempty(residuals{2})
+        sites(channel_n).fourier = residuals{2}(channel_n, :);
+    end
+end
+end
+
+function residual = residual_matrix(fitted, frequency, theta_band, n_channels)
+required = {'log10_mean_power', 'aperiodic_fit', 'gaussian_params'};
+for field_n = 1:numel(required)
+    if ~isfield(fitted, required{field_n})
+        error(['Saved spectra have no %s, so theta and the aperiodic ' ...
+            'fit cannot be removed.'], required{field_n});
+    end
+end
+log_power = fitted.log10_mean_power;
+aperiodic = fitted.aperiodic_fit;
+n_frequency = numel(frequency);
+if size(log_power, 1) ~= n_channels || size(aperiodic, 1) ~= n_channels || ...
+        size(log_power, 2) ~= n_frequency || size(aperiodic, 2) ~= n_frequency
+    error(['Saved log10 power and the aperiodic fit do not match the ' ...
+        'channel table or the frequency grid.']);
+end
+if ~iscell(fitted.gaussian_params) || numel(fitted.gaussian_params) ~= n_channels
+    error('gaussian_params must hold one peak matrix per channel.');
+end
+residual = nan(n_channels, n_frequency);
+for channel_n = 1:n_channels
+    residual(channel_n, :) = subtract_theta_and_aperiodic( ...
+        log_power(channel_n, :), aperiodic(channel_n, :), ...
+        fitted.gaussian_params{channel_n}, frequency, theta_band);
+end
+end
+
+function residual = subtract_theta_and_aperiodic( ...
+        log_power, aperiodic, gaussians, frequency, theta_band)
+% FOOOF components are additive in log10 power. Theta peaks are the
+% Gaussians whose center frequency lies inside theta_band, matching
+% Analyse_play_session_lpag_spectra.m.
+residual = log_power(:).' - aperiodic(:).';
+if isempty(gaussians) || size(gaussians, 2) < 3 || size(gaussians, 1) < 1
+    return
+end
+center = gaussians(:, 1);
+peak_height = gaussians(:, 2);
+width = gaussians(:, 3);
+keep = isfinite(center) & isfinite(peak_height) & isfinite(width) & ...
+    width ~= 0 & center >= theta_band(1) & center <= theta_band(2);
+center = center(keep);
+peak_height = peak_height(keep);
+width = width(keep);
+theta_fit = zeros(1, numel(frequency));
+for gaussian_n = 1:numel(center)
+    theta_fit = theta_fit + peak_height(gaussian_n) .* exp( ...
+        -(frequency - center(gaussian_n)).^2 ./ (2 * width(gaussian_n).^2));
+end
+residual = residual - theta_fit;
+end
+
+function plot_pooled_residual_spectra(sites, frequency, spectral_method, theta_band)
+if isempty(sites)
+    fprintf('No channels were available for the pooled residual spectra.\n');
+    return
+end
+[method_names, method_ids] = selected_spectral_methods(spectral_method);
+method_fields = {'welch', 'fourier'};
+animals = unique({sites.animal}, 'stable');
+for animal_n = 1:numel(animals)
+    animal_name = animals{animal_n};
+    animal_sites = sites(strcmp({sites.animal}, animal_name));
+    plot_one_animal_residual(animal_sites, animal_name, frequency, ...
+        method_names, method_ids, method_fields, theta_band);
+end
+end
+
+function plot_one_animal_residual(sites, animal_name, frequency, ...
+        method_names, method_ids, method_fields, theta_band)
+shank_id = reshape([sites.shank], [], 1);
+shank_list = unique(shank_id(isfinite(shank_id)));
+shank_list = sort(shank_list);
+if any(~isfinite(shank_id))
+    shank_list(end + 1, 1) = NaN; %#ok<AGROW>
+end
+n_shanks = numel(shank_list);
+n_methods = numel(method_ids);
+panels = cell(n_methods, n_shanks);
+finite_values = cell(n_methods, 1);
+for shank_n = 1:n_shanks
+    if isfinite(shank_list(shank_n))
+        in_shank = shank_id == shank_list(shank_n);
+        shank_label = sprintf('Shank %g', shank_list(shank_n));
+    else
+        in_shank = ~isfinite(shank_id);
+        shank_label = 'Unassigned';
+    end
+    shank_sites = sites(in_shank);
+    for slot_n = 1:n_methods
+        method_n = method_ids(slot_n);
+        pooled = pool_sites_by_coordinate( ...
+            shank_sites, method_fields{method_n});
+        pooled.label = shank_label;
+        panels{slot_n, shank_n} = pooled;
+        if ~isempty(pooled.spectrum)
+            finite_values{slot_n} = [finite_values{slot_n}; ...
+                pooled.spectrum(isfinite(pooled.spectrum))]; %#ok<AGROW>
+        end
+    end
+end
+
+n_rows = 0;
+n_merged = 0;
+for shank_n = 1:n_shanks
+    n_rows = n_rows + numel(panels{1, shank_n}.depth_um);
+    n_merged = n_merged + nnz(panels{1, shank_n}.n_averaged > 1);
+end
+fprintf(['Pooled residual spectrum | %s | %d sites from %d session ' ...
+    'channels | %d sites combined matching coordinates\n'], ...
+    animal_name, n_rows, numel(sites), n_merged);
+
+figure('Name', ['Pooled residual spectrum | ', animal_name], 'Color', 'w', ...
+    'Position', [80 80 max(360, 280 * max(n_shanks, 1)) 720]);
+colors = diverging_or_sequential('raw_aperiodic_subtracted');
+for slot_n = 1:n_methods
+    color_limits = spectrum_color_limits( ...
+        finite_values{slot_n}, 'raw_aperiodic_subtracted');
+    for shank_n = 1:n_shanks
+        subplot(n_methods, n_shanks, (slot_n - 1) * n_shanks + shank_n)
+        pooled = panels{slot_n, shank_n};
+        depth = pooled.depth_um(:);
+        if isempty(depth)
+            axis off
+            title(sprintf('%s | %s | no sites', ...
+                method_names{slot_n}, pooled.label), 'Interpreter', 'none')
+            continue
+        end
+        use_depth_axis = numel(depth) > 1 && all(isfinite(depth)) && ...
+            all(diff(depth) > 0);
+        if use_depth_axis
+            imagesc(frequency, depth, pooled.spectrum);
+        else
+            imagesc(frequency, 1:numel(depth), pooled.spectrum);
+            coordinate_ticks(depth, pooled.x_um);
+        end
+        axis tight
+        colormap(colors)
+        if all(isfinite(color_limits))
+            caxis(color_limits);
+        end
+        set(gca, 'YDir', 'normal')
+        xlabel('Frequency (Hz)')
+        if shank_n == 1
+            ylabel('Distance to tip (µm)')
+        end
+        title(sprintf('%s | %s | %d sites', method_names{slot_n}, ...
+            pooled.label, numel(depth)), 'Interpreter', 'none')
+        box off
+    end
+    color_bar = colorbar;
+    ylabel(color_bar, {'log10 power', 'minus aperiodic and theta'})
+end
+sgtitle({animal_name, ...
+    sprintf('log10 power minus aperiodic fit and theta (%.0f-%.0f Hz)', ...
+    theta_band(1), theta_band(2)), ...
+    'Sessions averaged only where shank, x, and y match'}, ...
+    'Interpreter', 'none')
+drawnow
+end
+
+function pooled = pool_sites_by_coordinate(sites, method_field)
+pooled = struct('label', '', 'depth_um', [], 'x_um', [], ...
+    'spectrum', [], 'n_averaged', []);
+if isempty(sites)
+    return
+end
+n_sites = numel(sites);
+x_um = reshape([sites.x_um], [], 1);
+y_um = reshape([sites.y_um], [], 1);
+spectrum = vertcat(sites.(method_field));
+if isempty(spectrum)
+    return
+end
+% Neuropixels coordinates are integer micrometres. Rounding keeps the
+% same physical site together when a saved value carries a fraction.
+x_key = round(x_um);
+y_key = round(y_um);
+row_id = zeros(n_sites, 1);
+missing = ~isfinite(x_key) | ~isfinite(y_key);
+row_id(missing) = find(missing);
+x_key(~isfinite(x_key)) = 0;
+y_key(~isfinite(y_key)) = 0;
+[~, ~, group] = unique([x_key, y_key, row_id], 'rows', 'stable');
+n_groups = max(group);
+depth = nan(n_groups, 1);
+lateral = nan(n_groups, 1);
+n_averaged = zeros(n_groups, 1);
+pooled_spectrum = nan(n_groups, size(spectrum, 2));
+for group_n = 1:n_groups
+    in_group = group == group_n;
+    depth(group_n) = mean(y_um(in_group), 'omitnan');
+    lateral(group_n) = mean(x_um(in_group), 'omitnan');
+    n_averaged(group_n) = nnz(in_group);
+    pooled_spectrum(group_n, :) = mean(spectrum(in_group, :), 1, 'omitnan');
+end
+order_y = depth;
+order_y(~isfinite(order_y)) = inf;
+order_x = lateral;
+order_x(~isfinite(order_x)) = inf;
+[~, order] = sortrows([order_y, order_x], [1 2]);
+pooled.depth_um = depth(order);
+pooled.x_um = lateral(order);
+pooled.spectrum = pooled_spectrum(order, :);
+pooled.n_averaged = n_averaged(order);
+end
+
+function coordinate_ticks(depth_um, x_um)
+n_rows = numel(depth_um);
+n_ticks = min(8, n_rows);
+if n_ticks < 1
+    return
+end
+tick_index = unique(round(linspace(1, n_rows, n_ticks)));
+y_key = round(depth_um);
+tick_labels = cell(numel(tick_index), 1);
+for tick_n = 1:numel(tick_index)
+    row_n = tick_index(tick_n);
+    if ~isfinite(depth_um(row_n))
+        tick_labels{tick_n} = '';
+        continue
+    end
+    shared = isfinite(y_key(row_n)) && nnz(y_key == y_key(row_n)) > 1;
+    if shared && isfinite(x_um(row_n))
+        tick_labels{tick_n} = sprintf('%.0f (x %.0f)', ...
+            depth_um(row_n), x_um(row_n));
+    else
+        tick_labels{tick_n} = sprintf('%.0f', depth_um(row_n));
+    end
+end
+set(gca, 'YTick', tick_index, 'YTickLabel', tick_labels)
 end
 
 function plot_band_profiles(frequency, channel_table, ...
