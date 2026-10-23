@@ -13,6 +13,8 @@
 % artifact_trend_sd robust deviations from the local shank trend is removed.
 % The scale is a median absolute deviation, and channels at the ends of the
 % probe are judged against the trend of the sites inward from those ends.
+% SupCol channels stay in the analysis only at distances to mid-LPAG that
+% more than half of the SupCol sessions also reach.
 % Each band and spectral method then has its own scatter of that
 % z-scored power against distance to mid-LPAG, with transparent markers.
 % A separate figure compares the selected regions with a nested
@@ -91,6 +93,12 @@ region_distance_scale = 'normalized';
 % smooth change between neighboring sites. End-of-probe channels use the
 % trend estimated inward of those ends.
 artifact_trend_sd = 5;
+
+% SupCol distances to mid-LPAG are grouped in bins of this width. A bin
+% stays in the analysis only when more than half of the sessions that have
+% SupCol also have a SupCol channel in that bin. Far bins reached by only
+% a few sessions are left out.
+supcol_distance_bin_um = 100;
 
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
@@ -207,7 +215,8 @@ end
 if isempty(placed)
     error('No probe channels were found in the selected recordings.');
 end
-power_table = write_lpag_distance_table(power_pieces, saving_folder, spectrum_field);
+power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
+    spectrum_field, supcol_distance_bin_um);
 plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band, ...
@@ -883,7 +892,8 @@ end
 power_table = vertcat(pieces{:});
 end
 
-function power_table = write_lpag_distance_table(power_pieces, saving_folder, spectrum_field)
+function power_table = write_lpag_distance_table(power_pieces, ...
+        saving_folder, spectrum_field, supcol_distance_bin_um)
 kept = power_pieces(~cellfun(@isempty, power_pieces));
 if isempty(kept)
     fprintf(['No shank with a mid-LPAG channel was found; ' ...
@@ -894,6 +904,7 @@ end
 power_table = vertcat(kept{:});
 power_table = sortrows(power_table, ...
     {'Animal', 'Session', 'Shank', 'Method', 'DistanceToMidLPAG_um'});
+power_table = restrict_supcol_common_distances(power_table, supcol_distance_bin_um);
 table_file = fullfile(saving_folder, sprintf( ...
     'play_session_probe_power_by_lpag_distance_%s.csv', spectrum_field));
 writetable(power_table, table_file);
@@ -902,7 +913,79 @@ fprintf(['Wrote %d channel rows to %s\n' ...
     'centeredAtLPAG subtracts the mid-LPAG channel. ' ...
     'zWithinShank divides that difference by the standard deviation ' ...
     'of the same band on that shank. Band values left blank failed the ' ...
-    'shank-trend screen.\n'], height(power_table), table_file);
+    'shank-trend screen or sit at a SupCol distance reached by only a ' ...
+    'minority of sessions.\n'], height(power_table), table_file);
+end
+
+function power_table = restrict_supcol_common_distances(power_table, bin_um)
+if isempty(power_table) || ~isfinite(bin_um) || bin_um <= 0
+    return
+end
+region_keys = region_keys_for_rows(power_table.Area);
+in_sc = region_row_has(region_keys, 'SC');
+distance_um = power_table.DistanceToMidLPAG_um;
+methods = unique(cellstr(string(power_table.Method)), 'stable');
+if isempty(methods)
+    return
+end
+in_count = in_sc & strcmp(power_table.Method, methods{1}) & isfinite(distance_um);
+if ~any(in_count)
+    fprintf('No SupCol channels with a distance to mid-LPAG.\n');
+    return
+end
+session_key = strcat(cellstr(string(power_table.Animal)), '|', ...
+    cellstr(string(power_table.Session)));
+n_sessions = numel(unique(session_key(in_count)));
+bin_id = floor(distance_um(:) / bin_um);
+bins = unique(bin_id(in_count));
+bins = sort(bins(:));
+n_at = zeros(numel(bins), 1);
+for bin_n = 1:numel(bins)
+    in_bin = in_count & bin_id == bins(bin_n);
+    n_at(bin_n) = numel(unique(session_key(in_bin)));
+end
+% More than half of the sessions that have SupCol.
+need = floor(n_sessions / 2) + 1;
+kept_bin = n_at >= need;
+if ~any(kept_bin)
+    kept_bin = n_at == max(n_at);
+    fprintf(['No SupCol distance bin reached %d sessions. ' ...
+        'Keeping bins with the largest coverage (%d sessions).\n'], ...
+        need, max(n_at));
+end
+fprintf(['SupCol coverage along distance to mid-LPAG ' ...
+    '(positive = dorsal, farther from the tip).\n' ...
+    '%d sessions have SupCol. Bins are %g µm. ' ...
+    'A bin stays when at least %d sessions have a SupCol channel there.\n'], ...
+    n_sessions, bin_um, need);
+for bin_n = 1:numel(bins)
+    bin_start = bins(bin_n) * bin_um;
+    if kept_bin(bin_n)
+        status = 'kept';
+    else
+        status = 'set aside';
+    end
+    fprintf('  %8g to %8g µm: %3d sessions  %s\n', ...
+        bin_start, bin_start + bin_um, n_at(bin_n), status);
+end
+drop = in_sc & isfinite(distance_um) & ~ismember(bin_id, bins(kept_bin));
+if ~any(drop)
+    fprintf('Every SupCol channel falls in a distance bin shared by most sessions.\n');
+    return
+end
+power_fields = { ...
+    'DeltaPower', 'ThetaPower', 'GammaPower', ...
+    'DeltaPower_centeredAtLPAG', 'ThetaPower_centeredAtLPAG', ...
+    'GammaPower_centeredAtLPAG', ...
+    'DeltaPower_zWithinShank', 'ThetaPower_zWithinShank', ...
+    'GammaPower_zWithinShank'};
+for field_n = 1:numel(power_fields)
+    power_table.(power_fields{field_n})(drop) = NaN;
+end
+kept_ids = bins(kept_bin);
+fprintf(['Set aside %d SupCol rows outside %g to %g µm, ' ...
+    'the distances present in most sessions.\n'], nnz(drop), ...
+    min(kept_ids) * bin_um, (max(kept_ids) + 1) * bin_um);
 end
 
 function plot_normalized_power_scatters(power_table, ...
