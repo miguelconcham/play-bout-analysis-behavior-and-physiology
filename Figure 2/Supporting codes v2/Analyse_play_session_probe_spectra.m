@@ -9,7 +9,9 @@
 % power, with no rescaling. A table written beside the spectra has the same
 % distance, the area, the saved delta/theta/gamma power, that power minus the
 % mid-LPAG channel, and that difference divided by the within-shank standard
-% deviation. PAG sections,
+% deviation. Each band and spectral method then has its own scatter of that
+% z-scored power against distance to mid-LPAG, with transparent markers
+% colored by area. PAG sections,
 % an upper side that passes through SupCol, and a deeper side that passes
 % through DR are colored. Other territory stays gray. Those colored tracks
 % are one figure. The 95% confidence intervals for the three track classes
@@ -159,7 +161,8 @@ end
 if isempty(placed)
     error('No probe channels were found in the selected recordings.');
 end
-write_lpag_distance_table(power_pieces, saving_folder, spectrum_field);
+power_table = write_lpag_distance_table(power_pieces, saving_folder, spectrum_field);
+plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band);
 if isempty(tracks)
     fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
         'stack is skipped.\n']);
@@ -688,11 +691,12 @@ end
 power_table = vertcat(pieces{:});
 end
 
-function write_lpag_distance_table(power_pieces, saving_folder, spectrum_field)
+function power_table = write_lpag_distance_table(power_pieces, saving_folder, spectrum_field)
 kept = power_pieces(~cellfun(@isempty, power_pieces));
 if isempty(kept)
     fprintf(['No shank with a mid-LPAG channel was found; ' ...
         'the distance table was not written.\n']);
+    power_table = table();
     return
 end
 power_table = vertcat(kept{:});
@@ -706,6 +710,134 @@ fprintf(['Wrote %d channel rows to %s\n' ...
     'centeredAtLPAG subtracts the mid-LPAG channel. ' ...
     'zWithinShank divides that difference by the standard deviation ' ...
     'of the same band on that shank.\n'], height(power_table), table_file);
+end
+
+function plot_normalized_power_scatters(power_table, ...
+        delta_band, theta_band, gamma_band)
+if isempty(power_table)
+    return
+end
+method_names = {'Welch', 'Fourier'};
+band_fields = { ...
+    'DeltaPower_zWithinShank', ...
+    'ThetaPower_zWithinShank', ...
+    'GammaPower_zWithinShank'};
+band_names = { ...
+    sprintf('Delta %g-%g Hz', delta_band(1), delta_band(2)), ...
+    sprintf('Theta %g-%g Hz', theta_band(1), theta_band(2)), ...
+    sprintf('Gamma %g-%g Hz', gamma_band(1), gamma_band(2))};
+region_keys = region_keys_for_rows(power_table.Area);
+region_names = unique([region_keys{:}], 'stable');
+region_names = region_draw_order(region_names(:).');
+figure_n = 0;
+for method_n = 1:numel(method_names)
+    in_method = strcmp(power_table.Method, method_names{method_n});
+    distance_um = power_table.DistanceToMidLPAG_um;
+    for band_n = 1:numel(band_fields)
+        figure_n = figure_n + 1;
+        power = power_table.(band_fields{band_n});
+        figure('Name', sprintf('%s | %s vs distance to mid-LPAG', ...
+            method_names{method_n}, band_names{band_n}), ...
+            'Color', 'w', 'Position', [60 + 24 * figure_n, 60, 760, 560]);
+        hold on
+        yline(0, ':k', 'HandleVisibility', 'off');
+        xline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
+            'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+        legend_handles = gobjects(0, 1);
+        legend_labels = {};
+        for region_n = 1:numel(region_names)
+            this_region = region_names{region_n};
+            in_region = in_method & region_row_has(region_keys, this_region);
+            keep = in_region & isfinite(distance_um) & isfinite(power);
+            if ~any(keep)
+                continue
+            end
+            this_color = region_color(this_region);
+            scatter(distance_um(keep), power(keep), 22, this_color, 'filled', ...
+                'MarkerFaceAlpha', 0.22, 'MarkerEdgeAlpha', 0.22, ...
+                'HandleVisibility', 'off');
+            legend_handles(end + 1, 1) = plot(nan, nan, 'o', ...
+                'MarkerFaceColor', this_color, 'MarkerEdgeColor', this_color, ...
+                'MarkerSize', 7); %#ok<AGROW>
+            legend_labels{end + 1} = sprintf('%s (n=%d)', ...
+                this_region, nnz(keep)); %#ok<AGROW>
+        end
+        xlabel({'Distance to mid-LPAG (µm)', ...
+            'positive = dorsal, farther from the tip'})
+        ylabel({'Power z-scored within shank', '0 = mid-LPAG channel'})
+        title(sprintf('%s | %s', method_names{method_n}, band_names{band_n}))
+        if ~isempty(legend_handles)
+            legend(legend_handles, legend_labels, ...
+                'Location', 'eastoutside', 'FontSize', 8)
+        end
+        box off
+    end
+end
+end
+
+function keys = region_keys_for_rows(area_labels)
+area_labels = cellstr(string(area_labels));
+keys = cell(numel(area_labels), 1);
+for row_n = 1:numel(area_labels)
+    tokens = split_area_label(area_labels{row_n});
+    if isempty(tokens)
+        keys{row_n} = {'Unlabeled'};
+        continue
+    end
+    names = cell(1, numel(tokens));
+    for token_n = 1:numel(tokens)
+        names{token_n} = canonical_region_name(tokens{token_n});
+    end
+    names = unique(names, 'stable');
+    keys{row_n} = names(:).';
+end
+end
+
+function name = canonical_region_name(token)
+if name_is_supcol(token)
+    name = 'SC';
+else
+    name = token;
+end
+end
+
+function ordered = region_draw_order(names)
+foreground = {'PAG', 'DMPAG', 'DLPAG', 'LPAG', 'VLPAG', 'SC', 'DR'};
+background = names(~ismember(names, foreground));
+background = background(:).';
+present_foreground = foreground(ismember(foreground, names));
+ordered = [background, present_foreground];
+end
+
+function mask = region_row_has(region_keys, region_name)
+mask = false(numel(region_keys), 1);
+for row_n = 1:numel(region_keys)
+    mask(row_n) = any(strcmp(region_keys{row_n}, region_name));
+end
+end
+
+function color = region_color(name)
+switch name
+    case 'SC'
+        color = [0.90 0.45 0.05];
+    case 'DLPAG'
+        color = [0.16 0.42 0.78];
+    case 'LPAG'
+        color = [0.13 0.55 0.36];
+    case 'VLPAG'
+        color = [0.55 0.72 0.16];
+    case 'DR'
+        color = [0.45 0.28 0.72];
+    case 'DMPAG'
+        color = [0.05 0.55 0.58];
+    case 'PAG'
+        color = [0.20 0.38 0.30];
+    case 'Unlabeled'
+        color = [0.72 0.72 0.72];
+    otherwise
+        hue = mod(sum(double(char(name))), 11) / 11;
+        color = hsv2rgb([hue, 0.35, 0.62]);
+end
 end
 
 function track = empty_track()
