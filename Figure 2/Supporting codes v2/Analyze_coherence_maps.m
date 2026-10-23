@@ -342,6 +342,7 @@ try
     copyobj(leg_area, fig);
 catch
 end
+set(session_handles, 'HandleVisibility', 'on');
 n_col = min(3, numel(session_handles));
 leg_sess = legend(ax, session_handles, ...
     'Location', 'southoutside', 'Interpreter', 'none', ...
