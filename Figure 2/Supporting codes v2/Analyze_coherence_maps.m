@@ -80,8 +80,8 @@ local_save_figure(session_fig, fullfile(figure_folder, 'all_sessions.png'));
 
 %% Plot 2 — one figure per animal, sessions pooled, region borders
 animal_ids = unique({traces.animal_id}, 'stable');
-stack_table = table(zeros(0, 1), zeros(0, 1), cell(0, 1), ...
-    'VariableNames', {'distance_um', 'phase_rad', 'area'});
+stack_table = table(zeros(0, 1), zeros(0, 1), cell(0, 1), cell(0, 1), cell(0, 1), ...
+    'VariableNames', {'distance_um', 'phase_rad', 'area', 'animal', 'session'});
 for animal_n = 1:numel(animal_ids)
     animal_id = animal_ids{animal_n};
     these = traces(strcmp({traces.animal_id}, animal_id));
@@ -94,8 +94,11 @@ for animal_n = 1:numel(animal_ids)
         plot(distance_um, phase_rad, ...
             'Color', animal_colors(trace_n, :), 'LineWidth', 1.2, ...
             'DisplayName', these(trace_n).line_label)
-        stack_table = [stack_table; table(distance_um, phase_rad, area, ...
-            'VariableNames', {'distance_um', 'phase_rad', 'area'})]; %#ok<AGROW>
+        n_row = numel(distance_um);
+        animal = repmat({char(these(trace_n).animal_id)}, n_row, 1);
+        session = repmat({char(these(trace_n).session_name)}, n_row, 1);
+        stack_table = [stack_table; table(distance_um, phase_rad, area, animal, session, ...
+            'VariableNames', {'distance_um', 'phase_rad', 'area', 'animal', 'session'})]; %#ok<AGROW>
     end
     xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
     yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
