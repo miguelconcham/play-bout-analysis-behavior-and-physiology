@@ -11,9 +11,12 @@
 % mid-LPAG channel, and that difference divided by the within-shank standard
 % deviation. Each band and spectral method then has its own scatter of that
 % z-scored power against distance to mid-LPAG, with transparent markers.
-% A separate figure compares the selected regions with repeated measures
-% on that same z-scored power: one bar per region, the shank means as
-% connected points, and sign-rank brackets with Bonferroni correction.
+% A separate figure compares the selected regions with a nested
+% repeated-measures model of that same z-scored power. Every channel
+% remains an observation nested in its partner session. Region is the
+% fixed effect, and session and session-by-region are random. The figure
+% shows every channel, a line for each session, and mixed-model brackets
+% with Bonferroni correction.
 % Figures use Fourier unless spectral_method is changed. The scatter,
 % confidence-interval, region-comparison, and region-distance figures
 % draw regions_to_display, which starts as LPAG, VLPAG, and SupCol. PAG sections,
@@ -1034,103 +1037,382 @@ if numel(region_names) < 2
         'regions_to_display.\n']);
     return
 end
-region_list = strjoin(cellfun(@region_display_name, region_names, ...
-    'UniformOutput', false), ', ');
 for method_n = 1:numel(method_names)
     in_method = strcmp(power_table.Method, method_names{method_n});
-    band_values = cell(1, numel(band_fields));
+    band_obs = cell(1, numel(band_fields));
+    enough = false(1, numel(band_fields));
     for band_n = 1:numel(band_fields)
-        band_values{band_n} = region_mean_matrix(power_table, in_method, ...
-            region_keys, region_names, power_table.(band_fields{band_n}));
+        band_obs{band_n} = nested_channel_observations(power_table, ...
+            in_method, region_keys, region_names, ...
+            power_table.(band_fields{band_n}));
+        enough(band_n) = band_obs{band_n}.n_sessions >= 2 && ...
+            numel(band_obs{band_n}.region_names) >= 2;
     end
-    n_complete = cellfun(@(values) size(values, 1), band_values);
-    if ~any(n_complete >= 2)
-        fprintf(['%s region comparison needs at least two shanks that ' ...
-            'contain %s.\n'], method_names{method_n}, region_list);
+    if ~any(enough)
+        fprintf(['%s region comparison needs channels from at least two ' ...
+            'sessions in at least two selected regions.\n'], ...
+            method_names{method_n});
         continue
     end
-    figure('Name', sprintf('%s | region comparison', method_names{method_n}), ...
-        'Color', 'w', 'Position', [110, 80, 1080, 480]);
+    figure('Name', sprintf('%s | nested region comparison', method_names{method_n}), ...
+        'Color', 'w', 'Position', [110, 80, 1080, 520]);
     for band_n = 1:numel(band_fields)
         subplot(1, numel(band_fields), band_n)
-        if n_complete(band_n) < 2
+        obs = band_obs{band_n};
+        if ~enough(band_n)
             axis off
-            text(0.5, 0.5, sprintf('%s\nfewer than 2 complete shanks', ...
+            text(0.5, 0.5, sprintf('%s\nfewer than 2 sessions', ...
                 band_names{band_n}), 'HorizontalAlignment', 'center');
-            fprintf(['%s | %s: fewer than 2 shanks contain %s.\n'], ...
-                method_names{method_n}, band_names{band_n}, region_list);
+            fprintf(['%s | %s: fewer than 2 sessions with channels in ' ...
+                'at least two regions.\n'], method_names{method_n}, band_names{band_n});
             continue
         end
-        draw_region_comparison(band_values{band_n}, region_names, ...
-            band_names{band_n}, method_names{method_n}, region_list);
+        result = fit_nested_region_model(obs);
+        report_nested_region_tests(method_names{method_n}, band_names{band_n}, ...
+            region_names, obs, result);
+        draw_nested_region_comparison(obs, result, band_names{band_n});
     end
-    sgtitle({sprintf('%s | repeated-measures region comparison', ...
-        method_names{method_n}), ...
-        ['Mean z-scored power in each region (0 = mid-LPAG). ' ...
-        'Lines join one shank. Brackets: sign-rank, Bonferroni.']}, ...
+    sgtitle({sprintf('%s | nested repeated measures', method_names{method_n}), ...
+        ['Channels stay in the test, nested in the session. ' ...
+        'Lines join one session. Brackets are mixed-model contrasts, Bonferroni.']}, ...
         'FontSize', 10)
 end
 end
 
-function values = region_mean_matrix(power_table, row_mask, ...
+function obs = nested_channel_observations(power_table, row_mask, ...
         region_keys, region_names, power)
-group_index = session_shank_groups(power_table, row_mask);
-n_groups = numel(group_index);
+obs = empty_nested_observations();
+session_index = session_groups(power_table, row_mask);
 n_regions = numel(region_names);
-values = nan(n_groups, n_regions);
-for group_n = 1:n_groups
-    rows = group_index{group_n};
+power_cells = cell(1, 0);
+region_cells = cell(1, 0);
+session_cells = cell(1, 0);
+for session_n = 1:numel(session_index)
+    rows = session_index{session_n};
     these_keys = region_keys(rows);
+    these_power = power(rows);
     for region_n = 1:n_regions
         in_region = region_row_has(these_keys, region_names{region_n});
-        samples = power(rows);
-        samples = samples(in_region);
+        samples = these_power(in_region);
         samples = samples(isfinite(samples));
         if isempty(samples)
             continue
         end
-        values(group_n, region_n) = mean(samples);
+        power_cells{end + 1} = samples(:); %#ok<AGROW>
+        region_cells{end + 1} = repmat(region_n, numel(samples), 1); %#ok<AGROW>
+        session_cells{end + 1} = repmat(session_n, numel(samples), 1); %#ok<AGROW>
     end
 end
-values = values(all(isfinite(values), 2), :);
+if isempty(power_cells)
+    return
+end
+region_id = vertcat(region_cells{:});
+present = false(1, n_regions);
+present(unique(region_id)) = true;
+kept = find(present);
+remap = zeros(1, n_regions);
+remap(kept) = 1:numel(kept);
+obs.power = vertcat(power_cells{:});
+obs.region_id = remap(region_id);
+obs.region_id = obs.region_id(:);
+obs.session_id = vertcat(session_cells{:});
+[~, ~, obs.session_id] = unique(obs.session_id, 'stable');
+obs.region_names = region_names(kept);
+obs.n_sessions = numel(unique(obs.session_id));
+obs.session_mean = session_region_means(obs);
 end
 
-function draw_region_comparison(values, region_names, band_name, ...
-        method_name, region_list)
-n_shanks = size(values, 1);
-n_regions = size(values, 2);
-means = mean(values, 1);
-standard_error = std(values, 0, 1) ./ sqrt(n_shanks);
-[p_raw, p_adjusted, pairs] = paired_region_tests(values);
-p_omnibus = friedman_p(values);
-report_region_tests(method_name, band_name, region_list, region_names, ...
-    n_shanks, p_omnibus, pairs, p_raw, p_adjusted);
+function obs = empty_nested_observations()
+obs = struct( ...
+    'power', [], ...
+    'region_id', [], ...
+    'session_id', [], ...
+    'region_names', {{}}, ...
+    'n_sessions', 0, ...
+    'session_mean', []);
+end
 
+function session_mean = session_region_means(obs)
+% Anchors for the session lines. The mixed model keeps every channel.
+n_sessions = obs.n_sessions;
+n_regions = numel(obs.region_names);
+session_mean = nan(n_sessions, n_regions);
+for session_n = 1:n_sessions
+    for region_n = 1:n_regions
+        samples = obs.power(obs.session_id == session_n & ...
+            obs.region_id == region_n);
+        if isempty(samples)
+            continue
+        end
+        session_mean(session_n, region_n) = mean(samples);
+    end
+end
+end
+
+function group_index = session_groups(power_table, row_mask)
+rows = find(row_mask);
+animal = cellstr(string(power_table.Animal(rows)));
+session_key = cellstr(string(power_table.Session(rows)));
+group_key = strcat(animal, '|', session_key);
+[~, ~, group_id] = unique(group_key, 'stable');
+n_groups = max([group_id; 0]);
+group_index = cell(n_groups, 1);
+for group_n = 1:n_groups
+    group_index{group_n} = rows(group_id == group_n);
+end
+end
+
+function result = fit_nested_region_model(obs)
+n_regions = numel(obs.region_names);
+n_pairs = n_regions * (n_regions - 1) / 2;
+result = struct( ...
+    'ok', false, ...
+    'p_omnibus', NaN, ...
+    'f_stat', NaN, ...
+    'df1', NaN, ...
+    'df2', NaN, ...
+    'p_raw', nan(n_pairs, 1), ...
+    'p_adjusted', nan(n_pairs, 1), ...
+    'pairs', nchoosek(1:n_regions, 2), ...
+    'emm', nan(1, n_regions), ...
+    'emm_se', nan(1, n_regions), ...
+    'session_sd', NaN, ...
+    'cell_sd', NaN, ...
+    'channel_sd', NaN, ...
+    'message', '');
+region_label = obs.region_names(obs.region_id);
+region_label = region_label(:);
+session_label = cellstr(string(obs.session_id));
+try
+    model_table = table(obs.power(:), ...
+        categorical(region_label, obs.region_names), ...
+        categorical(session_label), ...
+        'VariableNames', {'Power', 'Region', 'Session'});
+    lme = fitlme(model_table, ...
+        'Power ~ Region + (1|Session) + (1|Session:Region)', ...
+        'FitMethod', 'REML', 'DummyVarCoding', 'reference');
+catch ME
+    result.message = ME.message;
+    return
+end
+try
+    stats = anova(lme, 'DFMethod', 'satterthwaite');
+    [result.f_stat, result.df1, result.df2, result.p_omnibus] = ...
+        region_anova_row(stats);
+catch ME
+    result.message = ME.message;
+end
+coef_names = coefficient_names(lme);
+beta = fixedEffects(lme);
+covB = lme.CoefficientCovariance;
+for region_n = 1:n_regions
+    L = level_row(coef_names, obs.region_names{region_n}, obs.region_names{1});
+    if any(~isfinite(L))
+        continue
+    end
+    result.emm(region_n) = L * beta(:);
+    result.emm_se(region_n) = sqrt(max(L * covB * L', 0));
+end
+for pair_n = 1:size(result.pairs, 1)
+    L = contrast_vector(coef_names, obs.region_names, ...
+        result.pairs(pair_n, 1), result.pairs(pair_n, 2));
+    if any(~isfinite(L)) || ~any(L)
+        continue
+    end
+    try
+        result.p_raw(pair_n) = coefTest(lme, L, 0, 'DFMethod', 'satterthwaite');
+    catch
+        try
+            result.p_raw(pair_n) = coefTest(lme, L, 0);
+        catch
+            result.p_raw(pair_n) = NaN;
+        end
+    end
+end
+result.p_adjusted = min(result.p_raw * size(result.pairs, 1), 1);
+try
+    [psi, channel_var] = covarianceParameters(lme);
+    result.session_sd = sqrt(max(psi{1}(1, 1), 0));
+    result.cell_sd = sqrt(max(psi{2}(1, 1), 0));
+    result.channel_sd = sqrt(max(channel_var, 0));
+catch
+end
+result.ok = isfinite(result.p_omnibus) || any(isfinite(result.p_adjusted));
+if ~result.ok && isempty(result.message)
+    result.message = 'The region effect could not be tested.';
+end
+end
+
+function names = coefficient_names(lme)
+names = lme.CoefficientNames;
+if isstring(names)
+    names = cellstr(names);
+end
+names = names(:).';
+end
+
+function [f_stat, df1, df2, p_value] = region_anova_row(stats)
+f_stat = NaN;
+df1 = NaN;
+df2 = NaN;
+p_value = NaN;
+terms = column_as_cells(stats.Term);
+row = find(strcmp(strtrim(terms), 'Region'), 1);
+if isempty(row)
+    return
+end
+f_stat = stats.FStat(row);
+df1 = stats.DF1(row);
+df2 = stats.DF2(row);
+p_value = stats.pValue(row);
+end
+
+function terms = column_as_cells(column)
+if iscell(column)
+    terms = column(:);
+    return
+end
+terms = cellstr(string(column));
+terms = terms(:);
+end
+
+function L = level_row(coef_names, region_name, reference_name)
+L = zeros(1, numel(coef_names));
+intercept = find(strcmp(coef_names, '(Intercept)'), 1);
+if isempty(intercept)
+    L(:) = NaN;
+    return
+end
+L(intercept) = 1;
+if strcmp(region_name, reference_name)
+    return
+end
+idx = coefficient_index(coef_names, region_name);
+if isempty(idx)
+    L(:) = NaN;
+    return
+end
+L(idx) = 1;
+end
+
+function L = contrast_vector(coef_names, region_names, index_a, index_b)
+reference = region_names{1};
+weight_a = level_row(coef_names, region_names{index_a}, reference);
+weight_b = level_row(coef_names, region_names{index_b}, reference);
+if any(~isfinite(weight_a)) || any(~isfinite(weight_b))
+    L = nan(1, numel(coef_names));
+    return
+end
+L = weight_a - weight_b;
+end
+
+function idx = coefficient_index(coef_names, region_name)
+token = ['Region_' region_name];
+idx = find(strcmp(coef_names, token), 1);
+if ~isempty(idx)
+    return
+end
+idx = [];
+for name_n = 1:numel(coef_names)
+    pieces = strsplit(coef_names{name_n}, '_');
+    if numel(pieces) >= 2 && strcmp(pieces{1}, 'Region') && ...
+            strcmp(pieces{end}, region_name)
+        idx = name_n;
+        return
+    end
+end
+end
+
+function report_nested_region_tests(method_name, band_name, ...
+        requested_names, obs, result)
+region_list = strjoin(cellfun(@region_display_name, obs.region_names, ...
+    'UniformOutput', false), ', ');
+fprintf(['%s | %s: %d channels nested in %d sessions (%s).\n' ...
+    '  Power ~ Region + (1|Session) + (1|Session:Region)\n'], ...
+    method_name, band_name, numel(obs.power), obs.n_sessions, region_list);
+missing = requested_names(~ismember(requested_names, obs.region_names));
+if ~isempty(missing)
+    missing_list = strjoin(cellfun(@region_display_name, missing, ...
+        'UniformOutput', false), ', ');
+    fprintf('  No channels in %s.\n', missing_list);
+end
+if ~result.ok
+    if isempty(result.message)
+        detail = 'The region effect could not be tested.';
+    else
+        detail = result.message;
+    end
+    fprintf('  Nested mixed model was not fit: %s\n', detail);
+    return
+end
+fprintf('  Region effect F(%s, %s) = %s, p = %s\n', ...
+    format_p_value(result.df1), format_p_value(result.df2), ...
+    format_p_value(result.f_stat), format_p_value(result.p_omnibus));
+if isfinite(result.session_sd)
+    fprintf(['  SD: session %s, session-by-region %s, channel %s\n'], ...
+        format_p_value(result.session_sd), format_p_value(result.cell_sd), ...
+        format_p_value(result.channel_sd));
+    if result.cell_sd < 1e-4
+        fprintf(['  The session-by-region variance is at the boundary, ' ...
+            'so this p-value leans on the channel residual.\n']);
+    end
+end
+for pair_n = 1:size(result.pairs, 1)
+    fprintf('  %s vs %s: p = %s, Bonferroni p = %s %s\n', ...
+        region_display_name(obs.region_names{result.pairs(pair_n, 1)}), ...
+        region_display_name(obs.region_names{result.pairs(pair_n, 2)}), ...
+        format_p_value(result.p_raw(pair_n)), ...
+        format_p_value(result.p_adjusted(pair_n)), ...
+        significance_label(result.p_adjusted(pair_n)));
+end
+end
+
+function draw_nested_region_comparison(obs, result, band_name)
+n_sessions = obs.n_sessions;
+n_regions = numel(obs.region_names);
+if result.ok && all(isfinite(result.emm))
+    means = result.emm;
+    standard_error = result.emm_se;
+else
+    means = mean(obs.session_mean, 1, 'omitnan');
+    n_per_region = sum(isfinite(obs.session_mean), 1);
+    standard_error = std(obs.session_mean, 0, 1, 'omitnan') ./ sqrt(n_per_region);
+end
 hold on
 yline(0, ':k', 'HandleVisibility', 'off');
-jitter_span = 0.22;
-jitter = ((1:n_shanks).' - (n_shanks + 1) / 2) / n_shanks * jitter_span;
-for shank_n = 1:n_shanks
-    plot((1:n_regions) + jitter(shank_n), values(shank_n, :), '-', ...
-        'Color', [0.45 0.45 0.45], 'LineWidth', 0.7, ...
+jitter = ((1:n_sessions).' - (n_sessions + 1) / 2) / n_sessions * 0.22;
+for session_n = 1:n_sessions
+    y = obs.session_mean(session_n, :);
+    keep = isfinite(y);
+    if nnz(keep) < 2
+        continue
+    end
+    plot(find(keep) + jitter(session_n), y(keep), '-', ...
+        'Color', [0.55 0.55 0.55], 'LineWidth', 0.6, ...
         'HandleVisibility', 'off');
 end
 bar_half = 0.275;
 for region_n = 1:n_regions
+    if ~isfinite(means(region_n))
+        continue
+    end
     fill(region_n + [-bar_half, bar_half, bar_half, -bar_half], ...
         [0, 0, means(region_n), means(region_n)], ...
-        region_color(region_names{region_n}), ...
+        region_color(obs.region_names{region_n}), ...
         'FaceAlpha', 0.35, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 end
 errorbar(1:n_regions, means, standard_error, 'k', 'LineStyle', 'none', ...
     'LineWidth', 1, 'CapSize', 8, 'HandleVisibility', 'off');
+colors = zeros(numel(obs.power), 3);
 for region_n = 1:n_regions
-    scatter(region_n + jitter, values(:, region_n), 28, ...
-        region_color(region_names{region_n}), 'filled', ...
-        'MarkerFaceAlpha', 0.9, 'MarkerEdgeColor', [0.15 0.15 0.15], ...
-        'MarkerEdgeAlpha', 0.45, 'HandleVisibility', 'off');
+    in_region = obs.region_id == region_n;
+    colors(in_region, :) = repmat(region_color(obs.region_names{region_n}), ...
+        nnz(in_region), 1);
 end
-y_extent = [0; values(:); (means + standard_error).'; (means - standard_error).'];
+scatter(obs.region_id + jitter(obs.session_id), obs.power, 16, colors, ...
+    'filled', 'MarkerFaceAlpha', 0.28, 'MarkerEdgeColor', 'none', ...
+    'HandleVisibility', 'off');
+y_extent = [0; obs.power(:); (means + standard_error).'; (means - standard_error).'];
 y_extent = y_extent(isfinite(y_extent));
 y_low = min(y_extent);
 y_high = max(y_extent);
@@ -1138,78 +1420,25 @@ span = y_high - y_low;
 if ~isfinite(span) || span < 0.5
     span = 0.5;
 end
-draw_significance_brackets(pairs, p_adjusted, y_high, span);
+if result.ok
+    draw_significance_brackets(result.pairs, result.p_adjusted, y_high, span);
+    n_pairs = size(result.pairs, 1);
+else
+    n_pairs = 0;
+end
 margin = 0.08 * span;
-n_pairs = size(pairs, 1);
 ylim([y_low - margin, y_high + margin + n_pairs * (0.12 * span) + 0.12 * span]);
 xlim([0.4, n_regions + 0.6]);
 set(gca, 'XTick', 1:n_regions, 'XTickLabel', ...
-    cellfun(@region_display_name, region_names, 'UniformOutput', false));
-ylabel({'Mean power z-scored within shank', '0 = mid-LPAG channel'})
-if n_regions >= 3
-    if isfinite(p_omnibus)
-        omnibus_label = sprintf('Friedman p = %.3g', p_omnibus);
-    else
-        omnibus_label = 'Friedman p = n/a';
-    end
-    title(sprintf('%s | %s | n = %d shanks', band_name, omnibus_label, n_shanks))
+    cellfun(@region_display_name, obs.region_names, 'UniformOutput', false));
+ylabel({'Power z-scored within shank', '0 = mid-LPAG channel'})
+if result.ok && isfinite(result.p_omnibus)
+    omnibus_label = sprintf('nested p = %.3g', result.p_omnibus);
 else
-    title(sprintf('%s | n = %d shanks', band_name, n_shanks))
+    omnibus_label = 'nested model unavailable';
 end
+title(sprintf('%s | %s | %d sessions', band_name, omnibus_label, n_sessions))
 box off
-end
-
-function [p_raw, p_adjusted, pairs] = paired_region_tests(values)
-n_regions = size(values, 2);
-pairs = nchoosek(1:n_regions, 2);
-n_pairs = size(pairs, 1);
-p_raw = nan(n_pairs, 1);
-for pair_n = 1:n_pairs
-    sample_a = values(:, pairs(pair_n, 1));
-    sample_b = values(:, pairs(pair_n, 2));
-    if all(sample_a - sample_b == 0)
-        p_raw(pair_n) = 1;
-        continue
-    end
-    try
-        p_raw(pair_n) = signrank(sample_a, sample_b);
-    catch
-        p_raw(pair_n) = NaN;
-    end
-end
-p_adjusted = min(p_raw * n_pairs, 1);
-end
-
-function p_value = friedman_p(values)
-p_value = NaN;
-if size(values, 2) < 3 || size(values, 1) < 2
-    return
-end
-try
-    p_value = friedman(values, 1, 'off');
-catch
-    p_value = NaN;
-end
-end
-
-function report_region_tests(method_name, band_name, region_list, ...
-        region_names, n_shanks, p_omnibus, pairs, p_raw, p_adjusted)
-fprintf('%s | %s: %d shanks contain %s.\n', ...
-    method_name, band_name, n_shanks, region_list);
-if numel(region_names) >= 3
-    if isfinite(p_omnibus)
-        fprintf('  Friedman p = %.4g\n', p_omnibus);
-    else
-        fprintf('  Friedman p = n/a\n');
-    end
-end
-for pair_n = 1:size(pairs, 1)
-    fprintf('  %s vs %s: sign-rank p = %s, Bonferroni p = %s %s\n', ...
-        region_display_name(region_names{pairs(pair_n, 1)}), ...
-        region_display_name(region_names{pairs(pair_n, 2)}), ...
-        format_p_value(p_raw(pair_n)), format_p_value(p_adjusted(pair_n)), ...
-        significance_label(p_adjusted(pair_n)));
-end
 end
 
 function label = format_p_value(p_value)
