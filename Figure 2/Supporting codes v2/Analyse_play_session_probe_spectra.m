@@ -54,8 +54,14 @@ theta_band = [6 12];
 gamma_band = [30 45];
 
 %% Load the requested recording files
-file_list = dir(fullfile(saving_folder, ...
-    'play_session_probe_periodic_aperiodic_spectra_*.mat'));
+file_patterns = probe_periodic_spectra_filename();
+file_list = dir(fullfile(saving_folder, file_patterns{1}));
+for pattern_n = 2:numel(file_patterns)
+    extra_files = dir(fullfile(saving_folder, file_patterns{pattern_n}));
+    if ~isempty(extra_files)
+        file_list = [file_list; extra_files]; %#ok<AGROW>
+    end
+end
 if isempty(file_list)
     error('No channel-wise spectra found in %s.', saving_folder);
 end

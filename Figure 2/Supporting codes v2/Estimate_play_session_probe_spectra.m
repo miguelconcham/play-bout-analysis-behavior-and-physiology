@@ -30,9 +30,8 @@ for fn = 1:numel(animal_list)
 
     probe_spectra = GENERATE_PLAY_SESSION_PROBE_SPECTRA(animal_path);
 
-    safe_name = regexprep(animal_list(fn).name, '[^\w\-]+', '_');
     output_file = fullfile(saving_folder, ...
-        ['play_session_probe_periodic_aperiodic_spectra_', safe_name, '.mat']);
+        probe_periodic_spectra_filename(animal_list(fn).name));
     disp(['Saving ', output_file])
     save(output_file, 'probe_spectra', '-v7.3');
 end
