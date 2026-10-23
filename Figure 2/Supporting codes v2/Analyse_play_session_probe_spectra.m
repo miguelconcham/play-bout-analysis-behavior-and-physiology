@@ -12,6 +12,13 @@
 % a different distance in another session. Frequency is the horizontal
 % axis and distance to the tip is the vertical axis.
 %
+% Each standard region also gets its own spectrum of that same residual.
+% At every frequency the estimate is a mixed model, Power ~ 1 + (1|Session)
+% + (1|Session:Channel), so channels are repeated measures nested in the
+% session. The central LPAG channel is drawn as a dotted reference. A
+% second figure tests region at each frequency and marks the region with
+% the strongest estimate.
+%
 % Selected sessions are stacked with mid-LPAG at zero. The figures keep saved
 % power, with no rescaling. A table written beside the spectra has the same
 % distance, the area, the saved delta/theta/gamma power, that power minus the
@@ -117,6 +124,10 @@ bands_to_display = {'delta'};
 %   regions_to_display = {'LPAG', 'VLPAG', 'SupCol', 'DR'};
 regions_to_display = {'LPAG', 'VLPAG', 'SupCol'};
 
+% Spectra of log10 power after the aperiodic fit and theta Gaussians are
+% removed. One subplot per region. The list is the initial set.
+spectrum_regions = {'SupCol', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
+
 % Ventral and dorsal curves. 'normalized' z-scores each band within the
 % shank and subtracts the power of the first channel on that side, so the
 % curve starts at 0. 'raw' draws the saved band power.
@@ -201,6 +212,7 @@ tracks = repmat(empty_track(), 0, 1);
 placed = repmat(empty_placed(), 0, 1);
 power_pieces = {};
 pooled_pieces = {};
+region_pieces = {};
 
 %% Plot each requested session on its own
 for file_n = recording_index(:).'
@@ -268,6 +280,9 @@ for file_n = recording_index(:).'
                 channel_table, this_session, frequency, theta_band, ...
                 probe_spectra.animal_name, spectral_method); %#ok<SAGROW>
         end
+        region_pieces{end + 1} = region_channel_records( ...
+            channel_table, this_session, frequency, theta_band, ...
+            probe_spectra.animal_name, session_n, spectral_method); %#ok<SAGROW>
 
         if plot_each_session
             plot_depth_spectrum(frequency, channel_table, ...
@@ -327,6 +342,13 @@ plot_region_distances(placed, spectrum_field, ...
     delta_band, theta_band, gamma_band, spectral_method, ...
     regions_to_display, region_distance_scale, distance_model_bin_um, ...
     bands_to_display, plot_style);
+if isempty(region_pieces)
+    region_records = repmat(empty_region_record(), 0, 1);
+else
+    region_records = vertcat(region_pieces{:});
+end
+plot_region_residual_spectra(region_records, stacked_frequency, ...
+    spectral_method, theta_band, spectrum_regions, plot_style);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
@@ -3503,4 +3525,646 @@ for slot_n = 1:numel(selection.index)
         'MarkerEdgeAlpha', plot_style.marker_alpha, ...
         'HandleVisibility', 'off');
 end
+end
+
+function item = empty_region_record()
+item = struct( ...
+    'animal', '', ...
+    'session', NaN, ...
+    'shank', NaN, ...
+    'channel', NaN, ...
+    'method_id', NaN, ...
+    'regions', {{}}, ...
+    'is_center', false, ...
+    'spectrum', []);
+end
+
+function records = region_channel_records(channel_table, session, ...
+        frequency, theta_band, animal_name, session_n, spectral_method)
+[~, method_ids] = selected_spectral_methods(spectral_method);
+method_fields = {'welch', 'fourier'};
+if ~ismember('IsLPAGCenter', channel_table.Properties.VariableNames)
+    error(['Channel table has no IsLPAGCenter column, so the central ' ...
+        'LPAG reference cannot be drawn.']);
+end
+n_channels = height(channel_table);
+animal = char(string(animal_name));
+records = repmat(empty_region_record(), 0, 1);
+for slot_n = 1:numel(method_ids)
+    method_n = method_ids(slot_n);
+    residual = residual_matrix(session.(method_fields{method_n}), ...
+        frequency, theta_band, n_channels);
+    these = repmat(empty_region_record(), n_channels, 1);
+    for channel_n = 1:n_channels
+        these(channel_n).animal = animal;
+        these(channel_n).session = session_n;
+        these(channel_n).shank = channel_table.ProbeNumber(channel_n);
+        these(channel_n).channel = channel_table.Channel(channel_n);
+        these(channel_n).method_id = method_n;
+        these(channel_n).regions = area_to_region_keys( ...
+            area_label_at(channel_table.Area, channel_n));
+        these(channel_n).is_center = ...
+            channel_table.IsLPAGCenter(channel_n) ~= 0;
+        these(channel_n).spectrum = residual(channel_n, :);
+    end
+    records = [records; these]; %#ok<AGROW>
+end
+end
+
+function label = area_label_at(area_column, index)
+if iscell(area_column)
+    label = area_column{index};
+elseif isstring(area_column)
+    label = area_column(index);
+else
+    label = area_column(index, :);
+end
+end
+
+function keys = area_to_region_keys(label)
+tokens = split_area_label(label);
+keys = cell(1, 0);
+for token_n = 1:numel(tokens)
+    name = canonical_region_name(tokens{token_n});
+    if strcmp(name, 'Other') || any(strcmp(keys, name))
+        continue
+    end
+    keys{end + 1} = name; %#ok<AGROW>
+end
+end
+
+function plot_region_residual_spectra(records, frequency, spectral_method, ...
+        theta_band, spectrum_regions, plot_style)
+if isempty(records) || isempty(frequency)
+    fprintf('No channels were available for the region spectra.\n');
+    return
+end
+region_names = selected_regions(spectrum_regions);
+region_names = region_names(~strcmp(region_names, 'Other'));
+region_names = unique(region_names, 'stable');
+region_names = region_names(:).';
+if isempty(region_names)
+    fprintf('spectrum_regions is empty, so the region spectra are skipped.\n');
+    return
+end
+[method_names, method_ids] = selected_spectral_methods(spectral_method);
+for slot_n = 1:numel(method_ids)
+    method_n = method_ids(slot_n);
+    method_records = records(reshape([records.method_id], [], 1) == method_n);
+    if isempty(method_records)
+        continue
+    end
+    fprintf(['Region spectra | %s | theta-free aperiodic residual | ' ...
+        '%d channels\n'], method_names{slot_n}, numel(method_records));
+    [fits, center_fit] = fit_region_spectrum_means( ...
+        method_records, frequency, region_names);
+    effect = fit_region_effect_by_frequency( ...
+        method_records, frequency, region_names);
+    draw_region_spectrum_panels(frequency, region_names, fits, center_fit, ...
+        method_names{slot_n}, theta_band, plot_style);
+    draw_region_effect_figure(frequency, region_names, effect, ...
+        method_names{slot_n}, theta_band);
+    report_region_effect(method_names{slot_n}, region_names, effect);
+end
+end
+
+function [fits, center_fit] = fit_region_spectrum_means( ...
+        records, frequency, region_names)
+n_regions = numel(region_names);
+fits = repmat(empty_spectrum_fit(numel(frequency)), 1, n_regions);
+for region_n = 1:n_regions
+    subset = records(record_in_region(records, region_names{region_n}));
+    fprintf('  %s\n', region_display_name(region_names{region_n}));
+    fits(region_n) = fit_spectrum_intercepts(subset, frequency);
+end
+center_records = records(reshape([records.is_center], [], 1));
+fprintf('  Central LPAG\n');
+center_fit = fit_spectrum_intercepts(center_records, frequency);
+end
+
+function fit = empty_spectrum_fit(n_frequency)
+fit = struct( ...
+    'intercept', nan(1, n_frequency), ...
+    'lower', nan(1, n_frequency), ...
+    'upper', nan(1, n_frequency), ...
+    'n_channels', 0, ...
+    'n_sessions', 0, ...
+    'formula', '', ...
+    'n_fit', 0);
+end
+
+function fit = fit_spectrum_intercepts(records, frequency)
+n_frequency = numel(frequency);
+fit = empty_spectrum_fit(n_frequency);
+if isempty(records)
+    fprintf('    no channels\n');
+    return
+end
+[power, session_key, channel_key] = record_columns(records);
+[formula, ~] = nested_formula(session_key, channel_key, false);
+fit.formula = formula;
+fit.n_channels = size(power, 1);
+fit.n_sessions = numel(unique(session_key));
+fprintf('    %d channels in %d sessions | %s\n', ...
+    fit.n_channels, fit.n_sessions, formula);
+if isempty(strfind(formula, 'Session:Channel')) %#ok<STREMP>
+    fprintf(['    Each channel occurs once in a session, so the channel ' ...
+        'term is the residual and the random effect is the session.\n']);
+end
+if fit.n_sessions < 2
+    fprintf('    fewer than 2 sessions, so the mixed model is skipped\n');
+    return
+end
+for frequency_n = 1:n_frequency
+    [intercept, lower, upper] = fit_one_intercept( ...
+        power(:, frequency_n), session_key, channel_key, formula);
+    fit.intercept(frequency_n) = intercept;
+    fit.lower(frequency_n) = lower;
+    fit.upper(frequency_n) = upper;
+    if isfinite(intercept)
+        fit.n_fit = fit.n_fit + 1;
+    end
+end
+fprintf('    fitted %d of %d frequencies\n', fit.n_fit, n_frequency);
+end
+
+function [formula, nested] = nested_formula(session_key, channel_key, with_region)
+% One row per channel leaves Session:Channel identical to the residual.
+% The fitted model then keeps every channel nested in its session through
+% the session random intercept. A repeated channel inside one session
+% uses the explicit nested term.
+pair_key = strcat(session_key(:), '|', channel_key(:));
+nested = numel(unique(pair_key)) < numel(pair_key);
+if with_region
+    if nested
+        formula = 'Power ~ Region + (1|Session) + (1|Session:Channel)';
+    else
+        formula = 'Power ~ Region + (1|Session)';
+    end
+else
+    if nested
+        formula = 'Power ~ 1 + (1|Session) + (1|Session:Channel)';
+    else
+        formula = 'Power ~ 1 + (1|Session)';
+    end
+end
+end
+
+function [intercept, lower, upper] = fit_one_intercept( ...
+        power, session_key, channel_key, formula)
+intercept = NaN;
+lower = NaN;
+upper = NaN;
+[intercept, lower, upper] = fit_intercept_table( ...
+    power, session_key, channel_key, formula);
+if isfinite(intercept)
+    return
+end
+if ~isempty(strfind(formula, 'Session:Channel')) %#ok<STREMP>
+    [intercept, lower, upper] = fit_intercept_table( ...
+        power, session_key, channel_key, 'Power ~ 1 + (1|Session)');
+end
+end
+
+function [intercept, lower, upper] = fit_intercept_table( ...
+        power, session_key, channel_key, formula)
+intercept = NaN;
+lower = NaN;
+upper = NaN;
+power = power(:);
+keep = isfinite(power);
+if nnz(keep) < 2 || numel(unique(session_key(keep))) < 2
+    return
+end
+model_table = table(power(keep), ...
+    categorical(session_key(keep)), categorical(channel_key(keep)), ...
+    'VariableNames', {'Power', 'Session', 'Channel'});
+warning_state = warning;
+warning('off', 'all');
+try
+    lme = fitlme(model_table, formula, 'FitMethod', 'REML');
+    try
+        [beta, ~, stats] = fixedEffects(lme, 'DFMethod', 'satterthwaite');
+        intercept = beta(1);
+        try
+            lower = stats.Lower(1);
+            upper = stats.Upper(1);
+        catch
+            [lower, upper] = interval_from_se( ...
+                intercept, stats.SE(1), stats.DF(1));
+        end
+    catch
+        beta = fixedEffects(lme);
+        intercept = beta(1);
+        se = sqrt(max(lme.CoefficientCovariance(1, 1), 0));
+        [lower, upper] = interval_from_se( ...
+            intercept, se, max(lme.DFE, 1));
+    end
+catch
+    intercept = NaN;
+    lower = NaN;
+    upper = NaN;
+end
+warning(warning_state);
+end
+
+function mask = record_in_region(records, region_name)
+mask = false(numel(records), 1);
+for record_n = 1:numel(records)
+    mask(record_n) = any(strcmp(records(record_n).regions, region_name));
+end
+end
+
+function [power, session_key, channel_key] = record_columns(records)
+power = vertcat(records.spectrum);
+n_records = numel(records);
+session_key = cell(n_records, 1);
+channel_key = cell(n_records, 1);
+for record_n = 1:n_records
+    session_key{record_n} = [records(record_n).animal, '|', ...
+        sprintf('%.12g', records(record_n).session)];
+    channel_key{record_n} = nested_channel_key( ...
+        records(record_n).shank, records(record_n).channel);
+end
+end
+
+function key = nested_channel_key(shank, channel)
+key = [number_key(shank), '|', number_key(channel)];
+end
+
+function key = number_key(value)
+if ~isfinite(value)
+    key = 'NaN';
+else
+    key = sprintf('%.12g', value);
+end
+end
+
+function effect = fit_region_effect_by_frequency(records, frequency, region_names)
+n_frequency = numel(frequency);
+n_regions = numel(region_names);
+effect = struct( ...
+    'emm', nan(n_regions, n_frequency), ...
+    'p_omnibus', nan(1, n_frequency), ...
+    'winner', zeros(1, n_frequency), ...
+    'formula', '', ...
+    'n_fit', 0);
+[power, region_id, session_key, channel_key] = stack_region_rows( ...
+    records, region_names);
+if isempty(power)
+    fprintf('  Region test: no channels in the selected regions\n');
+    return
+end
+[formula, ~] = nested_formula(session_key, channel_key, true);
+effect.formula = formula;
+fprintf('  Region test | %d channel rows in %d sessions | %s\n', ...
+    size(power, 1), numel(unique(session_key)), formula);
+if isempty(strfind(formula, 'Session:Channel')) %#ok<STREMP>
+    fprintf(['  Each channel occurs once in a session, so the channel ' ...
+        'term is the residual and the random effect is the session.\n']);
+end
+for frequency_n = 1:n_frequency
+    [emm, p_value, winner] = fit_one_region_test( ...
+        power(:, frequency_n), region_id, region_names, ...
+        session_key, channel_key, formula);
+    effect.emm(:, frequency_n) = emm;
+    effect.p_omnibus(frequency_n) = p_value;
+    effect.winner(frequency_n) = winner;
+    if isfinite(p_value)
+        effect.n_fit = effect.n_fit + 1;
+    end
+end
+fprintf('  Region test fitted %d of %d frequencies\n', ...
+    effect.n_fit, n_frequency);
+end
+
+function [power, region_id, session_key, channel_key] = stack_region_rows( ...
+        records, region_names)
+power_cells = cell(1, 0);
+region_cells = cell(1, 0);
+session_cells = cell(1, 0);
+channel_cells = cell(1, 0);
+for region_n = 1:numel(region_names)
+    subset = records(record_in_region(records, region_names{region_n}));
+    if isempty(subset)
+        continue
+    end
+    [this_power, this_session, this_channel] = record_columns(subset);
+    for row_n = 1:numel(this_channel)
+        this_channel{row_n} = [this_channel{row_n}, '|', region_names{region_n}];
+    end
+    power_cells{end + 1} = this_power; %#ok<AGROW>
+    region_cells{end + 1} = repmat(region_n, size(this_power, 1), 1); %#ok<AGROW>
+    session_cells{end + 1} = this_session; %#ok<AGROW>
+    channel_cells{end + 1} = this_channel; %#ok<AGROW>
+end
+if isempty(power_cells)
+    power = [];
+    region_id = [];
+    session_key = {};
+    channel_key = {};
+    return
+end
+power = vertcat(power_cells{:});
+region_id = vertcat(region_cells{:});
+session_key = vertcat(session_cells{:});
+channel_key = vertcat(channel_cells{:});
+end
+
+function [emm, p_value, winner] = fit_one_region_test( ...
+        power, region_id, region_names, session_key, channel_key, formula)
+n_regions = numel(region_names);
+emm = nan(n_regions, 1);
+p_value = NaN;
+winner = 0;
+power = power(:);
+keep = isfinite(power);
+if nnz(keep) < 4
+    return
+end
+power = power(keep);
+region_id = region_id(keep);
+session_key = session_key(keep);
+channel_key = channel_key(keep);
+present = unique(region_id, 'stable');
+present = present(present >= 1 & present <= n_regions);
+if numel(present) < 2 || numel(unique(session_key)) < 2
+    return
+end
+present_names = region_names(present);
+present_names = present_names(:).';
+if any(strcmp(present_names, 'LPAG'))
+    present_names = [{'LPAG'}, present_names(~strcmp(present_names, 'LPAG'))];
+end
+row_names = region_names(region_id);
+row_names = row_names(:);
+model_table = table(power, ...
+    categorical(row_names, present_names), ...
+    categorical(session_key), categorical(channel_key), ...
+    'VariableNames', {'Power', 'Region', 'Session', 'Channel'});
+warning_state = warning;
+warning('off', 'all');
+lme = [];
+try
+    lme = fitlme(model_table, formula, ...
+        'FitMethod', 'REML', 'DummyVarCoding', 'reference');
+catch
+    if ~isempty(strfind(formula, 'Session:Channel')) %#ok<STREMP>
+        try
+            lme = fitlme(model_table, 'Power ~ Region + (1|Session)', ...
+                'FitMethod', 'REML', 'DummyVarCoding', 'reference');
+        catch
+            lme = [];
+        end
+    end
+end
+warning(warning_state);
+if isempty(lme)
+    return
+end
+try
+    stats = anova(lme, 'DFMethod', 'satterthwaite');
+    [~, ~, ~, p_value] = region_anova_row(stats);
+catch
+    try
+        stats = anova(lme);
+        [~, ~, ~, p_value] = region_anova_row(stats);
+    catch
+        p_value = NaN;
+    end
+end
+coef_names = coefficient_names(lme);
+try
+    beta = fixedEffects(lme);
+catch
+    return
+end
+reference_name = present_names{1};
+for region_n = 1:n_regions
+    if ~any(present == region_n)
+        continue
+    end
+    L = level_row(coef_names, region_names{region_n}, reference_name);
+    if any(~isfinite(L)) || numel(L) ~= numel(beta)
+        continue
+    end
+    emm(region_n) = L * beta(:);
+end
+finite_region = find(isfinite(emm));
+if isempty(finite_region) || ~isfinite(p_value) || p_value >= 0.05
+    return
+end
+[~, best] = max(emm(finite_region));
+winner = finite_region(best);
+end
+
+function draw_region_spectrum_panels(frequency, region_names, fits, ...
+        center_fit, method_name, theta_band, plot_style)
+n_regions = numel(region_names);
+figure('Name', ['Region spectra | ', method_name], 'Color', 'w', ...
+    'Position', [70 30 860 180 * n_regions]);
+y_limits = spectrum_panel_limits(fits, center_fit);
+for region_n = 1:n_regions
+    subplot(n_regions, 1, region_n)
+    hold on
+    yline(0, ':', 'Color', [0.75 0.75 0.75], 'HandleVisibility', 'off');
+    this_fit = fits(region_n);
+    draw_spectrum_interval(frequency, this_fit.intercept, ...
+        this_fit.lower, this_fit.upper, ...
+        region_color(region_names{region_n}), plot_style.ci_alpha);
+    center_line = plot(frequency, center_line_values(center_fit.intercept), ...
+        'k:', 'LineWidth', 1.3);
+    region_line = plot(nan, nan, '-', ...
+        'Color', region_color(region_names{region_n}), 'LineWidth', 1.6);
+    ci_patch = plot(nan, nan, 's', ...
+        'MarkerFaceColor', region_color(region_names{region_n}), ...
+        'MarkerEdgeColor', 'none', 'MarkerSize', 8);
+    xlim([frequency(1), frequency(end)])
+    if all(isfinite(y_limits))
+        ylim(y_limits)
+    end
+    ylabel('log10 power')
+    title(sprintf('%s | %d sessions', ...
+        region_display_name(region_names{region_n}), this_fit.n_sessions))
+    if region_n == 1
+        legend([region_line, ci_patch, center_line], ...
+            {'Region estimate', '95% CI', 'Central LPAG'}, ...
+            'Location', 'northeast', 'Box', 'off');
+    end
+    if region_n == n_regions
+        xlabel('Frequency (Hz)')
+    else
+        set(gca, 'XTickLabel', [])
+    end
+    box off
+end
+sgtitle({sprintf('%s | theta-free aperiodic spectrum', method_name), ...
+    sprintf('Theta %g-%g Hz removed. %s', theta_band(1), theta_band(2), ...
+    'Channels nested in session. Dotted line is central LPAG.')}, ...
+    'FontSize', 10)
+drawnow
+end
+
+function values = center_line_values(intercept)
+values = intercept(:).';
+values(~isfinite(values)) = NaN;
+end
+
+function limits = spectrum_panel_limits(fits, center_fit)
+values = center_fit.intercept(:);
+for region_n = 1:numel(fits)
+    values = [values; fits(region_n).intercept(:); ...
+        fits(region_n).lower(:); fits(region_n).upper(:)]; %#ok<AGROW>
+end
+values = values(isfinite(values));
+if numel(values) < 2
+    limits = [NaN NaN];
+    return
+end
+low = prctile(values, 1);
+high = prctile(values, 99);
+if low == high
+    low = low - 0.1;
+    high = high + 0.1;
+end
+pad = 0.08 * (high - low);
+limits = [low - pad, high + pad];
+end
+
+function draw_spectrum_interval(frequency, intercept, lower, upper, color, ci_alpha)
+frequency = frequency(:);
+intercept = intercept(:);
+lower = lower(:);
+upper = upper(:);
+finite = isfinite(frequency) & isfinite(intercept) & ...
+    isfinite(lower) & isfinite(upper);
+if ~any(finite)
+    return
+end
+    index = find(finite);
+    run_break = [1; find(diff(index) > 1) + 1; numel(index) + 1];
+    for run_n = 1:numel(run_break) - 1
+        selected = index(run_break(run_n):run_break(run_n + 1) - 1);
+        x = frequency(selected);
+        if numel(selected) >= 2
+            fill([x; flipud(x)], ...
+                [lower(selected); flipud(upper(selected))], color, ...
+                'FaceAlpha', ci_alpha, 'EdgeColor', 'none', ...
+                'HandleVisibility', 'off');
+        end
+        plot(x, intercept(selected), '-', 'Color', color, 'LineWidth', 1.6, ...
+            'HandleVisibility', 'off');
+    end
+end
+
+function draw_region_effect_figure(frequency, region_names, effect, ...
+        method_name, theta_band)
+n_regions = numel(region_names);
+labels = cellfun(@region_display_name, region_names, 'UniformOutput', false);
+figure('Name', ['Region effect by frequency | ', method_name], ...
+    'Color', 'w', 'Position', [100 40 960 760]);
+heatmap_axis = subplot(3, 1, 1);
+finite_values = effect.emm(isfinite(effect.emm));
+imagesc(heatmap_axis, frequency, 1:n_regions, effect.emm);
+set(heatmap_axis, 'YTick', 1:n_regions, 'YTickLabel', labels, 'YDir', 'reverse');
+axis(heatmap_axis, 'tight')
+colormap(heatmap_axis, diverging_or_sequential('raw_aperiodic_subtracted'))
+color_limits = spectrum_color_limits(finite_values, 'raw_aperiodic_subtracted');
+if all(isfinite(color_limits))
+    set(heatmap_axis, 'CLim', color_limits)
+end
+colorbar(heatmap_axis)
+ylabel(heatmap_axis, 'Region')
+title(heatmap_axis, 'Estimated log10 power')
+box(heatmap_axis, 'off')
+
+subplot(3, 1, 2)
+p_values = effect.p_omnibus;
+p_values(p_values <= 0) = realmin;
+plot(frequency, -log10(p_values), 'k', 'LineWidth', 1.2)
+hold on
+yline(-log10(0.05), '--', 'p = 0.05', 'LabelHorizontalAlignment', 'left');
+xlim([frequency(1), frequency(end)])
+ylabel('-log10 p')
+title('Test of region at each frequency')
+box off
+
+subplot(3, 1, 3)
+hold on
+step = median(diff(frequency));
+if ~isfinite(step) || step <= 0
+    step = 1;
+end
+for frequency_n = 1:numel(frequency)
+    x0 = frequency(frequency_n) - step / 2;
+    winner = effect.winner(frequency_n);
+    if winner >= 1 && winner <= n_regions
+        color = region_color(region_names{winner});
+    else
+        color = [0.86 0.86 0.86];
+    end
+    patch([x0, x0 + step, x0 + step, x0], [0, 0, 1, 1], color, ...
+        'EdgeColor', 'none', 'HandleVisibility', 'off');
+end
+guides = gobjects(n_regions + 1, 1);
+guide_labels = [labels, {'Region effect p >= 0.05'}];
+for region_n = 1:n_regions
+    guides(region_n) = plot(nan, nan, 's', ...
+        'MarkerFaceColor', region_color(region_names{region_n}), ...
+        'MarkerEdgeColor', 'none', 'MarkerSize', 8);
+end
+guides(end) = plot(nan, nan, 's', ...
+    'MarkerFaceColor', [0.86 0.86 0.86], ...
+    'MarkerEdgeColor', 'none', 'MarkerSize', 8);
+legend(guides, guide_labels, 'Location', 'eastoutside', 'Box', 'off')
+xlim([frequency(1) - step / 2, frequency(end) + step / 2])
+ylim([0, 1])
+set(gca, 'YTick', [])
+xlabel('Frequency (Hz)')
+title('Strongest region where regions differ')
+box off
+sgtitle({sprintf('%s | regional effect by frequency', method_name), ...
+    sprintf(['Theta %g-%g Hz and the aperiodic fit removed. ' ...
+    'Gray frequencies have no region effect at p < 0.05.'], ...
+    theta_band(1), theta_band(2))}, 'FontSize', 10)
+drawnow
+end
+
+function report_region_effect(method_name, region_names, effect)
+p_values = effect.p_omnibus;
+significant = isfinite(p_values) & p_values < 0.05;
+q_values = benjamini_hochberg(p_values);
+fdr = isfinite(q_values) & q_values < 0.05;
+fprintf(['%s | region effect at %d frequencies, %d with p < 0.05, ' ...
+    '%d with FDR q < 0.05\n'], method_name, effect.n_fit, ...
+    nnz(significant), nnz(fdr));
+if ~any(significant)
+    return
+end
+for region_n = 1:numel(region_names)
+    fprintf('  %s is strongest at %d of those frequencies\n', ...
+        region_display_name(region_names{region_n}), ...
+        nnz(effect.winner == region_n));
+end
+end
+
+function q_values = benjamini_hochberg(p_values)
+q_values = nan(size(p_values));
+p_column = p_values(:);
+valid = isfinite(p_column);
+if ~any(valid)
+    return
+end
+[sorted, order] = sort(p_column(valid));
+n_tests = numel(sorted);
+q_sorted = sorted(:) .* n_tests ./ (1:n_tests).';
+q_sorted = min(q_sorted, 1);
+for rank_n = n_tests - 1:-1:1
+    q_sorted(rank_n) = min(q_sorted(rank_n), q_sorted(rank_n + 1));
+end
+q_valid = nan(n_tests, 1);
+q_valid(order) = q_sorted;
+q_column = nan(numel(p_column), 1);
+q_column(valid) = q_valid;
+q_values(:) = q_column;
 end
