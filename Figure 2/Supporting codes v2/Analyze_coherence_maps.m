@@ -279,8 +279,9 @@ else
 end
 end
 
-function local_plot_session_profile_lines(stack_table)
+function session_handles = local_plot_session_profile_lines(stack_table)
 % Thin gray polyline per session/probe, with distinct start/end marks.
+session_handles = gobjects(0, 1);
 if isempty(stack_table) || height(stack_table) == 0
     return
 end
@@ -304,12 +305,54 @@ for g = 1:numel(groups)
         'HandleVisibility', 'off')
     mark_n = mod(g - 1, numel(start_markers)) + 1;
     color = session_colors(g, :);
-    scatter(distance_um(1), phase_rad(1), 70, color, start_markers{mark_n}, ...
+    disp_name = sprintf('%s  (%s start, %s end)', groups{g}, ...
+        start_markers{mark_n}, end_markers{mark_n});
+    h_start = scatter(distance_um(1), phase_rad(1), 70, color, start_markers{mark_n}, ...
         'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 0.6, ...
-        'MarkerFaceAlpha', 0.95, 'HandleVisibility', 'off')
+        'MarkerFaceAlpha', 0.95, 'HandleVisibility', 'off', ...
+        'DisplayName', disp_name);
     scatter(distance_um(end), phase_rad(end), 70, color, end_markers{mark_n}, ...
         'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 0.6, ...
         'MarkerFaceAlpha', 0.95, 'HandleVisibility', 'off')
+    session_handles(end + 1, 1) = h_start; %#ok<AGROW>
+end
+end
+
+function local_add_area_and_session_legends(session_handles)
+% Area legend on the right; session marker/color legend below.
+ax = gca;
+fig = ancestor(ax, 'figure');
+leg_area = legend(ax, 'Location', 'eastoutside', 'Interpreter', 'none');
+try
+    title(leg_area, 'Area');
+catch
+end
+try
+    leg_area.AutoUpdate = 'off';
+catch
+end
+if nargin < 1 || isempty(session_handles)
+    return
+end
+session_handles = session_handles(isgraphics(session_handles));
+if isempty(session_handles)
+    return
+end
+try
+    copyobj(leg_area, fig);
+catch
+end
+n_col = min(3, numel(session_handles));
+leg_sess = legend(ax, session_handles, ...
+    'Location', 'southoutside', 'Interpreter', 'none', ...
+    'NumColumns', n_col, 'FontSize', 8);
+try
+    title(leg_sess, 'Session (start / end markers, same color)');
+catch
+end
+try
+    leg_sess.AutoUpdate = 'off';
+catch
 end
 end
 
@@ -358,9 +401,9 @@ if isempty(stack_table) || height(stack_table) == 0
     return
 end
 scatter_fig = figure('Name', fig_title, ...
-    'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
+    'Color', 'w', 'Units', 'normalized', 'Position', [0.06 0.05 0.82 0.84]);
 hold on
-local_plot_session_profile_lines(stack_table)
+session_handles = local_plot_session_profile_lines(stack_table)
 area_labels = stack_table.area;
 for k = 1:numel(area_labels)
     if isempty(area_labels{k})
@@ -392,7 +435,7 @@ yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
 xlabel('Distance from LPAG center (\mum)')
 ylabel('Phase difference vs LPAG center (rad)')
 title(fig_title)
-legend('Location', 'eastoutside', 'Interpreter', 'none')
+local_add_area_and_session_legends(session_handles)
 local_set_observed_radian_ylim(gca, y_scatter, [])
 box off
 local_save_figure(scatter_fig, save_path);
@@ -416,9 +459,9 @@ area_colors = generateDistinctColors(max(numel(areas_in_color), 1));
 present = areas_in_color(ismember(areas_in_color, stack_clean.area));
 
 ci_fig = figure('Name', fig_title, ...
-    'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
+    'Color', 'w', 'Units', 'normalized', 'Position', [0.06 0.05 0.82 0.84]);
 hold on
-local_plot_session_profile_lines(stack_clean)
+session_handles = local_plot_session_profile_lines(stack_clean)
 raw_mask = ismember(stack_raw.area, areas_in_color) & ...
     isfinite(stack_raw.distance_um) & isfinite(stack_raw.phase_rad);
 if any(raw_mask)
@@ -449,7 +492,7 @@ yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
 xlabel('Distance from LPAG center (\mum)')
 ylabel('Phase difference vs LPAG center (rad)')
 title(fig_title)
-legend('Location', 'eastoutside', 'Interpreter', 'none')
+local_add_area_and_session_legends(session_handles)
 local_set_observed_radian_ylim(gca, y_scatter, y_ci)
 box off
 local_save_figure(ci_fig, save_path);
