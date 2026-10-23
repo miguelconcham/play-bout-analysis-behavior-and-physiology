@@ -5,8 +5,11 @@
 % is distance to the probe tip, not depth: larger values are further from the
 % tip (upper), smaller values are closer to the tip (deeper).
 %
-% Selected sessions are stacked with mid-LPAG at zero. Alignment is spatial
-% only: power is not divided or subtracted by the value at LPAG. PAG sections,
+% Selected sessions are stacked with mid-LPAG at zero. The figures keep saved
+% power, with no rescaling. A table written beside the spectra has the same
+% distance, the area, the saved delta/theta/gamma power, that power minus the
+% mid-LPAG channel, and that difference divided by the within-shank standard
+% deviation. PAG sections,
 % an upper side that passes through SupCol, and a deeper side that passes
 % through DR are colored. Other territory stays gray. Those colored tracks
 % are one figure. The 95% confidence intervals for the three track classes
@@ -75,6 +78,7 @@ end
 stacked_frequency = [];
 tracks = repmat(empty_track(), 0, 1);
 placed = repmat(empty_placed(), 0, 1);
+power_pieces = {};
 
 %% Plot each requested session on its own
 for file_n = recording_index(:).'
@@ -128,6 +132,10 @@ for file_n = recording_index(:).'
         placed = [placed; placed_from_session(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
             delta_band, theta_band, gamma_band, session_label)]; %#ok<AGROW>
+        power_pieces{end + 1} = lpag_distance_table(channel_table, ...
+            welch_spectrum, fourier_spectrum, frequency, ...
+            delta_band, theta_band, gamma_band, ...
+            probe_spectra.animal_name, session_n, spectrum_field); %#ok<SAGROW>
 
         if plot_each_session
             plot_depth_spectrum(frequency, channel_table, ...
@@ -145,6 +153,7 @@ end
 if isempty(placed)
     error('No probe channels were found in the selected recordings.');
 end
+write_lpag_distance_table(power_pieces, saving_folder, spectrum_field);
 if isempty(tracks)
     fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
         'stack is skipped.\n']);
@@ -613,6 +622,84 @@ for group_n = 1:numel(groups)
         mean_in_band(fourier_rows, frequency, gamma_band)];
     placed(end + 1, 1) = item; %#ok<AGROW>
 end
+end
+
+function power_table = lpag_distance_table(channel_table, welch_spectrum, ...
+        fourier_spectrum, frequency, delta_band, theta_band, gamma_band, ...
+        animal_name, session_n, spectrum_field)
+groups = probe_groups_by_depth(channel_table);
+method_names = {'Welch', 'Fourier'};
+spectra = {welch_spectrum, fourier_spectrum};
+variable_names = { ...
+    'DistanceToMidLPAG_um', ...
+    'DeltaPower', 'ThetaPower', 'GammaPower', 'Area', ...
+    'DeltaPower_centeredAtLPAG', 'ThetaPower_centeredAtLPAG', ...
+    'GammaPower_centeredAtLPAG', ...
+    'DeltaPower_zWithinShank', 'ThetaPower_zWithinShank', ...
+    'GammaPower_zWithinShank', ...
+    'Animal', 'Session', 'Shank', 'Channel', 'Method', 'Spectrum'};
+pieces = cell(1, 0);
+for group_n = 1:numel(groups)
+    this_group = groups(group_n);
+    center_mask = this_group.is_lpag_center(:);
+    center_depth = this_group.depth_um(center_mask);
+    center_depth = center_depth(isfinite(center_depth));
+    if isempty(center_depth)
+        continue
+    end
+    distance_um = this_group.depth_um(:) - mean(center_depth);
+    channel = channel_table.Channel(this_group.channel_index);
+    n_sites = numel(distance_um);
+    for method_n = 1:2
+        rows = spectra{method_n}(this_group.channel_index, :);
+        bands = [ ...
+            mean_in_band(rows, frequency, delta_band), ...
+            mean_in_band(rows, frequency, theta_band), ...
+            mean_in_band(rows, frequency, gamma_band)];
+        reference = mean(bands(center_mask, :), 1, 'omitnan');
+        centered = bands - reference;
+        band_std = std(bands, 0, 1, 'omitnan');
+        band_std(band_std == 0) = NaN;
+        z_power = centered ./ band_std;
+        pieces{end + 1} = table( ...
+            distance_um, ...
+            bands(:, 1), bands(:, 2), bands(:, 3), this_group.areas(:), ...
+            centered(:, 1), centered(:, 2), centered(:, 3), ...
+            z_power(:, 1), z_power(:, 2), z_power(:, 3), ...
+            repmat({animal_name}, n_sites, 1), ...
+            repmat(session_n, n_sites, 1), ...
+            repmat(this_group.probe_number, n_sites, 1), ...
+            channel, ...
+            repmat(method_names(method_n), n_sites, 1), ...
+            repmat({spectrum_field}, n_sites, 1), ...
+            'VariableNames', variable_names); %#ok<AGROW>
+    end
+end
+if isempty(pieces)
+    power_table = table();
+    return
+end
+power_table = vertcat(pieces{:});
+end
+
+function write_lpag_distance_table(power_pieces, saving_folder, spectrum_field)
+kept = power_pieces(~cellfun(@isempty, power_pieces));
+if isempty(kept)
+    fprintf(['No shank with a mid-LPAG channel was found; ' ...
+        'the distance table was not written.\n']);
+    return
+end
+power_table = vertcat(kept{:});
+power_table = sortrows(power_table, ...
+    {'Animal', 'Session', 'Shank', 'Method', 'DistanceToMidLPAG_um'});
+table_file = fullfile(saving_folder, sprintf( ...
+    'play_session_probe_power_by_lpag_distance_%s.csv', spectrum_field));
+writetable(power_table, table_file);
+fprintf(['Wrote %d channel rows to %s\n' ...
+    'Distance is positive dorsal (farther from the tip). ' ...
+    'centeredAtLPAG subtracts the mid-LPAG channel. ' ...
+    'zWithinShank divides that difference by the standard deviation ' ...
+    'of the same band on that shank.\n'], height(power_table), table_file);
 end
 
 function track = empty_track()
