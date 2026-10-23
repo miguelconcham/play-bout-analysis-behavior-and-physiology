@@ -19,8 +19,11 @@
 % are one figure. The 95% confidence intervals for the three track classes
 % are a separate figure, drawn when at least two tracks are available.
 %
-% Separate figures center each shank, when the region is present, on SC,
-% DLPAG, LPAG, VLPAG, and DR. The center is the midpoint of that region's
+% Separate figures center each shank on the regions in regions_to_display.
+% By default each ventral or dorsal curve is z-scored within the shank and
+% set to 0 at its first channel. Set region_distance_scale to 'raw' for the
+% saved power. Each panel reports a Spearman correlation of distance and power.
+% The center is the midpoint of that region's
 % labeled span on the shank. Delta, theta, and gamma are drawn against
 % distance from that center, once toward the tip (ventral) and once toward
 % the brain surface (dorsal). Individual shanks and the confidence intervals
@@ -66,6 +69,11 @@ spectral_method = {'Fourier'};
 % figures. SupCol is the superior colliculus. Add 'DR' to include it:
 %   regions_to_display = {'LPAG', 'VLPAG', 'SupCol', 'DR'};
 regions_to_display = {'LPAG', 'VLPAG', 'SupCol'};
+
+% Ventral and dorsal curves. 'normalized' z-scores each band within the
+% shank and subtracts the power of the first channel on that side, so the
+% curve starts at 0. 'raw' draws the saved band power.
+region_distance_scale = 'normalized';
 
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
@@ -198,7 +206,8 @@ else
         delta_band, theta_band, gamma_band, spectral_method);
 end
 plot_region_distances(placed, spectrum_field, ...
-    delta_band, theta_band, gamma_band, spectral_method, regions_to_display);
+    delta_band, theta_band, gamma_band, spectral_method, ...
+    regions_to_display, region_distance_scale);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
@@ -1464,7 +1473,11 @@ end
 end
 
 function plot_region_distances(placed, spectrum_field, ...
-        delta_band, theta_band, gamma_band, spectral_method, regions_to_display)
+        delta_band, theta_band, gamma_band, spectral_method, ...
+        regions_to_display, region_distance_scale)
+if ~any(strcmp(region_distance_scale, {'normalized', 'raw'}))
+    error('region_distance_scale must be ''normalized'' or ''raw''.');
+end
 region_names = selected_regions(regions_to_display);
 directions = {'ventral', 'dorsal'};
 direction_titles = { ...
@@ -1504,13 +1517,12 @@ for kind_n = 1:numel(panel_kinds)
             figure_name = sprintf('%s power vs distance to region center', ...
                 method_names{method_slot});
             figure_position = [40 40 980 max(480, 240 * n_regions)];
-            figure_note = 'Distance 0 is the region center. Each line is one shank.';
+            figure_note = region_distance_note(region_distance_scale, false);
         else
             figure_name = sprintf('%s 95%% CI vs distance to region center', ...
                 method_names{method_slot});
             figure_position = [90 40 980 max(480, 240 * n_regions)];
-            figure_note = ['Distance 0 is the region center. ' ...
-                'Thick line and shade are the mean and 95% CI where n >= 2.'];
+            figure_note = region_distance_note(region_distance_scale, true);
         end
         figure('Name', figure_name, 'Color', 'w', 'Position', figure_position);
         legend_drawn = false;
@@ -1535,6 +1547,11 @@ for kind_n = 1:numel(panel_kinds)
                     if isempty(distance)
                         continue
                     end
+                    welch_std = std(placed(placed_n).welch_bands, 0, 1, 'omitnan');
+                    fourier_std = std(placed(placed_n).fourier_bands, 0, 1, 'omitnan');
+                    [welch_power, fourier_power] = scale_side_power( ...
+                        distance, welch_power, fourier_power, ...
+                        welch_std, fourier_std, region_distance_scale);
                     if strcmp(panel_kind, 'tracks')
                         draw_distance_track(distance, ...
                             power_for_method(welch_power, fourier_power, method_n), ...
@@ -1568,7 +1585,8 @@ for kind_n = 1:numel(panel_kinds)
                         end
                     end
                 end
-                if strcmp(spectrum_field, 'raw_aperiodic_subtracted')
+                if strcmp(region_distance_scale, 'normalized') || ...
+                        strcmp(spectrum_field, 'raw_aperiodic_subtracted')
                     yline(0, ':k', 'HandleVisibility', 'off');
                 end
                 xline(0, '--k', 'HandleVisibility', 'off');
@@ -1578,11 +1596,12 @@ for kind_n = 1:numel(panel_kinds)
                 xlim([0, x_max]);
                 xlabel(direction_xlabels{direction_n})
                 if direction_n == 1
-                    ylabel(profile_xlabel(spectrum_field))
+                    ylabel(region_distance_ylabel(spectrum_field, region_distance_scale))
                 end
                 title(sprintf('%s | %s (n=%d)', ...
                     region_display_name(region_names{region_n}), ...
                     direction_titles{direction_n}, numel(side_tracks)))
+                draw_rank_correlations(side_tracks, method_n, band_colors);
                 if strcmp(panel_kind, 'interval') && numel(side_tracks) < 2
                     text(0.5, 0.5, 'CI needs at least 2 shanks', ...
                         'Units', 'normalized', 'HorizontalAlignment', 'center', ...
@@ -1605,6 +1624,83 @@ for kind_n = 1:numel(panel_kinds)
             'Interpreter', 'none')
     end
 end
+end
+
+function note = region_distance_note(scale_mode, with_interval)
+if strcmp(scale_mode, 'normalized')
+    note = ['Each shank is z-scored and set to 0 at its first channel. ' ...
+        'Spearman rho compares distance with that power.'];
+else
+    note = ['Saved band power. Spearman rho compares distance with power.'];
+end
+if with_interval
+    note = [note, ' Thick line and shade are the mean and 95% CI where n >= 2.'];
+end
+end
+
+function label = region_distance_ylabel(spectrum_field, scale_mode)
+if strcmp(scale_mode, 'normalized')
+    label = {'Z-scored power', '0 = first channel on this side'};
+    return
+end
+label = profile_xlabel(spectrum_field);
+end
+
+function [welch_power, fourier_power] = scale_side_power( ...
+        distance, welch_power, fourier_power, welch_std, fourier_std, scale_mode)
+if ~strcmp(scale_mode, 'normalized')
+    return
+end
+welch_power = center_and_scale_side(distance, welch_power, welch_std);
+fourier_power = center_and_scale_side(distance, fourier_power, fourier_std);
+end
+
+function power = center_and_scale_side(distance, power, band_std)
+distance = distance(:);
+finite_distance = distance(isfinite(distance));
+if isempty(finite_distance)
+    return
+end
+start = isfinite(distance) & distance == min(finite_distance);
+reference = mean(power(start, :), 1, 'omitnan');
+band_std = band_std(:).';
+band_std(band_std == 0 | ~isfinite(band_std)) = NaN;
+power = (power - reference) ./ band_std;
+end
+
+function draw_rank_correlations(side_tracks, method_n, band_colors)
+for band_n = 1:3
+    rho = panel_rank_correlation(side_tracks, method_n, band_n);
+    if isfinite(rho)
+        label = sprintf('\\rho = %.2f', rho);
+    else
+        label = '\rho = n/a';
+    end
+    text(0.98, 0.98 - (band_n - 1) * 0.09, label, ...
+        'Units', 'normalized', 'HorizontalAlignment', 'right', ...
+        'VerticalAlignment', 'top', 'Color', band_colors(band_n, :), ...
+        'FontSize', 8, 'Interpreter', 'tex');
+end
+end
+
+function rho = panel_rank_correlation(side_tracks, method_n, band_n)
+distance = [];
+power = [];
+for track_n = 1:numel(side_tracks)
+    distance = [distance; side_tracks(track_n).rel_um(:)]; %#ok<AGROW>
+    power = [power; band_column(side_tracks(track_n), method_n, band_n)]; %#ok<AGROW>
+end
+rho = NaN;
+keep = isfinite(distance) & isfinite(power);
+if nnz(keep) < 3
+    return
+end
+distance = distance(keep);
+power = power(keep);
+if numel(unique(distance)) < 2 || numel(unique(power)) < 2
+    return
+end
+rho = corr(distance, power, 'Type', 'Spearman');
 end
 
 function center = region_center_um(tip_um, areas, region_name)
