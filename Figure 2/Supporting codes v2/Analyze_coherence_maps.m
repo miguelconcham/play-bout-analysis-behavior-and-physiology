@@ -195,6 +195,8 @@ else
     ci_fig = figure('Name', 'Delta phase vs distance, area CI', ...
         'Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.12 0.68 0.7]);
     hold on
+    y_scatter = [];
+    y_ci = [];
     for area_n = 1:numel(colored_names)
         mask = strcmp(stack_table.area, colored_names{area_n}) & colored_mask;
         scatter(stack_table.distance_um(mask), stack_table.phase_rad(mask), ...
@@ -207,6 +209,8 @@ else
         plot(distance_axis, mean_phase, '-', ...
             'Color', colored_colors(area_n, :), 'LineWidth', 1.8, ...
             'DisplayName', colored_names{area_n})
+        y_scatter = [y_scatter; stack_table.phase_rad(mask)]; %#ok<AGROW>
+        y_ci = [y_ci; mean_phase(:); ci_lo(:); ci_hi(:)]; %#ok<AGROW>
     end
     xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
     yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
@@ -214,7 +218,7 @@ else
     ylabel('Phase difference vs LPAG center (rad)')
     title('Delta phase vs distance, 95% CI by area')
     legend('Location', 'eastoutside', 'Interpreter', 'none')
-    local_set_radian_ticks(gca)
+    local_set_observed_radian_ylim(gca, y_scatter, y_ci)
     box off
     local_save_figure(ci_fig, fullfile(figure_folder, 'area_interpolated_ci.png'));
 end
@@ -385,13 +389,56 @@ for k = 1:numel(keys_list)
 end
 end
 
-function local_set_radian_ticks(ax)
+function local_set_observed_radian_ylim(ax, y_scatter, y_ci)
+% Fit y to the plotted CI and the bulk of the scatter (2–98th percentile).
+y_scatter = y_scatter(isfinite(y_scatter));
+y_ci = y_ci(isfinite(y_ci));
+if isempty(y_scatter) && isempty(y_ci)
+    return
+end
+if isempty(y_ci)
+    low = min(y_scatter);
+    high = max(y_scatter);
+else
+    low = min(y_ci);
+    high = max(y_ci);
+end
+if ~isempty(y_scatter)
+    if numel(y_scatter) >= 20
+        edges = prctile(y_scatter, [2 98]);
+    else
+        edges = [min(y_scatter), max(y_scatter)];
+    end
+    low = min(low, edges(1));
+    high = max(high, edges(2));
+end
+if ~isfinite(low) || ~isfinite(high) || high <= low
+    return
+end
+pad = max(0.08 * (high - low), 0.05);
+ylim(ax, [low - pad, high + pad])
+local_set_radian_ticks(ax, 'tight')
+end
+
+function local_set_radian_ticks(ax, mode)
+if nargin < 2 || isempty(mode)
+    mode = 'atleast_pi';
+end
 ylim_now = ylim(ax);
-low = min(-pi, ylim_now(1));
-high = max(pi, ylim_now(2));
-ylim(ax, [low, high])
-tick = unique([-2*pi, -pi, -pi/2, 0, pi/2, pi, 2*pi]);
+if strcmp(mode, 'tight')
+    low = ylim_now(1);
+    high = ylim_now(2);
+else
+    low = min(-pi, ylim_now(1));
+    high = max(pi, ylim_now(2));
+    ylim(ax, [low, high])
+end
+tick = unique([-2*pi, -3*pi/2, -pi, -3*pi/4, -pi/2, -pi/4, 0, ...
+    pi/4, pi/2, 3*pi/4, pi, 3*pi/2, 2*pi]);
 tick = tick(tick >= low - 1e-9 & tick <= high + 1e-9);
+if numel(tick) < 2
+    return
+end
 yticks(ax, tick)
 yticklabels(ax, arrayfun(@local_radian_label, tick, 'UniformOutput', false))
 end
@@ -407,6 +454,18 @@ elseif abs(value - pi/2) < 1e-9
     label = '\pi/2';
 elseif abs(value + pi/2) < 1e-9
     label = '-\pi/2';
+elseif abs(value - pi/4) < 1e-9
+    label = '\pi/4';
+elseif abs(value + pi/4) < 1e-9
+    label = '-\pi/4';
+elseif abs(value - 3*pi/4) < 1e-9
+    label = '3\pi/4';
+elseif abs(value + 3*pi/4) < 1e-9
+    label = '-3\pi/4';
+elseif abs(value - 3*pi/2) < 1e-9
+    label = '3\pi/2';
+elseif abs(value + 3*pi/2) < 1e-9
+    label = '-3\pi/2';
 elseif abs(value - 2*pi) < 1e-9
     label = '2\pi';
 elseif abs(value + 2*pi) < 1e-9
