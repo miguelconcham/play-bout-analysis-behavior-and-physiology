@@ -15,10 +15,17 @@
 % probe are judged against the trend of the sites inward from those ends.
 % SupCol and VLPAG channels stay in the analysis only at distances from
 % the LPAG-facing border of that area that more than half of the sessions
-% with that region also reach. A second comparison figure splits each
-% region into the proximal and distal halves of that available distance.
+% with that region also reach. Those channels, and values that leave the
+% shank trend, are removed before the distance correlation and the
+% distance mixed model. A proximal/distal comparison can split each
+% region into the nearer and farther halves of that available distance.
+% It stays off unless plot_proximal_distal is set true.
 % Each band and spectral method then has its own scatter of that
 % z-scored power against distance to mid-LPAG, with transparent markers.
+% The matching distance figure fits a mixed model of that power on
+% distance. Every channel stays an observation, and sessions are nested
+% in the animal. The line is the fixed effect. Spearman rho and its
+% p-value use the same channels.
 % A separate figure compares the selected regions with a nested
 % repeated-measures model of that same z-scored power. Every channel
 % remains an observation nested in its partner session. Region is the
@@ -26,7 +33,7 @@
 % shows every channel, a line for each session, and mixed-model brackets
 % with Bonferroni correction.
 % Figures use Fourier unless spectral_method is changed. The scatter,
-% confidence-interval, region-comparison, and region-distance figures
+% distance-model, region-comparison, and region-distance figures
 % draw regions_to_display, which starts as LPAG, VLPAG, and SupCol. PAG sections,
 % an upper side that passes through SupCol, and a deeper side that passes
 % through DR are colored. Other territory stays gray. Those colored tracks
@@ -36,12 +43,12 @@
 % Separate figures center each shank on the regions in regions_to_display.
 % By default each ventral or dorsal curve is z-scored within the shank and
 % set to 0 at its first channel. Set region_distance_scale to 'raw' for the
-% saved power. Each panel reports a Spearman correlation of distance and power.
-% The center is the midpoint of that region's
-% labeled span on the shank. Delta, theta, and gamma are drawn against
-% distance from that center, once toward the tip (ventral) and once toward
-% the brain surface (dorsal). Individual shanks and the confidence intervals
-% are separate figures.
+% saved power. Each panel reports a Spearman correlation of distance and
+% power, with its p-value, after the same outlier screens. The center is
+% the midpoint of that region's labeled span on the shank. Delta, theta,
+% and gamma are drawn against distance from that center, once toward the
+% tip (ventral) and once toward the brain surface (dorsal). Individual
+% shanks are one figure. The mixed-model fit of power on distance is another.
 
 %% Which recording and session to inspect
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
@@ -79,7 +86,7 @@ gamma_band = [30 45];
 %   spectral_method = {'Welch', 'Fourier'};
 spectral_method = {'Fourier'};
 
-% Regions drawn on the scatter, confidence-interval, region-comparison,
+% Regions drawn on the scatter, distance-model, region-comparison,
 % and region-distance figures. SupCol is the superior colliculus. Add 'DR'
 % to include it:
 %   regions_to_display = {'LPAG', 'VLPAG', 'SupCol', 'DR'};
@@ -100,8 +107,12 @@ artifact_trend_sd = 5;
 % faces LPAG, in bins of this width. A bin stays when more than half of
 % the sessions with that region also have a channel there. Near-border
 % sites stay in even when LPAG itself is thin. The far tail, reached by
-% only a few sessions, is left out.
+% only a few sessions, is left out. Only those channels are removed.
 region_border_bin_um = 100;
+
+% The proximal/distal comparison is a second figure. It stays off until
+% this switch is set true.
+plot_proximal_distal = false;
 
 %% Load the requested recording files
 file_patterns = probe_periodic_spectra_filename();
@@ -194,7 +205,7 @@ for file_n = recording_index(:).'
         placed = [placed; placed_from_session(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
             delta_band, theta_band, gamma_band, session_label, ...
-            artifact_trend_sd)]; %#ok<AGROW>
+            artifact_trend_sd, probe_spectra.animal_name, session_n)]; %#ok<AGROW>
         power_pieces{end + 1} = lpag_distance_table(channel_table, ...
             welch_spectrum, fourier_spectrum, frequency, ...
             delta_band, theta_band, gamma_band, ...
@@ -220,14 +231,17 @@ if isempty(placed)
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
     spectrum_field, region_border_bin_um);
+placed = apply_screened_power_to_placed(placed, power_table);
 plot_normalized_power_scatters(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 plot_normalized_power_intervals(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
 plot_region_power_comparison(power_table, delta_band, theta_band, gamma_band, ...
     spectral_method, regions_to_display);
-plot_region_half_comparison(power_table, delta_band, theta_band, gamma_band, ...
-    spectral_method, regions_to_display);
+if plot_proximal_distal
+    plot_region_half_comparison(power_table, delta_band, theta_band, gamma_band, ...
+        spectral_method, regions_to_display);
+end
 if isempty(tracks)
     fprintf(['No shank with a mid-LPAG channel was found; the mid-LPAG ' ...
         'stack is skipped.\n']);
@@ -793,6 +807,10 @@ end
 function item = empty_placed()
 item = struct( ...
     'label', '', ...
+    'animal', '', ...
+    'session', NaN, ...
+    'shank', NaN, ...
+    'channel', [], ...
     'tip_um', [], ...
     'areas', {{}}, ...
     'welch_bands', [], ...
@@ -801,7 +819,7 @@ end
 
 function placed = placed_from_session(channel_table, welch_spectrum, ...
         fourier_spectrum, frequency, delta_band, theta_band, gamma_band, ...
-        session_label, artifact_trend_sd)
+        session_label, artifact_trend_sd, animal_name, session_n)
 groups = probe_groups_by_depth(channel_table);
 placed = repmat(empty_placed(), 0, 1);
 for group_n = 1:numel(groups)
@@ -814,6 +832,11 @@ for group_n = 1:numel(groups)
     fourier_rows = fourier_spectrum(this_group.channel_index, :);
     item = empty_placed();
     item.label = sprintf('%s | %s', session_label, this_group.label);
+    item.animal = char(string(animal_name));
+    item.session = session_n;
+    item.shank = this_group.probe_number;
+    item.channel = channel_table.Channel(this_group.channel_index);
+    item.channel = item.channel(:);
     item.tip_um = tip_um;
     item.areas = this_group.areas;
     item.welch_bands = reject_trend_outliers(tip_um, [ ...
@@ -826,6 +849,96 @@ for group_n = 1:numel(groups)
         mean_in_band(fourier_rows, frequency, gamma_band)], artifact_trend_sd);
     placed(end + 1, 1) = item; %#ok<AGROW>
 end
+end
+
+function placed = apply_screened_power_to_placed(placed, power_table)
+if isempty(placed) || isempty(power_table) || ...
+        ~ismember('DeltaPower', power_table.Properties.VariableNames)
+    return
+end
+band_fields = {'DeltaPower', 'ThetaPower', 'GammaPower'};
+nan_bands = containers.Map('KeyType', 'char', 'ValueType', 'any');
+row_key = site_key(power_table.Animal, power_table.Session, ...
+    power_table.Shank, power_table.Channel, power_table.Method);
+for row_n = 1:height(power_table)
+    mask = false(1, 3);
+    for band_n = 1:3
+        mask(band_n) = ~isfinite(power_table.(band_fields{band_n})(row_n));
+    end
+    key = row_key{row_n};
+    if isKey(nan_bands, key)
+        nan_bands(key) = nan_bands(key) | mask;
+    else
+        nan_bands(key) = mask;
+    end
+end
+n_blanked = 0;
+method_names = {'Welch', 'Fourier'};
+for placed_n = 1:numel(placed)
+    item = placed(placed_n);
+    for site_n = 1:numel(item.channel)
+        for method_n = 1:2
+            key = site_key(item.animal, item.session, item.shank, ...
+                item.channel(site_n), method_names{method_n});
+            key = key{1};
+            if ~isKey(nan_bands, key)
+                continue
+            end
+            mask = nan_bands(key);
+            if method_n == 1
+                bands = item.welch_bands;
+            else
+                bands = item.fourier_bands;
+            end
+            for band_n = 1:3
+                if mask(band_n) && isfinite(bands(site_n, band_n))
+                    bands(site_n, band_n) = NaN;
+                    n_blanked = n_blanked + 1;
+                end
+            end
+            if method_n == 1
+                item.welch_bands = bands;
+            else
+                item.fourier_bands = bands;
+            end
+        end
+    end
+    placed(placed_n) = item;
+end
+if n_blanked > 0
+    fprintf(['Region-distance plots leave out %d further band values that ' ...
+        'the distance table left blank. Those channels failed the shank-trend ' ...
+        'screen or sit beyond the SupCol or VLPAG border distance reached by ' ...
+        'most sessions. The session itself stays.\n'], n_blanked);
+end
+end
+
+function key = site_key(animal, session, shank, channel, method)
+key = strcat(as_key_text(animal), '|', ...
+    as_key_text(session), '|', ...
+    as_key_text(shank), '|', ...
+    as_key_text(channel), '|', ...
+    as_key_text(method));
+end
+
+function text = as_key_text(value)
+if ischar(value)
+    text = {value};
+    return
+end
+if isnumeric(value)
+    value = value(:);
+    text = cell(numel(value), 1);
+    for value_n = 1:numel(value)
+        if isfinite(value(value_n))
+            text{value_n} = sprintf('%.12g', value(value_n));
+        else
+            text{value_n} = 'NaN';
+        end
+    end
+    return
+end
+text = cellstr(string(value(:)));
 end
 
 function power_table = lpag_distance_table(channel_table, welch_spectrum, ...
@@ -1278,7 +1391,6 @@ function plot_normalized_power_intervals(power_table, ...
 if isempty(power_table)
     return
 end
-distance_step_um = 5;
 [method_names, ~] = selected_spectral_methods(spectral_method);
 band_fields = { ...
     'DeltaPower_zWithinShank', ...
@@ -1291,62 +1403,239 @@ band_names = { ...
 region_keys = region_keys_for_rows(power_table.Area);
 region_names = selected_regions(regions_to_display);
 region_names = region_names(~strcmp(region_names, 'Other'));
+animal = cellstr(string(power_table.Animal));
+session = power_table.Session;
 figure_n = 0;
 for method_n = 1:numel(method_names)
     in_method = strcmp(power_table.Method, method_names{method_n});
     distance_um = power_table.DistanceToMidLPAG_um;
-    colored_row = false(height(power_table), 1);
-    for region_n = 1:numel(region_names)
-        colored_row = colored_row | region_row_has(region_keys, region_names{region_n});
-    end
-    colored_row = colored_row & in_method;
-    grid = fine_distance_grid(distance_um(colored_row), distance_step_um);
     for band_n = 1:numel(band_fields)
         figure_n = figure_n + 1;
         power = power_table.(band_fields{band_n});
-        figure('Name', sprintf('%s | %s 95%% CI vs distance to mid-LPAG', ...
+        figure('Name', sprintf('%s | %s mixed model vs distance to mid-LPAG', ...
             method_names{method_n}, band_names{band_n}), ...
-            'Color', 'w', 'Position', [80 + 24 * figure_n, 100, 760, 560]);
+            'Color', 'w', 'Position', [80 + 24 * figure_n, 100, 980, 560]);
         hold on
         yline(0, ':k', 'HandleVisibility', 'off');
         xline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
             'LabelHorizontalAlignment', 'left', 'FontSize', 8);
         legend_handles = gobjects(0, 1);
         legend_labels = {};
+        x_span = [];
         for region_n = 1:numel(region_names)
             this_region = region_names{region_n};
-            in_region = in_method & region_row_has(region_keys, this_region);
-            [mean_line, lower_line, upper_line, n_profiles] = ...
-                interpolated_session_interval( ...
-                power_table, in_region, distance_um, power, grid);
-            if n_profiles < 2 || ~any(isfinite(mean_line))
+            keep = in_method & region_row_has(region_keys, this_region) & ...
+                isfinite(distance_um) & isfinite(power);
+            if ~any(keep)
                 continue
             end
+            this_distance = distance_um(keep);
+            this_power = power(keep);
+            result = fit_distance_mixed_model(this_distance, this_power, ...
+                animal(keep), session(keep));
+            [rho, p_rho] = rank_correlation(this_distance, this_power);
+            report_distance_model(sprintf('%s | %s | %s', ...
+                method_names{method_n}, band_names{band_n}, ...
+                region_display_name(this_region)), result, rho, p_rho);
             this_color = region_color(this_region);
-            draw_band_interval(grid, mean_line, lower_line, upper_line, this_color);
+            if result.ok
+                draw_distance_model_line(this_distance, result, this_color);
+                x_span = [x_span; this_distance(:)]; %#ok<AGROW>
+            end
             legend_handles(end + 1, 1) = plot(nan, nan, '-', ...
                 'Color', this_color, 'LineWidth', 2); %#ok<AGROW>
-            legend_labels{end + 1} = sprintf('%s (n=%d shanks)', ...
-                region_display_name(this_region), n_profiles); %#ok<AGROW>
+            legend_labels{end + 1} = distance_model_legend( ...
+                this_region, result, rho, p_rho); %#ok<AGROW>
         end
-        if ~isempty(grid) && numel(grid) > 1
-            xlim([grid(1), grid(end)]);
+        if numel(x_span) > 1
+            pad = 0.02 * max(max(x_span) - min(x_span), 1);
+            xlim([min(x_span) - pad, max(x_span) + pad]);
         end
         xlabel({'Distance to mid-LPAG (µm)', ...
             'positive = dorsal, farther from the tip'})
         ylabel({'Power z-scored within shank', '0 = mid-LPAG channel'})
-        title(sprintf('%s | %s | 95%% CI on a %g µm grid', ...
-            method_names{method_n}, band_names{band_n}, distance_step_um))
+        title(sprintf('%s | %s | mixed model across animals', ...
+            method_names{method_n}, band_names{band_n}))
         if ~isempty(legend_handles)
             legend(legend_handles, legend_labels, ...
-                'Location', 'eastoutside', 'FontSize', 8)
+                'Location', 'eastoutside', 'FontSize', 8, 'Interpreter', 'tex')
         end
         box off
     end
 end
-fprintf(['Region confidence intervals use a %g µm distance axis. ' ...
-    'Each shank is interpolated on its own, and the interval is across shanks.\n'], ...
-    distance_step_um);
+fprintf(['Distance fits are mixed models of channel power on distance, ' ...
+    'with sessions nested in the animal. Spearman rho and p use the same ' ...
+    'channels, after extreme values and uncommon border distances are removed.\n']);
+end
+
+function result = fit_distance_mixed_model(distance, power, animal, session)
+result = struct( ...
+    'ok', false, ...
+    'intercept', NaN, ...
+    'slope', NaN, ...
+    'p_slope', NaN, ...
+    'n_channels', 0, ...
+    'n_animals', 0, ...
+    'n_sessions', 0, ...
+    'formula', '', ...
+    'message', '');
+distance = distance(:);
+power = power(:);
+animal = cellstr(string(animal(:)));
+session = cellstr(string(session(:)));
+keep = isfinite(distance) & isfinite(power);
+distance = distance(keep);
+power = power(keep);
+animal = animal(keep);
+session = session(keep);
+result.n_channels = numel(power);
+if result.n_channels == 0
+    result.message = 'No finite channels.';
+    return
+end
+session_id = strcat(animal, '|', session);
+result.n_animals = numel(unique(animal));
+result.n_sessions = numel(unique(session_id));
+if result.n_channels < 4 || numel(unique(distance)) < 2 || ...
+        numel(unique(power)) < 2
+    result.message = 'Not enough variation to fit distance.';
+    return
+end
+formulas = {};
+if result.n_animals >= 2 && result.n_sessions > result.n_animals
+    formulas{end + 1} = 'Power ~ Distance + (1|Animal) + (1|Session)'; %#ok<AGROW>
+end
+if result.n_animals >= 2
+    formulas{end + 1} = 'Power ~ Distance + (1|Animal)'; %#ok<AGROW>
+end
+if result.n_sessions >= 2
+    formulas{end + 1} = 'Power ~ Distance + (1|Session)'; %#ok<AGROW>
+end
+if isempty(formulas)
+    result.message = ['A mixed model needs repeated measures in more than ' ...
+        'one animal or session.'];
+    return
+end
+model_table = table(power, distance, categorical(animal), ...
+    categorical(session_id), ...
+    'VariableNames', {'Power', 'Distance', 'Animal', 'Session'});
+last_error = '';
+for formula_n = 1:numel(formulas)
+    try
+        lme = fitlme(model_table, formulas{formula_n}, 'FitMethod', 'REML');
+    catch ME
+        last_error = ME.message;
+        continue
+    end
+    coef_names = coefficient_names(lme);
+    slope_index = find(strcmp(coef_names, 'Distance'), 1);
+    intercept_index = find(strcmp(coef_names, '(Intercept)'), 1);
+    if isempty(slope_index) || isempty(intercept_index)
+        last_error = 'The distance slope was not in the model.';
+        continue
+    end
+    beta = fixedEffects(lme);
+    contrast = zeros(1, numel(coef_names));
+    contrast(slope_index) = 1;
+    try
+        p_slope = coefTest(lme, contrast, 0, 'DFMethod', 'satterthwaite');
+    catch
+        try
+            p_slope = coefTest(lme, contrast, 0);
+        catch ME
+            last_error = ME.message;
+            continue
+        end
+    end
+    result.ok = isfinite(p_slope) && isfinite(beta(slope_index)) && ...
+        isfinite(beta(intercept_index));
+    if ~result.ok
+        last_error = 'The distance slope could not be tested.';
+        continue
+    end
+    result.intercept = beta(intercept_index);
+    result.slope = beta(slope_index);
+    result.p_slope = p_slope;
+    result.formula = formulas{formula_n};
+    result.message = '';
+    return
+end
+if isempty(last_error)
+    last_error = 'The distance model could not be fit.';
+end
+result.message = last_error;
+end
+
+function draw_distance_model_line(distance, result, color)
+distance = distance(isfinite(distance));
+if ~result.ok || numel(distance) < 2
+    return
+end
+x_line = [min(distance), max(distance)];
+if x_line(1) == x_line(2)
+    return
+end
+plot(x_line, result.intercept + result.slope * x_line, '-', ...
+    'Color', color, 'LineWidth', 2.0, 'HandleVisibility', 'off');
+end
+
+function label = distance_model_legend(region_name, result, rho, p_rho)
+if result.ok
+    slope_text = sprintf('slope p = %s, %d animals', ...
+        format_p_value(result.p_slope), result.n_animals);
+else
+    slope_text = 'model unavailable';
+end
+if isfinite(rho)
+    rho_text = sprintf('\\rho = %.2f, p = %s', rho, format_p_value(p_rho));
+else
+    rho_text = '\rho = n/a';
+end
+label = sprintf('%s | %s | %s', region_display_name(region_name), ...
+    slope_text, rho_text);
+end
+
+function report_distance_model(context, result, rho, p_rho)
+fprintf('%s\n', context);
+if result.ok
+    fprintf('  %s\n', result.formula);
+    if contains(result.formula, 'Session')
+        fprintf('  Session is the partner session within the animal.\n');
+    end
+    fprintf(['  slope = %s per µm, p = %s ' ...
+        '(%d channels, %d animals, %d sessions)\n'], ...
+        format_p_value(result.slope), format_p_value(result.p_slope), ...
+        result.n_channels, result.n_animals, result.n_sessions);
+else
+    if isempty(result.message)
+        detail = 'The distance model could not be fit.';
+    else
+        detail = result.message;
+    end
+    fprintf('  Mixed model was not fit: %s\n', detail);
+end
+if isfinite(rho)
+    fprintf('  Spearman rho = %.2f, p = %s\n', rho, format_p_value(p_rho));
+else
+    fprintf('  Spearman rho is undefined.\n');
+end
+end
+
+function [rho, p_value] = rank_correlation(distance, power)
+rho = NaN;
+p_value = NaN;
+distance = distance(:);
+power = power(:);
+keep = isfinite(distance) & isfinite(power);
+if nnz(keep) < 3
+    return
+end
+distance = distance(keep);
+power = power(keep);
+if numel(unique(distance)) < 2 || numel(unique(power)) < 2
+    return
+end
+[rho, p_value] = corr(distance, power, 'Type', 'Spearman');
 end
 
 function plot_region_power_comparison(power_table, ...
@@ -1918,61 +2207,6 @@ else
 end
 end
 
-function grid = fine_distance_grid(distance_um, step_um)
-distance_um = distance_um(isfinite(distance_um));
-if isempty(distance_um)
-    grid = 0;
-    return
-end
-grid = (floor(min(distance_um) / step_um) * step_um):step_um: ...
-    (ceil(max(distance_um) / step_um) * step_um);
-end
-
-function [mean_line, lower_line, upper_line, n_profiles] = ...
-        interpolated_session_interval(power_table, row_mask, ...
-        distance_um, power, grid)
-group_index = session_shank_groups(power_table, row_mask);
-n_groups = numel(group_index);
-resampled = nan(n_groups, numel(grid));
-n_profiles = 0;
-for group_n = 1:n_groups
-    rows = group_index{group_n};
-    resampled(group_n, :) = resample_one( ...
-        distance_um(rows), power(rows), grid);
-    finite = isfinite(distance_um(rows)) & isfinite(power(rows));
-    if nnz(finite) >= 2
-        n_profiles = n_profiles + 1;
-    end
-end
-n_at_grid = sum(isfinite(resampled), 1);
-mean_line = mean(resampled, 1, 'omitnan');
-deviation = std(resampled, 0, 1, 'omitnan');
-standard_error = deviation ./ sqrt(n_at_grid);
-critical = nan(size(n_at_grid));
-enough = n_at_grid >= 2;
-critical(enough) = tinv(0.975, n_at_grid(enough) - 1);
-half_width = critical .* standard_error;
-lower_line = mean_line - half_width;
-upper_line = mean_line + half_width;
-mean_line(~enough) = NaN;
-lower_line(~enough) = NaN;
-upper_line(~enough) = NaN;
-end
-
-function group_index = session_shank_groups(power_table, row_mask)
-rows = find(row_mask);
-animal = cellstr(string(power_table.Animal(rows)));
-session_key = cellstr(string(power_table.Session(rows)));
-shank_key = cellstr(string(power_table.Shank(rows)));
-group_key = strcat(animal, '|', session_key, '|', shank_key);
-[~, ~, group_id] = unique(group_key, 'stable');
-n_groups = max([group_id; 0]);
-group_index = cell(n_groups, 1);
-for group_n = 1:n_groups
-    group_index{group_n} = rows(group_id == group_n);
-end
-end
-
 function track = empty_track()
 track = struct( ...
     'label', '', ...
@@ -2421,7 +2655,7 @@ for region_n = 1:n_regions
         nnz(isfinite(centers(:, region_n))), n_placed);
 end
 
-panel_kinds = {'tracks', 'interval'};
+panel_kinds = {'tracks', 'model'};
 for kind_n = 1:numel(panel_kinds)
     panel_kind = panel_kinds{kind_n};
     for method_slot = 1:numel(method_ids)
@@ -2432,7 +2666,7 @@ for kind_n = 1:numel(panel_kinds)
             figure_position = [40 40 980 max(480, 240 * n_regions)];
             figure_note = region_distance_note(region_distance_scale, false);
         else
-            figure_name = sprintf('%s 95%% CI vs distance to region center', ...
+            figure_name = sprintf('%s mixed model vs distance to region center', ...
                 method_names{method_slot});
             figure_position = [90 40 980 max(480, 240 * n_regions)];
             figure_note = region_distance_note(region_distance_scale, true);
@@ -2475,6 +2709,8 @@ for kind_n = 1:numel(panel_kinds)
                     side_track.rel_um = distance;
                     side_track.welch_bands = welch_power;
                     side_track.fourier_bands = fourier_power;
+                    side_track.animal = placed(placed_n).animal;
+                    side_track.session = placed(placed_n).session;
                     side_tracks(end + 1, 1) = side_track; %#ok<AGROW>
                 end
                 if isempty(side_tracks)
@@ -2486,15 +2722,31 @@ for kind_n = 1:numel(panel_kinds)
                     continue
                 end
                 x_max = farthest;
-                if strcmp(panel_kind, 'interval') && numel(side_tracks) >= 2
+                slope_p = nan(1, 3);
+                model_ok = false;
+                if strcmp(panel_kind, 'model')
                     for band_n = 1:3
-                        [grid, mean_line, lower_line, upper_line] = ...
-                            class_interval(side_tracks, method_n, band_n);
-                        draw_band_interval(grid, mean_line, lower_line, ...
-                            upper_line, band_colors(band_n, :));
-                        finite_grid = grid(isfinite(mean_line));
-                        if ~isempty(finite_grid)
-                            x_max = max(x_max, max(finite_grid));
+                        [point_distance, point_power, point_animal, point_session] = ...
+                            side_track_points(side_tracks, method_n, band_n);
+                        result = fit_distance_mixed_model(point_distance, ...
+                            point_power, point_animal, point_session);
+                        [rho, p_rho] = rank_correlation(point_distance, point_power);
+                        report_distance_model(sprintf('%s | %s | %s | %s', ...
+                            method_names{method_slot}, band_names{band_n}, ...
+                            region_display_name(region_names{region_n}), ...
+                            direction_titles{direction_n}), ...
+                            result, rho, p_rho);
+                        slope_p(band_n) = result.p_slope;
+                        if ~result.ok
+                            continue
+                        end
+                        model_ok = true;
+                        finite_distance = point_distance( ...
+                            isfinite(point_distance) & isfinite(point_power));
+                        draw_distance_model_line(finite_distance, result, ...
+                            band_colors(band_n, :));
+                        if ~isempty(finite_distance)
+                            x_max = max(x_max, max(finite_distance));
                         end
                     end
                 end
@@ -2514,9 +2766,10 @@ for kind_n = 1:numel(panel_kinds)
                 title(sprintf('%s | %s (n=%d)', ...
                     region_display_name(region_names{region_n}), ...
                     direction_titles{direction_n}, numel(side_tracks)))
-                draw_rank_correlations(side_tracks, method_n, band_colors);
-                if strcmp(panel_kind, 'interval') && numel(side_tracks) < 2
-                    text(0.5, 0.5, 'CI needs at least 2 shanks', ...
+                draw_rank_correlations(side_tracks, method_n, band_colors, ...
+                    strcmp(panel_kind, 'model'), slope_p);
+                if strcmp(panel_kind, 'model') && ~model_ok
+                    text(0.5, 0.5, 'Mixed model was not fit', ...
                         'Units', 'normalized', 'HorizontalAlignment', 'center', ...
                         'FontSize', 8);
                 end
@@ -2539,15 +2792,18 @@ for kind_n = 1:numel(panel_kinds)
 end
 end
 
-function note = region_distance_note(scale_mode, with_interval)
+function note = region_distance_note(scale_mode, with_model)
 if strcmp(scale_mode, 'normalized')
     note = ['Each shank is z-scored and set to 0 at its first channel. ' ...
-        'Spearman rho compares distance with that power.'];
+        'Spearman rho and p compare distance with that power ' ...
+        'after extreme values and uncommon border distances are removed.'];
 else
-    note = ['Saved band power. Spearman rho compares distance with power.'];
+    note = ['Saved band power. Spearman rho and p compare distance with power ' ...
+        'after extreme values and uncommon border distances are removed.'];
 end
-if with_interval
-    note = [note, ' Thick line and shade are the mean and 95% CI where n >= 2.'];
+if with_model
+    note = [note, [' The line is a mixed model of power on distance, ' ...
+        'with sessions nested in the animal.']];
 end
 end
 
@@ -2581,39 +2837,54 @@ band_std(band_std == 0 | ~isfinite(band_std)) = NaN;
 power = (power - reference) ./ band_std;
 end
 
-function draw_rank_correlations(side_tracks, method_n, band_colors)
+function draw_rank_correlations(side_tracks, method_n, band_colors, ...
+        with_slope, slope_p)
+if nargin < 4
+    with_slope = false;
+    slope_p = nan(1, 3);
+end
+if with_slope
+    gap = 0.16;
+else
+    gap = 0.09;
+end
 for band_n = 1:3
-    rho = panel_rank_correlation(side_tracks, method_n, band_n);
+    [rho, p_value] = panel_rank_correlation(side_tracks, method_n, band_n);
     if isfinite(rho)
-        label = sprintf('\\rho = %.2f', rho);
+        label = sprintf('\\rho = %.2f, p = %s', rho, format_p_value(p_value));
     else
         label = '\rho = n/a';
     end
-    text(0.98, 0.98 - (band_n - 1) * 0.09, label, ...
+    if with_slope
+        label = sprintf('%s\nslope p = %s', label, format_p_value(slope_p(band_n)));
+    end
+    text(0.98, 0.98 - (band_n - 1) * gap, label, ...
         'Units', 'normalized', 'HorizontalAlignment', 'right', ...
         'VerticalAlignment', 'top', 'Color', band_colors(band_n, :), ...
         'FontSize', 8, 'Interpreter', 'tex');
 end
 end
 
-function rho = panel_rank_correlation(side_tracks, method_n, band_n)
+function [rho, p_value] = panel_rank_correlation(side_tracks, method_n, band_n)
+[distance, power] = side_track_points(side_tracks, method_n, band_n);
+[rho, p_value] = rank_correlation(distance, power);
+end
+
+function [distance, power, animal, session] = side_track_points( ...
+        side_tracks, method_n, band_n)
 distance = [];
 power = [];
+animal = {};
+session = [];
 for track_n = 1:numel(side_tracks)
-    distance = [distance; side_tracks(track_n).rel_um(:)]; %#ok<AGROW>
-    power = [power; band_column(side_tracks(track_n), method_n, band_n)]; %#ok<AGROW>
+    this_distance = side_tracks(track_n).rel_um(:);
+    this_power = band_column(side_tracks(track_n), method_n, band_n);
+    n_points = numel(this_distance);
+    distance = [distance; this_distance]; %#ok<AGROW>
+    power = [power; this_power(:)]; %#ok<AGROW>
+    animal = [animal; repmat({side_tracks(track_n).animal}, n_points, 1)]; %#ok<AGROW>
+    session = [session; repmat(side_tracks(track_n).session, n_points, 1)]; %#ok<AGROW>
 end
-rho = NaN;
-keep = isfinite(distance) & isfinite(power);
-if nnz(keep) < 3
-    return
-end
-distance = distance(keep);
-power = power(keep);
-if numel(unique(distance)) < 2 || numel(unique(power)) < 2
-    return
-end
-rho = corr(distance, power, 'Type', 'Spearman');
 end
 
 function center = region_center_um(tip_um, areas, region_name)
@@ -2679,7 +2950,8 @@ end
 end
 
 function item = empty_side_track()
-item = struct('rel_um', [], 'welch_bands', [], 'fourier_bands', []);
+item = struct('rel_um', [], 'welch_bands', [], 'fourier_bands', [], ...
+    'animal', '', 'session', NaN);
 end
 
 function draw_distance_track(distance, power, band_colors)
@@ -2697,29 +2969,4 @@ for band_n = 1:size(power, 2)
     plot(distance, this_power, 'Color', this_color, 'LineWidth', 1.0, ...
         'HandleVisibility', 'off');
 end
-end
-
-function draw_band_interval(grid, mean_line, lower_line, upper_line, color)
-x = grid(:);
-y_low = lower_line(:);
-y_high = upper_line(:);
-finite = isfinite(x) & isfinite(y_low) & isfinite(y_high);
-if ~any(finite)
-    return
-end
-breaks = diff([false; finite; false]);
-starts = find(breaks == 1);
-stops = find(breaks == -1) - 1;
-for segment_n = 1:numel(starts)
-    index = starts(segment_n):stops(segment_n);
-    if numel(index) < 2
-        continue
-    end
-    segment_x = x(index).';
-    fill([segment_x, fliplr(segment_x)], ...
-        [y_low(index).', fliplr(y_high(index).')], color, ...
-        'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-end
-plot(grid, mean_line, 'Color', color, 'LineWidth', 2.0, ...
-    'HandleVisibility', 'off');
 end
