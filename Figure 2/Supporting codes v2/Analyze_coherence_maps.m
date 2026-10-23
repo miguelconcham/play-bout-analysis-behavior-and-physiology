@@ -152,13 +152,19 @@ end
 %% Interpolate per-session outliers; keep the original table for faint overlays
 stack_table = local_interpolate_session_trend_outliers(stack_table_raw);
 
-%% Split sessions with DR (often inverted SupCol) from the rest
+%% Split probes that have DR (often inverted SupCol) from the rest
+% A row belongs to the DR set only if that session+probe has at least one
+% 'DR' channel. Other probes from the same folder stay in the no-DR set.
 areas_in_color = {'DR', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
-dr_sessions = unique(stack_table.session(strcmp(stack_table.area, 'DR')), 'stable');
-has_dr = ismember(stack_table.session, dr_sessions);
-has_dr_raw = ismember(stack_table_raw.session, dr_sessions);
-fprintf('%d sessions with DR, %d without\n', ...
-    numel(dr_sessions), numel(unique(stack_table.session(~has_dr))));
+has_dr = local_group_has_dr(stack_table);
+has_dr_raw = local_group_has_dr(stack_table_raw);
+dr_groups = unique(local_group_key(stack_table(has_dr, :)), 'stable');
+no_dr_groups = unique(local_group_key(stack_table(~has_dr, :)), 'stable');
+fprintf('%d probes with DR, %d without\n', numel(dr_groups), numel(no_dr_groups));
+disp('Probes in the DR figures:')
+disp(dr_groups)
+disp('Probes in the no-DR figures:')
+disp(no_dr_groups)
 
 local_plot_colored_scatter(stack_table(~has_dr, :), areas_in_color, ...
     'Delta phase vs distance by area (no DR)', ...
@@ -170,15 +176,15 @@ local_plot_area_scatter_ci(stack_table(~has_dr, :), stack_table_raw(~has_dr_raw,
 
 if any(has_dr)
     local_plot_colored_scatter(stack_table(has_dr, :), areas_in_color, ...
-        'Delta phase vs distance by area (DR sessions)', ...
+        'Delta phase vs distance by area (DR probes)', ...
         fullfile(figure_folder, 'all_points_by_area_dr_sessions.png'));
     local_plot_area_scatter_ci(stack_table(has_dr, :), stack_table_raw(has_dr_raw, :), ...
         areas_in_color, ...
-        'Delta phase vs distance, 95% CI by area (DR sessions)', ...
+        'Delta phase vs distance, 95% CI by area (DR probes)', ...
         fullfile(figure_folder, 'area_interpolated_ci_dr_sessions.png'));
 else
     warning('Analyze_coherence_maps:NoDRSessions', ...
-        'No sessions with DR channels; skipped the DR-only scatter/CI figures.');
+        'No probes with DR channels; skipped the DR-only scatter/CI figures.');
 end
 
 %% -------------------------------------------------------------------------
@@ -236,6 +242,27 @@ filled = interp1(in_d, in_p, d(outlier_local), 'linear');
 out_idx = idx(outlier_local);
 good = isfinite(filled);
 phase_clean(out_idx(good)) = filled(good);
+end
+
+function key = local_group_key(tbl)
+if isempty(tbl) || height(tbl) == 0
+    key = {};
+    return
+end
+session = tbl.session;
+if ismember('probe', tbl.Properties.VariableNames)
+    probe_str = arrayfun(@(p) num2str(p), tbl.probe, 'UniformOutput', false);
+    key = strcat(session, ' probe ', probe_str);
+else
+    key = session;
+end
+end
+
+function tf = local_group_has_dr(tbl)
+key = local_group_key(tbl);
+is_dr = strcmp(tbl.area, 'DR');
+dr_keys = unique(key(is_dr), 'stable');
+tf = ismember(key, dr_keys);
 end
 
 function stack_clean = local_interpolate_session_trend_outliers(stack_table)
