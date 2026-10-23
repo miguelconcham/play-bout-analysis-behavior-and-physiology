@@ -436,6 +436,44 @@ def extract_lpag_ref_session_trace(
     )
 
 
+def session_trend_outlier_mask(
+    distance_um: np.ndarray,
+    phase_rad: np.ndarray,
+    threshold_factor: float = 3.0,
+) -> np.ndarray:
+    """True where a point is far from a per-session moving-median trend.
+
+    Matches Analyze_coherence_maps: sort by distance, estimate a local trend,
+    then flag residuals beyond ``threshold_factor`` scaled MAD (MATLAB
+    ``isoutlier(..., 'median')``).
+    """
+    distance_um = np.asarray(distance_um, dtype=float).reshape(-1)
+    phase_rad = np.asarray(phase_rad, dtype=float).reshape(-1)
+    n = distance_um.size
+    outlier = np.zeros(n, dtype=bool)
+    valid = np.isfinite(distance_um) & np.isfinite(phase_rad)
+    if np.count_nonzero(valid) < 8:
+        return outlier
+    order = np.argsort(distance_um[valid], kind="mergesort")
+    valid_idx = np.flatnonzero(valid)[order]
+    phase_sorted = phase_rad[valid_idx]
+    win = max(7, 2 * (phase_sorted.size // 8) + 1)
+    if win % 2 == 0:
+        win += 1
+    pad = win // 2
+    padded = np.pad(phase_sorted, (pad, pad), mode="edge")
+    trend = np.empty_like(phase_sorted)
+    for i in range(phase_sorted.size):
+        trend[i] = np.median(padded[i : i + win])
+    residual = phase_sorted - trend
+    med = np.median(residual)
+    mad = np.median(np.abs(residual - med))
+    scaled = 1.4826 * mad
+    threshold = max(threshold_factor * scaled, 0.5)
+    outlier[valid_idx] = np.abs(residual - med) > threshold
+    return outlier
+
+
 def _field(session, name: str, default=None):
     if isinstance(session, dict):
         return session.get(name, default)

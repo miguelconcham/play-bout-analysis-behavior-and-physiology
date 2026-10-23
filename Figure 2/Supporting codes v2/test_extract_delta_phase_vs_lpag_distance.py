@@ -18,6 +18,7 @@ from extract_delta_phase_vs_lpag_distance import (  # noqa: E402
     probe_numbers,
     region_borders,
     session_animal_id,
+    session_trend_outlier_mask,
 )
 from find_latest_merged_coherence_files import (  # noqa: E402
     find_latest_merged_coherence_files,
@@ -328,6 +329,22 @@ class LpagRefPipelineTests(unittest.TestCase):
         self.assertAlmostEqual(phase_lag[2], -lag, places=6)
         # Pairwise maps would be nCh x nCh; vs-ref is nCh.
         self.assertEqual(phase_lag.shape, (3,))
+
+
+class SessionTrendOutlierTests(unittest.TestCase):
+    def test_flags_a_point_far_from_the_session_trend(self):
+        distance = np.linspace(-200.0, 200.0, 41)
+        phase = 0.002 * distance
+        phase[20] = 3.0
+        outlier = session_trend_outlier_mask(distance, phase)
+        self.assertTrue(outlier[20])
+        self.assertEqual(int(np.count_nonzero(outlier)), 1)
+
+    def test_keeps_a_smooth_session_trend(self):
+        distance = np.linspace(-200.0, 200.0, 41)
+        phase = 0.002 * distance + 0.01 * np.sin(distance / 40.0)
+        outlier = session_trend_outlier_mask(distance, phase)
+        self.assertFalse(np.any(outlier))
 
 
 if __name__ == "__main__":

@@ -17,7 +17,8 @@
 % region borders (same x/y as plot 1).
 %
 % Plot 3 — scatter of every stacked point, colored by area, with marker
-% face blending. Only DR / PAG subregions / SupCol are colored.
+% face blending. Only DR / PAG subregions / SupCol are colored. Points far
+% from each session's phase-vs-distance trend are removed first.
 %
 % Plot 4 — mean and 95% CI of those colored areas after interpolating each
 % session onto a shared distance axis.
@@ -86,8 +87,8 @@ local_save_figure(session_fig, fullfile(figure_folder, 'all_sessions.png'));
 
 %% Plot 2 — one figure per animal, sessions pooled, region borders
 animal_ids = unique({traces.animal_id}, 'stable');
-stack_table = table(zeros(0, 1), zeros(0, 1), cell(0, 1), cell(0, 1), cell(0, 1), ...
-    'VariableNames', {'distance_um', 'phase_rad', 'area', 'animal', 'session'});
+stack_table = table(zeros(0, 1), zeros(0, 1), cell(0, 1), cell(0, 1), cell(0, 1), zeros(0, 1), ...
+    'VariableNames', {'distance_um', 'phase_rad', 'area', 'animal', 'session', 'probe'});
 for animal_n = 1:numel(animal_ids)
     animal_id = animal_ids{animal_n};
     these = traces(strcmp({traces.animal_id}, animal_id));
@@ -103,8 +104,13 @@ for animal_n = 1:numel(animal_ids)
         n_row = numel(distance_um);
         animal = repmat({char(these(trace_n).animal_id)}, n_row, 1);
         session = repmat({char(these(trace_n).session_name)}, n_row, 1);
-        stack_table = [stack_table; table(distance_um, phase_rad, area, animal, session, ...
-            'VariableNames', {'distance_um', 'phase_rad', 'area', 'animal', 'session'})]; %#ok<AGROW>
+        if isfield(these(trace_n), 'probe_num') && ~isempty(these(trace_n).probe_num)
+            probe = repmat(these(trace_n).probe_num, n_row, 1);
+        else
+            probe = ones(n_row, 1);
+        end
+        stack_table = [stack_table; table(distance_um, phase_rad, area, animal, session, probe, ...
+            'VariableNames', {'distance_um', 'phase_rad', 'area', 'animal', 'session', 'probe'})]; %#ok<AGROW>
     end
     xline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
     yline(0, '-', 'Color', [0.2 0.2 0.2], 'HandleVisibility', 'off')
@@ -127,6 +133,9 @@ for animal_n = 1:numel(animal_ids)
     file_stem = regexprep(animal_id, '[^A-Za-z0-9]+', '_');
     local_save_figure(animal_fig, fullfile(figure_folder, [file_stem, '.png']));
 end
+
+%% Drop per-session points far from that recording's phase-vs-distance trend
+stack_table = local_remove_session_trend_outliers(stack_table);
 
 %% Plot 3 — all stacked points, colored by area
 areas_in_color = {'DR', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
@@ -226,6 +235,50 @@ end
 if isstring(area)
     area = cellstr(area);
 end
+end
+
+function stack_table = local_remove_session_trend_outliers(stack_table)
+% Per session (and probe), fit a robust trend of phase vs distance and drop
+% points whose residual is more than 3 scaled MAD from that trend, with a
+% 0.5 rad floor so isolated jumps are still removed on a clean trace.
+n_row = height(stack_table);
+keep = true(n_row, 1);
+session = stack_table.session;
+if ismember('probe', stack_table.Properties.VariableNames)
+    probe_str = arrayfun(@(p) num2str(p), stack_table.probe, 'UniformOutput', false);
+    group = strcat(session, '::', probe_str);
+else
+    group = session;
+end
+group_ids = unique(group, 'stable');
+for g = 1:numel(group_ids)
+    idx = find(strcmp(group, group_ids{g}) & ...
+        isfinite(stack_table.distance_um) & isfinite(stack_table.phase_rad));
+    if numel(idx) < 8
+        continue
+    end
+    distance_um = stack_table.distance_um(idx);
+    phase_rad = stack_table.phase_rad(idx);
+    [distance_um, order] = sort(distance_um);
+    idx = idx(order);
+    phase_rad = phase_rad(order);
+    span = max(7, 2 * floor(numel(phase_rad) / 8) + 1);
+    try
+        trend = smooth(distance_um, phase_rad, span, 'rlowess');
+    catch
+        trend = movmedian(phase_rad, span);
+    end
+    residual = phase_rad - trend;
+    med_res = median(residual);
+    scaled_mad = 1.4826 * mad(residual, 1);
+    threshold = max(3 * scaled_mad, 0.5);
+    outlier = abs(residual - med_res) > threshold;
+    keep(idx(outlier)) = false;
+end
+n_removed = sum(~keep);
+fprintf('Removed %d / %d points far from the per-session phase-distance trend\n', ...
+    n_removed, n_row);
+stack_table = stack_table(keep, :);
 end
 
 function [mean_phase, ci_lo, ci_hi] = local_session_interpolated_ci( ...
