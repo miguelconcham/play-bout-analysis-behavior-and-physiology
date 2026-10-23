@@ -135,9 +135,9 @@ for trace_n = 1:numel(these)
         pair = {these(trace_n).border_from_area{border_n}, ...
             these(trace_n).border_to_area{border_n}};
         if isKey(buckets, key)
-            values = buckets(key);
-            values{end + 1} = pair; %#ok<AGROW>
-            buckets(key) = values;
+            bucket_pairs = buckets(key);
+            bucket_pairs{end + 1} = pair; %#ok<AGROW>
+            buckets(key) = bucket_pairs;
         else
             buckets(key) = {pair};
         end
@@ -148,7 +148,7 @@ if buckets.Count == 0
     border_label = {};
     return
 end
-keys_list = cell2mat(keys(buckets));
+keys_list = cell2mat(buckets.keys);
 keys_list = sort(keys_list);
 border_distance = zeros(numel(keys_list), 1);
 border_label = cell(numel(keys_list), 1);
@@ -163,8 +163,8 @@ for k = 1:numel(keys_list)
             counts(label) = 1;
         end
     end
-    labels = keys(counts);
-    votes = cell2mat(values(counts));
+    labels = counts.keys;
+    votes = cell2mat(counts.values);
     [~, winner] = max(votes);
     border_distance(k) = keys_list(k);
     border_label{k} = labels{winner};
