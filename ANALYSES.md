@@ -43,6 +43,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Play-bout PSTH maps by channel / area | extra | `Figure 2/Supporting codes v2/Estimate_psth_area_maps.m` | `Figure 2/Supporting codes v2/Analyze_psth_area_maps.m` |
 | Full-spectrum spectrogram at play onset | extra | `Figure 2/Supporting codes v2/Estimate_psth_full_spectrogram.m` | `Figure 2/Supporting codes v2/Analyze_psth_full_spectrogram.m` |
 | Partner-session mid-LPAG Welch/Fourier spectra and periodic/aperiodic fits | extra | `Figure 2/Supporting codes v2/Estimate_play_session_lpag_spectra.m` | `Figure 2/Supporting codes v2/Analyse_play_session_lpag_spectra.m` |
+| Partner-session periodic/aperiodic spectra on every probe channel, stacked on mid-LPAG and on SC / DLPAG / LPAG / VLPAG / DR | extra | `Figure 2/Supporting codes v2/Estimate_play_session_probe_spectra.m` | `Figure 2/Supporting codes v2/Analyse_play_session_probe_spectra.m` |
 | Neuron–LFP phase locking (PPC, preferred phase, PSTH) | Fig 3a–e | `Figure 3/Supporting codes/Estiamte_phase_copuling.m` | `Figure 3/Figure 3a-e.m` |
 | Fig 3e PPC delta-power controls (1-s amplitude matching, pre-play null) | referee control | `Figure 3/Supporting codes/Estimate_phase_locking_power_control.m` | `Figure 3/Supporting codes/Analyze_play_ppc_amplitude_matched.m` |
 | Fig 3e PPC power-contrast null (session non-play tails) | referee control | `Figure 3/Supporting codes/Estimate_phase_locking_power_contrast.m` | `Figure 3/Supporting codes/Analyze_play_ppc_power_contrast.m` |
@@ -87,6 +88,7 @@ These are the supporting / complementary pipelines. Rebuild with Estimate, then 
 | Channel-wise play-bout maps (LPAG vs VLPAG, etc.) | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Full spectrogram at play onset | `Estimate_psth_full_spectrogram.m` | `Analyze_psth_full_spectrogram.m` |
 | Partner-session mid-LPAG Welch/Fourier spectra + FOOOF | `Estimate_play_session_lpag_spectra.m` | `Analyse_play_session_lpag_spectra.m` |
+| Partner-session spectra + FOOOF on every probe channel; mid-LPAG stack and ventral/dorsal distance to SC, DLPAG, LPAG, VLPAG, DR | `Estimate_play_session_probe_spectra.m` | `Analyse_play_session_probe_spectra.m` |
 | Speed vs band-limited power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m` |
 | Delta–gamma (or other) phase–amplitude coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m` or `Figure 2/CrossFreq coupling.m` |
 | CFC as depth maps | `Estimate_freq_coupling_maps.m` | `Analyze_freq_coupling_maps.m` |
@@ -94,7 +96,7 @@ These are the supporting / complementary pipelines. Rebuild with Estimate, then 
 | PLI / phase lag vs mid-LPAG only | `Estimate_coherence_maps_lpag_ref.m` | `Analyze_coherence_maps_lpag_ref.m` (loads `coherence_pli_struct_lpag_ref_2026.mat`) |
 | Hilbert phase at exploratory / play onset | `Estimate_phase_psth.m` | `Analyze_phase_psth.m` or `Analyze_phase_psth_SuppFig.m` |
 
-GENERATE functions live next to those Estimates (`GENERATE_PSTH_PLAY_BOUT.m`, `GENERATE_PSTH_ALL_BEHAVIORS.m`, `GENERATE_PSTH_CALLS.m`, `GENERATE_PSTH_CALL_LOC_REGRESSORS.m`, `GENERATE_SPEED_FREQ_RELATION.m`, `GENERATE_FREQ_COUPLING_STRUCT.m`, `GENERATE_FREQ_COUPLING_MAPS_STRUCT.m`, `GENERATE_COHERNECE_MAPS_STRUCT.m`, `GENERATE_COHERENCE_MAPS_LPAG_REF.m`, `GENERATE_PHASE_EXPLORATORY_ONSET.m`, `GENERATE_PSTH_AREA_MAPS.m`, `GENERATE_PSTH_SPECTROGRAM.m`).
+GENERATE functions live next to those Estimates (`GENERATE_PSTH_PLAY_BOUT.m`, `GENERATE_PSTH_ALL_BEHAVIORS.m`, `GENERATE_PSTH_CALLS.m`, `GENERATE_PSTH_CALL_LOC_REGRESSORS.m`, `GENERATE_SPEED_FREQ_RELATION.m`, `GENERATE_FREQ_COUPLING_STRUCT.m`, `GENERATE_FREQ_COUPLING_MAPS_STRUCT.m`, `GENERATE_COHERNECE_MAPS_STRUCT.m`, `GENERATE_COHERENCE_MAPS_LPAG_REF.m`, `GENERATE_PHASE_EXPLORATORY_ONSET.m`, `GENERATE_PSTH_AREA_MAPS.m`, `GENERATE_PSTH_SPECTROGRAM.m`, `GENERATE_PLAY_SESSION_PROBE_SPECTRA.m`).
 
 ### Spikes and locking (Figure 3 supporting)
 
