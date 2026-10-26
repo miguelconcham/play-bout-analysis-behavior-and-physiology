@@ -13,7 +13,8 @@
 % folder; that switch is off, so those three folders are not split into
 % three windows. Each channel is log10 power with the aperiodic fit and
 % the periodic Gaussians in pooled_periodic_ranges removed. The default
-% window is 6-12 Hz. Sites are
+% draws that figure twice, once after removing 6-12 Hz and once after
+% removing 0.1-1 Hz. Sites are
 % averaged only when the shank and the x and y coordinates match. Channel
 % number is not used, because the channel map can change between days and
 % the same channel number can sit at a different distance. Frequency is
@@ -102,13 +103,13 @@ session_index = [];
 % Single-session figures are optional.
 plot_each_session = false;
 
-% Pooled spectrogram. Off until this switch is set true. The color is
-% log10 power minus the aperiodic fit minus periodic Gaussians whose
-% centers fall inside pooled_periodic_ranges. The two switches below
-% choose which sessions share a figure. Sites are averaged only at a
-% matching shank and matching x and y. Channel number is ignored, because
-% the channel map can change between days.
-plot_pooled_animal_spectra = false;
+% Pooled spectrogram, one figure per animal when pool_recording_days is
+% true. The color is log10 power minus the aperiodic fit minus periodic
+% Gaussians whose centers fall inside pooled_periodic_ranges. The two
+% switches below choose which sessions share a figure. Sites are averaged
+% only at a matching shank and matching x and y. Channel number is
+% ignored, because the channel map can change between days.
+plot_pooled_animal_spectra = true;
 
 % One figure per recording folder. Partner sessions are the rows inside
 % that file, so B1D1 1007, B1D1 1012, and B1D1 1013 stay in separate
@@ -124,14 +125,13 @@ pool_partner_sessions = false;
 pool_recording_days = true;
 
 % Frequency windows removed from the pooled spectrogram, together with
-% the aperiodic fit. Each cell is one full set of those figures.
-% Gaussians whose centers fall inside that cell are removed. Peaks
-% outside the cell stay. The default removes 6-12 Hz.
+% the aperiodic fit. Each cell is one full set of those figures, so the
+% default is two figures per animal. Gaussians whose centers fall inside
+% that cell are removed. Peaks outside the cell stay.
+%   pooled_periodic_ranges = {[6 12; .1 1]};
 %   pooled_periodic_ranges = {[6 12]};
-%   pooled_periodic_ranges = {[1 5]};
-%   pooled_periodic_ranges = {[1 5; 6 12]};
-%   pooled_periodic_ranges = {[6 12], [1 5]};
-pooled_periodic_ranges = {[6 12]};
+%   pooled_periodic_ranges = {[.1 1]};
+pooled_periodic_ranges = {[6 12], [.1 1]};
 
 % log10 power minus the fitted aperiodic component. Switch to
 % 'log10_mean_power' to draw the session-mean spectrum itself.
@@ -139,7 +139,7 @@ spectrum_field = 'raw_aperiodic_subtracted';
 
 delta_band = [1 5];
 theta_band = [6 12];
-gamma_band = [30 45];
+gamma_band = [30 40];
 
 % Power and correlation figures use the Fourier spectra. Welch is available:
 %   spectral_method = {'Welch'};
@@ -163,11 +163,12 @@ spectrum_regions = {'SupCol', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
 
 % Each cell is one region-spectrum analysis. Gaussians whose centers fall
 % inside that cell are removed, together with the aperiodic fit. Peaks
-% outside the cell stay, so {[1 5]} removes delta and leaves theta.
+% outside the cell stay. The default draws the regions twice: 6-12 Hz
+% removed, then 0.1-1 Hz removed.
+%   periodic_ranges_to_subtract = {[6 12; .1 1]};
 %   periodic_ranges_to_subtract = {[6 12]};
-%   periodic_ranges_to_subtract = {[1 5]};
-%   periodic_ranges_to_subtract = {[1 5; 6 12]};
-periodic_ranges_to_subtract = {[6 12], [1 5]};
+%   periodic_ranges_to_subtract = {[.1 1]};
+periodic_ranges_to_subtract = {[6 12], [.1 1]};
 
 % Ventral and dorsal curves. 'normalized' z-scores each band within the
 % shank and subtracts the power of the first channel on that side, so the
