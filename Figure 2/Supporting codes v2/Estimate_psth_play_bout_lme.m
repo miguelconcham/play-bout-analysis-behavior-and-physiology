@@ -14,13 +14,12 @@
 %
 % Samples at or after the bout end are left out. |z| above zscore_limit is
 % left out before the day mean. z uses the baseline (-2, 0) and a 20-bin
-% moving mean. Partner 3 and bouts outside a partner window are left out.
+% moving mean. Partner 3 is left out.
 %
-% Partner number is calculated here. For each recording day the script loads
-% the behavior file, applies the video-to-NPX synch model, and takes
-% Session_structure rows of type Partners session, in time order. A play bout
-% belongs to the block that contains its onset. The PSTH mats only supply
-% power and bout times.
+% Partner number comes from Behavior already stored in the PSTH, with the
+% same rule as the original delta script. Session_structure rows are kept,
+% Tickling rows are removed, and a bout takes the first block that contains
+% it completely (bout start >= block start and bout end < block end).
 %
 % Input mats come from Estimate_psth_band_power.m. The names below are the
 % delta play-bout pair. Swap them for theta or gamma (see the combinations file).
@@ -32,7 +31,6 @@ if ~isempty(this_dir)
 end
 
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
-data_root = fileparts(fileparts(saving_folder));
 
 psth_file = 'psth_structure_delta_updated.mat';
 names_file = 'animal_names_delta_updated.mat';
@@ -96,17 +94,7 @@ for j = 1:numel(psth_structure)
             '%s has %d bouts and %d PSTH rows.', session_name, size(play_bouts, 1), size(onset, 1));
     end
 
-    windows = zeros(0, 2);
-    try
-        windows = load_partner_windows(session_name, data_root);
-    catch load_error
-        warning('Estimate_psth_play_bout_lme:Behavior', ...
-            '%s: behavior file was not read (%s).', session_name, load_error.message);
-    end
-    if isempty(windows) && isfield(psth_structure(j), 'Behavior')
-        windows = partner_windows_from_behavior(psth_structure(j).Behavior);
-    end
-    this_partner = assign_partner_index(play_bouts(:, 1), windows(:, 1), windows(:, 2));
+    this_partner = partner_index_from_behavior(play_bouts, psth_structure(j).Behavior);
     fprintf('%s: %d bouts, partner 1 = %d, partner 2 = %d\n', ...
         session_name, numel(this_partner), sum(this_partner == 1), sum(this_partner == 2));
 
@@ -124,11 +112,6 @@ end
 
 obs = session_partner_mean_psth(power, partner, session_id, bout_length, time, ...
     zscore_limit, length_limit);
-if isempty(obs.session_id)
-    error('Estimate_psth_play_bout_lme:Partners', ...
-        ['No play-bout onset fell in a Partners session. ' ...
-        'The behavior file and synch model for these recording days were checked under Data.']);
-end
 
 %% Fit Power ~ 1 + Partner + (1|Session) at each time bin
 valid_bins = find(time >= time_range(1) & time <= time_range(2));
@@ -238,53 +221,11 @@ end
 play_bouts = double(play_bouts);
 end
 
-function windows = load_partner_windows(session_name, data_root)
-windows = zeros(0, 2);
-[behavior, synch_model] = load_synced_behavior(session_name, data_root);
-if isempty(behavior) || isempty(synch_model)
-    return
-end
-behavior.Start = predict(synch_model, behavior.Start);
-behavior.End = predict(synch_model, behavior.End);
-windows = partner_windows_from_behavior(behavior);
-end
-
-function [behavior, synch_model] = load_synced_behavior(session_name, data_root)
-behavior = [];
-synch_model = [];
-[~, session_name] = fileparts(session_name);
-npx_dir = fullfile(data_root, 'NPX data', 'NPX raw data', session_name);
-
-local_synch = fullfile(npx_dir, 'synch_model_video2NPX.mat');
-data_synch = fullfile(data_root, 'Synch data', session_name, 'synch_model_video2NPX.mat');
-if isfile(local_synch)
-    synch_file = local_synch;
-elseif isfile(data_synch)
-    synch_file = data_synch;
-else
-    return
-end
-loaded = load(synch_file, 'synch_model_video2NPX');
-if ~isfield(loaded, 'synch_model_video2NPX')
-    return
-end
-synch_model = loaded.synch_model_video2NPX;
-
-local_behavior = dir(fullfile(npx_dir, 'ELAN*'));
-data_behavior = fullfile(data_root, 'Behavior backups', [session_name, '.txt']);
-if ~isempty(local_behavior)
-    behavior_file = fullfile(npx_dir, local_behavior(1).name);
-elseif isfile(data_behavior)
-    behavior_file = data_behavior;
-else
-    behavior = [];
-    synch_model = [];
-    return
-end
-
-behavior = readtable(behavior_file);
-behavior(:, 2) = [];
-behavior.Properties.VariableNames = {'Animal', 'Start', 'End', 'Length', 'Type'};
+function partner_index = partner_index_from_behavior(play_bouts, behavior)
+partner_sessions = behavior(ismember(behavior.Animal, 'Session_structure'), :);
+partner_sessions(ismember(partner_sessions.Type, 'Tickling'), :) = [];
+partner_index = partner_index_in_windows( ...
+    play_bouts(:, 1), play_bouts(:, 2), partner_sessions.Start, partner_sessions.End);
 end
 
 function tf = is_table(value)

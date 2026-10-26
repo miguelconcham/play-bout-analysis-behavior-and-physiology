@@ -9,7 +9,15 @@ end
 test_partners_session_rows_ignore_tickling();
 test_onset_inside_a_window_keeps_a_bout_that_runs_past_the_end();
 test_non_partner_type_falls_back_to_session_blocks();
+test_original_window_rule();
 disp('test_assign_partner_index passed');
+end
+
+function test_original_window_rule()
+windows = [0 10; 10 30];
+partner = partner_index_in_windows([1; 12; 1], [5; 20; 15], windows(:, 1), windows(:, 2));
+assert(isequal(partner, [1; 2; 1]), ...
+    'The original whole-bout partner index changed.');
 end
 
 function test_partners_session_rows_ignore_tickling()

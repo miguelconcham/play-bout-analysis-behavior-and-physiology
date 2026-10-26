@@ -32,8 +32,8 @@ DELTA
    Loaded by      : Figure 2.m ; Play partner.m
    Saved by       : Estimate_psth_play_bout_lme.m
    Note           : One mean PSTH per recording day and partner (electrode 1).
-                    Partner blocks are read in Estimate_psth_play_bout_lme.m from
-                    the behavior file (Session_structure / Partners session).
+                    Partner index uses Behavior stored in the PSTH: Session_structure
+                    rows with Tickling removed, same whole-bout rule as the original script.
                     Power ~ 1 + Partner + (1|Session). In-bout samples, |z| <= 4.
                     results.est is the Partner1 level. results.partner_est is
                     Partner2 minus Partner1. Figure 2.m plots results.pvals.
