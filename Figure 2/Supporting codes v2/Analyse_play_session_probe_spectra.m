@@ -20,9 +20,10 @@
 % the same channel number can sit at a different distance. Frequency is
 % the horizontal axis and distance to the tip is the vertical axis. A
 % dotted line sits between neighboring sites when their region labels
-% differ and the sessions at those coordinates agree. Every area name on
-% the channel is used, including regions that are outside the selected
-% analysis list, such as InfCol.
+% differ. Each region span is also labeled, including a shank that stays
+% in one region. Days that disagree keep every name they reported.
+% Every area name on the channel is used, including regions that are
+% outside the selected analysis list, such as InfCol.
 %
 % Each standard region also gets its own spectrum. The aperiodic fit is
 % removed, and so are the periodic Gaussians whose centers fall in
@@ -927,28 +928,56 @@ name = token;
 end
 
 function key = agreed_area_key(keys)
-keys = keys(~cellfun('isempty', keys));
-if isempty(keys)
+n_keys = numel(keys);
+trimmed = cell(n_keys, 1);
+for key_n = 1:n_keys
+    trimmed{key_n} = strtrim(char(string(keys{key_n})));
+end
+trimmed = trimmed(~cellfun('isempty', trimmed));
+if isempty(trimmed)
     key = '';
     return
 end
-unique_keys = unique(keys, 'stable');
+unique_keys = unique(trimmed, 'stable');
 if numel(unique_keys) == 1
     key = unique_keys{1};
-else
+    return
+end
+names = cell(1, 0);
+for key_n = 1:numel(unique_keys)
+    parts = split_area_label(unique_keys{key_n});
+    for part_n = 1:numel(parts)
+        name = border_region_name(parts{part_n});
+        if isempty(name) || any(strcmp(names, name))
+            continue
+        end
+        names{end + 1} = name; %#ok<AGROW>
+    end
+end
+if isempty(names)
     key = '';
+    return
+end
+names = sort(names);
+key = names{1};
+for name_n = 2:numel(names)
+    key = [key, ',', names{name_n}]; %#ok<AGROW>
 end
 end
 
 function mark_region_divisions(depth_um, area_keys, use_depth_axis)
-if numel(depth_um) < 2 || numel(area_keys) ~= numel(depth_um)
+if isempty(depth_um) || numel(area_keys) ~= numel(depth_um)
     return
 end
 hold on
-x_limits = xlim;
-for row_n = 1:numel(depth_um) - 1
-    below = area_keys{row_n};
-    above = area_keys{row_n + 1};
+n_rows = numel(depth_um);
+row_key = cell(n_rows, 1);
+for row_n = 1:n_rows
+    row_key{row_n} = strtrim(char(string(area_keys{row_n})));
+end
+for row_n = 1:n_rows - 1
+    below = row_key{row_n};
+    above = row_key{row_n + 1};
     if isempty(below) || isempty(above) || strcmp(below, above)
         continue
     end
@@ -962,12 +991,47 @@ for row_n = 1:numel(depth_um) - 1
     end
     yline(y_value, ':', 'Color', [0.15 0.15 0.15], ...
         'LineWidth', 1.1, 'HandleVisibility', 'off');
-    text(x_limits(1), y_value, ['  ', ...
-        region_border_label(below), ' | ', region_border_label(above)], ...
-        'Color', [0.15 0.15 0.15], 'FontSize', 7, ...
-        'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom', ...
-        'Interpreter', 'none', 'Clipping', 'on');
+    mark_region_label(y_value, ...
+        [region_border_label(below), ' | ', region_border_label(above)], ...
+        'bottom');
 end
+row_n = 1;
+while row_n <= n_rows
+    this_key = row_key{row_n};
+    run_end = row_n;
+    while run_end < n_rows && strcmp(row_key{run_end + 1}, this_key)
+        run_end = run_end + 1;
+    end
+    if ~isempty(this_key)
+        mark_region_label(region_span_center( ...
+            depth_um, row_n, run_end, use_depth_axis), ...
+            region_border_label(this_key), 'middle');
+    end
+    row_n = run_end + 1;
+end
+end
+
+function y_value = region_span_center(depth_um, row_start, row_end, use_depth_axis)
+if use_depth_axis
+    y_value = (depth_um(row_start) + depth_um(row_end)) / 2;
+else
+    y_value = (row_start + row_end) / 2;
+end
+end
+
+function mark_region_label(y_value, label, vertical)
+y_limits = ylim;
+if ~isfinite(y_value) || y_limits(2) == y_limits(1)
+    return
+end
+y_norm = (y_value - y_limits(1)) / (y_limits(2) - y_limits(1));
+y_norm = min(max(y_norm, 0.03), 0.97);
+text(0.02, y_norm, [' ', label], ...
+    'Units', 'normalized', ...
+    'Color', [0.05 0.05 0.05], 'FontSize', 8, ...
+    'BackgroundColor', 'w', 'Margin', 1, ...
+    'HorizontalAlignment', 'left', 'VerticalAlignment', vertical, ...
+    'Interpreter', 'none', 'Clipping', 'on');
 end
 
 function label = region_border_label(key)
