@@ -9,6 +9,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 from extract_delta_phase_vs_lpag_distance import (  # noqa: E402
+    align_geometry_to_lfp_rows,
     extract_lpag_ref_session_trace,
     extract_session_traces,
     lpag_center_map_index,
@@ -46,6 +47,32 @@ class GeometryTests(unittest.TestCase):
         np.testing.assert_array_equal(npx1, np.ones(4))
         npx2 = probe_numbers(np.array([8.0, 40.0, 258.0, 790.0]))
         np.testing.assert_array_equal(npx2, np.array([1.0, 1.0, 2.0, 4.0]))
+
+    def test_chanmap_plus_one_geometry_uses_the_lfp_row_column(self):
+        # Sites 1..4 have y = 0, 20, 40, 60. GENERATE stores them at
+        # chanMap+1, so row 0 is empty and the phase matrix stays 4 x 4.
+        y_by_lfp = np.array([0.0, 20.0, 40.0, 60.0])
+        channel_map = np.full((5, 2), np.nan)
+        channel_map[1:, 0] = 27.0
+        channel_map[1:, 1] = y_by_lfp
+        areas = ["", "SupCol", "DLPAG", "LPAG", "VLPAG"]
+        phase = np.zeros((4, 4))
+        for i in range(4):
+            for j in range(4):
+                phase[i, j] = _linear_phase(y_by_lfp[i] - y_by_lfp[j])
+        aligned_phase, aligned_map, aligned_areas = align_geometry_to_lfp_rows(
+            phase, channel_map, areas
+        )
+        np.testing.assert_allclose(aligned_map[:, 1], y_by_lfp)
+        self.assertEqual(aligned_areas[2], "LPAG")
+        traces = extract_session_traces(
+            aligned_phase, aligned_map, aligned_areas, "B1D1 chanMap plus one"
+        )
+        self.assertEqual(len(traces), 1)
+        # LPAG is the only LPAG site, LFP row 3 (0-based index 2), y = 40.
+        self.assertEqual(traces[0].lpag_center_index, 2)
+        self.assertAlmostEqual(traces[0].phase_rad[2], 0.0)
+        np.testing.assert_allclose(traces[0].phase_rad, _linear_phase(y_by_lfp - 40.0))
 
     def test_lpag_center_is_closest_lpag_site_to_mean(self):
         y = np.array([0.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0])

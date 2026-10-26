@@ -65,6 +65,8 @@ for fn = 1:numel(animal_list)
 end
 
 %% Save results
+% Figure 3/Figure 3a-e.m section 18 loads these two files and reads the
+% mid-LPAG column of mean_phaseLag_freq1 (delta) or mean_phaseLag_freq2 (theta).
 disp('saving')
 save(fullfile(saving_folder, 'coherence_pli_struct_2026.mat'), 'pli_struct', '-v7.3');
 save(fullfile(saving_folder, 'coherence_pli_structure_animal_names2026.mat'), 'animal_names');

@@ -139,6 +139,38 @@ def sort_channels_by_probe_depth(
     return probe_idx[order]
 
 
+def align_geometry_to_lfp_rows(phase_matrix, channel_map, areas):
+    """Move GENERATE geometry stored at chanMap+1 onto LFP file rows.
+
+    ``mean_phaseLag`` is indexed by the LFP file row. ``channel_map`` in
+    ``GENERATE_COHERNECE_MAPS_STRUCT`` is indexed by ``chanMap + 1``. For a
+    1-based ``chanMap`` that makes the map one row longer than the phase
+    matrix and leaves row 0 empty. Phase locking stores the file row in
+    ``cluster_info.ch``. Maps that are already on those rows are unchanged.
+    """
+    phase_matrix = np.asarray(phase_matrix, dtype=float)
+    channel_map = np.asarray(channel_map, dtype=float)
+    areas = list(areas)
+    n_lfp = int(phase_matrix.shape[0])
+    n_map = int(channel_map.shape[0])
+    row0_empty = n_map >= 1 and not np.any(np.isfinite(channel_map[0]))
+    stored_plus_one = n_map >= n_lfp + 1 and row0_empty
+    if not stored_plus_one:
+        n = min(n_lfp, phase_matrix.shape[1], n_map, len(areas))
+        return phase_matrix[:n, :n], channel_map[:n], areas[:n]
+
+    aligned_map = np.full((n_lfp, channel_map.shape[1]), np.nan, dtype=float)
+    aligned_areas = [""] * n_lfp
+    for lfp_row in range(n_lfp):
+        map_index = lfp_row + 1
+        if map_index >= n_map:
+            continue
+        aligned_map[lfp_row] = channel_map[map_index]
+        if map_index < len(areas) and areas[map_index] not in (None, ""):
+            aligned_areas[lfp_row] = areas[map_index]
+    return phase_matrix[:n_lfp, :n_lfp], aligned_map, aligned_areas
+
+
 def extract_session_traces(
     phase_matrix: np.ndarray,
     channel_map: np.ndarray,

@@ -1044,4 +1044,495 @@ bar(proportions_all_areaas, 'stacked')
 legend({'dleta and gamma-locked','delta-locked gamma-unlocked','gamma-locked delta-unlocked','gamma-unlocked delta-unlocked'}, 'Location','northoutside')
 
 
+%% 18 LPAG-centered preferred phase
+% Re-references the preferred angles loaded in section 3 to the mid-LPAG
+% channel. Sections 1-17 are unchanged. This block only reads phase_struct,
+% animal_names, and data_root.
+%
+% Coherence estimates are the full pairwise maps from Estimate_coherence_maps.m
+% (GENERATE_COHERNECE_MAPS_STRUCT), saved as:
+%   coherence_pli_struct_2026.mat
+%   coherence_pli_structure_animal_names2026.mat
+% under Analysis results\psth power by frequency and behavior.
+% The phase lag of channel X is the column of that matrix against the
+% mid-LPAG site on the same probe (phase(X) - phase(mid-LPAG)).
+% Geometry in that file is stored at chanMap+1. The phase matrix and
+% cluster_info.ch are the LFP file row, so the column is read after
+% shifting geometry back onto those rows.
+% Delta uses mean_phaseLag_freq1. Theta uses mean_phaseLag_freq2.
+% The centered angle is
+%
+%   wrap(preferred angle - channel phase lag)
+%
+% The matrix row is the 1-based LFP row, matched to cluster_info.ch.
+% Peak versus trough uses the section 13 split: trough outside
+% [-pi/2, pi/2], peak inside it. Locked neurons with no mid-LPAG lag are
+% left out of the new figures and of the retention counts.
+%
+% Run sections 1 and 3 first. lpag_phase_lag_band has to match that load.
+
+lpag_phase_lag_band = 'delta'; % 'delta' or 'theta'
+
+if ~exist('phase_struct', 'var') || ~exist('animal_names', 'var') || ~exist('data_root', 'var')
+    error('Figure3:MissingPhaseData', ...
+        'Run sections 1 and 3 before this section so phase_struct, animal_names, and data_root exist.');
+end
+if numel(phase_struct) ~= size(animal_names, 1)
+    error('Figure3:SessionCount', ...
+        'phase_struct has %d sessions and animal_names has %d rows.', ...
+        numel(phase_struct), size(animal_names, 1));
+end
+
+% Pairwise coherence files written by Estimate_coherence_maps.m
+lpag_coherence_folder = [data_root, '\Analysis results\psth power by frequency and behavior'];
+lpag_structure_file = [lpag_coherence_folder, '\coherence_pli_struct_2026.mat'];
+lpag_names_file = [lpag_coherence_folder, '\coherence_pli_structure_animal_names2026.mat'];
+disp('Coherence estimates from Estimate_coherence_maps.m')
+disp(['  ', lpag_structure_file])
+disp(['  ', lpag_names_file])
+
+if exist(lpag_structure_file, 'file') ~= 2 || exist(lpag_names_file, 'file') ~= 2
+    error('Figure3:MissingCoherence', ...
+        ['Pairwise coherence files were not found. Run Estimate_coherence_maps.m. ', ...
+        'Expected %s and %s.'], lpag_structure_file, lpag_names_file);
+end
+
+switch lower(lpag_phase_lag_band)
+    case 'delta'
+        lpag_lag_field = 'mean_phaseLag_freq1';
+    case 'theta'
+        lpag_lag_field = 'mean_phaseLag_freq2';
+    otherwise
+        error('Figure3:PhaseLagBand', ...
+            'lpag_phase_lag_band must be ''delta'' or ''theta''.');
+end
+
+lpag_repo_root = fileparts(data_root);
+addpath(fullfile(lpag_repo_root, 'Custom functions'));
+addpath(fullfile(lpag_repo_root, 'Figure 2', 'Supporting codes v2'));
+addpath(fullfile(lpag_repo_root, 'Figure 3', 'Supporting codes'));
+
+disp('Loading pairwise coherence maps')
+lpag_coherence = load(lpag_structure_file, 'pli_struct');
+lpag_pli = lpag_coherence.pli_struct;
+lpag_names_loaded = load(lpag_names_file, 'animal_names');
+lpag_coherence_names = lpag_names_loaded.animal_names;
+if numel(lpag_pli) ~= size(lpag_coherence_names, 1)
+    warning('Figure3:CoherenceNames', ...
+        'coherence_pli_struct_2026.mat has %d sessions and the names file has %d rows.', ...
+        numel(lpag_pli), size(lpag_coherence_names, 1));
+end
+
+% One column per probe: phase of each same-probe LFP row versus mid-LPAG.
+% The 4th argument puts chanMap+1 geometry onto the LFP rows in cluster_info.ch.
+lpag_traces = extract_delta_phase_vs_lpag_distance( ...
+    lpag_pli, lpag_coherence_names, lpag_lag_field, true);
+clear lpag_pli lpag_coherence
+if isempty(lpag_traces)
+    error('Figure3:NoPhaseLags', ...
+        'No mid-LPAG phase-lag column in %s.', lpag_structure_file);
+end
+
+lpag_lag_by_channel = containers.Map('KeyType', 'char', 'ValueType', 'double');
+lpag_coherence_sessions = cell(numel(lpag_traces), 1);
+lpag_ref_lags = [];
+for lpag_k = 1:numel(lpag_traces)
+    lpag_session_name = strtrim(char(lpag_traces(lpag_k).session_name));
+    lpag_coherence_sessions{lpag_k} = lpag_session_name;
+    lpag_rows = round(double(lpag_traces(lpag_k).channel_index(:)));
+    lpag_lags = double(lpag_traces(lpag_k).phase_rad(:));
+    lpag_n = min(numel(lpag_rows), numel(lpag_lags));
+    for lpag_i = 1:lpag_n
+        if ~isfinite(lpag_rows(lpag_i)) || ~isfinite(lpag_lags(lpag_i))
+            continue
+        end
+        lpag_key = sprintf('%s|%d', lpag_session_name, lpag_rows(lpag_i));
+        if isKey(lpag_lag_by_channel, lpag_key)
+            lpag_previous = lpag_lag_by_channel(lpag_key);
+            if abs(angle(exp(1i * (lpag_previous - lpag_lags(lpag_i))))) > 1e-3
+                warning('Figure3:DuplicateChannelLag', ...
+                    'Session %s channel %d has two different phase lags. Keeping the first.', ...
+                    lpag_session_name, lpag_rows(lpag_i));
+            end
+        else
+            lpag_lag_by_channel(lpag_key) = lpag_lags(lpag_i);
+        end
+    end
+    lpag_ref = round(double(lpag_traces(lpag_k).lpag_center_index));
+    lpag_ref_pos = find(lpag_rows(1:lpag_n) == lpag_ref, 1);
+    if ~isempty(lpag_ref_pos) && isfinite(lpag_lags(lpag_ref_pos))
+        lpag_ref_lags(end + 1, 1) = lpag_lags(lpag_ref_pos); %#ok<SAGROW>
+    end
+end
+clear lpag_traces
+if lpag_lag_by_channel.Count == 0
+    error('Figure3:NoPhaseLags', ...
+        'No mid-LPAG phase lags were read from %s.', lpag_structure_file);
+end
+fprintf('Read %d channel phase lags from %s\n', lpag_lag_by_channel.Count, lpag_structure_file);
+if ~isempty(lpag_ref_lags)
+    fprintf('Mid-LPAG reference |phase lag| max = %.3g rad (expected near 0).\n', ...
+        max(abs(lpag_ref_lags)));
+end
+
+lpag_n_sessions = numel(phase_struct);
+lpag_counts = zeros(lpag_n_sessions, 1);
+for lpag_ns = 1:lpag_n_sessions
+    if ~isfield(phase_struct(lpag_ns), 'cluster_info') || ~isfield(phase_struct(lpag_ns), 'entire_recording_phase_stats')
+        error('Figure3:PhaseStructFields', ...
+            'Session %d is missing cluster_info or entire_recording_phase_stats.', lpag_ns);
+    end
+    lpag_info_names = phase_struct(lpag_ns).cluster_info.Properties.VariableNames;
+    if ~ismember('ch', lpag_info_names) || ~ismember('area', lpag_info_names)
+        error('Figure3:NoChannel', ...
+            'cluster_info in session %d has no ch or area column.', lpag_ns);
+    end
+    lpag_counts(lpag_ns) = size(phase_struct(lpag_ns).cluster_info, 1);
+end
+
+lpag_n_neurons = sum(lpag_counts);
+lpag_session = cell(lpag_n_neurons, 1);
+lpag_area = cell(lpag_n_neurons, 1);
+lpag_channel = nan(lpag_n_neurons, 1);
+lpag_preferred_angle = nan(lpag_n_neurons, 1);
+lpag_ppc_p = nan(lpag_n_neurons, 1);
+lpag_cursor = 1;
+for lpag_ns = 1:lpag_n_sessions
+    lpag_n_this = lpag_counts(lpag_ns);
+    lpag_idx = lpag_cursor:(lpag_cursor + lpag_n_this - 1);
+    lpag_info = phase_struct(lpag_ns).cluster_info;
+    lpag_stats = phase_struct(lpag_ns).entire_recording_phase_stats;
+    if ndims(lpag_stats) == 3
+        lpag_preferred_part = reshape(lpag_stats(1, :, 1), [], 1);
+        lpag_ppc_part = reshape(lpag_stats(1, :, 5), [], 1);
+    elseif ismatrix(lpag_stats) && size(lpag_stats, 2) >= 5 && size(lpag_stats, 1) == lpag_n_this
+        lpag_preferred_part = lpag_stats(:, 1);
+        lpag_ppc_part = lpag_stats(:, 5);
+    else
+        error('Figure3:PhaseStatsShape', ...
+            'entire_recording_phase_stats in session %d has an unexpected size.', lpag_ns);
+    end
+    if numel(lpag_preferred_part) ~= lpag_n_this || numel(lpag_ppc_part) ~= lpag_n_this
+        error('Figure3:PhaseStatsCount', ...
+            'Session %d phase stats do not match cluster_info (%d neurons).', ...
+            lpag_ns, lpag_n_this);
+    end
+
+    if iscell(animal_names)
+        lpag_session_name = animal_names{lpag_ns, 1};
+    elseif isstring(animal_names)
+        lpag_session_name = animal_names(lpag_ns, 1);
+    else
+        lpag_session_name = animal_names(lpag_ns, :);
+    end
+    if iscell(lpag_session_name)
+        lpag_session_name = lpag_session_name{1};
+    end
+    lpag_session_name = strtrim(char(lpag_session_name));
+
+    lpag_area_column = lpag_info.area;
+    lpag_area_part = cell(lpag_n_this, 1);
+    if iscell(lpag_area_column)
+        for lpag_a = 1:lpag_n_this
+            lpag_value = lpag_area_column{lpag_a};
+            while iscell(lpag_value) && numel(lpag_value) == 1
+                lpag_value = lpag_value{1};
+            end
+            if isempty(lpag_value)
+                lpag_area_part{lpag_a} = '';
+            else
+                lpag_area_part{lpag_a} = strtrim(char(string(lpag_value)));
+            end
+        end
+    else
+        lpag_area_part = cellstr(strtrim(string(lpag_area_column)));
+    end
+
+    lpag_session(lpag_idx) = repmat({lpag_session_name}, lpag_n_this, 1);
+    lpag_area(lpag_idx) = lpag_area_part;
+    lpag_channel(lpag_idx) = double(lpag_info.ch(:));
+    lpag_preferred_angle(lpag_idx) = lpag_preferred_part;
+    lpag_ppc_p(lpag_idx) = lpag_ppc_part;
+    lpag_cursor = lpag_cursor + lpag_n_this;
+end
+
+lpag_phase_lag = nan(lpag_n_neurons, 1);
+for lpag_n = 1:lpag_n_neurons
+    if ~isfinite(lpag_channel(lpag_n))
+        continue
+    end
+    lpag_key = sprintf('%s|%d', lpag_session{lpag_n}, round(lpag_channel(lpag_n)));
+    if isKey(lpag_lag_by_channel, lpag_key)
+        lpag_phase_lag(lpag_n) = lpag_lag_by_channel(lpag_key);
+    end
+end
+lpag_centered_angle = mod(lpag_preferred_angle - lpag_phase_lag + pi, 2 * pi) - pi;
+
+lpag_has_angle = isfinite(lpag_preferred_angle);
+lpag_has_lag = isfinite(lpag_phase_lag) & lpag_has_angle;
+lpag_locked = lpag_has_angle & lpag_ppc_p < 0.01;
+lpag_unlocked = lpag_has_angle & lpag_ppc_p >= 0.1;
+lpag_original_trough = lpag_locked & lpag_has_lag & ...
+    (lpag_preferred_angle > pi / 2 | lpag_preferred_angle < -pi / 2);
+lpag_original_peak = lpag_locked & lpag_has_lag & ~lpag_original_trough;
+lpag_new_trough = lpag_has_lag & isfinite(lpag_centered_angle) & ...
+    (lpag_centered_angle > pi / 2 | lpag_centered_angle < -pi / 2);
+lpag_new_peak = lpag_has_lag & isfinite(lpag_centered_angle) & ~lpag_new_trough;
+
+fprintf(['LPAG-centered phase (%s): %d neurons, %d locked, %d locked with a ', ...
+    'mid-LPAG lag, %d locked without a lag.\n'], ...
+    lpag_phase_lag_band, lpag_n_neurons, sum(lpag_locked), ...
+    sum(lpag_locked & lpag_has_lag), sum(lpag_locked & ~lpag_has_lag));
+if sum(lpag_locked & lpag_has_lag) < 0.5 * sum(lpag_locked)
+    warning('Figure3:PartialMatch', ...
+        ['Only %d of %d locked neurons matched an LFP row in coherence_pli_struct_2026.mat. ', ...
+        'Preferred angles use cluster_info.ch. Phase lags use that same LFP row in the pairwise matrix.'], ...
+        sum(lpag_locked & lpag_has_lag), sum(lpag_locked));
+end
+if ~any(lpag_locked & lpag_has_lag)
+    lpag_phase_sessions = unique(lpag_session, 'stable');
+    lpag_lag_sessions = unique(lpag_coherence_sessions, 'stable');
+    error('Figure3:NoPhaseLagMatch', ...
+        ['No locked neuron matched a mid-LPAG phase lag. ', ...
+        'Phase-coupling sessions include: %s. Coherence sessions include: %s. ', ...
+        'Session folder names and LFP channel rows have to agree.'], ...
+        strjoin(lpag_phase_sessions(1:min(5, numel(lpag_phase_sessions))), ' | '), ...
+        strjoin(lpag_lag_sessions(1:min(5, numel(lpag_lag_sessions))), ' | '));
+end
+
+lpag_centered_neurons = table(lpag_session, lpag_area, lpag_channel, ...
+    lpag_preferred_angle, lpag_phase_lag, lpag_centered_angle, lpag_ppc_p, ...
+    'VariableNames', {'session', 'area', 'channel', 'preferred_angle', ...
+    'phase_lag', 'lpag_centered_angle', 'ppc_p'});
+
+%% 18a Phase distribution, channel-centered and mid-LPAG-centered
+lpag_plot_locked = lpag_locked & lpag_has_lag;
+lpag_angle_edges = -pi:(pi / 32):pi;
+lpag_distribution_fig = figure('Name', 'LPAG-centered preferred phase');
+subplot(1, 2, 1)
+polarhistogram(lpag_preferred_angle(lpag_plot_locked), lpag_angle_edges)
+title('Channel-centered')
+subplot(1, 2, 2)
+polarhistogram(lpag_centered_angle(lpag_plot_locked), lpag_angle_edges)
+title('Mid-LPAG-centered')
+lpag_rmax = 0;
+for lpag_panel = 1:2
+    subplot(1, 2, lpag_panel)
+    lpag_this_r = rlim;
+    lpag_rmax = max(lpag_rmax, lpag_this_r(2));
+end
+for lpag_panel = 1:2
+    subplot(1, 2, lpag_panel)
+    rlim([0 lpag_rmax])
+end
+
+%% 18b Two-component mixture on the mid-LPAG-centered angles
+lpag_locked_angles = lpag_centered_angle(lpag_plot_locked);
+[lpag_mu, lpag_kappa, lpag_w, lpag_LL] = vm2_mixture_EM(lpag_locked_angles + pi, 10000);
+lpag_displayed_mu = lpag_mu - pi;
+[~, lpag_peak_component] = min(abs(lpag_displayed_mu));
+lpag_component_order = [lpag_peak_component, 3 - lpag_peak_component];
+[lpag_theta_uni, lpag_kappa_uni] = circ_vmpar(lpag_locked_angles);
+lpag_LL1 = sum(log(circ_vmpdf(lpag_locked_angles, lpag_theta_uni, lpag_kappa_uni)));
+lpag_LR = 2 * (lpag_LL(end) - lpag_LL1);
+fprintf('LPAG-centered mixture LR (two components vs unimodal) = %.4f\n', lpag_LR);
+
+lpag_angle_counts = histcounts(lpag_locked_angles, lpag_angle_edges);
+lpag_angle_counts = lpag_angle_counts(:)' / sum(lpag_angle_counts);
+lpag_angle_centers = 0.5 * (lpag_angle_edges(1:end - 1) + lpag_angle_edges(2:end));
+lpag_angle_centers = lpag_angle_centers(:)';
+lpag_mix_centers = lpag_w .* circ_vmpdf(lpag_angle_centers(:), lpag_mu(1) - pi, lpag_kappa(1)) + ...
+    (1 - lpag_w) .* circ_vmpdf(lpag_angle_centers(:), lpag_mu(2) - pi, lpag_kappa(2));
+lpag_mix_centers = lpag_mix_centers(:)' / sum(lpag_mix_centers);
+
+lpag_mixture_fig = figure('Name', 'LPAG-centered mixture');
+subplot(2, 1, 1)
+plot([lpag_angle_centers, lpag_angle_centers + 2 * pi], [lpag_angle_counts, lpag_angle_counts], 'k')
+hold on
+plot([lpag_angle_centers, lpag_angle_centers + 2 * pi], [lpag_mix_centers, lpag_mix_centers], 'b')
+xlabel('Phase (rad)')
+ylabel('Probability')
+legend({'Mid-LPAG-centered phases', 'Two-component von Mises'}, 'Location', 'northeast')
+xlim([-pi, 3 * pi])
+
+lpag_mix_edges = lpag_w .* circ_vmpdf(lpag_angle_edges(:), lpag_mu(1) - pi, lpag_kappa(1)) + ...
+    (1 - lpag_w) .* circ_vmpdf(lpag_angle_edges(:), lpag_mu(2) - pi, lpag_kappa(2));
+lpag_mix_edges = lpag_mix_edges(:)' / sum(lpag_mix_edges);
+subplot(2, 1, 2)
+polarplot(lpag_angle_edges, [lpag_angle_counts, lpag_angle_counts(1)], 'k')
+hold on
+polarplot(lpag_angle_edges, lpag_mix_edges, 'r')
+lpag_r_lim = rlim;
+polarplot([1 1] * lpag_displayed_mu(lpag_component_order(1)), lpag_r_lim, 'r')
+polarplot([1 1] * lpag_displayed_mu(lpag_component_order(2)), lpag_r_lim, 'b')
+legend({'Phase distribution', 'Mixture', 'Mean phase peak', 'Mean phase trough'})
+
+%% 18c Mean mid-LPAG-centered angle of trough neurons, per structure
+lpag_trough_regions = {'DLPAG', 'LPAG', 'VLPAG', 'SupCol'};
+lpag_trough_mask = lpag_new_trough & lpag_locked & ismember(lpag_area, lpag_trough_regions);
+lpag_trough_angles = lpag_centered_angle(lpag_trough_mask);
+lpag_trough_labels = lpag_area(lpag_trough_mask);
+lpag_violin_fig = [];
+lpag_percentile_fig = [];
+lpag_group_names = {};
+lpag_group_idx = [];
+if numel(lpag_trough_angles) > 0
+    [lpag_group_names, ~, lpag_group_idx] = unique(lpag_trough_labels);
+end
+if numel(lpag_trough_angles) == 0 || numel(lpag_group_names) < 2
+    warning('Figure3:TroughViolin', ...
+        'Not enough mid-LPAG-centered trough neurons to compare structures.');
+else
+    circular_violin_plot(lpag_trough_angles, lpag_group_idx, true);
+    lpag_tick_order = str2double(xticklabels);
+    xticklabels(lpag_group_names(lpag_tick_order))
+    title('Mid-LPAG-centered trough neurons')
+    lpag_violin_fig = gcf;
+
+    lpag_angular_range = circular_violin_plot_percentiles(lpag_trough_angles, lpag_group_idx, [20 80], true);
+    lpag_tick_order = str2double(xticklabels);
+    xticklabels(lpag_group_names(lpag_tick_order))
+    title('Mid-LPAG-centered trough neurons')
+    lpag_percentile_fig = gcf;
+    disp(lpag_angular_range)
+end
+
+%% 18d Trough / peak / unlocked percentages from the mid-LPAG-centered angles
+lpag_area_list = {'SupCol', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
+lpag_area_labels = {'SC', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
+lpag_number_per_area = nan(numel(lpag_area_list), 5);
+for lpag_an = 1:numel(lpag_area_list)
+    lpag_in_area = strcmp(lpag_area, lpag_area_list{lpag_an}) & lpag_has_lag;
+    lpag_area_angles = lpag_centered_angle(lpag_in_area & lpag_locked);
+    lpag_area_finite = isfinite(lpag_area_angles);
+    lpag_number_per_area(lpag_an, 1) = sum(lpag_area_angles > pi / 2 | lpag_area_angles < -pi / 2);
+    lpag_number_per_area(lpag_an, 2) = sum(lpag_area_finite & ~(lpag_area_angles > pi / 2 | lpag_area_angles < -pi / 2));
+    lpag_number_per_area(lpag_an, 3) = sum(lpag_in_area & lpag_locked);
+    lpag_number_per_area(lpag_an, 4) = sum(lpag_in_area);
+    lpag_number_per_area(lpag_an, 5) = sum(lpag_in_area & lpag_unlocked);
+end
+
+lpag_class_counts = [lpag_number_per_area(:, 1), lpag_number_per_area(:, 2), ...
+    lpag_number_per_area(:, 5), ...
+    lpag_number_per_area(:, 4) - lpag_number_per_area(:, 1) - lpag_number_per_area(:, 2) - lpag_number_per_area(:, 5)];
+lpag_class_percent = nan(size(lpag_class_counts));
+for lpag_an = 1:numel(lpag_area_list)
+    if lpag_number_per_area(lpag_an, 4) > 0
+        lpag_class_percent(lpag_an, :) = 100 * lpag_class_counts(lpag_an, :) / lpag_number_per_area(lpag_an, 4);
+    end
+end
+
+lpag_percent_fig = figure('Name', 'LPAG-centered trough and peak percentages');
+lpag_bars = bar(lpag_class_percent, 'stacked');
+lpag_bars(1).FaceColor = 'b';
+lpag_bars(2).FaceColor = 'r';
+lpag_bars(3).FaceColor = 'g';
+lpag_bars(4).FaceColor = 'k';
+xticklabels(lpag_area_labels)
+ylim([0 100])
+legend({'Trough-locked', 'Peak-locked', 'Unlocked', 'Unclassified'})
+ylabel('Percent')
+title('Mid-LPAG-centered classification')
+
+lpag_total_counts = sum(lpag_class_counts, 1);
+if sum(lpag_total_counts) > 0
+    lpag_total_row = lpag_total_counts / sum(lpag_total_counts);
+else
+    lpag_total_row = nan(1, size(lpag_class_counts, 2));
+end
+lpag_class_names = {'Trough-locked', 'Peak-locked', 'Unlocked', 'Unclassified'};
+lpag_percent_table = figure('Name', 'LPAG-centered class counts');
+uitable(lpag_percent_table, ...
+    'Data', [lpag_class_counts; lpag_total_row], ...
+    'RowName', [lpag_area_labels, {'Total%'}], ...
+    'ColumnName', lpag_class_names, ...
+    'Position', [20 20 640 170]);
+
+%% 18e Neurons that stayed trough or stayed peak after the re-reference
+lpag_n_regions = numel(lpag_area_list);
+lpag_ret_trough_n = zeros(lpag_n_regions + 1, 1);
+lpag_ret_trough_stay = zeros(lpag_n_regions + 1, 1);
+lpag_ret_peak_n = zeros(lpag_n_regions + 1, 1);
+lpag_ret_peak_stay = zeros(lpag_n_regions + 1, 1);
+for lpag_an = 1:lpag_n_regions
+    lpag_in_area = strcmp(lpag_area, lpag_area_list{lpag_an});
+    lpag_ret_trough_n(lpag_an) = sum(lpag_original_trough & lpag_in_area);
+    lpag_ret_trough_stay(lpag_an) = sum(lpag_original_trough & lpag_new_trough & lpag_in_area);
+    lpag_ret_peak_n(lpag_an) = sum(lpag_original_peak & lpag_in_area);
+    lpag_ret_peak_stay(lpag_an) = sum(lpag_original_peak & lpag_new_peak & lpag_in_area);
+end
+lpag_ret_trough_n(end) = sum(lpag_ret_trough_n(1:lpag_n_regions));
+lpag_ret_trough_stay(end) = sum(lpag_ret_trough_stay(1:lpag_n_regions));
+lpag_ret_peak_n(end) = sum(lpag_ret_peak_n(1:lpag_n_regions));
+lpag_ret_peak_stay(end) = sum(lpag_ret_peak_stay(1:lpag_n_regions));
+
+lpag_pct_trough_stay = 100 * lpag_ret_trough_stay ./ lpag_ret_trough_n;
+lpag_pct_peak_stay = 100 * lpag_ret_peak_stay ./ lpag_ret_peak_n;
+lpag_pct_trough_stay(lpag_ret_trough_n == 0) = NaN;
+lpag_pct_peak_stay(lpag_ret_peak_n == 0) = NaN;
+
+lpag_retention = table([lpag_area_labels, {'Total'}]', lpag_ret_trough_n, ...
+    lpag_ret_trough_stay, lpag_pct_trough_stay, lpag_ret_peak_n, ...
+    lpag_ret_peak_stay, lpag_pct_peak_stay, ...
+    'VariableNames', {'region', 'n_trough', 'n_trough_still_trough', ...
+    'pct_trough_still_trough', 'n_peak', 'n_peak_still_peak', 'pct_peak_still_peak'});
+disp(lpag_retention)
+fprintf('%-8s %8s %14s %8s %14s\n', 'Region', 'N trough', '% still trough', 'N peak', '% still peak');
+for lpag_an = 1:(lpag_n_regions + 1)
+    fprintf('%-8s %8d %14.1f %8d %14.1f\n', lpag_retention.region{lpag_an}, ...
+        lpag_retention.n_trough(lpag_an), lpag_retention.pct_trough_still_trough(lpag_an), ...
+        lpag_retention.n_peak(lpag_an), lpag_retention.pct_peak_still_peak(lpag_an));
+end
+
+lpag_retention_fig = figure('Name', 'Trough and peak labels kept after LPAG centering');
+bar([lpag_pct_trough_stay, lpag_pct_peak_stay]);
+xticklabels([lpag_area_labels, {'Total'}])
+ylim([0 100])
+ylabel('Percent that kept the label')
+legend({'Trough neurons still trough', 'Peak neurons still peak'}, 'Location', 'northeast')
+title('Label retention after mid-LPAG re-referencing')
+
+lpag_retention_table = figure('Name', 'Trough and peak retention counts');
+uitable(lpag_retention_table, ...
+    'Data', [lpag_ret_trough_n, lpag_ret_trough_stay, lpag_pct_trough_stay, ...
+    lpag_ret_peak_n, lpag_ret_peak_stay, lpag_pct_peak_stay], ...
+    'RowName', [lpag_area_labels, {'Total'}], ...
+    'ColumnName', {'N trough', 'Still trough', '% still trough', ...
+    'N peak', 'Still peak', '% still peak'}, ...
+    'Position', [20 20 860 180]);
+
+%% 18f Save the mid-LPAG-centered figures and the neuron table
+lpag_figures_folder = fullfile(data_root, 'Figure codes', 'Figure 3 Updated');
+if exist(lpag_figures_folder, 'dir') ~= 7
+    mkdir(lpag_figures_folder);
+end
+print(lpag_distribution_fig, '-vector', '-dsvg', ...
+    fullfile(lpag_figures_folder, 'lpag_centered_phase_distribution.svg'));
+print(lpag_mixture_fig, '-vector', '-dsvg', ...
+    fullfile(lpag_figures_folder, 'lpag_centered_phase_mixture.svg'));
+if ~isempty(lpag_violin_fig)
+    print(lpag_violin_fig, '-vector', '-dsvg', ...
+        fullfile(lpag_figures_folder, 'lpag_centered_trough_angle_violin.svg'));
+    print(lpag_percentile_fig, '-vector', '-dsvg', ...
+        fullfile(lpag_figures_folder, 'lpag_centered_trough_angle_percentiles.svg'));
+end
+print(lpag_percent_fig, '-vector', '-dsvg', ...
+    fullfile(lpag_figures_folder, 'lpag_centered_trough_peak_percent.svg'));
+print(lpag_retention_fig, '-vector', '-dsvg', ...
+    fullfile(lpag_figures_folder, 'lpag_centered_label_retention.svg'));
+
+lpag_saving_folder = fullfile(data_root, 'Analysis results', 'phase locking data');
+if exist(lpag_saving_folder, 'dir') ~= 7
+    mkdir(lpag_saving_folder);
+end
+save(fullfile(lpag_saving_folder, 'lpag_centered_preferred_angles.mat'), ...
+    'lpag_centered_neurons', 'lpag_retention', 'lpag_phase_lag_band', '-v7.3');
+
+if numel(lpag_trough_angles) > 0 && numel(lpag_group_names) >= 2
+    [lpag_ww_p, lpag_ww_table] = circ_wwtest(lpag_trough_angles, lpag_group_idx);
+    disp(lpag_ww_p)
+    disp(lpag_ww_table)
+end
+
+
 
