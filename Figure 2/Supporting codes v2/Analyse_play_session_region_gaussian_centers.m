@@ -33,15 +33,26 @@ spectral_method = 'Fourier';
 % Lower is better. AIC is plotted either way.
 selection_criterion = 'BIC';
 
-% Same component search as the mid-LPAG mixture.
+% max_components is a hard cap, the same cap as the mid-LPAG mixture.
+% The search does not add Gaussians past that cap. What takes the time
+% is refitting every count from 1 through the cap, and every restart
+% visits every bump center. The mid-LPAG sample is one channel per
+% session, so 50 restarts stay cheap. A region with more than
+% large_sample_centers uses large_sample_replicates instead.
+% Set large_sample_replicates equal to replicates to keep all 50.
+% After the first component fit, a projected remainder above
+% slow_run_seconds is called out as a long run.
 mixture_options = struct( ...
     'max_components', 10, ...
     'replicates', 50, ...
+    'large_sample_centers', 500, ...
+    'large_sample_replicates', 10, ...
     'max_iter', 2000, ...
     'regularization', 1e-4, ...
     'minimum_observations_per_component', 5, ...
     'minimum_effective_membership', 3, ...
-    'random_seed', 1);
+    'random_seed', 1, ...
+    'slow_run_seconds', 15 * 60);
 
 % Drawn on the distribution only. It does not choose the mixture.
 % Set this empty to omit the line.
@@ -91,9 +102,27 @@ frequency = [];
 regions = {};
 pieces = cell(numel(recording_index), 1);
 piece_n = 0;
-for file_n = recording_index(:).'
+selected_files = recording_index(:).';
+total_bytes = sum([file_list(selected_files).bytes]);
+bytes_done = 0;
+load_clock = tic;
+fprintf(['Loading %d channel-wise spectra (%.0f MB). Each file holds ' ...
+    'every channel, so this step can take a few minutes.\n'], ...
+    numel(selected_files), total_bytes / 1e6);
+for file_n = selected_files
     input_file = fullfile(saving_folder, file_list(file_n).name);
-    fprintf('Loading %s\n', input_file);
+    this_bytes = file_list(file_n).bytes;
+    fprintf('Loading spectra %d/%d: %s (%.0f MB).\n', ...
+        piece_n + 1, numel(selected_files), file_list(file_n).name, ...
+        this_bytes / 1e6);
+    if bytes_done > 0
+        load_left = mixture_remaining_seconds( ...
+            toc(load_clock), bytes_done, total_bytes - bytes_done);
+        fprintf('  About %s left for loading.\n', ...
+            format_search_duration(load_left));
+    end
+    drawnow;
+    file_clock = tic;
     loaded = load(input_file, 'probe_spectra');
     probe_spectra = loaded.probe_spectra;
     this_frequency = probe_spectra.frequency(:).';
@@ -107,6 +136,12 @@ for file_n = recording_index(:).'
     [pieces{piece_n}, regions] = region_gaussian_center_table( ...
         probe_spectra, regions_to_analyze, spectral_method, ...
         session_index, file_n);
+    clear loaded probe_spectra
+    bytes_done = bytes_done + this_bytes;
+    fprintf('  Peaks collected in %s. Loading elapsed %s.\n', ...
+        format_search_duration(toc(file_clock)), ...
+        format_search_duration(toc(load_clock)));
+    drawnow;
 end
 pieces = pieces(1:piece_n);
 pieces = pieces(~cellfun(@isempty, pieces));
@@ -145,9 +180,13 @@ for method_n = 1:numel(method_names)
     method_name = canonical_method_name(method_names{method_n});
     in_method = strcmp(peak_table.Method, method_name);
     region_results = repmat(empty_region_result(), numel(regions), 1);
+    region_centers = cell(numel(regions), 1);
+    search_plans = cell(numel(regions), 1);
     for region_n = 1:numel(regions)
         in_region = in_method & strcmp(peak_table.Region, regions{region_n});
         centers = peak_table.CenterFrequency(in_region);
+        centers = centers(isfinite(centers));
+        region_centers{region_n} = centers;
         region_results(region_n).name = regions{region_n};
         region_results(region_n).n_peaks = numel(centers);
         region_results(region_n).n_channels = numel(unique([ ...
@@ -157,8 +196,22 @@ for method_n = 1:numel(method_names)
         region_results(region_n).n_sessions = numel(unique([ ...
             peak_table.RecordingIndex(in_region), ...
             peak_table.SessionIndex(in_region)], 'rows'));
+        search_plans{region_n} = gaussian_mixture_search_plan( ...
+            numel(centers), numel(unique(centers)), mixture_options);
+    end
+    print_mixture_plan(method_name, regions, search_plans, mixture_options);
+
+    for region_n = 1:numel(regions)
+        fit_options = mixture_options;
+        fit_options.progress_label = sprintf('%s %s (%d/%d)', ...
+            method_name, regions{region_n}, region_n, numel(regions));
+        later_work = 0;
+        for later_n = (region_n + 1):numel(regions)
+            later_work = later_work + search_plans{later_n}.work_units;
+        end
+        fit_options.other_regions_work_units = later_work;
         region_results(region_n).fit = fit_gaussian_center_mixture( ...
-            centers, frequency_limits, mixture_options);
+            region_centers{region_n}, frequency_limits, fit_options);
     end
 
     plot_region_gaussian_centers(region_results, frequency_limits, ...
@@ -215,6 +268,8 @@ n_peaks = zeros(n_regions, 1);
 n_channels = zeros(n_regions, 1);
 n_sessions = zeros(n_regions, 1);
 best_n = nan(n_regions, 1);
+restarts = nan(n_regions, 1);
+fit_seconds = nan(n_regions, 1);
 selected_bic = nan(n_regions, 1);
 selected_aic = nan(n_regions, 1);
 status = cell(n_regions, 1);
@@ -225,6 +280,13 @@ for region_n = 1:n_regions
     n_channels(region_n) = this_region.n_channels;
     n_sessions(region_n) = this_region.n_sessions;
     best_n(region_n) = this_region.fit.best_n_components;
+    restarts(region_n) = this_region.fit.replicates_used;
+    these_seconds = this_region.fit.component_fit_seconds;
+    if isempty(these_seconds)
+        fit_seconds(region_n) = NaN;
+    else
+        fit_seconds(region_n) = sum(these_seconds, 'omitnan');
+    end
     status{region_n} = this_region.fit.status;
     model_table = this_region.fit.model_selection;
     if isfinite(best_n(region_n)) && ~isempty(model_table)
@@ -234,7 +296,63 @@ for region_n = 1:n_regions
     end
 end
 summary = table(names, n_peaks, n_channels, n_sessions, best_n, ...
-    selected_bic, selected_aic, status, ...
+    restarts, fit_seconds, selected_bic, selected_aic, status, ...
     'VariableNames', {'Region', 'NCenters', 'NChannels', 'NSessions', ...
-    'BestNComponents', 'SelectedBIC', 'SelectedAIC', 'Status'});
+    'BestNComponents', 'Restarts', 'FitSeconds', 'SelectedBIC', ...
+    'SelectedAIC', 'Status'});
+end
+
+function print_mixture_plan(method_name, regions, search_plans, options)
+options = gaussian_mixture_options(options);
+fprintf(['\n%s mixture plan. At most %d Gaussians are tested; the ' ...
+    'count is not left uncapped.\n'], method_name, options.max_components);
+fprintf(['Each count from 1 through that cap is refit. A region with ' ...
+    'more than %d centers uses %d restarts instead of %d, because each ' ...
+    'restart visits every center.\n'], ...
+    options.large_sample_centers, options.large_sample_replicates, ...
+    options.replicates);
+total_work = 0;
+for region_n = 1:numel(regions)
+    plan = search_plans{region_n};
+    total_work = total_work + plan.work_units;
+    if plan.restarts_reduced
+        restart_text = sprintf('%d restarts, reduced from %d', ...
+            plan.replicates, plan.replicates_requested);
+    else
+        restart_text = sprintf('%d restarts', plan.replicates);
+    end
+    if plan.max_components_tested < 1
+        component_text = 'no fit';
+    else
+        component_text = sprintf('components 1:%d', ...
+            plan.max_components_tested);
+    end
+    fprintf('  %s: %d centers, %s, %s. %s.\n', ...
+        regions{region_n}, plan.n_centers, component_text, ...
+        restart_text, plan.runtime_note);
+end
+if total_work <= 0
+    fprintf('No region has enough centers for a mixture.\n');
+    drawnow;
+    return
+end
+reference = search_plans{1}.reference_work_units;
+if isempty(reference) || reference <= 0
+    scale = NaN;
+else
+    scale = total_work / reference;
+end
+fprintf(['Combined work is %.1f times one mid-LPAG-sized search ' ...
+    '(300 centers, %d restarts, up to %d Gaussians).\n'], ...
+    scale, options.replicates, options.max_components);
+if isfinite(scale) && scale > 10
+    fprintf(['That is a long run relative to the mid-LPAG fit. The ' ...
+        'first component will turn this into a clock-time estimate. ' ...
+        'A projection past %s is reported while the fit is running.\n'], ...
+        format_search_duration(options.slow_run_seconds));
+else
+    fprintf(['The first component will turn this into a clock-time ' ...
+        'estimate.\n']);
+end
+drawnow;
 end

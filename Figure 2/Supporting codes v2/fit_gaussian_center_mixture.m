@@ -4,16 +4,23 @@ function result = fit_gaussian_center_mixture( ...
 %
 % The fit matches the mid-LPAG Fourier-center mixture: fitgmdist on the
 % finite center frequencies, a small covariance ridge, and several random
-% restarts. A component stays eligible when it converges and its soft
-% membership is at least minimum_effective_membership. selection_criterion
-% is 'BIC' unless options asks for 'AIC'. Both criteria are stored.
+% restarts. The number of Gaussians is capped by options.max_components
+% (10). A region with more centers than large_sample_centers uses fewer
+% restarts, because each restart visits every center. A component stays
+% eligible when it converges and its soft membership is at least
+% minimum_effective_membership. selection_criterion is 'BIC' unless
+% options asks for 'AIC'. Both criteria are stored.
 
 if nargin < 3 || isempty(options)
     options = struct();
 end
-options = mixture_options(options);
+options = gaussian_mixture_options(options);
 centers = centers(:);
 centers = centers(isfinite(centers));
+progress_label = char(string(options.progress_label));
+if isempty(progress_label)
+    progress_label = 'Gaussian centers';
+end
 
 if nargin < 2 || isempty(frequency_limits)
     if isempty(centers)
@@ -32,18 +39,25 @@ result = empty_mixture_result(options.selection_criterion);
 result.center_frequencies = centers;
 result.frequency_limits = frequency_limits(1:2);
 
+search_plan = gaussian_mixture_search_plan( ...
+    numel(centers), numel(unique(centers)), options);
+result.search_plan = search_plan;
+result.replicates_used = search_plan.replicates;
+result.max_components_tested = search_plan.max_components_tested;
 if numel(centers) < options.minimum_observations_per_component
     result.status = sprintf( ...
         'fewer than %d finite center frequencies', ...
         options.minimum_observations_per_component);
+    fprintf('%s: %s. Mixture skipped.\n', progress_label, result.status);
+    drawnow;
     return
 end
 
-max_components = min([options.max_components, numel(centers), ...
-    numel(unique(centers)), floor(numel(centers) / ...
-    options.minimum_observations_per_component)]);
+max_components = search_plan.max_components_tested;
 if max_components < 1
     result.status = 'not enough distinct center frequencies';
+    fprintf('%s: %s. Mixture skipped.\n', progress_label, result.status);
+    drawnow;
     return
 end
 
@@ -56,16 +70,38 @@ gmm_converged = false(max_components, 1);
 gmm_minimum_effective_n = nan(max_components, 1);
 gmm_eligible = false(max_components, 1);
 
+if search_plan.restarts_reduced
+    restart_note = sprintf('restarts reduced from %d to %d', ...
+        search_plan.replicates_requested, search_plan.replicates);
+else
+    restart_note = sprintf('%d restarts', search_plan.replicates);
+end
+fprintf(['%s: %d centers. Testing 1:%d Gaussians ' ...
+    '(cap %d), %s. %s.\n'], ...
+    progress_label, numel(centers), max_components, ...
+    search_plan.max_components_cap, restart_note, ...
+    search_plan.runtime_note);
+drawnow;
+
 previous_rng = rng;
 rng_cleaner = onCleanup(@() rng(previous_rng)); %#ok<NASGU>
 rng(options.random_seed, 'twister');
 fit_options = statset('MaxIter', options.max_iter, 'Display', 'off');
+fit_seconds = nan(max_components, 1);
+region_clock = tic;
 for component_n = component_counts.'
+    fprintf(['  %s: component %d/%d started ' ...
+        '(%d centers x %d restarts).\n'], ...
+        progress_label, component_n, max_components, ...
+        numel(centers), search_plan.replicates);
+    drawnow;
+    component_clock = tic;
     try
         this_gmm = fitgmdist(centers, component_n, ...
             'RegularizationValue', options.regularization, ...
-            'Replicates', options.replicates, ...
+            'Replicates', search_plan.replicates, ...
             'Options', fit_options);
+        fit_seconds(component_n) = toc(component_clock);
         gmm_models{component_n} = this_gmm;
         gmm_aic(component_n) = this_gmm.AIC;
         gmm_bic(component_n) = this_gmm.BIC;
@@ -78,12 +114,27 @@ for component_n = component_counts.'
             gmm_minimum_effective_n(component_n) >= ...
             options.minimum_effective_membership && ...
             isfinite(this_gmm.AIC) && isfinite(this_gmm.BIC);
+        fprintf('  %s: component %d/%d finished in %s. %s\n', ...
+            progress_label, component_n, max_components, ...
+            format_search_duration(fit_seconds(component_n)), ...
+            mixture_progress_message(numel(centers), ...
+            search_plan.replicates, component_n, max_components, ...
+            toc(region_clock), options));
     catch ME
+        fit_seconds(component_n) = toc(component_clock);
         warning('regionGaussianCenters:componentFitFailed', ...
             'The %d-component Gaussian-center mixture failed: %s', ...
             component_n, ME.message);
+        fprintf('  %s: component %d/%d failed after %s.\n', ...
+            progress_label, component_n, max_components, ...
+            format_search_duration(fit_seconds(component_n)));
     end
+    drawnow;
 end
+result.component_fit_seconds = fit_seconds;
+fprintf('%s: component search finished in %s.\n', progress_label, ...
+    format_search_duration(toc(region_clock)));
+drawnow;
 
 result.model_selection = table(component_counts, gmm_aic, gmm_bic, ...
     gmm_negative_log_likelihood, gmm_converged, ...
@@ -115,36 +166,27 @@ result.component_density = component_density;
 result.mixture_density = mixture_density;
 end
 
-function options = mixture_options(options)
-options = fill_mixture_option(options, 'selection_criterion', 'BIC');
-options = fill_mixture_option(options, 'max_components', 10);
-options = fill_mixture_option(options, 'replicates', 50);
-options = fill_mixture_option(options, 'max_iter', 2000);
-options = fill_mixture_option(options, 'regularization', 1e-4);
-options = fill_mixture_option(options, ...
-    'minimum_observations_per_component', 5);
-options = fill_mixture_option(options, 'minimum_effective_membership', 3);
-options = fill_mixture_option(options, 'random_seed', 1);
-
-criterion = upper(strtrim(char(string(options.selection_criterion))));
-if ~ismember(criterion, {'BIC', 'AIC'})
-    error('regionGaussianCenters:criterion', ...
-        'selection_criterion must be BIC or AIC.');
+function message = mixture_progress_message( ...
+        n_centers, replicates, component_n, max_components, ...
+        elapsed_seconds, options)
+done_units = n_centers * replicates * sum(1:component_n);
+remaining_here = n_centers * replicates * sum( ...
+    (component_n + 1):max_components);
+if component_n >= max_components
+    remaining_here = 0;
 end
-options.selection_criterion = criterion;
-if options.max_components < 1 || options.replicates < 1 || ...
-        options.max_iter < 1 || ...
-        options.minimum_observations_per_component < 1 || ...
-        options.minimum_effective_membership < 1
-    error('regionGaussianCenters:options', ...
-        ['max_components, replicates, max_iter, and the membership ' ...
-        'minima must be at least 1.']);
-end
-end
-
-function options = fill_mixture_option(options, name, default_value)
-if ~isfield(options, name) || isempty(options.(name))
-    options.(name) = default_value;
+remaining_units = remaining_here + options.other_regions_work_units;
+remaining_seconds = mixture_remaining_seconds( ...
+    elapsed_seconds, done_units, remaining_units);
+message = sprintf('%s left in this search', ...
+    format_search_duration(remaining_seconds));
+if isfinite(remaining_seconds) && ...
+        remaining_seconds > options.slow_run_seconds
+    message = sprintf(['%s. That is longer than %s. The Gaussian cap ' ...
+        'is %d and restarts are already %d; lower max_components or ' ...
+        'large_sample_replicates to shorten the rest.'], ...
+        message, format_search_duration(options.slow_run_seconds), ...
+        options.max_components, replicates);
 end
 end
 
@@ -159,7 +201,11 @@ result = struct( ...
     'best_component_table', empty_component_table(), ...
     'density_frequency', zeros(0, 1), ...
     'component_density', zeros(0, 0), ...
-    'mixture_density', zeros(0, 1));
+    'mixture_density', zeros(0, 1), ...
+    'replicates_used', NaN, ...
+    'max_components_tested', 0, ...
+    'component_fit_seconds', zeros(0, 1), ...
+    'search_plan', []);
 end
 
 function model_selection = empty_model_selection()

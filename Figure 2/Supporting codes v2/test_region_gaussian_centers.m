@@ -10,6 +10,8 @@ end
 
 test_region_membership();
 test_criterion_selection();
+test_search_plan_caps_gaussians_and_restarts();
+test_remaining_time_scales_with_work();
 test_short_samples_are_not_fitted();
 test_distribution_figure();
 if exist('fitgmdist', 'file') == 2
@@ -87,6 +89,45 @@ assert(select_gaussian_mixture_count(counts, bic, eligible) == 3, ...
     'An ineligible BIC minimum was selected.');
 assert(isnan(select_gaussian_mixture_count(counts, bic, false(3, 1))), ...
     'A sample with no eligible model returned a component count.');
+end
+
+function test_search_plan_caps_gaussians_and_restarts()
+options = struct('max_components', 10, 'replicates', 50, ...
+    'large_sample_centers', 500, 'large_sample_replicates', 10, ...
+    'minimum_observations_per_component', 5);
+large = gaussian_mixture_search_plan(10000, 9000, options);
+assert(large.max_components_tested == 10, ...
+    'A large sample tested more than the Gaussian cap.');
+assert(large.replicates == 10, ...
+    'A large sample kept all 50 restarts.');
+assert(large.restarts_reduced, ...
+    'The large-sample restart reduction was not recorded.');
+assert(abs(large.work_units - 10000 * 10 * sum(1:10)) < 1e-6, ...
+    'Work units are not centers times restarts times component counts.');
+
+small = gaussian_mixture_search_plan(80, 80, options);
+assert(small.max_components_tested == 10, ...
+    'Eighty centers did not reach the cap of 10.');
+assert(small.replicates == 50, ...
+    'A small sample did not keep the mid-LPAG restart count.');
+assert(~small.restarts_reduced, ...
+    'A small sample was marked as restart-reduced.');
+
+limited = gaussian_mixture_search_plan(30, 30, options);
+assert(limited.max_components_tested == 6, ...
+    'Thirty centers were not limited to one component per five centers.');
+assert(strcmp(format_search_duration(45), '45 s'), ...
+    'A short duration was not reported in seconds.');
+assert(contains(format_search_duration(125), 'min'), ...
+    'A two-minute duration was not reported in minutes.');
+end
+
+function test_remaining_time_scales_with_work()
+seconds = mixture_remaining_seconds(10, 100, 300);
+assert(abs(seconds - 30) < 1e-9, ...
+    'Remaining time did not scale with unfinished work.');
+assert(isnan(mixture_remaining_seconds(10, 0, 300)), ...
+    'A clock with no finished work returned a finite time.');
 end
 
 function test_short_samples_are_not_fitted()
