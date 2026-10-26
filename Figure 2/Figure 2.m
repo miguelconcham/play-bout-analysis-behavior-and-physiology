@@ -142,7 +142,9 @@ stacked_mean_onset = [];
 what2plot = all_psth_onset;
 % what2plot = all_psth_tw_3points;
 zscore_limit = Inf;
-time2use = time;
+% Paper range: time2use is `time` (4001 bins). A shorter PSTH gets one
+% sample per column, so this index matches size(what2plot, 2).
+time2use = psth_plot_time(time, size(what2plot, 2), psth_ranges, bin_size);
 % time2use = time_wrap_3_points;
 
 artifcat_removal = max(abs(what2plot(:,time2use>X_lim(1))),[],2,'omitmissing')<4;
@@ -601,6 +603,7 @@ min_length = .0;
 stacked_mean_onset = [];
 % what2plot = all_psth_onset_behavior; %Select what to plot
 what2plot = all_psth_onset_only_playobut;
+time2use = psth_plot_time(time, size(what2plot, 2), psth_ranges, bin_size);
 for an= 1:numel(animal_label)
     animal_bool = animal_index==an;
     length_bool = play_bout_length>min_length;
@@ -609,7 +612,7 @@ for an= 1:numel(animal_label)
     subplot(5,numel(animal_label),(1:numel(animal_label):2*numel(animal_label)) + an-1)
 
     array = what2plot(animal_bool & length_bool & electrode_bool,:);
-    imagesc(time,1:numel(sorted_play_bout_length),array(order,:) )
+    imagesc(time2use,1:numel(sorted_play_bout_length),array(order,:) )
     xlim(X_lim)
     clim([-2 2])
     axis xy
@@ -622,9 +625,9 @@ for an= 1:numel(animal_label)
 
     [~, ~, ci]  = ttest(array);
     no_nan = ~any(isnan(ci));
-    fill([time(no_nan) fliplr(time(no_nan))], [ci(1,no_nan) fliplr(ci(2,no_nan))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
+    fill([time2use(no_nan) fliplr(time2use(no_nan))], [ci(1,no_nan) fliplr(ci(2,no_nan))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
     hold on
-    plot(time,mean(array, 'omitmissing'), 'k')
+    plot(time2use,mean(array, 'omitmissing'), 'k')
     xlim(X_lim)
     stacked_mean_onset = [stacked_mean_onset;mean(array, 'omitmissing')];
 end
@@ -648,10 +651,11 @@ fill_lim = [.35 .4];
 length_bool = play_bout_length>min_length;
 electrode_bool = electrode_index==1;
 [sorted_play_bout_length, order] = sort(play_bout_length( length_bool & electrode_bool,:));
+time2use = psth_plot_time(time, size(what2plot, 2), psth_ranges, bin_size);
 
 subplot(2,1,1)
 array = what2plot( length_bool & electrode_bool,:);
-imagesc(time,1:numel(sorted_play_bout_length),array(order,:) )
+imagesc(time2use,1:numel(sorted_play_bout_length),array(order,:) )
 
 xlim(X_lim)
 clim([-1 2])
@@ -664,14 +668,14 @@ title('All data')
 subplot(2,1,2)
 
 [~, ~, ci]  = ttest(array);
-fill([time fliplr(time)], [ci(1,:) fliplr(ci(2,:))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
+fill([time2use fliplr(time2use)], [ci(1,:) fliplr(ci(2,:))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
 hold on
-plot(time,mean(array, 'omitmissing'), 'k')
+plot(time2use,mean(array, 'omitmissing'), 'k')
 xlim(X_lim)
 
-plot(time,stacked_mean_onset, 'k:')
+plot(time2use,stacked_mean_onset, 'k:')
 hold on
-plot(time,mean(stacked_mean_onset), 'k:')
+plot(time2use,mean(stacked_mean_onset), 'k:')
 xlim(X_lim)
 
 sig_idx = pvals_fdr < alpha;
