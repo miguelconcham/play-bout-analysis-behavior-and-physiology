@@ -7,6 +7,9 @@
 % files to fit. 'delta' keeps the original result filenames. 'theta' and
 % 'gamma' write results_full_lfp_per_behavior_<band>.mat and
 % results_full_lfp_per_behavior_time_warpped_<band>.mat.
+% Each LME is skipped when that file is already in saving_folder.
+% The %% Save sections only write the workspace, so a finished fit can be
+% saved without fitting again.
 % Run Estimate_psth_all_behaviors_theta_gamma.m first so those PSTH files exist.
 
 this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_all_behaviors_theta_gamma.m';
@@ -125,12 +128,18 @@ for i = 1:n
 end
 
 %% LME analysis — onset-aligned PSTH
-baseline_idx = time >= -2 & time <= 0;
-analysis_idx = time >= -1 & time <= 2;
-time_analysis = time(analysis_idx);
+% Skipped when results_full_lfp_per_behavior_<band>.mat is already saved.
 group1 = 1:8;
 group2 = [9 10 11 13 14];
 beh_groups = {group1, group2};
+if exist(fullfile(saving_folder, results_file), 'file') == 2
+    disp(['onset LME already saved, loading ' results_file])
+    load(fullfile(saving_folder, results_file), ...
+        'results', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis', 'all_behaviors')
+else
+baseline_idx = time >= -2 & time <= 0;
+analysis_idx = time >= -1 & time <= 2;
+time_analysis = time(analysis_idx);
 results = struct;
 
 for g = 1:2
@@ -221,14 +230,13 @@ for g = 1:2
     results(g).p_global = p_global;
     results(g).behaviors = self_other_beh_list;
 end
+end
 
-%% Save LME results (optional — comment out if re-using saved file)
+%% Save onset-aligned LME
+% This section only writes the workspace. Run it alone after a fit.
+disp(['saving ' results_file])
 save(fullfile(saving_folder, results_file), ...
     'results', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis', 'all_behaviors', 'band_name', '-v7.3')
-
-%% Load LME results
-load(fullfile(saving_folder, results_file), ...
-    'results', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis', 'all_behaviors')
 
 %% Plot colormap and mean responses (play vs non-play)
 alpha_tresh = Inf;
@@ -355,6 +363,12 @@ axis tight
 set(gca,'TickDir','out')
 
 %% LME analysis — time-wrapped PSTH
+% Skipped when results_full_lfp_per_behavior_time_warpped_<band>.mat is already saved.
+if exist(fullfile(saving_folder, results_tw_file), 'file') == 2
+    disp(['time-wrapped LME already saved, loading ' results_tw_file])
+    load(fullfile(saving_folder, results_tw_file), ...
+        'results_time_wrapped', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis_time_wrapped', 'all_behaviors')
+else
 baseline_idx = time_wrap_time >= -5 & time_wrap_time <= 0;
 analysis_idx = time_wrap_time >= -5 & time_wrap_time <= 10;
 time_analysis_time_wrapped = time_wrap_time(analysis_idx);
@@ -448,14 +462,13 @@ for g = 1:2
     results_time_wrapped(g).p_global = p_global;
     results_time_wrapped(g).behaviors = self_other_beh_list;
 end
+end
 
-%% Save time-wrapped LME results (optional)
+%% Save time-wrapped LME
+% This section only writes the workspace. Run it alone after a fit.
+disp(['saving ' results_tw_file])
 save(fullfile(saving_folder, results_tw_file), ...
     'results_time_wrapped', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis_time_wrapped', 'all_behaviors', 'band_name', '-v7.3')
-
-%% Load time-wrapped LME results
-load(fullfile(saving_folder, results_tw_file), ...
-    'results_time_wrapped', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis_time_wrapped', 'all_behaviors')
 
 %% Plot colormap and mean responses (time-wrapped)
 matrix_play = results_time_wrapped(1).beta_std;
