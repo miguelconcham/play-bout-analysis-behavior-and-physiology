@@ -1,26 +1,29 @@
 function options = gaussian_mixture_options(options)
 %GAUSSIAN_MIXTURE_OPTIONS  Defaults for the regional center mixtures.
 %
-% max_components is a hard cap. The mid-LPAG mixture uses the same cap of
-% 10. replicates is the restart count for a small sample. A region with
-% more than large_sample_centers bump centers uses large_sample_replicates
-% instead, because every restart visits every center.
+% max_components is a hard cap. The regional search tests every count
+% from 1 through 20. replicates is the restart count for every region.
+% large_sample_replicates is used only when it is smaller than replicates
+% and a region has more than large_sample_centers. The default keeps all
+% 50 restarts so a large region gets the same search as a small one.
+% slow_run_seconds is the clock budget. A projection past it is reported
+% while the fit is running.
 
 if nargin < 1 || isempty(options)
     options = struct();
 end
 options = fill_mixture_option(options, 'selection_criterion', 'BIC');
-options = fill_mixture_option(options, 'max_components', 10);
+options = fill_mixture_option(options, 'max_components', 20);
 options = fill_mixture_option(options, 'replicates', 50);
 options = fill_mixture_option(options, 'large_sample_centers', 500);
-options = fill_mixture_option(options, 'large_sample_replicates', 10);
+options = fill_mixture_option(options, 'large_sample_replicates', 50);
 options = fill_mixture_option(options, 'max_iter', 2000);
 options = fill_mixture_option(options, 'regularization', 1e-4);
 options = fill_mixture_option(options, ...
     'minimum_observations_per_component', 5);
 options = fill_mixture_option(options, 'minimum_effective_membership', 3);
 options = fill_mixture_option(options, 'random_seed', 1);
-options = fill_mixture_option(options, 'slow_run_seconds', 15 * 60);
+options = fill_mixture_option(options, 'slow_run_seconds', 10 * 3600);
 options = fill_mixture_option(options, 'progress_label', '');
 options = fill_mixture_option(options, 'other_regions_work_units', 0);
 

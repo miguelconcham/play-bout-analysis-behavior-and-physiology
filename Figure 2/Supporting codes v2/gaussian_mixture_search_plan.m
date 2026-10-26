@@ -1,11 +1,11 @@
 function plan = gaussian_mixture_search_plan(n_centers, n_unique, options)
 %GAUSSIAN_MIXTURE_SEARCH_PLAN  Component cap, restarts, and workload.
 %
-% max_components_tested never exceeds options.max_components. A large
-% region still stops at that cap; it does not keep adding Gaussians.
-% Restarts drop from options.replicates to large_sample_replicates once
-% n_centers exceeds large_sample_centers. work_units counts one unit per
-% center, per restart, per component count from 1 through the cap.
+% max_components_tested never exceeds options.max_components. The default
+% cap is 20. Restarts stay at options.replicates unless
+% large_sample_replicates is smaller and n_centers exceeds
+% large_sample_centers. work_units counts one unit per center, per
+% restart, per component count from 1 through the cap.
 % compared_with_reference is that cost divided by one mid-LPAG-sized
 % search: 300 centers, the full restart count, and the same cap.
 
@@ -48,14 +48,13 @@ end
 if max_components < 1
     runtime_note = 'too few centers to fit';
 elseif restarts_reduced && compared_with_reference > 10
-    runtime_note = ['long even after fewer restarts; the first ' ...
+    runtime_note = ['fewer restarts than requested; the first ' ...
         'component fit will project the clock time'];
 elseif restarts_reduced
-    runtime_note = ['restarts reduced for this sample size; expect ' ...
-        'minutes rather than the full 50-restart search'];
+    runtime_note = 'fewer restarts than requested for this sample size';
 elseif compared_with_reference > 10
-    runtime_note = ['larger than one mid-LPAG search; the first ' ...
-        'component fit will project the clock time'];
+    runtime_note = ['full restart search through the component cap; ' ...
+        'the first component fit will project the clock time'];
 else
     runtime_note = 'within the size of the original mid-LPAG search';
 end
