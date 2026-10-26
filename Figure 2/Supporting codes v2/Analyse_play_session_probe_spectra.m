@@ -12,9 +12,9 @@
 % included. A separate switch can also draw one figure per recording
 % folder; that switch is off, so those three folders are not split into
 % three windows. Each channel is log10 power with the aperiodic fit and
-% the periodic Gaussians in pooled_periodic_ranges removed. The default
-% draws that figure twice, once after removing 6-12 Hz and once after
-% removing 0.1-1 Hz. Sites are
+% the periodic Gaussians in pooled_periodic_ranges removed. Every listed
+% window is removed in that same figure. The default removes 6-12 Hz and
+% 0.1-1 Hz together. Sites are
 % averaged only when the shank and the x and y coordinates match. Channel
 % number is not used, because the channel map can change between days and
 % the same channel number can sit at a different distance. Frequency is
@@ -127,12 +127,12 @@ pool_partner_sessions = false;
 pool_recording_days = true;
 
 % Frequency windows removed from the pooled spectrogram, together with
-% the aperiodic fit. Each cell is one full set of those figures, so the
-% default is two figures per animal. Gaussians whose centers fall inside
-% that cell are removed. Peaks outside the cell stay.
+% the aperiodic fit. Every window in the list is removed in the same
+% figure. Gaussians whose centers fall inside any listed window are
+% removed. Peaks outside those windows stay.
+%   pooled_periodic_ranges = {[6 12], [.1 1]};
 %   pooled_periodic_ranges = {[6 12; .1 1]};
 %   pooled_periodic_ranges = {[6 12]};
-%   pooled_periodic_ranges = {[.1 1]};
 pooled_periodic_ranges = {[6 12], [.1 1]};
 
 % log10 power minus the fitted aperiodic component. Switch to
@@ -163,13 +163,12 @@ regions_to_display = {'LPAG', 'VLPAG', 'SupCol'};
 % below are removed. One subplot per region. The list is the initial set.
 spectrum_regions = {'SupCol', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
 
-% Each cell is one region-spectrum analysis. Gaussians whose centers fall
-% inside that cell are removed, together with the aperiodic fit. Peaks
-% outside the cell stay. The default draws the regions twice: 6-12 Hz
-% removed, then 0.1-1 Hz removed.
+% Each entry is a frequency window removed from the region spectra,
+% together with the aperiodic fit. Every window in the list is removed
+% in the same figures. Peaks outside those windows stay.
+%   periodic_ranges_to_subtract = {[6 12], [.1 1]};
 %   periodic_ranges_to_subtract = {[6 12; .1 1]};
 %   periodic_ranges_to_subtract = {[6 12]};
-%   periodic_ranges_to_subtract = {[.1 1]};
 periodic_ranges_to_subtract = {[6 12], [.1 1]};
 
 % Ventral and dorsal curves. 'normalized' z-scores each band within the
@@ -255,15 +254,12 @@ stacked_frequency = [];
 tracks = repmat(empty_track(), 0, 1);
 placed = repmat(empty_placed(), 0, 1);
 power_pieces = {};
-range_sets = periodic_range_sets(periodic_ranges_to_subtract);
-pooled_range_sets = periodic_range_sets(pooled_periodic_ranges);
+range_sets = {combined_periodic_ranges(periodic_ranges_to_subtract)};
+pooled_ranges = combined_periodic_ranges(pooled_periodic_ranges);
 region_pieces = cell(1, numel(range_sets));
-pooled_pieces = cell(1, numel(pooled_range_sets));
+pooled_pieces = {};
 for set_n = 1:numel(range_sets)
     region_pieces{set_n} = {};
-end
-for set_n = 1:numel(pooled_range_sets)
-    pooled_pieces{set_n} = {};
 end
 
 %% Plot each requested session on its own
@@ -329,12 +325,9 @@ for file_n = recording_index(:).'
             artifact_trend_sd); %#ok<SAGROW>
         if plot_pooled_animal_spectra && ...
                 (pool_partner_sessions || pool_recording_days)
-            for set_n = 1:numel(pooled_range_sets)
-                pooled_pieces{set_n}{end + 1} = residual_sites_from_session( ...
-                    channel_table, this_session, frequency, ...
-                    pooled_range_sets{set_n}, probe_spectra.animal_name, ...
-                    session_n, spectral_method); %#ok<SAGROW>
-            end
+            pooled_pieces{end + 1} = residual_sites_from_session( ...
+                channel_table, this_session, frequency, pooled_ranges, ...
+                probe_spectra.animal_name, session_n, spectral_method); %#ok<SAGROW>
         end
         for set_n = 1:numel(range_sets)
             region_pieces{set_n}{end + 1} = region_channel_records( ...
@@ -364,16 +357,14 @@ if plot_pooled_animal_spectra
         fprintf(['Pooled residual spectra were skipped because both ' ...
             'pool_partner_sessions and pool_recording_days are false.\n']);
     else
-        for set_n = 1:numel(pooled_range_sets)
-            if isempty(pooled_pieces{set_n})
-                pooled_sites = repmat(empty_residual_site(), 0, 1);
-            else
-                pooled_sites = vertcat(pooled_pieces{set_n}{:});
-            end
-            plot_pooled_residual_spectra(pooled_sites, stacked_frequency, ...
-                spectral_method, pooled_range_sets{set_n}, ...
-                pool_partner_sessions, pool_recording_days);
+        if isempty(pooled_pieces)
+            pooled_sites = repmat(empty_residual_site(), 0, 1);
+        else
+            pooled_sites = vertcat(pooled_pieces{:});
         end
+        plot_pooled_residual_spectra(pooled_sites, stacked_frequency, ...
+            spectral_method, pooled_ranges, pool_partner_sessions, ...
+            pool_recording_days);
     end
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
@@ -609,11 +600,21 @@ if iscell(ranges)
         sets{set_n} = periodic_range_matrix(ranges{set_n});
     end
     if isempty(sets)
-        error('periodic_ranges_to_subtract needs at least one range set.');
+        error('At least one periodic frequency window is required.');
     end
     return
 end
 sets = {periodic_range_matrix(ranges)};
+end
+
+function ranges = combined_periodic_ranges(ranges)
+% Every listed window is removed together. A cell of windows and a matrix
+% with one window per row name the same subtraction.
+sets = periodic_range_sets(ranges);
+ranges = zeros(0, 2);
+for set_n = 1:numel(sets)
+    ranges = [ranges; sets{set_n}]; %#ok<AGROW>
+end
 end
 
 function ranges = periodic_range_matrix(ranges)
