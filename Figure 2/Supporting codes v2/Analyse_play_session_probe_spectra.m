@@ -10,7 +10,9 @@
 % removed, as in the LPAG analysis. Sites are averaged only when the shank
 % and the x and y coordinates match, so the same channel number can sit at
 % a different distance in another session. Frequency is the horizontal
-% axis and distance to the tip is the vertical axis.
+% axis and distance to the tip is the vertical axis. A dotted line sits
+% between neighboring sites when their region labels differ and the
+% sessions at those coordinates agree.
 %
 % Each standard region also gets its own spectrum. The aperiodic fit is
 % removed, and so are the periodic Gaussians whose centers fall in
@@ -436,6 +438,7 @@ item = struct( ...
     'shank', NaN, ...
     'x_um', NaN, ...
     'y_um', NaN, ...
+    'area_key', '', ...
     'welch', [], ...
     'fourier', []);
 end
@@ -456,8 +459,10 @@ end
 for channel_n = 1:n_channels
     sites(channel_n).animal = animal;
     sites(channel_n).shank = channel_table.ProbeNumber(channel_n);
-    sites(channel_n).x_um = channel_table.Xum(channel_n);
-    sites(channel_n).y_um = channel_table.Yum(channel_n);
+        sites(channel_n).x_um = channel_table.Xum(channel_n);
+        sites(channel_n).y_um = channel_table.Yum(channel_n);
+        sites(channel_n).area_key = region_border_key( ...
+            area_label_at(channel_table.Area, channel_n));
     if ~isempty(residuals{1})
         sites(channel_n).welch = residuals{1}(channel_n, :);
     end
@@ -658,6 +663,7 @@ for slot_n = 1:n_methods
             caxis(color_limits);
         end
         set(gca, 'YDir', 'normal')
+        mark_region_divisions(depth, pooled.area_key, use_depth_axis)
         xlabel('Frequency (Hz)')
         if shank_n == 1
             ylabel('Distance to tip (µm)')
@@ -679,7 +685,7 @@ end
 
 function pooled = pool_sites_by_coordinate(sites, method_field)
 pooled = struct('label', '', 'depth_um', [], 'x_um', [], ...
-    'spectrum', [], 'n_averaged', []);
+    'spectrum', [], 'n_averaged', [], 'area_key', {{}});
 if isempty(sites)
     return
 end
@@ -704,12 +710,16 @@ n_groups = max(group);
 depth = nan(n_groups, 1);
 lateral = nan(n_groups, 1);
 n_averaged = zeros(n_groups, 1);
+area_key = cell(n_groups, 1);
 pooled_spectrum = nan(n_groups, size(spectrum, 2));
+site_areas = {sites.area_key};
+site_areas = site_areas(:);
 for group_n = 1:n_groups
     in_group = group == group_n;
     depth(group_n) = mean(y_um(in_group), 'omitnan');
     lateral(group_n) = mean(x_um(in_group), 'omitnan');
     n_averaged(group_n) = nnz(in_group);
+    area_key{group_n} = agreed_area_key(site_areas(in_group));
     pooled_spectrum(group_n, :) = mean(spectrum(in_group, :), 1, 'omitnan');
 end
 order_y = depth;
@@ -721,6 +731,72 @@ pooled.depth_um = depth(order);
 pooled.x_um = lateral(order);
 pooled.spectrum = pooled_spectrum(order, :);
 pooled.n_averaged = n_averaged(order);
+pooled.area_key = area_key(order);
+end
+
+function key = region_border_key(label)
+names = area_to_region_keys(label);
+if isempty(names)
+    key = '';
+    return
+end
+names = sort(names);
+key = names{1};
+for name_n = 2:numel(names)
+    key = [key, ',', names{name_n}]; %#ok<AGROW>
+end
+end
+
+function key = agreed_area_key(keys)
+keys = keys(~cellfun('isempty', keys));
+if isempty(keys)
+    key = '';
+    return
+end
+unique_keys = unique(keys, 'stable');
+if numel(unique_keys) == 1
+    key = unique_keys{1};
+else
+    key = '';
+end
+end
+
+function mark_region_divisions(depth_um, area_keys, use_depth_axis)
+if numel(depth_um) < 2 || numel(area_keys) ~= numel(depth_um)
+    return
+end
+hold on
+x_limits = xlim;
+for row_n = 1:numel(depth_um) - 1
+    below = area_keys{row_n};
+    above = area_keys{row_n + 1};
+    if isempty(below) || isempty(above) || strcmp(below, above)
+        continue
+    end
+    if use_depth_axis
+        y_value = (depth_um(row_n) + depth_um(row_n + 1)) / 2;
+    else
+        y_value = row_n + 0.5;
+    end
+    if ~isfinite(y_value)
+        continue
+    end
+    yline(y_value, ':', 'Color', [0.15 0.15 0.15], ...
+        'LineWidth', 1.1, 'HandleVisibility', 'off');
+    text(x_limits(1), y_value, ['  ', ...
+        region_border_label(below), ' | ', region_border_label(above)], ...
+        'Color', [0.15 0.15 0.15], 'FontSize', 7, ...
+        'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom', ...
+        'Interpreter', 'none', 'Clipping', 'on');
+end
+end
+
+function label = region_border_label(key)
+parts = strsplit(key, ',');
+label = region_display_name(parts{1});
+for part_n = 2:numel(parts)
+    label = [label, ', ', region_display_name(parts{part_n})]; %#ok<AGROW>
+end
 end
 
 function coordinate_ticks(depth_um, x_um)
