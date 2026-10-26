@@ -12,12 +12,13 @@
 % a different distance in another session. Frequency is the horizontal
 % axis and distance to the tip is the vertical axis.
 %
-% Each standard region also gets its own spectrum of that same residual.
-% At every frequency the estimate is a mixed model, Power ~ 1 + (1|Session)
-% + (1|Session:Channel), so channels are repeated measures nested in the
-% session. The central LPAG channel is drawn as a dotted reference. A
-% second figure tests region at each frequency and marks the region with
-% the strongest estimate.
+% Each standard region also gets its own spectrum. The aperiodic fit is
+% removed, and so are the periodic Gaussians whose centers fall in
+% periodic_ranges_to_subtract. At every frequency the estimate is a mixed
+% model, Power ~ 1 + (1|Session) + (1|Session:Channel), so channels are
+% repeated measures nested in the session. The central LPAG channel is
+% drawn as a dotted reference. A second figure tests region at each
+% frequency and marks the region with the strongest estimate.
 %
 % Selected sessions are stacked with mid-LPAG at zero. The figures keep saved
 % power, with no rescaling. A table written beside the spectra has the same
@@ -124,9 +125,17 @@ bands_to_display = {'delta'};
 %   regions_to_display = {'LPAG', 'VLPAG', 'SupCol', 'DR'};
 regions_to_display = {'LPAG', 'VLPAG', 'SupCol'};
 
-% Spectra of log10 power after the aperiodic fit and theta Gaussians are
-% removed. One subplot per region. The list is the initial set.
+% Spectra of log10 power after the aperiodic fit and the periodic ranges
+% below are removed. One subplot per region. The list is the initial set.
 spectrum_regions = {'SupCol', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
+
+% Each cell is one region-spectrum analysis. Gaussians whose centers fall
+% inside that cell are removed, together with the aperiodic fit. Peaks
+% outside the cell stay, so {[1 5]} removes delta and leaves theta.
+%   periodic_ranges_to_subtract = {[6 12]};
+%   periodic_ranges_to_subtract = {[1 5]};
+%   periodic_ranges_to_subtract = {[1 5; 6 12]};
+periodic_ranges_to_subtract = {[6 12], [1 5]};
 
 % Ventral and dorsal curves. 'normalized' z-scores each band within the
 % shank and subtracts the power of the first channel on that side, so the
@@ -212,7 +221,11 @@ tracks = repmat(empty_track(), 0, 1);
 placed = repmat(empty_placed(), 0, 1);
 power_pieces = {};
 pooled_pieces = {};
-region_pieces = {};
+range_sets = periodic_range_sets(periodic_ranges_to_subtract);
+region_pieces = cell(1, numel(range_sets));
+for set_n = 1:numel(range_sets)
+    region_pieces{set_n} = {};
+end
 
 %% Plot each requested session on its own
 for file_n = recording_index(:).'
@@ -280,9 +293,11 @@ for file_n = recording_index(:).'
                 channel_table, this_session, frequency, theta_band, ...
                 probe_spectra.animal_name, spectral_method); %#ok<SAGROW>
         end
-        region_pieces{end + 1} = region_channel_records( ...
-            channel_table, this_session, frequency, theta_band, ...
-            probe_spectra.animal_name, session_n, spectral_method); %#ok<SAGROW>
+        for set_n = 1:numel(range_sets)
+            region_pieces{set_n}{end + 1} = region_channel_records( ...
+                channel_table, this_session, frequency, range_sets{set_n}, ...
+                probe_spectra.animal_name, session_n, spectral_method); %#ok<SAGROW>
+        end
 
         if plot_each_session
             plot_depth_spectrum(frequency, channel_table, ...
@@ -342,13 +357,15 @@ plot_region_distances(placed, spectrum_field, ...
     delta_band, theta_band, gamma_band, spectral_method, ...
     regions_to_display, region_distance_scale, distance_model_bin_um, ...
     bands_to_display, plot_style);
-if isempty(region_pieces)
-    region_records = repmat(empty_region_record(), 0, 1);
-else
-    region_records = vertcat(region_pieces{:});
+for set_n = 1:numel(range_sets)
+    if isempty(region_pieces{set_n})
+        region_records = repmat(empty_region_record(), 0, 1);
+    else
+        region_records = vertcat(region_pieces{set_n}{:});
+    end
+    plot_region_residual_spectra(region_records, stacked_frequency, ...
+        spectral_method, range_sets{set_n}, spectrum_regions, plot_style);
 end
-plot_region_residual_spectra(region_records, stacked_frequency, ...
-    spectral_method, theta_band, spectrum_regions, plot_style);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
@@ -450,12 +467,12 @@ for channel_n = 1:n_channels
 end
 end
 
-function residual = residual_matrix(fitted, frequency, theta_band, n_channels)
+function residual = residual_matrix(fitted, frequency, ranges, n_channels)
 required = {'log10_mean_power', 'aperiodic_fit', 'gaussian_params'};
 for field_n = 1:numel(required)
     if ~isfield(fitted, required{field_n})
-        error(['Saved spectra have no %s, so theta and the aperiodic ' ...
-            'fit cannot be removed.'], required{field_n});
+        error(['Saved spectra have no %s, so the periodic ranges and the ' ...
+            'aperiodic fit cannot be removed.'], required{field_n});
     end
 end
 log_power = fitted.log10_mean_power;
@@ -469,19 +486,19 @@ end
 if ~iscell(fitted.gaussian_params) || numel(fitted.gaussian_params) ~= n_channels
     error('gaussian_params must hold one peak matrix per channel.');
 end
+ranges = periodic_range_matrix(ranges);
 residual = nan(n_channels, n_frequency);
 for channel_n = 1:n_channels
-    residual(channel_n, :) = subtract_theta_and_aperiodic( ...
+    residual(channel_n, :) = subtract_periodic_and_aperiodic( ...
         log_power(channel_n, :), aperiodic(channel_n, :), ...
-        fitted.gaussian_params{channel_n}, frequency, theta_band);
+        fitted.gaussian_params{channel_n}, frequency, ranges);
 end
 end
 
-function residual = subtract_theta_and_aperiodic( ...
-        log_power, aperiodic, gaussians, frequency, theta_band)
-% FOOOF components are additive in log10 power. Theta peaks are the
-% Gaussians whose center frequency lies inside theta_band, matching
-% Analyse_play_session_lpag_spectra.m.
+function residual = subtract_periodic_and_aperiodic( ...
+        log_power, aperiodic, gaussians, frequency, ranges)
+% FOOOF components are additive in log10 power. A peak is removed when
+% its center lies inside one of the requested ranges. Other peaks stay.
 residual = log_power(:).' - aperiodic(:).';
 if isempty(gaussians) || size(gaussians, 2) < 3 || size(gaussians, 1) < 1
     return
@@ -490,11 +507,65 @@ center = gaussians(:, 1);
 peak_height = gaussians(:, 2);
 width = gaussians(:, 3);
 keep = isfinite(center) & isfinite(peak_height) & isfinite(width) & ...
-    width ~= 0 & center >= theta_band(1) & center <= theta_band(2);
+    width ~= 0 & center_in_ranges(center, ranges);
 center = center(keep);
 peak_height = peak_height(keep);
 width = width(keep);
 residual = residual - sum_gaussians(center, peak_height, width, frequency);
+end
+
+function sets = periodic_range_sets(ranges)
+if iscell(ranges)
+    sets = cell(1, numel(ranges));
+    for set_n = 1:numel(ranges)
+        sets{set_n} = periodic_range_matrix(ranges{set_n});
+    end
+    if isempty(sets)
+        error('periodic_ranges_to_subtract needs at least one range set.');
+    end
+    return
+end
+sets = {periodic_range_matrix(ranges)};
+end
+
+function ranges = periodic_range_matrix(ranges)
+if isempty(ranges)
+    ranges = zeros(0, 2);
+    return
+end
+ranges = double(ranges);
+if isvector(ranges)
+    if numel(ranges) ~= 2
+        error('Each periodic range needs a low and a high frequency.');
+    end
+    ranges = ranges(:).';
+end
+if size(ranges, 2) ~= 2
+    error(['periodic_ranges_to_subtract must be [low high], a matrix ' ...
+        'with those two columns, or a cell of those.']);
+end
+if any(~isfinite(ranges(:))) || any(ranges(:, 1) > ranges(:, 2))
+    error('Each periodic range needs finite edges with low <= high.');
+end
+end
+
+function inside = center_in_ranges(center, ranges)
+inside = false(size(center));
+for range_n = 1:size(ranges, 1)
+    inside = inside | (center >= ranges(range_n, 1) & ...
+        center <= ranges(range_n, 2));
+end
+end
+
+function label = periodic_range_label(ranges)
+if isempty(ranges)
+    label = 'no periodic range';
+    return
+end
+label = sprintf('%g-%g Hz', ranges(1, 1), ranges(1, 2));
+for range_n = 2:size(ranges, 1)
+    label = sprintf('%s, %g-%g Hz', label, ranges(range_n, 1), ranges(range_n, 2));
+end
 end
 
 function plot_pooled_residual_spectra(sites, frequency, spectral_method, theta_band)
@@ -3540,7 +3611,7 @@ item = struct( ...
 end
 
 function records = region_channel_records(channel_table, session, ...
-        frequency, theta_band, animal_name, session_n, spectral_method)
+        frequency, ranges, animal_name, session_n, spectral_method)
 [~, method_ids] = selected_spectral_methods(spectral_method);
 method_fields = {'welch', 'fourier'};
 if ~ismember('IsLPAGCenter', channel_table.Properties.VariableNames)
@@ -3553,7 +3624,7 @@ records = repmat(empty_region_record(), 0, 1);
 for slot_n = 1:numel(method_ids)
     method_n = method_ids(slot_n);
     residual = residual_matrix(session.(method_fields{method_n}), ...
-        frequency, theta_band, n_channels);
+        frequency, ranges, n_channels);
     these = repmat(empty_region_record(), n_channels, 1);
     for channel_n = 1:n_channels
         these(channel_n).animal = animal;
@@ -3594,11 +3665,12 @@ end
 end
 
 function plot_region_residual_spectra(records, frequency, spectral_method, ...
-        theta_band, spectrum_regions, plot_style)
+        ranges, spectrum_regions, plot_style)
 if isempty(records) || isempty(frequency)
     fprintf('No channels were available for the region spectra.\n');
     return
 end
+range_label = periodic_range_label(ranges);
 region_names = selected_regions(spectrum_regions);
 region_names = region_names(~strcmp(region_names, 'Other'));
 region_names = unique(region_names, 'stable');
@@ -3614,16 +3686,17 @@ for slot_n = 1:numel(method_ids)
     if isempty(method_records)
         continue
     end
-    fprintf(['Region spectra | %s | theta-free aperiodic residual | ' ...
-        '%d channels\n'], method_names{slot_n}, numel(method_records));
+    fprintf(['Region spectra | %s | aperiodic fit and %s removed | ' ...
+        '%d channels\n'], method_names{slot_n}, range_label, ...
+        numel(method_records));
     [fits, center_fit] = fit_region_spectrum_means( ...
         method_records, frequency, region_names);
     effect = fit_region_effect_by_frequency( ...
         method_records, frequency, region_names);
     draw_region_spectrum_panels(frequency, region_names, fits, center_fit, ...
-        method_names{slot_n}, theta_band, plot_style);
+        method_names{slot_n}, range_label, plot_style);
     draw_region_effect_figure(frequency, region_names, effect, ...
-        method_names{slot_n}, theta_band);
+        method_names{slot_n}, range_label);
     report_region_effect(method_names{slot_n}, region_names, effect);
 end
 end
@@ -3959,9 +4032,10 @@ winner = finite_region(best);
 end
 
 function draw_region_spectrum_panels(frequency, region_names, fits, ...
-        center_fit, method_name, theta_band, plot_style)
+        center_fit, method_name, range_label, plot_style)
 n_regions = numel(region_names);
-figure('Name', ['Region spectra | ', method_name], 'Color', 'w', ...
+figure('Name', sprintf('Region spectra | %s | %s removed', ...
+    method_name, range_label), 'Color', 'w', ...
     'Position', [70 30 860 180 * n_regions]);
 y_limits = spectrum_panel_limits(fits, center_fit);
 for region_n = 1:n_regions
@@ -3998,9 +4072,8 @@ for region_n = 1:n_regions
     end
     box off
 end
-sgtitle({sprintf('%s | theta-free aperiodic spectrum', method_name), ...
-    sprintf('Theta %g-%g Hz removed. %s', theta_band(1), theta_band(2), ...
-    'Channels nested in session. Dotted line is central LPAG.')}, ...
+sgtitle({sprintf('%s | aperiodic fit and %s removed', method_name, range_label), ...
+    'Channels nested in session. Dotted line is central LPAG.'}, ...
     'FontSize', 10)
 drawnow
 end
@@ -4058,10 +4131,11 @@ end
 end
 
 function draw_region_effect_figure(frequency, region_names, effect, ...
-        method_name, theta_band)
+        method_name, range_label)
 n_regions = numel(region_names);
 labels = cellfun(@region_display_name, region_names, 'UniformOutput', false);
-figure('Name', ['Region effect by frequency | ', method_name], ...
+figure('Name', sprintf('Region effect by frequency | %s | %s removed', ...
+    method_name, range_label), ...
     'Color', 'w', 'Position', [100 40 960 760]);
 heatmap_axis = subplot(3, 1, 1);
 finite_values = effect.emm(isfinite(effect.emm));
@@ -4124,9 +4198,9 @@ xlabel('Frequency (Hz)')
 title('Strongest region where regions differ')
 box off
 sgtitle({sprintf('%s | regional effect by frequency', method_name), ...
-    sprintf(['Theta %g-%g Hz and the aperiodic fit removed. ' ...
-    'Gray frequencies have no region effect at p < 0.05.'], ...
-    theta_band(1), theta_band(2))}, 'FontSize', 10)
+    sprintf(['%s removed with the aperiodic fit. ' ...
+    'Gray frequencies have no region effect at p < 0.05.'], range_label)}, ...
+    'FontSize', 10)
 drawnow
 end
 
