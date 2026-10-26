@@ -17,14 +17,17 @@
 % 0.1-1 Hz together. Sites are
 % averaged only when the shank and the x and y coordinates match. Channel
 % number is not used, because the channel map can change between days and
-% the same channel number can sit at a different distance. Frequency is
+% the same channel number can sit at a different distance. A Gaussian
+% smooth, 100 µm along distance to the tip and 1 Hz along frequency by
+% default, softens small region steps on that image. Frequency is
 % the horizontal axis and distance to the tip is the vertical axis. A
 % dotted line sits between neighboring sites when their region labels
-% differ and the sessions at those coordinates agree. On a dual-probe
-% recording the labels are the regions of the shank that passes through
-% PAG, including neighbors such as InfCol. A shank in mPFC or LS is
-% drawn without those region names. Each shank is its own figure, at
-% the same width, so two NPX2 shanks are not placed in subplots.
+% differ. Each region span is also labeled, including a shank that stays
+% in one region. Days that disagree keep every name they reported.
+% On a dual-probe recording the labels are the regions of the shank that
+% passes through PAG, including neighbors such as InfCol. A shank in
+% mPFC or LS is drawn without those region names. Each shank is its own
+% figure, at the same width, so two NPX2 shanks are not placed in subplots.
 %
 % Each standard region also gets its own spectrum. The aperiodic fit is
 % removed, and so are the periodic Gaussians whose centers fall in
@@ -140,6 +143,12 @@ pool_recording_days = true;
 %   pooled_periodic_ranges = {[6 12; .1 1]};
 %   pooled_periodic_ranges = {[6 12]};
 pooled_periodic_ranges = {[6 12], [.1 1]};
+
+% Gaussian smoothing of the pooled spectrogram, after the sites are
+% averaged. The widths are standard deviations: distance to the tip, and
+% frequency. Set either value to 0 to leave that axis unsmoothed.
+pooled_smooth_um = 100;
+pooled_smooth_hz = 1;
 
 % log10 power minus the fitted aperiodic component. Switch to
 % 'log10_mean_power' to draw the session-mean spectrum itself.
@@ -378,7 +387,7 @@ if plot_pooled_animal_spectra
         end
         plot_pooled_residual_spectra(pooled_sites, stacked_frequency, ...
             spectral_method, pooled_ranges, pool_partner_sessions, ...
-            pool_recording_days);
+            pool_recording_days, pooled_smooth_um, pooled_smooth_hz);
     end
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
@@ -678,10 +687,15 @@ end
 end
 
 function plot_pooled_residual_spectra(sites, frequency, spectral_method, ...
-        ranges, pool_partner_sessions, pool_recording_days)
+        ranges, pool_partner_sessions, pool_recording_days, ...
+        smooth_um, smooth_hz)
 if isempty(sites)
     fprintf('No channels were available for the pooled residual spectra.\n');
     return
+end
+if ~isfinite(smooth_um) || smooth_um < 0 || ~isfinite(smooth_hz) || smooth_hz < 0
+    error(['pooled_smooth_um and pooled_smooth_hz must be finite and ' ...
+        'greater than or equal to 0.']);
 end
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 method_fields = {'welch', 'fourier'};
@@ -695,7 +709,8 @@ if pool_recording_days
         fprintf('  %s combines %s\n', animal_code, ...
             joined_recordings(these_sites));
         plot_one_animal_residual(these_sites, animal_code, frequency, ...
-            method_names, method_ids, method_fields, ranges, 'days');
+            method_names, method_ids, method_fields, ranges, 'days', ...
+            smooth_um, smooth_hz);
     end
 end
 if pool_partner_sessions
@@ -706,13 +721,15 @@ if pool_partner_sessions
         recording_name = recordings{recording_n};
         these_sites = sites(strcmp({sites.recording}, recording_name));
         plot_one_animal_residual(these_sites, recording_name, frequency, ...
-            method_names, method_ids, method_fields, ranges, 'partner');
+            method_names, method_ids, method_fields, ranges, 'partner', ...
+            smooth_um, smooth_hz);
     end
 end
 end
 
 function plot_one_animal_residual(sites, group_name, frequency, ...
-        method_names, method_ids, method_fields, ranges, pool_mode)
+        method_names, method_ids, method_fields, ranges, pool_mode, ...
+        smooth_um, smooth_hz)
 sites = keep_pag_shank_labels(sites);
 shank_id = reshape([sites.shank], [], 1);
 shank_list = unique(shank_id(isfinite(shank_id)));
@@ -737,6 +754,9 @@ for shank_n = 1:n_shanks
         method_n = method_ids(slot_n);
         pooled = pool_sites_by_coordinate( ...
             shank_sites, method_fields{method_n});
+        pooled.spectrum = smooth_pooled_spectrum( ...
+            pooled.spectrum, pooled.depth_um, frequency, ...
+            smooth_um, smooth_hz);
         pooled.label = shank_label;
         panels{slot_n, shank_n} = pooled;
         if ~isempty(pooled.spectrum)
@@ -821,12 +841,73 @@ for shank_n = 1:n_shanks
         color_bar = colorbar;
         ylabel(color_bar, {'log10 power', ['minus aperiodic and ', range_label]})
     end
-    sgtitle({[figure_prefix, ' | ', shown_name, ' | ', shank_label], ...
+    title_lines = {[figure_prefix, ' | ', shown_name, ' | ', shank_label], ...
         grouping_line, ...
-        sprintf('log10 power minus aperiodic fit and %s', range_label), ...
-        match_line}, 'Interpreter', 'none')
+        sprintf('log10 power minus aperiodic fit and %s', range_label)};
+    if smooth_um > 0 || smooth_hz > 0
+        title_lines{end + 1} = sprintf( ...
+            'Gaussian smooth %g µm along distance to the tip, %g Hz along frequency', ...
+            smooth_um, smooth_hz); %#ok<AGROW>
+    end
+    title_lines{end + 1} = match_line; %#ok<AGROW>
+    sgtitle(title_lines, 'Interpreter', 'none')
     drawnow
 end
+end
+
+function spectrum = smooth_pooled_spectrum(spectrum, depth_um, frequency, ...
+        sigma_um, sigma_hz)
+if isempty(spectrum)
+    return
+end
+spectrum = smooth_along_frequency(spectrum, frequency, sigma_hz);
+spectrum = smooth_along_depth(spectrum, depth_um, sigma_um);
+end
+
+function spectrum = smooth_along_frequency(spectrum, frequency, sigma_hz)
+if ~(isfinite(sigma_hz) && sigma_hz > 0) || size(spectrum, 2) < 2
+    return
+end
+frequency = frequency(:);
+if numel(frequency) ~= size(spectrum, 2)
+    error('Frequency grid does not match the pooled spectrogram.');
+end
+weight = gaussian_coordinate_weight(frequency, sigma_hz);
+[spectrum, finite] = finite_matrix(spectrum);
+numer = spectrum * weight;
+denom = double(finite) * weight;
+spectrum = numer ./ denom;
+spectrum(denom == 0) = NaN;
+end
+
+function spectrum = smooth_along_depth(spectrum, depth_um, sigma_um)
+if ~(isfinite(sigma_um) && sigma_um > 0) || size(spectrum, 1) < 2
+    return
+end
+depth_um = depth_um(:);
+if numel(depth_um) ~= size(spectrum, 1)
+    error('Distance to the tip does not match the pooled spectrogram.');
+end
+weight = gaussian_coordinate_weight(depth_um, sigma_um);
+[spectrum, finite] = finite_matrix(spectrum);
+numer = weight * spectrum;
+denom = weight * double(finite);
+spectrum = numer ./ denom;
+spectrum(denom == 0) = NaN;
+end
+
+function weight = gaussian_coordinate_weight(coordinate, sigma)
+coordinate = coordinate(:);
+delta = coordinate - coordinate.';
+weight = exp(-0.5 * (delta ./ sigma).^2);
+missing = ~isfinite(coordinate);
+weight(missing, :) = 0;
+weight(:, missing) = 0;
+end
+
+function [values, finite] = finite_matrix(values)
+finite = isfinite(values);
+values(~finite) = 0;
 end
 
 function [n_recordings, n_partner] = pooled_group_counts(sites)
@@ -1045,28 +1126,56 @@ name = token;
 end
 
 function key = agreed_area_key(keys)
-keys = keys(~cellfun('isempty', keys));
-if isempty(keys)
+n_keys = numel(keys);
+trimmed = cell(n_keys, 1);
+for key_n = 1:n_keys
+    trimmed{key_n} = strtrim(char(string(keys{key_n})));
+end
+trimmed = trimmed(~cellfun('isempty', trimmed));
+if isempty(trimmed)
     key = '';
     return
 end
-unique_keys = unique(keys, 'stable');
+unique_keys = unique(trimmed, 'stable');
 if numel(unique_keys) == 1
     key = unique_keys{1};
-else
+    return
+end
+names = cell(1, 0);
+for key_n = 1:numel(unique_keys)
+    parts = split_area_label(unique_keys{key_n});
+    for part_n = 1:numel(parts)
+        name = border_region_name(parts{part_n});
+        if isempty(name) || any(strcmp(names, name))
+            continue
+        end
+        names{end + 1} = name; %#ok<AGROW>
+    end
+end
+if isempty(names)
     key = '';
+    return
+end
+names = sort(names);
+key = names{1};
+for name_n = 2:numel(names)
+    key = [key, ',', names{name_n}]; %#ok<AGROW>
 end
 end
 
 function mark_region_divisions(depth_um, area_keys, use_depth_axis)
-if numel(depth_um) < 2 || numel(area_keys) ~= numel(depth_um)
+if isempty(depth_um) || numel(area_keys) ~= numel(depth_um)
     return
 end
 hold on
-x_limits = xlim;
-for row_n = 1:numel(depth_um) - 1
-    below = area_keys{row_n};
-    above = area_keys{row_n + 1};
+n_rows = numel(depth_um);
+row_key = cell(n_rows, 1);
+for row_n = 1:n_rows
+    row_key{row_n} = strtrim(char(string(area_keys{row_n})));
+end
+for row_n = 1:n_rows - 1
+    below = row_key{row_n};
+    above = row_key{row_n + 1};
     if isempty(below) || isempty(above) || strcmp(below, above)
         continue
     end
@@ -1080,12 +1189,47 @@ for row_n = 1:numel(depth_um) - 1
     end
     yline(y_value, ':', 'Color', [0.15 0.15 0.15], ...
         'LineWidth', 1.1, 'HandleVisibility', 'off');
-    text(x_limits(1), y_value, ['  ', ...
-        region_border_label(below), ' | ', region_border_label(above)], ...
-        'Color', [0.15 0.15 0.15], 'FontSize', 7, ...
-        'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom', ...
-        'Interpreter', 'none', 'Clipping', 'on');
+    mark_region_label(y_value, ...
+        [region_border_label(below), ' | ', region_border_label(above)], ...
+        'bottom');
 end
+row_n = 1;
+while row_n <= n_rows
+    this_key = row_key{row_n};
+    run_end = row_n;
+    while run_end < n_rows && strcmp(row_key{run_end + 1}, this_key)
+        run_end = run_end + 1;
+    end
+    if ~isempty(this_key)
+        mark_region_label(region_span_center( ...
+            depth_um, row_n, run_end, use_depth_axis), ...
+            region_border_label(this_key), 'middle');
+    end
+    row_n = run_end + 1;
+end
+end
+
+function y_value = region_span_center(depth_um, row_start, row_end, use_depth_axis)
+if use_depth_axis
+    y_value = (depth_um(row_start) + depth_um(row_end)) / 2;
+else
+    y_value = (row_start + row_end) / 2;
+end
+end
+
+function mark_region_label(y_value, label, vertical)
+y_limits = ylim;
+if ~isfinite(y_value) || y_limits(2) == y_limits(1)
+    return
+end
+y_norm = (y_value - y_limits(1)) / (y_limits(2) - y_limits(1));
+y_norm = min(max(y_norm, 0.03), 0.97);
+text(0.02, y_norm, [' ', label], ...
+    'Units', 'normalized', ...
+    'Color', [0.05 0.05 0.05], 'FontSize', 8, ...
+    'BackgroundColor', 'w', 'Margin', 1, ...
+    'HorizontalAlignment', 'left', 'VerticalAlignment', vertical, ...
+    'Interpreter', 'none', 'Clipping', 'on');
 end
 
 function label = region_border_label(key)
