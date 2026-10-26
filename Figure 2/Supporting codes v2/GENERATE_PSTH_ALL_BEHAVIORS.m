@@ -1,10 +1,4 @@
-function psth_by_band = GENERATE_PSTH_ALL_BEHAVIORS(current_dir, bands)
-% Load behavior, the channel map, and LFP_PAG once, then estimate every
-% band in bands. bands is a struct array with name, wind_length,
-% wind_overlap, min_separation, f, and freq_pow_range.
-% psth_by_band is a cell of the same length. Each cell is the per-channel
-% psth struct array for that band (onset, offset, and time-wrapped;
-% self and other).
+function psth_struct = GENERATE_PSTH_ALL_BEHAVIORS(current_dir, wind_length, wind_overlap, min_separation, f, freq_pow_range)
 
 %% Parameters
 all_behaviors    = {'Pounce', 'CC', 'Boxing', 'Evasion', 'Pin', 'Escape', 'CB', 'CD', 'Grooming', 'Rearing', 'Sniffing', 'Scratching', 'PounceI', 'Bite'};
@@ -18,7 +12,6 @@ animal_code        = animal_code{end};
 animal_code_params = strsplit(animal_code, ' ');
 animal_batch       = animal_code_params{1};
 repeated_animal    = animal_code_params{3};
-psth_by_band       = cell(1, numel(bands));
 
 %% Load synchronization model
 load([synch_directory, '\', animal_code, '\synch_model_video2NPX.mat'])
@@ -126,32 +119,24 @@ else
 end
 pause(.1)
 
-%% One LFP load, then a spectrogram per requested band
+%% Compute band-limited PSTH for all behaviors
 hist_range       = [-20 20];
 range_time_wrap  = [-5 5];
 n_bins_time_wrap = range(range_time_wrap) * 100;
+spect_bin_size   = wind_length - wind_overlap;
 
 PAG_LFP  = double(LFP(mid_PAG_channel, :));
 clear LFP
 LFP_time = (1:size(PAG_LFP, 2)) / 2500;
 
 range2exctract = LFP_time >= min(Behavior.Start) + hist_range(1) & LFP_time <= max(Behavior.End) + hist_range(2);
-behaviors_this_session = unique(Behavior.Type2);
-behaviors_this_session = behaviors_this_session(ismember(behaviors_this_session, all_behaviors));
-
-for band_n = 1:numel(bands)
-wind_length    = bands(band_n).wind_length;
-wind_overlap   = bands(band_n).wind_overlap;
-min_separation = bands(band_n).min_separation;
-f              = bands(band_n).f;
-freq_pow_range = bands(band_n).freq_pow_range;
-spect_bin_size = wind_length - wind_overlap;
-fprintf('Spectrogram %s (%g-%g Hz)\n', bands(band_n).name, freq_pow_range(1), freq_pow_range(2));
-
 psth_struct    = [];
 all_behavior_psth_self  = cell(3, numel(all_behaviors), 1);
 all_behavior_psth_other = cell(3, numel(all_behaviors), 1);
 partner_order_pb        = cell(1, numel(all_behaviors), 1);
+
+behaviors_this_session = unique(Behavior.Type2);
+behaviors_this_session = behaviors_this_session(ismember(behaviors_this_session, all_behaviors));
 
 for ch_n = 1:numel(mid_PAG_channel)
     disp('Estimating spectrogram')
@@ -161,11 +146,7 @@ for ch_n = 1:numel(mid_PAG_channel)
     disp('ready')
 
     freq_pow = mean(log10(pow_spectrogram(f >= freq_pow_range(1) & f <= freq_pow_range(2), :)));
-    % 1/fmax is the written smooth, in spectrogram samples. For delta, theta,
-    % and gamma that is shorter than one sample, and movmean rejects a
-    % window below 1, so the smooth stays one sample.
-    smooth_bins = max(1, round(1 / max(freq_pow_range)));
-    freq_pow = movmean(freq_pow, smooth_bins);
+    freq_pow = movmean(freq_pow, 1 / max(freq_pow_range));
 
     for beh_type = 1:numel(behaviors_this_session)
         behavior_index = find(ismember(Behavior.Type2, behaviors_this_session(beh_type)) & ismember(Behavior.Animal, repeated_animal));
@@ -272,7 +253,5 @@ for ch_n = 1:numel(mid_PAG_channel)
         psth_struct(ch_n).pow_spectrogram         = pow_spectrogram;
         psth_struct(ch_n).spect_time              = spect_time;
     end
-end
-psth_by_band{band_n} = psth_struct;
 end
 end
