@@ -14,8 +14,13 @@
 %
 % Samples at or after the bout end are left out. |z| above zscore_limit is
 % left out before the day mean. z uses the baseline (-2, 0) and a 20-bin
-% moving mean. Partner 3, tickling blocks, and bouts outside a partner window
-% are left out.
+% moving mean. Partner 3 and bouts outside a partner window are left out.
+%
+% Partner number is calculated here. For each recording day the script loads
+% the behavior file, applies the video-to-NPX synch model, and takes
+% Session_structure rows of type Partners session, in time order. A play bout
+% belongs to the block that contains its onset. The PSTH mats only supply
+% power and bout times.
 %
 % Input mats come from Estimate_psth_band_power.m. The names below are the
 % delta play-bout pair. Swap them for theta or gamma (see the combinations file).
@@ -27,6 +32,7 @@ if ~isempty(this_dir)
 end
 
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
+data_root = fileparts(fileparts(saving_folder));
 
 psth_file = 'psth_structure_delta_updated.mat';
 names_file = 'animal_names_delta_updated.mat';
@@ -77,7 +83,7 @@ for j = 1:numel(psth_structure)
     end
 
     onset = psth_structure(j).play_bout_onset;
-    play_bouts = psth_structure(j).play_bouts_table;
+    play_bouts = bout_times(psth_structure(j).play_bouts_table);
     if isempty(onset) || isempty(play_bouts)
         continue
     end
@@ -85,10 +91,28 @@ for j = 1:numel(psth_structure)
         error('Estimate_psth_play_bout_lme:Time', ...
             '%s has %d bins; the time axis has %d.', session_name, size(onset, 2), numel(time));
     end
+    if size(play_bouts, 1) ~= size(onset, 1)
+        error('Estimate_psth_play_bout_lme:Bouts', ...
+            '%s has %d bouts and %d PSTH rows.', session_name, size(play_bouts, 1), size(onset, 1));
+    end
+
+    windows = zeros(0, 2);
+    try
+        windows = load_partner_windows(session_name, data_root);
+    catch load_error
+        warning('Estimate_psth_play_bout_lme:Behavior', ...
+            '%s: behavior file was not read (%s).', session_name, load_error.message);
+    end
+    if isempty(windows) && isfield(psth_structure(j), 'Behavior')
+        windows = partner_windows_from_behavior(psth_structure(j).Behavior);
+    end
+    this_partner = assign_partner_index(play_bouts(:, 1), windows(:, 1), windows(:, 2));
+    fprintf('%s: %d bouts, partner 1 = %d, partner 2 = %d\n', ...
+        session_name, numel(this_partner), sum(this_partner == 1), sum(this_partner == 2));
 
     z = baseline_zscore(onset, baseline_index, smooth_wind);
     power = [power; z]; %#ok<AGROW>
-    partner = [partner; partner_index_from_behavior(play_bouts, psth_structure(j).Behavior)]; %#ok<AGROW>
+    partner = [partner; this_partner]; %#ok<AGROW>
     bout_length = [bout_length; play_bouts(:, 2) - play_bouts(:, 1)]; %#ok<AGROW>
     session_id = [session_id; repmat({session_name}, size(z, 1), 1)]; %#ok<AGROW>
 end
@@ -101,8 +125,9 @@ end
 obs = session_partner_mean_psth(power, partner, session_id, bout_length, time, ...
     zscore_limit, length_limit);
 if isempty(obs.session_id)
-    error('Estimate_psth_play_bout_lme:Empty', ...
-        'No recording day had a partner-1 or partner-2 mean.');
+    error('Estimate_psth_play_bout_lme:Partners', ...
+        ['No play-bout onset fell in a Partners session. ' ...
+        'The behavior file and synch model for these recording days were checked under Data.']);
 end
 
 %% Fit Power ~ 1 + Partner + (1|Session) at each time bin
@@ -206,22 +231,67 @@ z = (onset - mu) ./ sd;
 z = movmean(z, smooth_wind, 2);
 end
 
-function partner_index = partner_index_from_behavior(play_bouts, behavior)
-partner_index = nan(size(play_bouts, 1), 1);
-if isempty(play_bouts) || ~istable(behavior) || ~ismember('Animal', behavior.Properties.VariableNames)
+function play_bouts = bout_times(play_bouts)
+if is_table(play_bouts)
+    play_bouts = play_bouts{:, 1:min(2, size(play_bouts, 2))};
+end
+play_bouts = double(play_bouts);
+end
+
+function windows = load_partner_windows(session_name, data_root)
+windows = zeros(0, 2);
+[behavior, synch_model] = load_synced_behavior(session_name, data_root);
+if isempty(behavior) || isempty(synch_model)
     return
 end
-partner_sessions = behavior(ismember(behavior.Animal, 'Session_structure'), :);
-if ismember('Type', partner_sessions.Properties.VariableNames)
-    partner_sessions(ismember(partner_sessions.Type, 'Tickling'), :) = [];
+behavior.Start = predict(synch_model, behavior.Start);
+behavior.End = predict(synch_model, behavior.End);
+windows = partner_windows_from_behavior(behavior);
 end
-if isempty(partner_sessions)
+
+function [behavior, synch_model] = load_synced_behavior(session_name, data_root)
+behavior = [];
+synch_model = [];
+[~, session_name] = fileparts(session_name);
+npx_dir = fullfile(data_root, 'NPX data', 'NPX raw data', session_name);
+
+local_synch = fullfile(npx_dir, 'synch_model_video2NPX.mat');
+data_synch = fullfile(data_root, 'Synch data', session_name, 'synch_model_video2NPX.mat');
+if isfile(local_synch)
+    synch_file = local_synch;
+elseif isfile(data_synch)
+    synch_file = data_synch;
+else
     return
 end
-inside = play_bouts(:, 1).' >= partner_sessions.Start & play_bouts(:, 2).' < partner_sessions.End;
-[matched, partner_index] = max(inside, [], 1);
-partner_index = double(partner_index(:));
-partner_index(~matched(:)) = NaN;
+loaded = load(synch_file, 'synch_model_video2NPX');
+if ~isfield(loaded, 'synch_model_video2NPX')
+    return
+end
+synch_model = loaded.synch_model_video2NPX;
+
+local_behavior = dir(fullfile(npx_dir, 'ELAN*'));
+data_behavior = fullfile(data_root, 'Behavior backups', [session_name, '.txt']);
+if ~isempty(local_behavior)
+    behavior_file = fullfile(npx_dir, local_behavior(1).name);
+elseif isfile(data_behavior)
+    behavior_file = data_behavior;
+else
+    behavior = [];
+    synch_model = [];
+    return
+end
+
+behavior = readtable(behavior_file);
+behavior(:, 2) = [];
+behavior.Properties.VariableNames = {'Animal', 'Start', 'End', 'Length', 'Type'};
+end
+
+function tf = is_table(value)
+tf = false;
+if exist('istable', 'builtin') == 5 || exist('istable', 'file') == 2
+    tf = istable(value);
+end
 end
 
 function row = coefficient_row(coef, term)
