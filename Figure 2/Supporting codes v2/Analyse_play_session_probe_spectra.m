@@ -74,7 +74,11 @@
 % By default each ventral or dorsal curve is z-scored within the shank and
 % set to 0 at its first channel. Set region_distance_scale to 'raw' for the
 % saved power. Each panel reports a Spearman correlation of distance and
-% power, with its p-value, after the same outlier screens. The center is
+% power, with its p-value, after the same outlier screens. Distance from
+% the region center is grouped in bins of region_distance_bin_um. A bin
+% stays when at least half of the sessions on that side have a channel
+% in it. The scatter, the correlation, and the intercept use only those
+% bins. The center is
 % the midpoint of that region's labeled span on the shank. bands_to_display
 % selects delta, theta, and gamma. Delta is the default, and the points are
 % a scatter. Curves run toward the tip (ventral) and toward the brain
@@ -188,6 +192,14 @@ artifact_trend_sd = 5;
 % sites stay in even when LPAG itself is thin. The far tail, reached by
 % only a few sessions, is left out. Only those channels are removed.
 region_border_bin_um = 100;
+
+% Toward the tip and toward the brain surface, distance from the region
+% center is grouped in bins of this width. A bin stays when at least
+% region_distance_min_session_fraction of the sessions that still have a
+% channel on that side also have a channel in the bin. The scatter, the
+% Spearman correlation, and the intercept curve use only the kept bins.
+region_distance_bin_um = 100;
+region_distance_min_session_fraction = 0.5;
 
 % The proximal/distal comparison is a second figure. It stays off until
 % this switch is set true.
@@ -398,7 +410,8 @@ end
 plot_region_distances(placed, spectrum_field, ...
     delta_band, theta_band, gamma_band, spectral_method, ...
     regions_to_display, region_distance_scale, distance_model_bin_um, ...
-    bands_to_display, plot_style);
+    bands_to_display, plot_style, region_distance_bin_um, ...
+    region_distance_min_session_fraction);
 for set_n = 1:numel(range_sets)
     if isempty(region_pieces{set_n})
         region_records = repmat(empty_region_record(), 0, 1);
@@ -3496,9 +3509,19 @@ end
 function plot_region_distances(placed, spectrum_field, ...
         delta_band, theta_band, gamma_band, spectral_method, ...
         regions_to_display, region_distance_scale, distance_model_bin_um, ...
-        bands_to_display, plot_style)
+        bands_to_display, plot_style, region_distance_bin_um, ...
+        region_distance_min_session_fraction)
 if ~any(strcmp(region_distance_scale, {'normalized', 'raw'}))
     error('region_distance_scale must be ''normalized'' or ''raw''.');
+end
+if ~isfinite(region_distance_bin_um) || region_distance_bin_um <= 0
+    error('region_distance_bin_um must be a positive distance in µm.');
+end
+if ~isfinite(region_distance_min_session_fraction) || ...
+        region_distance_min_session_fraction <= 0 || ...
+        region_distance_min_session_fraction > 1
+    error(['region_distance_min_session_fraction must be greater than ' ...
+        '0 and at most 1.']);
 end
 region_names = selected_regions(regions_to_display);
 directions = {'ventral', 'dorsal'};
@@ -3535,12 +3558,14 @@ for kind_n = 1:numel(panel_kinds)
             figure_name = sprintf('%s power vs distance to region center', ...
                 method_names{method_slot});
             figure_position = [40 40 980 max(480, 240 * n_regions)];
-            figure_note = region_distance_note(region_distance_scale, false);
+            figure_note = region_distance_note(region_distance_scale, false, ...
+                region_distance_bin_um, region_distance_min_session_fraction);
         else
             figure_name = sprintf('%s intercept by distance to region center', ...
                 method_names{method_slot});
             figure_position = [90 40 980 max(480, 240 * n_regions)];
-            figure_note = region_distance_note(region_distance_scale, true);
+            figure_note = region_distance_note(region_distance_scale, true, ...
+                region_distance_bin_um, region_distance_min_session_fraction);
             figure_note = sprintf(['%s Rectangles cover the upper 90%% of the ' ...
                 'axis where the intercept interval excludes 0 for at least %g µm.'], ...
                 figure_note, plot_style.significance_min_um);
@@ -3560,7 +3585,6 @@ for kind_n = 1:numel(panel_kinds)
                 end
                 hold on
                 side_tracks = repmat(empty_side_track(), 0, 1);
-                farthest = 0;
                 for placed_n = available(:).'
                     [distance, welch_power, fourier_power] = side_samples( ...
                         placed(placed_n), centers(placed_n, region_n), ...
@@ -3573,12 +3597,6 @@ for kind_n = 1:numel(panel_kinds)
                     [welch_power, fourier_power] = scale_side_power( ...
                         distance, welch_power, fourier_power, ...
                         welch_std, fourier_std, region_distance_scale);
-                    if strcmp(panel_kind, 'tracks')
-                        draw_distance_scatter(distance, ...
-                            power_for_method(welch_power, fourier_power, method_n), ...
-                            selection, plot_style);
-                    end
-                    farthest = max(farthest, max(distance(isfinite(distance))));
                     side_track = empty_side_track();
                     side_track.rel_um = distance;
                     side_track.welch_bands = welch_power;
@@ -3594,6 +3612,35 @@ for kind_n = 1:numel(panel_kinds)
                         direction_titles{direction_n}), ...
                         'HorizontalAlignment', 'center', 'Interpreter', 'none');
                     continue
+                end
+                side_tracks = keep_common_distance_bins(side_tracks, method_n, ...
+                    region_distance_bin_um, region_distance_min_session_fraction, ...
+                    strcmp(panel_kind, 'tracks'), ...
+                    region_display_name(region_names{region_n}), ...
+                    direction_titles{direction_n});
+                if isempty(side_tracks)
+                    axis off
+                    text(0.5, 0.5, sprintf(['%s\n%s\nno bin shared by %.0f%% ' ...
+                        'of sessions'], ...
+                        region_display_name(region_names{region_n}), ...
+                        direction_titles{direction_n}, ...
+                        100 * region_distance_min_session_fraction), ...
+                        'HorizontalAlignment', 'center', 'Interpreter', 'none');
+                    continue
+                end
+                farthest = 0;
+                for track_n = 1:numel(side_tracks)
+                    distance = side_tracks(track_n).rel_um(:);
+                    finite_distance = distance(isfinite(distance));
+                    if ~isempty(finite_distance)
+                        farthest = max(farthest, max(finite_distance));
+                    end
+                    if strcmp(panel_kind, 'tracks')
+                        draw_distance_scatter(distance, ...
+                            power_for_method(side_tracks(track_n).welch_bands, ...
+                            side_tracks(track_n).fourier_bands, method_n), ...
+                            selection, plot_style);
+                    end
                 end
                 x_max = farthest;
                 model_ok = false;
@@ -3685,7 +3732,7 @@ for kind_n = 1:numel(panel_kinds)
 end
 end
 
-function note = region_distance_note(scale_mode, with_model)
+function note = region_distance_note(scale_mode, with_model, bin_um, min_fraction)
 if strcmp(scale_mode, 'normalized')
     note = ['Each shank is z-scored and set to 0 at its first channel. ' ...
         'Spearman rho and p compare distance with that power ' ...
@@ -3694,6 +3741,8 @@ else
     note = ['Saved band power. Spearman rho and p compare distance with power ' ...
         'after extreme values and uncommon border distances are removed.'];
 end
+note = [note, sprintf([' Bins of %g µm stay when at least %.0f%% of the ' ...
+    'sessions on that side have a channel there.'], bin_um, 100 * min_fraction)];
 if with_model
     note = [note, [' Dots are the channel values. At each distance, one ' ...
         'session power enters Power ~ 1 + (1|Animal). The marker is the ' ...
@@ -3834,6 +3883,93 @@ end
 function item = empty_side_track()
 item = struct('rel_um', [], 'welch_bands', [], 'fourier_bands', [], ...
     'animal', '', 'session', NaN);
+end
+
+function side_tracks = keep_common_distance_bins(side_tracks, method_n, ...
+        bin_um, min_fraction, do_print, region_label, direction_label)
+n_tracks = numel(side_tracks);
+session_ids = cell(n_tracks, 1);
+row_bin = cell(n_tracks, 1);
+row_finite = cell(n_tracks, 1);
+for track_n = 1:n_tracks
+    session_ids{track_n} = track_session_id(side_tracks(track_n));
+    [distance, power] = method_distance_power(side_tracks(track_n), method_n);
+    finite_row = isfinite(distance) & any(isfinite(power), 2);
+    this_bin = nan(numel(distance), 1);
+    this_bin(finite_row) = floor(distance(finite_row) / bin_um);
+    row_bin{track_n} = this_bin;
+    row_finite{track_n} = finite_row;
+end
+present = cellfun(@any, row_finite);
+session_present = unique(session_ids(present));
+n_sessions = numel(session_present);
+if n_sessions == 0
+    side_tracks = repmat(empty_side_track(), 0, 1);
+    return
+end
+all_bins = [];
+for track_n = 1:n_tracks
+    all_bins = [all_bins; row_bin{track_n}(row_finite{track_n})]; %#ok<AGROW>
+end
+bins = unique(all_bins);
+n_at = zeros(numel(bins), 1);
+for bin_n = 1:numel(bins)
+    sessions_here = {};
+    for track_n = 1:n_tracks
+        if any(row_bin{track_n} == bins(bin_n))
+            sessions_here{end + 1, 1} = session_ids{track_n}; %#ok<AGROW>
+        end
+    end
+    n_at(bin_n) = numel(unique(sessions_here));
+end
+kept_bin = n_at >= min_fraction * n_sessions;
+if do_print
+    fprintf(['%s | %s. %d sessions have this side. Bins are %g µm. ' ...
+        'A bin stays when at least %.0f%% of those sessions have a ' ...
+        'channel there.\n'], region_label, direction_label, n_sessions, ...
+        bin_um, 100 * min_fraction);
+    for bin_n = 1:numel(bins)
+        bin_start = bins(bin_n) * bin_um;
+        if kept_bin(bin_n)
+            status = 'kept';
+        else
+            status = 'set aside';
+        end
+        fprintf('  %8g to %8g µm: %3d sessions  %s\n', ...
+            bin_start, bin_start + bin_um, n_at(bin_n), status);
+    end
+    if any(kept_bin)
+        fprintf('Kept %d of %d bins.\n', nnz(kept_bin), numel(bins));
+    else
+        fprintf(['No bin reached %.0f%% of sessions. This side is left ' ...
+            'out of the correlation.\n'], 100 * min_fraction);
+    end
+end
+kept_ids = bins(kept_bin);
+kept_tracks = repmat(empty_side_track(), 0, 1);
+for track_n = 1:n_tracks
+    keep = row_finite{track_n} & ismember(row_bin{track_n}, kept_ids);
+    if ~any(keep)
+        continue
+    end
+    track = side_tracks(track_n);
+    track.rel_um = track.rel_um(keep);
+    track.welch_bands = track.welch_bands(keep, :);
+    track.fourier_bands = track.fourier_bands(keep, :);
+    kept_tracks(end + 1, 1) = track; %#ok<AGROW>
+end
+side_tracks = kept_tracks;
+end
+
+function id = track_session_id(track)
+animal = as_key_text(track.animal);
+session = as_key_text(track.session);
+id = [animal{1}, '|', session{1}];
+end
+
+function [distance, power] = method_distance_power(track, method_n)
+distance = track.rel_um(:);
+power = power_for_method(track.welch_bands, track.fourier_bands, method_n);
 end
 
 function draw_distance_scatter(distance, power, selection, plot_style)
