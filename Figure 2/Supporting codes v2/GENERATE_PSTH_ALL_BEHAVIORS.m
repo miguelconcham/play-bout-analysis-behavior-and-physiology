@@ -146,7 +146,11 @@ for ch_n = 1:numel(mid_PAG_channel)
     disp('ready')
 
     freq_pow = mean(log10(pow_spectrogram(f >= freq_pow_range(1) & f <= freq_pow_range(2), :)));
-    freq_pow = movmean(freq_pow, 1 / max(freq_pow_range));
+    % 1/fmax is the written smooth, in spectrogram samples. For delta, theta,
+    % and gamma that is shorter than one sample, and movmean rejects a
+    % window below 1, so the smooth stays one sample.
+    smooth_bins = max(1, round(1 / max(freq_pow_range)));
+    freq_pow = movmean(freq_pow, smooth_bins);
 
     for beh_type = 1:numel(behaviors_this_session)
         behavior_index = find(ismember(Behavior.Type2, behaviors_this_session(beh_type)) & ismember(Behavior.Animal, repeated_animal));

@@ -199,7 +199,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | Analysis | Estimate | Analyze / paper plot |
 |----------|----------|----------------------|
 | Play-bout band-power PSTH | `Estimate_psth_band_power.m` | `Figure 2.m` |
-| PSTH per behavior | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
+| PSTH per behavior (delta, theta, gamma; onset and time-wrapped; play and non-play; self and other) | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
 | Area maps | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Call-locked PSTH | `Estimate_psth_calls_all_animals.m` | `Figure 2.m` `%% 13`–`%% 17` |
 | GLM / unique $R^2$ | `Estimate_psth_all_regressors.m` | `Figure 2.m` `%% 7` |

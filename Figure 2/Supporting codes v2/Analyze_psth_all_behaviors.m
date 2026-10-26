@@ -1,5 +1,12 @@
 %% Analyze_psth_all_behaviors
-% Per-behavior delta PSTH analysis (self vs partner) with LME and plotting.
+% Per-behavior PSTH analysis (self vs partner) with LME and plotting.
+% Onset-aligned and time-wrapped estimates, play and non-play.
+%
+% band_list selects which saved Estimate_psth_all_behaviors.m files to fit.
+% 'delta' keeps the original result filenames. 'theta' and 'gamma' write
+% results_full_lfp_per_behavior_<band>.mat and
+% results_full_lfp_per_behavior_time_warpped_<band>.mat.
+% Run Estimate_psth_all_behaviors.m first so those PSTH files exist.
 
 this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_all_behaviors.m';
 repo_root = fileparts(fileparts(fileparts(this_file)));
@@ -8,11 +15,26 @@ saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency
 figure_2_new_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\FIgure 2 delta modulation per behavior';
 
 all_behaviors = {'Pounce', 'CC','Boxing', 'Evasion','Pin', 'Escape', 'CB', 'CD','Grooming','Rearing', 'Sniffing','Scratching','PounceI', 'Bite'};
+band_list = {'theta', 'gamma'};
+
+for band_n = 1:numel(band_list)
+band_name = band_list{band_n};
+structure_file = ['psth_structure_' band_name '_all_behaviors_self_other_partner.mat'];
+names_file = ['animal_names_' band_name '_all_behaviors_self_other_partner.mat'];
+if strcmp(band_name, 'delta')
+    results_file = 'results_full_lfp_per_behavior.mat';
+    results_tw_file = 'results_full_lfp_per_behavior_time_warpped.mat';
+    svg_name = 'mean response play self and other.svg';
+else
+    results_file = ['results_full_lfp_per_behavior_' band_name '.mat'];
+    results_tw_file = ['results_full_lfp_per_behavior_time_warpped_' band_name '.mat'];
+    svg_name = ['mean response play self and other ' band_name '.svg'];
+end
 
 %% Load precomputed behavior PSTH structures
-disp('loading')
-load([saving_folder,'\psth_structure_delta_all_behaviors_self_other_partner.mat'],'psth_structure');
-load([saving_folder,'\animal_names_delta_all_behaviors_self_other_partner.mat'],'animal_names');
+disp(['loading ' band_name])
+load(fullfile(saving_folder, structure_file), 'psth_structure');
+load(fullfile(saving_folder, names_file), 'animal_names');
 disp('ready')
 
 %% Merge PSTH across sessions (self and partner)
@@ -69,6 +91,7 @@ end
 
 %% Preview — time-wrapped mean PSTH per behavior
 figure
+set(gcf, 'Name', band_name)
 for b = 1:14
     subplot(4,4,b)
     plot(time_wrap_time, mean(all_psth_onset_self{3,b}, 'omitmissing'))
@@ -81,6 +104,7 @@ end
 
 %% Preview — onset-aligned mean PSTH per behavior
 figure
+set(gcf, 'Name', band_name)
 for b = 1:14
     subplot(4,4,b)
     plot(time(2:end), mean(all_psth_onset_self{1,b}, 'omitmissing'))
@@ -198,11 +222,11 @@ for g = 1:2
 end
 
 %% Save LME results (optional — comment out if re-using saved file)
-save([saving_folder,'\results_full_lfp_per_behavior.mat'], ...
-    'results', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis', 'all_behaviors', '-v7.3')
+save(fullfile(saving_folder, results_file), ...
+    'results', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis', 'all_behaviors', 'band_name', '-v7.3')
 
 %% Load LME results
-load([saving_folder,'\results_full_lfp_per_behavior.mat'], ...
+load(fullfile(saving_folder, results_file), ...
     'results', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis', 'all_behaviors')
 
 %% Plot colormap and mean responses (play vs non-play)
@@ -217,6 +241,7 @@ matrix_noplay(~any(pval_noplay<alpha_tresh,2),:) = NaN;
 noplay_indexes = [group2, group2+numel(all_behaviors)];
 
 figure
+set(gcf, 'Name', band_name)
 colormap(jet(256))
 ax2 = subplot(3,1,2:3);
 matrix2plot = matrix_noplay;
@@ -249,6 +274,7 @@ ax2.Position(3) = ax1.Position(3);
 
 %% Plot bar and scatter comparison (onset-aligned)
 figure
+set(gcf, 'Name', band_name)
 subplot(1,2,1)
 y_lim = [-5 5];
 time2compare = [-.2 .5];
@@ -287,6 +313,7 @@ ylim([-2.5 3.5])
 
 %% Plot self vs other — play behaviors
 figure
+set(gcf, 'Name', band_name)
 index_self = group1;
 index_other = 1:numel(play_indexes);
 index_other(index_self) = [];
@@ -303,10 +330,11 @@ plot(time_analysis([1 end]), [0 0], 'k:')
 plot([0 0], [-2 4], 'k')
 axis tight
 set(gca,'TickDir','out')
-print(gcf,'-vector','-dsvg',[figure_2_new_folder,'\mean response play self and other.svg'])
+print(gcf,'-vector','-dsvg',fullfile(figure_2_new_folder, svg_name))
 
 %% Plot self vs other — non-play behaviors
 figure
+set(gcf, 'Name', band_name)
 no_play_indexes = [group2, group2+numel(all_behaviors)];
 index_self = 1:numel(group2);
 index_other = 1:numel(no_play_indexes);
@@ -421,11 +449,11 @@ for g = 1:2
 end
 
 %% Save time-wrapped LME results (optional)
-save([saving_folder,'\results_full_lfp_per_behavior_time_warpped.mat'], ...
-    'results_time_wrapped', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis_time_wrapped', 'all_behaviors', '-v7.3')
+save(fullfile(saving_folder, results_tw_file), ...
+    'results_time_wrapped', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis_time_wrapped', 'all_behaviors', 'band_name', '-v7.3')
 
 %% Load time-wrapped LME results
-load([saving_folder,'\results_full_lfp_per_behavior_time_warpped.mat'], ...
+load(fullfile(saving_folder, results_tw_file), ...
     'results_time_wrapped', 'all_behaviors_2x', 'group1', 'group2', 'time_analysis_time_wrapped', 'all_behaviors')
 
 %% Plot colormap and mean responses (time-wrapped)
@@ -437,6 +465,7 @@ pval_noplay = results_time_wrapped(2).p_beh;
 matrix_noplay(~any(pval_noplay<alpha_tresh,2),:) = NaN;
 
 figure
+set(gcf, 'Name', band_name)
 colormap(jet(256))
 ax2 = subplot(3,1,2:3);
 [~, ~, ci] = ttest(matrix_noplay);
@@ -469,6 +498,7 @@ ax2.Position(3) = ax1.Position(3);
 %% Plot bar and scatter comparison (time-wrapped)
 alpha_level = 0.01;
 figure
+set(gcf, 'Name', band_name)
 subplot(1,2,1)
 y_lim = [-5 5];
 time2compare = [0 5];
@@ -504,3 +534,4 @@ plot([-.25 .25]+1, mean(play_bars)*[1 1], 'r', 'MarkerSize', 8)
 [p, ~, stats] = ranksum(non_play_bars, play_bars);
 title([num2str(stats.zval), ' ', num2str(stats.ranksum), ' ', num2str(p)])
 ylim(y_lim)
+end
