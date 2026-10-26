@@ -1,9 +1,12 @@
-function traces = extract_delta_phase_vs_lpag_distance(pli_struct, animal_names)
+function traces = extract_delta_phase_vs_lpag_distance(pli_struct, animal_names, phase_field)
 %EXTRACT_DELTA_PHASE_VS_LPAG_DISTANCE  Delta phase vs LPAG-center distance.
 %
-% For every saved coherence-map session, take the delta (freq1) pairwise
-% phase-lag matrix and read one column: phase of each same-probe channel
-% relative to that probe's LPAG-center site.
+% For every saved coherence-map session, take the pairwise phase-lag
+% matrix and read one column: phase of each same-probe channel relative
+% to that probe's LPAG-center site.
+%
+% phase_field selects the matrix. Default is 'mean_phaseLag_freq1'
+% (delta, 1-5 Hz). Pass 'mean_phaseLag_freq2' for theta (6-12 Hz).
 %
 % LPAG center is the same geometry as Fig 2 PSTHs / GENERATE_PLAY_SESSION:
 % mean (x, y) of LPAG sites on the probe, then the closest LPAG site.
@@ -22,6 +25,11 @@ function traces = extract_delta_phase_vs_lpag_distance(pli_struct, animal_names)
 %   lpag_center_index, lpag_center_y
 %   channel_index, distance_um, phase_rad, phase_unwrapped, area
 %   border_distance_um, border_from_area, border_to_area
+
+if nargin < 3 || isempty(phase_field)
+    phase_field = 'mean_phaseLag_freq1';
+end
+phase_field = char(phase_field);
 
 if nargin < 2 || isempty(animal_names)
     animal_names = cell(numel(pli_struct), 1);
@@ -53,9 +61,9 @@ for session_n = 1:numel(pli_struct)
     session_name = local_session_name(animal_names, session_n);
     animal_id = local_animal_id(session_name);
 
-    if ~isfield(entry, 'mean_phaseLag_freq1')
+    if ~isfield(entry, phase_field)
         warning('extract_delta_phase_vs_lpag_distance:NoDeltaPhase', ...
-            '%s: no mean_phaseLag_freq1 — skipping', session_name);
+            '%s: no %s — skipping', session_name, phase_field);
         continue
     end
     if ~isfield(entry, 'channel_map') || ~isfield(entry, 'areas_by_channel')
@@ -64,7 +72,7 @@ for session_n = 1:numel(pli_struct)
         continue
     end
 
-    phase_matrix = entry.mean_phaseLag_freq1;
+    phase_matrix = entry.(phase_field);
     channel_map = entry.channel_map;
     areas = entry.areas_by_channel;
     n_chan = min([size(phase_matrix, 1), size(phase_matrix, 2), size(channel_map, 1), numel(areas)]);

@@ -1049,17 +1049,22 @@ legend({'dleta and gamma-locked','delta-locked gamma-unlocked','gamma-locked del
 % channel. Sections 1-17 are unchanged. This block only reads phase_struct,
 % animal_names, and data_root.
 %
-% For a neuron on channel X, the LPAG-ref coherence file stores
-% phase(X) - phase(mid-LPAG): mean_phaseLag_freq1 for delta (1-5 Hz) and
-% mean_phaseLag_freq2 for theta (6-12 Hz). The centered angle is
+% Coherence estimates are the full pairwise maps from Estimate_coherence_maps.m
+% (GENERATE_COHERNECE_MAPS_STRUCT), saved as:
+%   coherence_pli_struct_2026.mat
+%   coherence_pli_structure_animal_names2026.mat
+% under Analysis results\psth power by frequency and behavior.
+% The phase lag of channel X is the column of that matrix against the
+% mid-LPAG site on the same probe (phase(X) - phase(mid-LPAG)).
+% Delta uses mean_phaseLag_freq1. Theta uses mean_phaseLag_freq2.
+% The centered angle is
 %
 %   wrap(preferred angle - channel phase lag)
 %
-% cluster_info.ch and pli_struct.lfp_rows are both the 1-based LFP row, so
-% the lag subtracted here is the lag of the same trace used for the
-% preferred angle. Peak versus trough uses the section 13 split: trough
-% outside [-pi/2, pi/2], peak inside it. Locked neurons with no mid-LPAG
-% lag are left out of the new figures and of the retention counts.
+% The matrix row is the 1-based LFP row, matched to cluster_info.ch.
+% Peak versus trough uses the section 13 split: trough outside
+% [-pi/2, pi/2], peak inside it. Locked neurons with no mid-LPAG lag are
+% left out of the new figures and of the retention counts.
 %
 % Run sections 1 and 3 first. lpag_phase_lag_band has to match that load.
 
@@ -1073,6 +1078,20 @@ if numel(phase_struct) ~= size(animal_names, 1)
     error('Figure3:SessionCount', ...
         'phase_struct has %d sessions and animal_names has %d rows.', ...
         numel(phase_struct), size(animal_names, 1));
+end
+
+% Pairwise coherence files written by Estimate_coherence_maps.m
+lpag_coherence_folder = [data_root, '\Analysis results\psth power by frequency and behavior'];
+lpag_structure_file = [lpag_coherence_folder, '\coherence_pli_struct_2026.mat'];
+lpag_names_file = [lpag_coherence_folder, '\coherence_pli_structure_animal_names2026.mat'];
+disp('Coherence estimates from Estimate_coherence_maps.m')
+disp(['  ', lpag_structure_file])
+disp(['  ', lpag_names_file])
+
+if exist(lpag_structure_file, 'file') ~= 2 || exist(lpag_names_file, 'file') ~= 2
+    error('Figure3:MissingCoherence', ...
+        ['Pairwise coherence files were not found. Run Estimate_coherence_maps.m. ', ...
+        'Expected %s and %s.'], lpag_structure_file, lpag_names_file);
 end
 
 switch lower(lpag_phase_lag_band)
@@ -1090,49 +1109,33 @@ addpath(fullfile(lpag_repo_root, 'Custom functions'));
 addpath(fullfile(lpag_repo_root, 'Figure 2', 'Supporting codes v2'));
 addpath(fullfile(lpag_repo_root, 'Figure 3', 'Supporting codes'));
 
-lpag_coherence_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
-[lpag_structure_file, lpag_names_file] = find_latest_merged_coherence_files(lpag_coherence_folder, 'lpag_ref');
+disp('Loading pairwise coherence maps')
 lpag_coherence = load(lpag_structure_file, 'pli_struct');
 lpag_pli = lpag_coherence.pli_struct;
-lpag_coherence_names = {};
-if ~isempty(lpag_names_file) && exist(lpag_names_file, 'file') == 2
-    lpag_names_loaded = load(lpag_names_file, 'animal_names');
-    lpag_coherence_names = lpag_names_loaded.animal_names;
+lpag_names_loaded = load(lpag_names_file, 'animal_names');
+lpag_coherence_names = lpag_names_loaded.animal_names;
+if numel(lpag_pli) ~= size(lpag_coherence_names, 1)
+    warning('Figure3:CoherenceNames', ...
+        'coherence_pli_struct_2026.mat has %d sessions and the names file has %d rows.', ...
+        numel(lpag_pli), size(lpag_coherence_names, 1));
+end
+
+% One column per probe: phase of each same-probe channel versus mid-LPAG.
+lpag_traces = extract_delta_phase_vs_lpag_distance(lpag_pli, lpag_coherence_names, lpag_lag_field);
+clear lpag_pli lpag_coherence
+if isempty(lpag_traces)
+    error('Figure3:NoPhaseLags', ...
+        'No mid-LPAG phase-lag column in %s.', lpag_structure_file);
 end
 
 lpag_lag_by_channel = containers.Map('KeyType', 'char', 'ValueType', 'double');
-lpag_coherence_sessions = {};
+lpag_coherence_sessions = cell(numel(lpag_traces), 1);
 lpag_ref_lags = [];
-for lpag_k = 1:numel(lpag_pli)
-    if ~isfield(lpag_pli(lpag_k), lpag_lag_field) || isempty(lpag_pli(lpag_k).(lpag_lag_field))
-        continue
-    end
-    if ~isvector(lpag_pli(lpag_k).(lpag_lag_field))
-        error('Figure3:PairwisePhaseLag', ...
-            ['%s is a pairwise matrix. This section uses the mid-LPAG vector ', ...
-            'from Estimate_coherence_maps_lpag_ref.m.'], lpag_lag_field);
-    end
-    if ~isfield(lpag_pli(lpag_k), 'lfp_rows') || isempty(lpag_pli(lpag_k).lfp_rows)
-        warning('Figure3:NoLfpRows', ...
-            'Coherence entry %d has no lfp_rows. Skipping.', lpag_k);
-        continue
-    end
-
-    if isfield(lpag_pli(lpag_k), 'animal_code') && ~isempty(lpag_pli(lpag_k).animal_code)
-        lpag_session_name = lpag_pli(lpag_k).animal_code;
-    elseif ~isempty(lpag_coherence_names) && lpag_k <= size(lpag_coherence_names, 1)
-        lpag_session_name = lpag_coherence_names(lpag_k, 1);
-    else
-        lpag_session_name = sprintf('session %d', lpag_k);
-    end
-    if iscell(lpag_session_name)
-        lpag_session_name = lpag_session_name{1};
-    end
-    lpag_session_name = strtrim(char(lpag_session_name));
-    lpag_coherence_sessions{end + 1, 1} = lpag_session_name; %#ok<SAGROW>
-
-    lpag_rows = round(double(lpag_pli(lpag_k).lfp_rows(:)));
-    lpag_lags = double(lpag_pli(lpag_k).(lpag_lag_field)(:));
+for lpag_k = 1:numel(lpag_traces)
+    lpag_session_name = strtrim(char(lpag_traces(lpag_k).session_name));
+    lpag_coherence_sessions{lpag_k} = lpag_session_name;
+    lpag_rows = round(double(lpag_traces(lpag_k).channel_index(:)));
+    lpag_lags = double(lpag_traces(lpag_k).phase_rad(:));
     lpag_n = min(numel(lpag_rows), numel(lpag_lags));
     for lpag_i = 1:lpag_n
         if ~isfinite(lpag_rows(lpag_i)) || ~isfinite(lpag_lags(lpag_i))
@@ -1150,18 +1153,18 @@ for lpag_k = 1:numel(lpag_pli)
             lpag_lag_by_channel(lpag_key) = lpag_lags(lpag_i);
         end
     end
-
-    if isfield(lpag_pli(lpag_k), 'lpag_center_index') && ~isempty(lpag_pli(lpag_k).lpag_center_index)
-        lpag_ref = lpag_pli(lpag_k).lpag_center_index;
-        if lpag_ref >= 1 && lpag_ref <= numel(lpag_lags) && isfinite(lpag_lags(lpag_ref))
-            lpag_ref_lags(end + 1, 1) = lpag_lags(lpag_ref); %#ok<SAGROW>
-        end
+    lpag_ref = round(double(lpag_traces(lpag_k).lpag_center_index));
+    lpag_ref_pos = find(lpag_rows(1:lpag_n) == lpag_ref, 1);
+    if ~isempty(lpag_ref_pos) && isfinite(lpag_lags(lpag_ref_pos))
+        lpag_ref_lags(end + 1, 1) = lpag_lags(lpag_ref_pos); %#ok<SAGROW>
     end
 end
+clear lpag_traces
 if lpag_lag_by_channel.Count == 0
     error('Figure3:NoPhaseLags', ...
         'No mid-LPAG phase lags were read from %s.', lpag_structure_file);
 end
+fprintf('Read %d channel phase lags from %s\n', lpag_lag_by_channel.Count, lpag_structure_file);
 if ~isempty(lpag_ref_lags)
     fprintf('Mid-LPAG reference |phase lag| max = %.3g rad (expected near 0).\n', ...
         max(abs(lpag_ref_lags)));
@@ -1277,8 +1280,8 @@ fprintf(['LPAG-centered phase (%s): %d neurons, %d locked, %d locked with a ', .
     sum(lpag_locked & lpag_has_lag), sum(lpag_locked & ~lpag_has_lag));
 if sum(lpag_locked & lpag_has_lag) < 0.5 * sum(lpag_locked)
     warning('Figure3:PartialMatch', ...
-        ['Only %d of %d locked neurons matched an LFP row in the phase-lag file. ', ...
-        'Preferred angles use cluster_info.ch. Phase lags are stored on lfp_rows.'], ...
+        ['Only %d of %d locked neurons matched an LFP row in coherence_pli_struct_2026.mat. ', ...
+        'Preferred angles use cluster_info.ch. Phase lags use that same LFP row in the pairwise matrix.'], ...
         sum(lpag_locked & lpag_has_lag), sum(lpag_locked));
 end
 if ~any(lpag_locked & lpag_has_lag)
