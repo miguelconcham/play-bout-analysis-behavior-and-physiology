@@ -5,19 +5,32 @@
 % is distance to the probe tip, not depth: larger values are further from the
 % tip (upper), smaller values are closer to the tip (deeper).
 %
-% An optional figure pools every selected session of one animal. Each
-% channel is log10 power with the aperiodic fit and the theta Gaussians
-% removed, as in the LPAG analysis. Sites are averaged only when the shank
-% and the x and y coordinates match, so the same channel number can sit at
-% a different distance in another session. Frequency is the horizontal
-% axis and distance to the tip is the vertical axis.
+% An optional figure pools sessions onto one spectrogram. Two switches
+% choose the grouping. Recording days pull every selected file whose
+% folder starts with the same animal code, so B1D1 1007, B1D1 1012, and
+% B1D1 1013 share one figure. Partner sessions inside those files are
+% included. A separate switch can also draw one figure per recording
+% folder; that switch is off, so those three folders are not split into
+% three windows. Each channel is log10 power with the aperiodic fit and
+% the periodic Gaussians in pooled_periodic_ranges removed. Every listed
+% window is removed in that same figure. The default removes 6-12 Hz and
+% 0.1-1 Hz together. Sites are
+% averaged only when the shank and the x and y coordinates match. Channel
+% number is not used, because the channel map can change between days and
+% the same channel number can sit at a different distance. Frequency is
+% the horizontal axis and distance to the tip is the vertical axis. A
+% dotted line sits between neighboring sites when their region labels
+% differ and the sessions at those coordinates agree. Every area name on
+% the channel is used, including regions that are outside the selected
+% analysis list, such as InfCol.
 %
-% Each standard region also gets its own spectrum of that same residual.
-% At every frequency the estimate is a mixed model, Power ~ 1 + (1|Session)
-% + (1|Session:Channel), so channels are repeated measures nested in the
-% session. The central LPAG channel is drawn as a dotted reference. A
-% second figure tests region at each frequency and marks the region with
-% the strongest estimate.
+% Each standard region also gets its own spectrum. The aperiodic fit is
+% removed, and so are the periodic Gaussians whose centers fall in
+% periodic_ranges_to_subtract. At every frequency the estimate is a mixed
+% model, Power ~ 1 + (1|Session) + (1|Session:Channel), so channels are
+% repeated measures nested in the session. The central LPAG channel is
+% drawn as a dotted reference. A second figure tests region at each
+% frequency and marks the region with the strongest estimate.
 %
 % Selected sessions are stacked with mid-LPAG at zero. The figures keep saved
 % power, with no rescaling. A table written beside the spectra has the same
@@ -92,13 +105,35 @@ session_index = [];
 % Single-session figures are optional.
 plot_each_session = false;
 
-% Pooled spectrogram for each animal. Off until this switch is set true.
-% The color is log10 power minus the aperiodic fit minus theta Gaussians
-% whose centers fall inside theta_band, the same subtraction as the LPAG
-% analysis. Sessions of one animal are averaged only at identical
-% coordinates. Channel identity is ignored, because one channel can move
-% between sessions.
-plot_pooled_animal_spectra = false;
+% Pooled spectrogram, one figure per animal when pool_recording_days is
+% true. The color is log10 power minus the aperiodic fit minus periodic
+% Gaussians whose centers fall inside pooled_periodic_ranges. The two
+% switches below choose which sessions share a figure. Sites are averaged
+% only at a matching shank and matching x and y. Channel number is
+% ignored, because the channel map can change between days.
+plot_pooled_animal_spectra = true;
+
+% One figure per recording folder. Partner sessions are the rows inside
+% that file, so B1D1 1007, B1D1 1012, and B1D1 1013 stay in separate
+% windows. Leave this false when those days should share a figure.
+pool_partner_sessions = false;
+
+% One figure per recorded animal. The animal is the first chunk of the
+% folder name: B1D1 in "B1D1 1007 Dual", "B1D1 1012 Dual", and
+% "B1D1 1013 Dual". Every selected recording of that animal is included,
+% and so are its partner sessions. The same physical site is averaged
+% across days only when shank, x, and y match. A channel that moved to
+% new coordinates stays a separate row.
+pool_recording_days = true;
+
+% Frequency windows removed from the pooled spectrogram, together with
+% the aperiodic fit. Every window in the list is removed in the same
+% figure. Gaussians whose centers fall inside any listed window are
+% removed. Peaks outside those windows stay.
+%   pooled_periodic_ranges = {[6 12], [.1 1]};
+%   pooled_periodic_ranges = {[6 12; .1 1]};
+%   pooled_periodic_ranges = {[6 12]};
+pooled_periodic_ranges = {[6 12], [.1 1]};
 
 % log10 power minus the fitted aperiodic component. Switch to
 % 'log10_mean_power' to draw the session-mean spectrum itself.
@@ -106,7 +141,7 @@ spectrum_field = 'raw_aperiodic_subtracted';
 
 delta_band = [1 5];
 theta_band = [6 12];
-gamma_band = [30 45];
+gamma_band = [30 40];
 
 % Power and correlation figures use the Fourier spectra. Welch is available:
 %   spectral_method = {'Welch'};
@@ -124,9 +159,17 @@ bands_to_display = {'delta'};
 %   regions_to_display = {'LPAG', 'VLPAG', 'SupCol', 'DR'};
 regions_to_display = {'LPAG', 'VLPAG', 'SupCol'};
 
-% Spectra of log10 power after the aperiodic fit and theta Gaussians are
-% removed. One subplot per region. The list is the initial set.
+% Spectra of log10 power after the aperiodic fit and the periodic ranges
+% below are removed. One subplot per region. The list is the initial set.
 spectrum_regions = {'SupCol', 'DLPAG', 'LPAG', 'VLPAG', 'DR'};
+
+% Each entry is a frequency window removed from the region spectra,
+% together with the aperiodic fit. Every window in the list is removed
+% in the same figures. Peaks outside those windows stay.
+%   periodic_ranges_to_subtract = {[6 12], [.1 1]};
+%   periodic_ranges_to_subtract = {[6 12; .1 1]};
+%   periodic_ranges_to_subtract = {[6 12]};
+periodic_ranges_to_subtract = {[6 12], [.1 1]};
 
 % Ventral and dorsal curves. 'normalized' z-scores each band within the
 % shank and subtracts the power of the first channel on that side, so the
@@ -211,8 +254,13 @@ stacked_frequency = [];
 tracks = repmat(empty_track(), 0, 1);
 placed = repmat(empty_placed(), 0, 1);
 power_pieces = {};
+range_sets = {combined_periodic_ranges(periodic_ranges_to_subtract)};
+pooled_ranges = combined_periodic_ranges(pooled_periodic_ranges);
+region_pieces = cell(1, numel(range_sets));
 pooled_pieces = {};
-region_pieces = {};
+for set_n = 1:numel(range_sets)
+    region_pieces{set_n} = {};
+end
 
 %% Plot each requested session on its own
 for file_n = recording_index(:).'
@@ -275,14 +323,17 @@ for file_n = recording_index(:).'
             delta_band, theta_band, gamma_band, ...
             probe_spectra.animal_name, session_n, spectrum_field, ...
             artifact_trend_sd); %#ok<SAGROW>
-        if plot_pooled_animal_spectra
+        if plot_pooled_animal_spectra && ...
+                (pool_partner_sessions || pool_recording_days)
             pooled_pieces{end + 1} = residual_sites_from_session( ...
-                channel_table, this_session, frequency, theta_band, ...
-                probe_spectra.animal_name, spectral_method); %#ok<SAGROW>
+                channel_table, this_session, frequency, pooled_ranges, ...
+                probe_spectra.animal_name, session_n, spectral_method); %#ok<SAGROW>
         end
-        region_pieces{end + 1} = region_channel_records( ...
-            channel_table, this_session, frequency, theta_band, ...
-            probe_spectra.animal_name, session_n, spectral_method); %#ok<SAGROW>
+        for set_n = 1:numel(range_sets)
+            region_pieces{set_n}{end + 1} = region_channel_records( ...
+                channel_table, this_session, frequency, range_sets{set_n}, ...
+                probe_spectra.animal_name, session_n, spectral_method); %#ok<SAGROW>
+        end
 
         if plot_each_session
             plot_depth_spectrum(frequency, channel_table, ...
@@ -302,13 +353,19 @@ if isempty(placed)
     error('No probe channels were found in the selected recordings.');
 end
 if plot_pooled_animal_spectra
-    if isempty(pooled_pieces)
-        pooled_sites = repmat(empty_residual_site(), 0, 1);
+    if ~pool_partner_sessions && ~pool_recording_days
+        fprintf(['Pooled residual spectra were skipped because both ' ...
+            'pool_partner_sessions and pool_recording_days are false.\n']);
     else
-        pooled_sites = vertcat(pooled_pieces{:});
+        if isempty(pooled_pieces)
+            pooled_sites = repmat(empty_residual_site(), 0, 1);
+        else
+            pooled_sites = vertcat(pooled_pieces{:});
+        end
+        plot_pooled_residual_spectra(pooled_sites, stacked_frequency, ...
+            spectral_method, pooled_ranges, pool_partner_sessions, ...
+            pool_recording_days);
     end
-    plot_pooled_residual_spectra(pooled_sites, stacked_frequency, ...
-        spectral_method, theta_band);
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
     spectrum_field, region_border_bin_um);
@@ -342,13 +399,15 @@ plot_region_distances(placed, spectrum_field, ...
     delta_band, theta_band, gamma_band, spectral_method, ...
     regions_to_display, region_distance_scale, distance_model_bin_um, ...
     bands_to_display, plot_style);
-if isempty(region_pieces)
-    region_records = repmat(empty_region_record(), 0, 1);
-else
-    region_records = vertcat(region_pieces{:});
+for set_n = 1:numel(range_sets)
+    if isempty(region_pieces{set_n})
+        region_records = repmat(empty_region_record(), 0, 1);
+    else
+        region_records = vertcat(region_pieces{set_n}{:});
+    end
+    plot_region_residual_spectra(region_records, stacked_frequency, ...
+        spectral_method, range_sets{set_n}, spectrum_regions, plot_style);
 end
-plot_region_residual_spectra(region_records, stacked_frequency, ...
-    spectral_method, theta_band, spectrum_regions, plot_style);
 
 function plot_depth_spectrum(frequency, channel_table, ...
         welch_spectrum, fourier_spectrum, spectrum_field, ...
@@ -415,32 +474,42 @@ end
 
 function item = empty_residual_site()
 item = struct( ...
-    'animal', '', ...
+    'recording', '', ...
+    'animal_code', '', ...
+    'day_label', '', ...
+    'session', NaN, ...
     'shank', NaN, ...
     'x_um', NaN, ...
     'y_um', NaN, ...
+    'area_key', '', ...
     'welch', [], ...
     'fourier', []);
 end
 
 function sites = residual_sites_from_session(channel_table, session, ...
-        frequency, theta_band, animal_name, spectral_method)
+        frequency, ranges, animal_name, session_n, spectral_method)
 [~, method_ids] = selected_spectral_methods(spectral_method);
 method_fields = {'welch', 'fourier'};
 n_channels = height(channel_table);
 sites = repmat(empty_residual_site(), n_channels, 1);
-animal = char(string(animal_name));
+recording = char(string(animal_name));
+[animal_code, day_label] = recording_identity(recording);
 residuals = cell(1, 2);
 for slot_n = 1:numel(method_ids)
     method_n = method_ids(slot_n);
     residuals{method_n} = residual_matrix( ...
-        session.(method_fields{method_n}), frequency, theta_band, n_channels);
+        session.(method_fields{method_n}), frequency, ranges, n_channels);
 end
 for channel_n = 1:n_channels
-    sites(channel_n).animal = animal;
+    sites(channel_n).recording = recording;
+    sites(channel_n).animal_code = animal_code;
+    sites(channel_n).day_label = day_label;
+    sites(channel_n).session = session_n;
     sites(channel_n).shank = channel_table.ProbeNumber(channel_n);
     sites(channel_n).x_um = channel_table.Xum(channel_n);
     sites(channel_n).y_um = channel_table.Yum(channel_n);
+    sites(channel_n).area_key = region_border_key( ...
+        area_label_at(channel_table.Area, channel_n));
     if ~isempty(residuals{1})
         sites(channel_n).welch = residuals{1}(channel_n, :);
     end
@@ -450,12 +519,39 @@ for channel_n = 1:n_channels
 end
 end
 
-function residual = residual_matrix(fitted, frequency, theta_band, n_channels)
+function [animal_code, day_label] = recording_identity(name)
+% "B1D1 1007 Dual" and "B1D1_1007_Dual" both give animal B1D1, day 1007.
+% The same split applies to play_session_probe_periodic_spectra_B1D1_1007_Dual.mat.
+name = strtrim(char(string(name)));
+name = strrep(name, char(160), ' ');
+if numel(name) > 4 && strcmpi(name(end - 3:end), '.mat')
+    name = name(1:end - 4);
+end
+stem = 'play_session_probe_periodic_spectra_';
+if strncmpi(name, stem, numel(stem))
+    name = name(numel(stem) + 1:end);
+end
+name = strtrim(strrep(name, '_', ' '));
+tokens = regexp(name, '\s+', 'split');
+if isempty(name) || isempty(tokens) || isempty(tokens{1})
+    animal_code = '';
+    day_label = '';
+    return
+end
+animal_code = tokens{1};
+if numel(tokens) >= 2
+    day_label = tokens{2};
+else
+    day_label = '';
+end
+end
+
+function residual = residual_matrix(fitted, frequency, ranges, n_channels)
 required = {'log10_mean_power', 'aperiodic_fit', 'gaussian_params'};
 for field_n = 1:numel(required)
     if ~isfield(fitted, required{field_n})
-        error(['Saved spectra have no %s, so theta and the aperiodic ' ...
-            'fit cannot be removed.'], required{field_n});
+        error(['Saved spectra have no %s, so the periodic ranges and the ' ...
+            'aperiodic fit cannot be removed.'], required{field_n});
     end
 end
 log_power = fitted.log10_mean_power;
@@ -469,19 +565,19 @@ end
 if ~iscell(fitted.gaussian_params) || numel(fitted.gaussian_params) ~= n_channels
     error('gaussian_params must hold one peak matrix per channel.');
 end
+ranges = periodic_range_matrix(ranges);
 residual = nan(n_channels, n_frequency);
 for channel_n = 1:n_channels
-    residual(channel_n, :) = subtract_theta_and_aperiodic( ...
+    residual(channel_n, :) = subtract_periodic_and_aperiodic( ...
         log_power(channel_n, :), aperiodic(channel_n, :), ...
-        fitted.gaussian_params{channel_n}, frequency, theta_band);
+        fitted.gaussian_params{channel_n}, frequency, ranges);
 end
 end
 
-function residual = subtract_theta_and_aperiodic( ...
-        log_power, aperiodic, gaussians, frequency, theta_band)
-% FOOOF components are additive in log10 power. Theta peaks are the
-% Gaussians whose center frequency lies inside theta_band, matching
-% Analyse_play_session_lpag_spectra.m.
+function residual = subtract_periodic_and_aperiodic( ...
+        log_power, aperiodic, gaussians, frequency, ranges)
+% FOOOF components are additive in log10 power. A peak is removed when
+% its center lies inside one of the requested ranges. Other peaks stay.
 residual = log_power(:).' - aperiodic(:).';
 if isempty(gaussians) || size(gaussians, 2) < 3 || size(gaussians, 1) < 1
     return
@@ -490,31 +586,113 @@ center = gaussians(:, 1);
 peak_height = gaussians(:, 2);
 width = gaussians(:, 3);
 keep = isfinite(center) & isfinite(peak_height) & isfinite(width) & ...
-    width ~= 0 & center >= theta_band(1) & center <= theta_band(2);
+    width ~= 0 & center_in_ranges(center, ranges);
 center = center(keep);
 peak_height = peak_height(keep);
 width = width(keep);
 residual = residual - sum_gaussians(center, peak_height, width, frequency);
 end
 
-function plot_pooled_residual_spectra(sites, frequency, spectral_method, theta_band)
+function sets = periodic_range_sets(ranges)
+if iscell(ranges)
+    sets = cell(1, numel(ranges));
+    for set_n = 1:numel(ranges)
+        sets{set_n} = periodic_range_matrix(ranges{set_n});
+    end
+    if isempty(sets)
+        error('At least one periodic frequency window is required.');
+    end
+    return
+end
+sets = {periodic_range_matrix(ranges)};
+end
+
+function ranges = combined_periodic_ranges(ranges)
+% Every listed window is removed together. A cell of windows and a matrix
+% with one window per row name the same subtraction.
+sets = periodic_range_sets(ranges);
+ranges = zeros(0, 2);
+for set_n = 1:numel(sets)
+    ranges = [ranges; sets{set_n}]; %#ok<AGROW>
+end
+end
+
+function ranges = periodic_range_matrix(ranges)
+if isempty(ranges)
+    ranges = zeros(0, 2);
+    return
+end
+ranges = double(ranges);
+if isvector(ranges)
+    if numel(ranges) ~= 2
+        error('Each periodic range needs a low and a high frequency.');
+    end
+    ranges = ranges(:).';
+end
+if size(ranges, 2) ~= 2
+    error(['periodic_ranges_to_subtract must be [low high], a matrix ' ...
+        'with those two columns, or a cell of those.']);
+end
+if any(~isfinite(ranges(:))) || any(ranges(:, 1) > ranges(:, 2))
+    error('Each periodic range needs finite edges with low <= high.');
+end
+end
+
+function inside = center_in_ranges(center, ranges)
+inside = false(size(center));
+for range_n = 1:size(ranges, 1)
+    inside = inside | (center >= ranges(range_n, 1) & ...
+        center <= ranges(range_n, 2));
+end
+end
+
+function label = periodic_range_label(ranges)
+if isempty(ranges)
+    label = 'no periodic range';
+    return
+end
+label = sprintf('%g-%g Hz', ranges(1, 1), ranges(1, 2));
+for range_n = 2:size(ranges, 1)
+    label = sprintf('%s, %g-%g Hz', label, ranges(range_n, 1), ranges(range_n, 2));
+end
+end
+
+function plot_pooled_residual_spectra(sites, frequency, spectral_method, ...
+        ranges, pool_partner_sessions, pool_recording_days)
 if isempty(sites)
     fprintf('No channels were available for the pooled residual spectra.\n');
     return
 end
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 method_fields = {'welch', 'fourier'};
-animals = unique({sites.animal}, 'stable');
-for animal_n = 1:numel(animals)
-    animal_name = animals{animal_n};
-    animal_sites = sites(strcmp({sites.animal}, animal_name));
-    plot_one_animal_residual(animal_sites, animal_name, frequency, ...
-        method_names, method_ids, method_fields, theta_band);
+if pool_recording_days
+    animal_codes = unique({sites.animal_code}, 'stable');
+    fprintf(['Recording-day pooling: %d animal codes. Folders that share ' ...
+        'the first name chunk are one figure.\n'], numel(animal_codes));
+    for code_n = 1:numel(animal_codes)
+        animal_code = animal_codes{code_n};
+        these_sites = sites(strcmp({sites.animal_code}, animal_code));
+        fprintf('  %s combines %s\n', animal_code, ...
+            joined_recordings(these_sites));
+        plot_one_animal_residual(these_sites, animal_code, frequency, ...
+            method_names, method_ids, method_fields, ranges, 'days');
+    end
+end
+if pool_partner_sessions
+    recordings = unique({sites.recording}, 'stable');
+    fprintf(['Partner-session pooling: %d recording folders, each in ' ...
+        'its own figure.\n'], numel(recordings));
+    for recording_n = 1:numel(recordings)
+        recording_name = recordings{recording_n};
+        these_sites = sites(strcmp({sites.recording}, recording_name));
+        plot_one_animal_residual(these_sites, recording_name, frequency, ...
+            method_names, method_ids, method_fields, ranges, 'partner');
+    end
 end
 end
 
-function plot_one_animal_residual(sites, animal_name, frequency, ...
-        method_names, method_ids, method_fields, theta_band)
+function plot_one_animal_residual(sites, group_name, frequency, ...
+        method_names, method_ids, method_fields, ranges, pool_mode)
 shank_id = reshape([sites.shank], [], 1);
 shank_list = unique(shank_id(isfinite(shank_id)));
 shank_list = sort(shank_list);
@@ -553,12 +731,30 @@ for shank_n = 1:n_shanks
     n_rows = n_rows + numel(panels{1, shank_n}.depth_um);
     n_merged = n_merged + nnz(panels{1, shank_n}.n_averaged > 1);
 end
-fprintf(['Pooled residual spectrum | %s | %d sites from %d session ' ...
+[n_recordings, n_partner] = pooled_group_counts(sites);
+if strcmp(pool_mode, 'days')
+    figure_prefix = 'Pooled recording days';
+    shown_name = sprintf('%s | days %s', group_name, joined_day_labels(sites));
+    match_line = ['Sites averaged across days only where shank, x, and y ' ...
+        'match. Channel number is not used.'];
+    grouping_line = sprintf('%d recording folders (%s) | %d partner sessions', ...
+        n_recordings, joined_recordings(sites), n_partner);
+else
+    figure_prefix = 'Pooled partner sessions';
+    shown_name = group_name;
+    match_line = ['Partner sessions of one recording day, averaged only ' ...
+        'where shank, x, and y match. Channel number is not used.'];
+    grouping_line = sprintf('%d recording folders | %d partner sessions', ...
+        n_recordings, n_partner);
+end
+range_label = periodic_range_label(ranges);
+fprintf(['%s | %s | removed %s | %s | %d sites from %d session ' ...
     'channels | %d sites combined matching coordinates\n'], ...
-    animal_name, n_rows, numel(sites), n_merged);
+    figure_prefix, shown_name, range_label, grouping_line, n_rows, ...
+    numel(sites), n_merged);
 
-figure('Name', ['Pooled residual spectrum | ', animal_name], 'Color', 'w', ...
-    'Position', [80 80 max(360, 280 * max(n_shanks, 1)) 720]);
+figure('Name', [figure_prefix, ' | ', shown_name, ' | ', range_label], ...
+    'Color', 'w', 'Position', [80 80 max(360, 280 * max(n_shanks, 1)) 720]);
 colors = diverging_or_sequential('raw_aperiodic_subtracted');
 for slot_n = 1:n_methods
     color_limits = spectrum_color_limits( ...
@@ -587,6 +783,7 @@ for slot_n = 1:n_methods
             caxis(color_limits);
         end
         set(gca, 'YDir', 'normal')
+        mark_region_divisions(depth, pooled.area_key, use_depth_axis)
         xlabel('Frequency (Hz)')
         if shank_n == 1
             ylabel('Distance to tip (µm)')
@@ -596,19 +793,51 @@ for slot_n = 1:n_methods
         box off
     end
     color_bar = colorbar;
-    ylabel(color_bar, {'log10 power', 'minus aperiodic and theta'})
+    ylabel(color_bar, {'log10 power', ['minus aperiodic and ', range_label]})
 end
-sgtitle({animal_name, ...
-    sprintf('log10 power minus aperiodic fit and theta (%.0f-%.0f Hz)', ...
-    theta_band(1), theta_band(2)), ...
-    'Sessions averaged only where shank, x, and y match'}, ...
-    'Interpreter', 'none')
+sgtitle({[figure_prefix, ' | ', shown_name], grouping_line, ...
+    sprintf('log10 power minus aperiodic fit and %s', range_label), ...
+    match_line}, 'Interpreter', 'none')
 drawnow
+end
+
+function [n_recordings, n_partner] = pooled_group_counts(sites)
+n_recordings = numel(unique({sites.recording}, 'stable'));
+session_keys = cell(numel(sites), 1);
+for site_n = 1:numel(sites)
+    session_keys{site_n} = sprintf('%s|%g', sites(site_n).recording, ...
+        sites(site_n).session);
+end
+n_partner = numel(unique(session_keys, 'stable'));
+end
+
+function label = joined_recordings(sites)
+recordings = unique({sites.recording}, 'stable');
+label = recordings{1};
+for recording_n = 2:numel(recordings)
+    label = [label, ' || ', recordings{recording_n}]; %#ok<AGROW>
+end
+end
+
+function label = joined_day_labels(sites)
+recordings = unique({sites.recording}, 'stable');
+labels = cell(1, numel(recordings));
+for recording_n = 1:numel(recordings)
+    match = find(strcmp({sites.recording}, recordings{recording_n}), 1);
+    labels{recording_n} = sites(match).day_label;
+    if isempty(labels{recording_n})
+        labels{recording_n} = recordings{recording_n};
+    end
+end
+label = labels{1};
+for label_n = 2:numel(labels)
+    label = [label, ', ', labels{label_n}]; %#ok<AGROW>
+end
 end
 
 function pooled = pool_sites_by_coordinate(sites, method_field)
 pooled = struct('label', '', 'depth_um', [], 'x_um', [], ...
-    'spectrum', [], 'n_averaged', []);
+    'spectrum', [], 'n_averaged', [], 'area_key', {{}});
 if isempty(sites)
     return
 end
@@ -633,12 +862,16 @@ n_groups = max(group);
 depth = nan(n_groups, 1);
 lateral = nan(n_groups, 1);
 n_averaged = zeros(n_groups, 1);
+area_key = cell(n_groups, 1);
 pooled_spectrum = nan(n_groups, size(spectrum, 2));
+site_areas = {sites.area_key};
+site_areas = site_areas(:);
 for group_n = 1:n_groups
     in_group = group == group_n;
     depth(group_n) = mean(y_um(in_group), 'omitnan');
     lateral(group_n) = mean(x_um(in_group), 'omitnan');
     n_averaged(group_n) = nnz(in_group);
+    area_key{group_n} = agreed_area_key(site_areas(in_group));
     pooled_spectrum(group_n, :) = mean(spectrum(in_group, :), 1, 'omitnan');
 end
 order_y = depth;
@@ -650,6 +883,99 @@ pooled.depth_um = depth(order);
 pooled.x_um = lateral(order);
 pooled.spectrum = pooled_spectrum(order, :);
 pooled.n_averaged = n_averaged(order);
+pooled.area_key = area_key(order);
+end
+
+function key = region_border_key(label)
+% Borders use every labeled area. The region lists above choose which
+% areas enter the statistical figures, and they do not hide a border.
+names = border_region_names(label);
+if isempty(names)
+    key = '';
+    return
+end
+names = sort(names);
+key = names{1};
+for name_n = 2:numel(names)
+    key = [key, ',', names{name_n}]; %#ok<AGROW>
+end
+end
+
+function names = border_region_names(label)
+tokens = split_area_label(label);
+names = cell(1, 0);
+for token_n = 1:numel(tokens)
+    name = border_region_name(tokens{token_n});
+    if isempty(name) || any(strcmp(names, name))
+        continue
+    end
+    names{end + 1} = name; %#ok<AGROW>
+end
+end
+
+function name = border_region_name(token)
+token = strtrim(char(string(token)));
+if isempty(token)
+    name = '';
+    return
+end
+if name_is_supcol(token)
+    name = 'SC';
+    return
+end
+name = token;
+end
+
+function key = agreed_area_key(keys)
+keys = keys(~cellfun('isempty', keys));
+if isempty(keys)
+    key = '';
+    return
+end
+unique_keys = unique(keys, 'stable');
+if numel(unique_keys) == 1
+    key = unique_keys{1};
+else
+    key = '';
+end
+end
+
+function mark_region_divisions(depth_um, area_keys, use_depth_axis)
+if numel(depth_um) < 2 || numel(area_keys) ~= numel(depth_um)
+    return
+end
+hold on
+x_limits = xlim;
+for row_n = 1:numel(depth_um) - 1
+    below = area_keys{row_n};
+    above = area_keys{row_n + 1};
+    if isempty(below) || isempty(above) || strcmp(below, above)
+        continue
+    end
+    if use_depth_axis
+        y_value = (depth_um(row_n) + depth_um(row_n + 1)) / 2;
+    else
+        y_value = row_n + 0.5;
+    end
+    if ~isfinite(y_value)
+        continue
+    end
+    yline(y_value, ':', 'Color', [0.15 0.15 0.15], ...
+        'LineWidth', 1.1, 'HandleVisibility', 'off');
+    text(x_limits(1), y_value, ['  ', ...
+        region_border_label(below), ' | ', region_border_label(above)], ...
+        'Color', [0.15 0.15 0.15], 'FontSize', 7, ...
+        'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom', ...
+        'Interpreter', 'none', 'Clipping', 'on');
+end
+end
+
+function label = region_border_label(key)
+parts = strsplit(key, ',');
+label = region_display_name(parts{1});
+for part_n = 2:numel(parts)
+    label = [label, ', ', region_display_name(parts{part_n})]; %#ok<AGROW>
+end
 end
 
 function coordinate_ticks(depth_um, x_um)
@@ -3540,7 +3866,7 @@ item = struct( ...
 end
 
 function records = region_channel_records(channel_table, session, ...
-        frequency, theta_band, animal_name, session_n, spectral_method)
+        frequency, ranges, animal_name, session_n, spectral_method)
 [~, method_ids] = selected_spectral_methods(spectral_method);
 method_fields = {'welch', 'fourier'};
 if ~ismember('IsLPAGCenter', channel_table.Properties.VariableNames)
@@ -3553,7 +3879,7 @@ records = repmat(empty_region_record(), 0, 1);
 for slot_n = 1:numel(method_ids)
     method_n = method_ids(slot_n);
     residual = residual_matrix(session.(method_fields{method_n}), ...
-        frequency, theta_band, n_channels);
+        frequency, ranges, n_channels);
     these = repmat(empty_region_record(), n_channels, 1);
     for channel_n = 1:n_channels
         these(channel_n).animal = animal;
@@ -3594,11 +3920,12 @@ end
 end
 
 function plot_region_residual_spectra(records, frequency, spectral_method, ...
-        theta_band, spectrum_regions, plot_style)
+        ranges, spectrum_regions, plot_style)
 if isempty(records) || isempty(frequency)
     fprintf('No channels were available for the region spectra.\n');
     return
 end
+range_label = periodic_range_label(ranges);
 region_names = selected_regions(spectrum_regions);
 region_names = region_names(~strcmp(region_names, 'Other'));
 region_names = unique(region_names, 'stable');
@@ -3614,16 +3941,17 @@ for slot_n = 1:numel(method_ids)
     if isempty(method_records)
         continue
     end
-    fprintf(['Region spectra | %s | theta-free aperiodic residual | ' ...
-        '%d channels\n'], method_names{slot_n}, numel(method_records));
+    fprintf(['Region spectra | %s | aperiodic fit and %s removed | ' ...
+        '%d channels\n'], method_names{slot_n}, range_label, ...
+        numel(method_records));
     [fits, center_fit] = fit_region_spectrum_means( ...
         method_records, frequency, region_names);
     effect = fit_region_effect_by_frequency( ...
         method_records, frequency, region_names);
     draw_region_spectrum_panels(frequency, region_names, fits, center_fit, ...
-        method_names{slot_n}, theta_band, plot_style);
+        method_names{slot_n}, range_label, plot_style);
     draw_region_effect_figure(frequency, region_names, effect, ...
-        method_names{slot_n}, theta_band);
+        method_names{slot_n}, range_label);
     report_region_effect(method_names{slot_n}, region_names, effect);
 end
 end
@@ -3959,9 +4287,10 @@ winner = finite_region(best);
 end
 
 function draw_region_spectrum_panels(frequency, region_names, fits, ...
-        center_fit, method_name, theta_band, plot_style)
+        center_fit, method_name, range_label, plot_style)
 n_regions = numel(region_names);
-figure('Name', ['Region spectra | ', method_name], 'Color', 'w', ...
+figure('Name', sprintf('Region spectra | %s | %s removed', ...
+    method_name, range_label), 'Color', 'w', ...
     'Position', [70 30 860 180 * n_regions]);
 y_limits = spectrum_panel_limits(fits, center_fit);
 for region_n = 1:n_regions
@@ -3998,9 +4327,8 @@ for region_n = 1:n_regions
     end
     box off
 end
-sgtitle({sprintf('%s | theta-free aperiodic spectrum', method_name), ...
-    sprintf('Theta %g-%g Hz removed. %s', theta_band(1), theta_band(2), ...
-    'Channels nested in session. Dotted line is central LPAG.')}, ...
+sgtitle({sprintf('%s | aperiodic fit and %s removed', method_name, range_label), ...
+    'Channels nested in session. Dotted line is central LPAG.'}, ...
     'FontSize', 10)
 drawnow
 end
@@ -4058,10 +4386,11 @@ end
 end
 
 function draw_region_effect_figure(frequency, region_names, effect, ...
-        method_name, theta_band)
+        method_name, range_label)
 n_regions = numel(region_names);
 labels = cellfun(@region_display_name, region_names, 'UniformOutput', false);
-figure('Name', ['Region effect by frequency | ', method_name], ...
+figure('Name', sprintf('Region effect by frequency | %s | %s removed', ...
+    method_name, range_label), ...
     'Color', 'w', 'Position', [100 40 960 760]);
 heatmap_axis = subplot(3, 1, 1);
 finite_values = effect.emm(isfinite(effect.emm));
@@ -4124,9 +4453,9 @@ xlabel('Frequency (Hz)')
 title('Strongest region where regions differ')
 box off
 sgtitle({sprintf('%s | regional effect by frequency', method_name), ...
-    sprintf(['Theta %g-%g Hz and the aperiodic fit removed. ' ...
-    'Gray frequencies have no region effect at p < 0.05.'], ...
-    theta_band(1), theta_band(2))}, 'FontSize', 10)
+    sprintf(['%s removed with the aperiodic fit. ' ...
+    'Gray frequencies have no region effect at p < 0.05.'], range_label)}, ...
+    'FontSize', 10)
 drawnow
 end
 
