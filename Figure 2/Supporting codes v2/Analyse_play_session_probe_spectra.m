@@ -17,7 +17,9 @@
 % 0.1-1 Hz together. Sites are
 % averaged only when the shank and the x and y coordinates match. Channel
 % number is not used, because the channel map can change between days and
-% the same channel number can sit at a different distance. Frequency is
+% the same channel number can sit at a different distance. A Gaussian
+% smooth of pooled_smooth_um by pooled_smooth_hz softens small region
+% steps on that image. Frequency is
 % the horizontal axis and distance to the tip is the vertical axis. A
 % dotted line sits between neighboring sites when their region labels
 % differ. Each region span is also labeled, including a shank that stays
@@ -135,6 +137,12 @@ pool_recording_days = true;
 %   pooled_periodic_ranges = {[6 12; .1 1]};
 %   pooled_periodic_ranges = {[6 12]};
 pooled_periodic_ranges = {[6 12], [.1 1]};
+
+% Gaussian smoothing of the pooled spectrogram, after the sites are
+% averaged. The widths are standard deviations: distance to the tip, and
+% frequency. Set either value to 0 to leave that axis unsmoothed.
+pooled_smooth_um = 100;
+pooled_smooth_hz = 1;
 
 % log10 power minus the fitted aperiodic component. Switch to
 % 'log10_mean_power' to draw the session-mean spectrum itself.
@@ -365,7 +373,7 @@ if plot_pooled_animal_spectra
         end
         plot_pooled_residual_spectra(pooled_sites, stacked_frequency, ...
             spectral_method, pooled_ranges, pool_partner_sessions, ...
-            pool_recording_days);
+            pool_recording_days, pooled_smooth_um, pooled_smooth_hz);
     end
 end
 power_table = write_lpag_distance_table(power_pieces, saving_folder, ...
@@ -659,10 +667,15 @@ end
 end
 
 function plot_pooled_residual_spectra(sites, frequency, spectral_method, ...
-        ranges, pool_partner_sessions, pool_recording_days)
+        ranges, pool_partner_sessions, pool_recording_days, ...
+        smooth_um, smooth_hz)
 if isempty(sites)
     fprintf('No channels were available for the pooled residual spectra.\n');
     return
+end
+if ~isfinite(smooth_um) || smooth_um < 0 || ~isfinite(smooth_hz) || smooth_hz < 0
+    error(['pooled_smooth_um and pooled_smooth_hz must be finite and ' ...
+        'greater than or equal to 0.']);
 end
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 method_fields = {'welch', 'fourier'};
@@ -676,7 +689,8 @@ if pool_recording_days
         fprintf('  %s combines %s\n', animal_code, ...
             joined_recordings(these_sites));
         plot_one_animal_residual(these_sites, animal_code, frequency, ...
-            method_names, method_ids, method_fields, ranges, 'days');
+            method_names, method_ids, method_fields, ranges, 'days', ...
+            smooth_um, smooth_hz);
     end
 end
 if pool_partner_sessions
@@ -687,13 +701,15 @@ if pool_partner_sessions
         recording_name = recordings{recording_n};
         these_sites = sites(strcmp({sites.recording}, recording_name));
         plot_one_animal_residual(these_sites, recording_name, frequency, ...
-            method_names, method_ids, method_fields, ranges, 'partner');
+            method_names, method_ids, method_fields, ranges, 'partner', ...
+            smooth_um, smooth_hz);
     end
 end
 end
 
 function plot_one_animal_residual(sites, group_name, frequency, ...
-        method_names, method_ids, method_fields, ranges, pool_mode)
+        method_names, method_ids, method_fields, ranges, pool_mode, ...
+        smooth_um, smooth_hz)
 shank_id = reshape([sites.shank], [], 1);
 shank_list = unique(shank_id(isfinite(shank_id)));
 shank_list = sort(shank_list);
@@ -717,6 +733,9 @@ for shank_n = 1:n_shanks
         method_n = method_ids(slot_n);
         pooled = pool_sites_by_coordinate( ...
             shank_sites, method_fields{method_n});
+        pooled.spectrum = smooth_pooled_spectrum( ...
+            pooled.spectrum, pooled.depth_um, frequency, ...
+            smooth_um, smooth_hz);
         pooled.label = shank_label;
         panels{slot_n, shank_n} = pooled;
         if ~isempty(pooled.spectrum)
@@ -796,10 +815,71 @@ for slot_n = 1:n_methods
     color_bar = colorbar;
     ylabel(color_bar, {'log10 power', ['minus aperiodic and ', range_label]})
 end
-sgtitle({[figure_prefix, ' | ', shown_name], grouping_line, ...
-    sprintf('log10 power minus aperiodic fit and %s', range_label), ...
-    match_line}, 'Interpreter', 'none')
+sgtitle_lines = {[figure_prefix, ' | ', shown_name], grouping_line, ...
+    sprintf('log10 power minus aperiodic fit and %s', range_label)};
+if smooth_um > 0 || smooth_hz > 0
+    sgtitle_lines{end + 1} = sprintf( ...
+        'Gaussian smooth %g µm along distance to the tip, %g Hz along frequency', ...
+        smooth_um, smooth_hz); %#ok<AGROW>
+end
+sgtitle_lines{end + 1} = match_line; %#ok<AGROW>
+sgtitle(sgtitle_lines, 'Interpreter', 'none')
 drawnow
+end
+
+function spectrum = smooth_pooled_spectrum(spectrum, depth_um, frequency, ...
+        sigma_um, sigma_hz)
+if isempty(spectrum)
+    return
+end
+spectrum = smooth_along_frequency(spectrum, frequency, sigma_hz);
+spectrum = smooth_along_depth(spectrum, depth_um, sigma_um);
+end
+
+function spectrum = smooth_along_frequency(spectrum, frequency, sigma_hz)
+if ~(isfinite(sigma_hz) && sigma_hz > 0) || size(spectrum, 2) < 2
+    return
+end
+frequency = frequency(:);
+if numel(frequency) ~= size(spectrum, 2)
+    error('Frequency grid does not match the pooled spectrogram.');
+end
+weight = gaussian_coordinate_weight(frequency, sigma_hz);
+[spectrum, finite] = finite_matrix(spectrum);
+numer = spectrum * weight;
+denom = double(finite) * weight;
+spectrum = numer ./ denom;
+spectrum(denom == 0) = NaN;
+end
+
+function spectrum = smooth_along_depth(spectrum, depth_um, sigma_um)
+if ~(isfinite(sigma_um) && sigma_um > 0) || size(spectrum, 1) < 2
+    return
+end
+depth_um = depth_um(:);
+if numel(depth_um) ~= size(spectrum, 1)
+    error('Distance to the tip does not match the pooled spectrogram.');
+end
+weight = gaussian_coordinate_weight(depth_um, sigma_um);
+[spectrum, finite] = finite_matrix(spectrum);
+numer = weight * spectrum;
+denom = weight * double(finite);
+spectrum = numer ./ denom;
+spectrum(denom == 0) = NaN;
+end
+
+function weight = gaussian_coordinate_weight(coordinate, sigma)
+coordinate = coordinate(:);
+delta = coordinate - coordinate.';
+weight = exp(-0.5 * (delta ./ sigma).^2);
+missing = ~isfinite(coordinate);
+weight(missing, :) = 0;
+weight(:, missing) = 0;
+end
+
+function [values, finite] = finite_matrix(values)
+finite = isfinite(values);
+values(~finite) = 0;
 end
 
 function [n_recordings, n_partner] = pooled_group_counts(sites)
