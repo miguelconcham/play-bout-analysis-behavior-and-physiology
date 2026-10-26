@@ -112,11 +112,17 @@ for j=1:numel(psth_structure)
             this_psth_ab(trial,:) = movmean(this_psth_ab(trial,:), smooth_wind);
         end
        
-        % 4000 was the ±20 s grid at 10 ms. A 50 ms grid has 801 bins
-        % (-20:0.05:20), so that fixed slice is out of range. Keep this
-        % session's play-bout width; only a one-bin endpoint mismatch is trimmed.
-        n_time = size(psth_structure(j).play_bout_onset, 2);
-        this_psth_ab = match_psth_columns(this_psth_ab, n_time);
+        % `time` is the figure axis. On the paper range it has 4001 bins.
+        % Keep that range when this PSTH is at least that wide. A shorter
+        % grid (801 bins) stays at its own width; column 4000 is not read.
+        n_axis = numel(time);
+        this_psth_ab = figure_psth_columns(this_psth_ab, n_axis);
+        if ~isempty(all_psth_onset_behavior) && size(this_psth_ab, 2) ~= size(all_psth_onset_behavior, 2)
+            error('Figure2:PsthWidth', ...
+                ['Session %s has %d behavior-onset bins and the pooled rows have %d. ' ...
+                 'The figure time axis has %d bins (4001 on the paper range).'], ...
+                animal_names{j, 1}, size(this_psth_ab, 2), size(all_psth_onset_behavior, 2), n_axis);
+        end
         all_psth_onset_behavior = [all_psth_onset_behavior; this_psth_ab];
 
         all_play_bouts = [all_play_bouts;this_animal_playbouts];
