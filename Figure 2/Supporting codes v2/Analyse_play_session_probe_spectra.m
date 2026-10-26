@@ -20,7 +20,9 @@
 % the same channel number can sit at a different distance. Frequency is
 % the horizontal axis and distance to the tip is the vertical axis. A
 % dotted line sits between neighboring sites when their region labels
-% differ and the sessions at those coordinates agree.
+% differ and the sessions at those coordinates agree. Every area name on
+% the channel is used, including regions that are outside the selected
+% analysis list, such as InfCol.
 %
 % Each standard region also gets its own spectrum. The aperiodic fit is
 % removed, and so are the periodic Gaussians whose centers fall in
@@ -884,7 +886,9 @@ pooled.area_key = area_key(order);
 end
 
 function key = region_border_key(label)
-names = area_to_region_keys(label);
+% Borders use every labeled area. The region lists above choose which
+% areas enter the statistical figures, and they do not hide a border.
+names = border_region_names(label);
 if isempty(names)
     key = '';
     return
@@ -894,6 +898,31 @@ key = names{1};
 for name_n = 2:numel(names)
     key = [key, ',', names{name_n}]; %#ok<AGROW>
 end
+end
+
+function names = border_region_names(label)
+tokens = split_area_label(label);
+names = cell(1, 0);
+for token_n = 1:numel(tokens)
+    name = border_region_name(tokens{token_n});
+    if isempty(name) || any(strcmp(names, name))
+        continue
+    end
+    names{end + 1} = name; %#ok<AGROW>
+end
+end
+
+function name = border_region_name(token)
+token = strtrim(char(string(token)));
+if isempty(token)
+    name = '';
+    return
+end
+if name_is_supcol(token)
+    name = 'SC';
+    return
+end
+name = token;
 end
 
 function key = agreed_area_key(keys)
