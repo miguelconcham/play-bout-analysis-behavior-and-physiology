@@ -4,6 +4,7 @@
 
 this_file       = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Figure 2.m';
 repo_root       = fileparts(this_file);
+addpath(fullfile(repo_root, 'Supporting codes v2'));
 combo_file      = fullfile(repo_root, 'Figure 2 Psth animal names and result combinations.txt');
 data_root       = fullfile(repo_root, '..', 'Data');
 saving_folder   = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
@@ -111,7 +112,12 @@ for j=1:numel(psth_structure)
             this_psth_ab(trial,:) = movmean(this_psth_ab(trial,:), smooth_wind);
         end
        
-        all_psth_onset_behavior = [all_psth_onset_behavior; this_psth_ab(:, 1:4000)];
+        % 4000 was the ±20 s grid at 10 ms. A 50 ms grid has 801 bins
+        % (-20:0.05:20), so that fixed slice is out of range. Keep this
+        % session's play-bout width; only a one-bin endpoint mismatch is trimmed.
+        n_time = size(psth_structure(j).play_bout_onset, 2);
+        this_psth_ab = match_psth_columns(this_psth_ab, n_time);
+        all_psth_onset_behavior = [all_psth_onset_behavior; this_psth_ab];
 
         all_play_bouts = [all_play_bouts;this_animal_playbouts];
     end
