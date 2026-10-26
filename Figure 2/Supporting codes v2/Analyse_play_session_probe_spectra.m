@@ -6,12 +6,13 @@
 % tip (upper), smaller values are closer to the tip (deeper).
 %
 % An optional figure pools sessions onto one spectrogram. Two switches
-% choose the grouping. Partner sessions are the rows inside one recording
-% file, so that figure is one recording day. Recording days pull every
-% selected file whose folder starts with the same animal code, for example
-% B1S3 in "B1S3 1007 Dual", and that figure also includes the partner
-% sessions of those files. Each channel is log10 power with the aperiodic
-% fit and the theta Gaussians removed, as in the LPAG analysis. Sites are
+% choose the grouping. Recording days pull every selected file whose
+% folder starts with the same animal code, so B1D1 1007, B1D1 1012, and
+% B1D1 1013 share one figure. Partner sessions inside those files are
+% included. A separate switch can also draw one figure per recording
+% folder; that switch is off, so those three folders are not split into
+% three windows. Each channel is log10 power with the aperiodic fit and
+% the theta Gaussians removed, as in the LPAG analysis. Sites are
 % averaged only when the shank and the x and y coordinates match. Channel
 % number is not used, because the channel map can change between days and
 % the same channel number can sit at a different distance. Frequency is
@@ -109,14 +110,16 @@ plot_each_session = false;
 plot_pooled_animal_spectra = false;
 
 % One figure per recording folder. Partner sessions are the rows inside
-% that file. Sites that share a shank and the same x and y are averaged.
-pool_partner_sessions = true;
+% that file, so B1D1 1007, B1D1 1012, and B1D1 1013 stay in separate
+% windows. Leave this false when those days should share a figure.
+pool_partner_sessions = false;
 
-% One figure per recorded animal. The animal is the first word of the
-% folder name, for example B1S3 in "B1S3 1007 Dual". Every selected
-% recording of that animal is included, and so are its partner sessions.
-% The same physical site is averaged across days only when shank, x, and
-% y match. A channel that moved to new coordinates stays a separate row.
+% One figure per recorded animal. The animal is the first chunk of the
+% folder name: B1D1 in "B1D1 1007 Dual", "B1D1 1012 Dual", and
+% "B1D1 1013 Dual". Every selected recording of that animal is included,
+% and so are its partner sessions. The same physical site is averaged
+% across days only when shank, x, and y match. A channel that moved to
+% new coordinates stays a separate row.
 pool_recording_days = true;
 
 % log10 power minus the fitted aperiodic component. Switch to
@@ -459,6 +462,7 @@ function item = empty_residual_site()
 item = struct( ...
     'recording', '', ...
     'animal_code', '', ...
+    'day_label', '', ...
     'session', NaN, ...
     'shank', NaN, ...
     'x_um', NaN, ...
@@ -475,7 +479,7 @@ method_fields = {'welch', 'fourier'};
 n_channels = height(channel_table);
 sites = repmat(empty_residual_site(), n_channels, 1);
 recording = char(string(animal_name));
-animal_code = animal_identity(recording);
+[animal_code, day_label] = recording_identity(recording);
 residuals = cell(1, 2);
 for slot_n = 1:numel(method_ids)
     method_n = method_ids(slot_n);
@@ -485,6 +489,7 @@ end
 for channel_n = 1:n_channels
     sites(channel_n).recording = recording;
     sites(channel_n).animal_code = animal_code;
+    sites(channel_n).day_label = day_label;
     sites(channel_n).session = session_n;
     sites(channel_n).shank = channel_table.ProbeNumber(channel_n);
     sites(channel_n).x_um = channel_table.Xum(channel_n);
@@ -500,21 +505,31 @@ for channel_n = 1:n_channels
 end
 end
 
-function code = animal_identity(name)
-% The recorded animal is the first chunk of the folder name.
-% "B1S3 1007 Dual" and "B1S3_1007_Dual" both give B1S3.
+function [animal_code, day_label] = recording_identity(name)
+% "B1D1 1007 Dual" and "B1D1_1007_Dual" both give animal B1D1, day 1007.
+% The same split applies to play_session_probe_periodic_spectra_B1D1_1007_Dual.mat.
 name = strtrim(char(string(name)));
-if isempty(name)
-    code = '';
+name = strrep(name, char(160), ' ');
+if numel(name) > 4 && strcmpi(name(end - 3:end), '.mat')
+    name = name(1:end - 4);
+end
+stem = 'play_session_probe_periodic_spectra_';
+if strncmpi(name, stem, numel(stem))
+    name = name(numel(stem) + 1:end);
+end
+name = strtrim(strrep(name, '_', ' '));
+tokens = regexp(name, '\s+', 'split');
+if isempty(name) || isempty(tokens) || isempty(tokens{1})
+    animal_code = '';
+    day_label = '';
     return
 end
-space_parts = strsplit(name);
-if numel(space_parts) > 1
-    code = space_parts{1};
-    return
+animal_code = tokens{1};
+if numel(tokens) >= 2
+    day_label = tokens{2};
+else
+    day_label = '';
 end
-underscore_parts = strsplit(name, '_');
-code = underscore_parts{1};
 end
 
 function residual = residual_matrix(fitted, frequency, ranges, n_channels)
@@ -626,22 +641,28 @@ if isempty(sites)
 end
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 method_fields = {'welch', 'fourier'};
+if pool_recording_days
+    animal_codes = unique({sites.animal_code}, 'stable');
+    fprintf(['Recording-day pooling: %d animal codes. Folders that share ' ...
+        'the first name chunk are one figure.\n'], numel(animal_codes));
+    for code_n = 1:numel(animal_codes)
+        animal_code = animal_codes{code_n};
+        these_sites = sites(strcmp({sites.animal_code}, animal_code));
+        fprintf('  %s combines %s\n', animal_code, ...
+            joined_recordings(these_sites));
+        plot_one_animal_residual(these_sites, animal_code, frequency, ...
+            method_names, method_ids, method_fields, theta_band, 'days');
+    end
+end
 if pool_partner_sessions
     recordings = unique({sites.recording}, 'stable');
+    fprintf(['Partner-session pooling: %d recording folders, each in ' ...
+        'its own figure.\n'], numel(recordings));
     for recording_n = 1:numel(recordings)
         recording_name = recordings{recording_n};
         these_sites = sites(strcmp({sites.recording}, recording_name));
         plot_one_animal_residual(these_sites, recording_name, frequency, ...
             method_names, method_ids, method_fields, theta_band, 'partner');
-    end
-end
-if pool_recording_days
-    animal_codes = unique({sites.animal_code}, 'stable');
-    for code_n = 1:numel(animal_codes)
-        animal_code = animal_codes{code_n};
-        these_sites = sites(strcmp({sites.animal_code}, animal_code));
-        plot_one_animal_residual(these_sites, animal_code, frequency, ...
-            method_names, method_ids, method_fields, theta_band, 'days');
     end
 end
 end
@@ -689,20 +710,24 @@ end
 [n_recordings, n_partner] = pooled_group_counts(sites);
 if strcmp(pool_mode, 'days')
     figure_prefix = 'Pooled recording days';
+    shown_name = sprintf('%s | days %s', group_name, joined_day_labels(sites));
     match_line = ['Sites averaged across days only where shank, x, and y ' ...
         'match. Channel number is not used.'];
+    grouping_line = sprintf('%d recording folders (%s) | %d partner sessions', ...
+        n_recordings, joined_recordings(sites), n_partner);
 else
     figure_prefix = 'Pooled partner sessions';
+    shown_name = group_name;
     match_line = ['Partner sessions of one recording day, averaged only ' ...
         'where shank, x, and y match. Channel number is not used.'];
+    grouping_line = sprintf('%d recording folders | %d partner sessions', ...
+        n_recordings, n_partner);
 end
-grouping_line = sprintf('%d recording folders | %d partner sessions', ...
-    n_recordings, n_partner);
 fprintf(['%s | %s | %s | %d sites from %d session channels | ' ...
     '%d sites combined matching coordinates\n'], ...
-    figure_prefix, group_name, grouping_line, n_rows, numel(sites), n_merged);
+    figure_prefix, shown_name, grouping_line, n_rows, numel(sites), n_merged);
 
-figure('Name', [figure_prefix, ' | ', group_name], 'Color', 'w', ...
+figure('Name', [figure_prefix, ' | ', shown_name], 'Color', 'w', ...
     'Position', [80 80 max(360, 280 * max(n_shanks, 1)) 720]);
 colors = diverging_or_sequential('raw_aperiodic_subtracted');
 for slot_n = 1:n_methods
@@ -744,7 +769,7 @@ for slot_n = 1:n_methods
     color_bar = colorbar;
     ylabel(color_bar, {'log10 power', 'minus aperiodic and theta'})
 end
-sgtitle({[figure_prefix, ' | ', group_name], grouping_line, ...
+sgtitle({[figure_prefix, ' | ', shown_name], grouping_line, ...
     sprintf('log10 power minus aperiodic fit and theta (%.0f-%.0f Hz)', ...
     theta_band(1), theta_band(2)), match_line}, 'Interpreter', 'none')
 drawnow
@@ -758,6 +783,30 @@ for site_n = 1:numel(sites)
         sites(site_n).session);
 end
 n_partner = numel(unique(session_keys, 'stable'));
+end
+
+function label = joined_recordings(sites)
+recordings = unique({sites.recording}, 'stable');
+label = recordings{1};
+for recording_n = 2:numel(recordings)
+    label = [label, ' || ', recordings{recording_n}]; %#ok<AGROW>
+end
+end
+
+function label = joined_day_labels(sites)
+recordings = unique({sites.recording}, 'stable');
+labels = cell(1, numel(recordings));
+for recording_n = 1:numel(recordings)
+    match = find(strcmp({sites.recording}, recordings{recording_n}), 1);
+    labels{recording_n} = sites(match).day_label;
+    if isempty(labels{recording_n})
+        labels{recording_n} = recordings{recording_n};
+    end
+end
+label = labels{1};
+for label_n = 2:numel(labels)
+    label = [label, ', ', labels{label_n}]; %#ok<AGROW>
+end
 end
 
 function pooled = pool_sites_by_coordinate(sites, method_field)
