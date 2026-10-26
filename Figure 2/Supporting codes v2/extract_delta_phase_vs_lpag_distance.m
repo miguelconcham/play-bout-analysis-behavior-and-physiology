@@ -1,4 +1,4 @@
-function traces = extract_delta_phase_vs_lpag_distance(pli_struct, animal_names, phase_field)
+function traces = extract_delta_phase_vs_lpag_distance(pli_struct, animal_names, phase_field, align_to_lfp_row)
 %EXTRACT_DELTA_PHASE_VS_LPAG_DISTANCE  Delta phase vs LPAG-center distance.
 %
 % For every saved coherence-map session, take the pairwise phase-lag
@@ -7,6 +7,13 @@ function traces = extract_delta_phase_vs_lpag_distance(pli_struct, animal_names,
 %
 % phase_field selects the matrix. Default is 'mean_phaseLag_freq1'
 % (delta, 1-5 Hz). Pass 'mean_phaseLag_freq2' for theta (6-12 Hz).
+%
+% align_to_lfp_row (default false) is for GENERATE_COHERNECE_MAPS_STRUCT
+% saves used by Figure 3. Those files store channel_map at chanMap+1, while
+% mean_phaseLag is indexed by the LFP file row and phase-locking stores that
+% same row in cluster_info.ch. When the map is one past the phase matrix and
+% its first row is empty, geometry is shifted back onto the LFP rows before
+% the mid-LPAG column is read. Leave this false for the distance figures.
 %
 % LPAG center is the same geometry as Fig 2 PSTHs / GENERATE_PLAY_SESSION:
 % mean (x, y) of LPAG sites on the probe, then the closest LPAG site.
@@ -30,6 +37,9 @@ if nargin < 3 || isempty(phase_field)
     phase_field = 'mean_phaseLag_freq1';
 end
 phase_field = char(phase_field);
+if nargin < 4 || isempty(align_to_lfp_row)
+    align_to_lfp_row = false;
+end
 
 if nargin < 2 || isempty(animal_names)
     animal_names = cell(numel(pli_struct), 1);
@@ -75,6 +85,16 @@ for session_n = 1:numel(pli_struct)
     phase_matrix = entry.(phase_field);
     channel_map = entry.channel_map;
     areas = entry.areas_by_channel;
+    if ~ismatrix(phase_matrix) || size(phase_matrix, 1) ~= size(phase_matrix, 2)
+        warning('extract_delta_phase_vs_lpag_distance:NotSquare', ...
+            '%s: %s is not a square phase-lag matrix — skipping', ...
+            session_name, phase_field);
+        continue
+    end
+    if align_to_lfp_row
+        [channel_map, areas, phase_matrix] = local_align_geometry_to_lfp_rows( ...
+            channel_map, areas, phase_matrix);
+    end
     n_chan = min([size(phase_matrix, 1), size(phase_matrix, 2), size(channel_map, 1), numel(areas)]);
     if n_chan < 2
         continue
@@ -224,18 +244,53 @@ if ch > numel(areas)
     return
 end
 value = areas{ch};
+while iscell(value) && numel(value) == 1
+    value = value{1};
+end
 if isempty(value)
     return
-end
-if iscell(value)
-    if isempty(value)
-        return
-    end
-    value = value{1};
 end
 if isstring(value) || ischar(value)
     label = strtrim(char(value));
 end
+end
+
+function [channel_map, areas, phase_matrix] = local_align_geometry_to_lfp_rows(channel_map, areas, phase_matrix)
+%GENERATE_COHERNECE_MAPS_STRUCT stores geometry at chanMap+1.
+%The phase-lag matrix is indexed by the LFP file row. Phase locking uses
+%that same file row (cluster_info.ch = chanMap for the 1-based map).
+n_lfp = size(phase_matrix, 1);
+if ~iscell(areas)
+    areas = cellstr(string(areas));
+end
+areas = areas(:);
+n_map = size(channel_map, 1);
+row1_empty = n_map >= 1 && ~any(isfinite(channel_map(1, :)));
+stored_plus_one = n_map >= n_lfp + 1 && row1_empty;
+if ~stored_plus_one
+    n = min([n_lfp, n_map, numel(areas)]);
+    channel_map = channel_map(1:n, :);
+    areas = areas(1:n);
+    phase_matrix = phase_matrix(1:n, 1:n);
+    return
+end
+
+aligned_map = nan(n_lfp, size(channel_map, 2));
+aligned_areas = cell(n_lfp, 1);
+for lfp_row = 1:n_lfp
+    map_index = lfp_row + 1;
+    aligned_areas{lfp_row} = '';
+    if map_index > n_map
+        continue
+    end
+    aligned_map(lfp_row, :) = channel_map(map_index, :);
+    if map_index <= numel(areas) && ~isempty(areas{map_index})
+        aligned_areas{lfp_row} = areas{map_index};
+    end
+end
+channel_map = aligned_map;
+areas = aligned_areas;
+phase_matrix = phase_matrix(1:n_lfp, 1:n_lfp);
 end
 
 function [border_distance_um, border_from_area, border_to_area] = ...

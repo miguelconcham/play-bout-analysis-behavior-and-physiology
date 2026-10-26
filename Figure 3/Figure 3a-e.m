@@ -1056,6 +1056,9 @@ legend({'dleta and gamma-locked','delta-locked gamma-unlocked','gamma-locked del
 % under Analysis results\psth power by frequency and behavior.
 % The phase lag of channel X is the column of that matrix against the
 % mid-LPAG site on the same probe (phase(X) - phase(mid-LPAG)).
+% Geometry in that file is stored at chanMap+1. The phase matrix and
+% cluster_info.ch are the LFP file row, so the column is read after
+% shifting geometry back onto those rows.
 % Delta uses mean_phaseLag_freq1. Theta uses mean_phaseLag_freq2.
 % The centered angle is
 %
@@ -1120,8 +1123,10 @@ if numel(lpag_pli) ~= size(lpag_coherence_names, 1)
         numel(lpag_pli), size(lpag_coherence_names, 1));
 end
 
-% One column per probe: phase of each same-probe channel versus mid-LPAG.
-lpag_traces = extract_delta_phase_vs_lpag_distance(lpag_pli, lpag_coherence_names, lpag_lag_field);
+% One column per probe: phase of each same-probe LFP row versus mid-LPAG.
+% The 4th argument puts chanMap+1 geometry onto the LFP rows in cluster_info.ch.
+lpag_traces = extract_delta_phase_vs_lpag_distance( ...
+    lpag_pli, lpag_coherence_names, lpag_lag_field, true);
 clear lpag_pli lpag_coherence
 if isempty(lpag_traces)
     error('Figure3:NoPhaseLags', ...
