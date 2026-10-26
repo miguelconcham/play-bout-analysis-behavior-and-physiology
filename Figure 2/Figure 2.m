@@ -618,6 +618,8 @@ for an= 1:numel(animal_label)
 end
 
 %% 11 Load mixed-model results — example: DELTA play bout (combo file DELTA #1)
+% Estimate_psth_play_bout_lme.m writes this file from day-mean PSTHs:
+% Power ~ 1 + Partner + (1|Session). results.est is the Partner1 level.
 % load(fullfile(saving_folder, 'results_play_bout.mat'), 'results'); % all time points
 load(fullfile(saving_folder, 'results_play_bout_PBonly_zscore4_updated.mat'), 'results'); % play-bout-only bins
 est = results.est;

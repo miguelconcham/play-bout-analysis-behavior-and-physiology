@@ -30,6 +30,11 @@ DELTA
    results        : results_play_bout_PBonly_zscore4_updated.mat
    Path           : Data\Analysis results\psth power by frequency and behavior\
    Loaded by      : Figure 2.m ; Play partner.m
+   Saved by       : Estimate_psth_play_bout_lme.m
+   Note           : One mean PSTH per recording day and partner (electrode 1).
+                    Power ~ 1 + Partner + (1|Session). In-bout samples, |z| <= 4.
+                    results.est is the Partner1 level. results.partner_est is
+                    Partner2 minus Partner1. Figure 2.m plots results.pvals.
 
 2) delta exploratory (non-play behaviors)
    psth_structure : psth_structure_delta_exploratory_bout.mat

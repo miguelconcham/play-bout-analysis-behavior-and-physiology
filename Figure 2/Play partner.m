@@ -358,6 +358,7 @@ for partner_number_list = {1, 2, [1 2 3]};
 end
 
 %% 6 (Supp Fig 2h) Load linear mixed model, and plot partner effect (difference between partners effect)
+% results.partner_est is Partner2 minus Partner1, from Estimate_psth_play_bout_lme.m.
 
 load([saving_folder,'\results_play_bout_PBonly_zscore4_updated.mat'],'results');   %     here we use all play bouts
 
