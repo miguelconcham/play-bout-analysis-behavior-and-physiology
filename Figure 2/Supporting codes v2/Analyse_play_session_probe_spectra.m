@@ -18,8 +18,8 @@
 % averaged only when the shank and the x and y coordinates match. Channel
 % number is not used, because the channel map can change between days and
 % the same channel number can sit at a different distance. A Gaussian
-% smooth of pooled_smooth_um by pooled_smooth_hz softens small region
-% steps on that image. Frequency is
+% smooth, 100 µm along distance to the tip and 1 Hz along frequency by
+% default, softens small region steps on that image. Frequency is
 % the horizontal axis and distance to the tip is the vertical axis. A
 % dotted line sits between neighboring sites when their region labels
 % differ. Each region span is also labeled, including a shank that stays
