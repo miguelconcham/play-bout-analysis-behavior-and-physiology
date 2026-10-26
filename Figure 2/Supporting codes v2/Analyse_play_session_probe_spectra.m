@@ -20,9 +20,11 @@
 % the same channel number can sit at a different distance. Frequency is
 % the horizontal axis and distance to the tip is the vertical axis. A
 % dotted line sits between neighboring sites when their region labels
-% differ and the sessions at those coordinates agree. Every area name on
-% the channel is used, including regions that are outside the selected
-% analysis list, such as InfCol.
+% differ and the sessions at those coordinates agree. On a dual-probe
+% recording the labels are the regions of the shank that passes through
+% PAG, including neighbors such as InfCol. A shank in mPFC or LS is
+% drawn without those region names. Each shank is its own figure, at
+% the same width, so two NPX2 shanks are not placed in subplots.
 %
 % Each standard region also gets its own spectrum. The aperiodic fit is
 % removed, and so are the periodic Gaussians whose centers fall in
@@ -431,40 +433,46 @@ spectra = {welch_spectrum, fourier_spectrum};
 [method_names, method_ids] = selected_spectral_methods(spectral_method);
 n_methods = numel(method_ids);
 
-figure('Name', ['Spectrum by depth | ', session_label], 'Color', 'w', ...
-    'Position', [80 80 max(360, 280 * n_groups) 720]);
 colors = diverging_or_sequential(spectrum_field);
-
+panel_values = cell(n_methods, n_groups);
+color_limits = cell(n_methods, 1);
 for method_slot = 1:n_methods
     method_n = method_ids(method_slot);
-    panel_values = cell(n_groups, 1);
     finite_values = [];
     for group_n = 1:n_groups
-        panel_values{group_n} = ...
+        panel_values{method_slot, group_n} = ...
             spectra{method_n}(probe_groups(group_n).channel_index, :);
         finite_values = [finite_values; ...
-            panel_values{group_n}(isfinite(panel_values{group_n}))]; %#ok<AGROW>
+            panel_values{method_slot, group_n}( ...
+            isfinite(panel_values{method_slot, group_n}))]; %#ok<AGROW>
     end
-    color_limits = spectrum_color_limits(finite_values, spectrum_field);
+    color_limits{method_slot} = spectrum_color_limits(finite_values, spectrum_field);
+end
 
-    for group_n = 1:n_groups
-        subplot(n_methods, n_groups, (method_slot - 1) * n_groups + group_n)
-        this_group = probe_groups(group_n);
+for group_n = 1:n_groups
+    this_group = probe_groups(group_n);
+    figure('Name', ['Spectrum by depth | ', session_label, ' | ', ...
+        this_group.label], 'Color', 'w', ...
+        'Position', [80 + 48 * (group_n - 1), 80, 640, 720]);
+    for method_slot = 1:n_methods
+        if n_methods > 1
+            subplot(n_methods, 1, method_slot)
+        end
         depth = this_group.depth_um(:);
         use_depth_axis = numel(depth) > 1 && all(isfinite(depth)) && ...
             all(diff(depth) > 0);
         if use_depth_axis
-            imagesc(frequency, depth, panel_values{group_n});
+            imagesc(frequency, depth, panel_values{method_slot, group_n});
             center_y = depth(this_group.is_lpag_center);
         else
-            imagesc(frequency, 1:numel(depth), panel_values{group_n});
+            imagesc(frequency, 1:numel(depth), panel_values{method_slot, group_n});
             depth_ticks(depth);
             center_y = find(this_group.is_lpag_center);
         end
         axis tight
         colormap(colors)
-        if all(isfinite(color_limits))
-            caxis(color_limits);
+        if all(isfinite(color_limits{method_slot}))
+            caxis(color_limits{method_slot});
         end
         these_borders = borders_for_probe(area_borders, this_group.probe_number);
         if use_depth_axis
@@ -474,15 +482,14 @@ for method_slot = 1:n_methods
         draw_area_borders(these_borders, depth, use_depth_axis)
         set(gca, 'YDir', 'normal')
         xlabel('Frequency (Hz)')
-        if group_n == 1
-            ylabel('Distance to tip (µm)')
-        end
+        ylabel('Distance to tip (µm)')
         title(sprintf('%s | %s', method_names{method_slot}, this_group.label))
         box off
+        colorbar
     end
-    colorbar
+    sgtitle({session_label, this_group.label, spectrum_title(spectrum_field)}, ...
+        'Interpreter', 'none')
 end
-sgtitle({session_label, spectrum_title(spectrum_field)}, 'Interpreter', 'none')
 end
 
 function item = empty_residual_site()
@@ -706,6 +713,7 @@ end
 
 function plot_one_animal_residual(sites, group_name, frequency, ...
         method_names, method_ids, method_fields, ranges, pool_mode)
+sites = keep_pag_shank_labels(sites);
 shank_id = reshape([sites.shank], [], 1);
 shank_list = unique(shank_id(isfinite(shank_id)));
 shank_list = sort(shank_list);
@@ -766,14 +774,22 @@ fprintf(['%s | %s | removed %s | %s | %d sites from %d session ' ...
     figure_prefix, shown_name, range_label, grouping_line, n_rows, ...
     numel(sites), n_merged);
 
-figure('Name', [figure_prefix, ' | ', shown_name, ' | ', range_label], ...
-    'Color', 'w', 'Position', [80 80 max(360, 280 * max(n_shanks, 1)) 720]);
 colors = diverging_or_sequential('raw_aperiodic_subtracted');
+color_limits = cell(n_methods, 1);
 for slot_n = 1:n_methods
-    color_limits = spectrum_color_limits( ...
+    color_limits{slot_n} = spectrum_color_limits( ...
         finite_values{slot_n}, 'raw_aperiodic_subtracted');
-    for shank_n = 1:n_shanks
-        subplot(n_methods, n_shanks, (slot_n - 1) * n_shanks + shank_n)
+end
+for shank_n = 1:n_shanks
+    shank_label = panels{1, shank_n}.label;
+    figure('Name', [figure_prefix, ' | ', shown_name, ' | ', ...
+        shank_label, ' | ', range_label], ...
+        'Color', 'w', ...
+        'Position', [80 + 48 * (shank_n - 1), 80, 640, 720]);
+    for slot_n = 1:n_methods
+        if n_methods > 1
+            subplot(n_methods, 1, slot_n)
+        end
         pooled = panels{slot_n, shank_n};
         depth = pooled.depth_um(:);
         if isempty(depth)
@@ -792,26 +808,25 @@ for slot_n = 1:n_methods
         end
         axis tight
         colormap(colors)
-        if all(isfinite(color_limits))
-            caxis(color_limits);
+        if all(isfinite(color_limits{slot_n}))
+            caxis(color_limits{slot_n});
         end
         set(gca, 'YDir', 'normal')
         mark_region_divisions(depth, pooled.area_key, use_depth_axis)
         xlabel('Frequency (Hz)')
-        if shank_n == 1
-            ylabel('Distance to tip (µm)')
-        end
+        ylabel('Distance to tip (µm)')
         title(sprintf('%s | %s | %d sites', method_names{slot_n}, ...
             pooled.label, numel(depth)), 'Interpreter', 'none')
         box off
+        color_bar = colorbar;
+        ylabel(color_bar, {'log10 power', ['minus aperiodic and ', range_label]})
     end
-    color_bar = colorbar;
-    ylabel(color_bar, {'log10 power', ['minus aperiodic and ', range_label]})
+    sgtitle({[figure_prefix, ' | ', shown_name, ' | ', shank_label], ...
+        grouping_line, ...
+        sprintf('log10 power minus aperiodic fit and %s', range_label), ...
+        match_line}, 'Interpreter', 'none')
+    drawnow
 end
-sgtitle({[figure_prefix, ' | ', shown_name], grouping_line, ...
-    sprintf('log10 power minus aperiodic fit and %s', range_label), ...
-    match_line}, 'Interpreter', 'none')
-drawnow
 end
 
 function [n_recordings, n_partner] = pooled_group_counts(sites)
@@ -897,6 +912,96 @@ pooled.x_um = lateral(order);
 pooled.spectrum = pooled_spectrum(order, :);
 pooled.n_averaged = n_averaged(order);
 pooled.area_key = area_key(order);
+end
+
+function sites = keep_pag_shank_labels(sites)
+% Dual-probe recordings label the shank that passes through PAG.
+% A shank whose areas are mPFC or LS keeps its spectrum and loses the names.
+if isempty(sites)
+    return
+end
+shank_id = reshape([sites.shank], [], 1);
+shank_list = unique(shank_id(isfinite(shank_id)));
+shank_list = sort(shank_list);
+if any(~isfinite(shank_id))
+    shank_list(end + 1, 1) = NaN; %#ok<AGROW>
+end
+for shank_n = 1:numel(shank_list)
+    if isfinite(shank_list(shank_n))
+        in_shank = shank_id == shank_list(shank_n);
+        shank_label = sprintf('Shank %g', shank_list(shank_n));
+    else
+        in_shank = ~isfinite(shank_id);
+        shank_label = 'Unassigned';
+    end
+    shank_sites = sites(in_shank);
+    if sites_include_pag_probe(shank_sites)
+        for site_n = find(in_shank).'
+            sites(site_n).area_key = remove_other_probe_regions( ...
+                sites(site_n).area_key);
+        end
+    else
+        had_label = false;
+        for site_n = find(in_shank).'
+            if ~isempty(sites(site_n).area_key)
+                had_label = true;
+            end
+            sites(site_n).area_key = '';
+        end
+        if had_label
+            fprintf(['  %s is not the PAG shank. mPFC and LS region ' ...
+                'labels are omitted.\n'], shank_label);
+        end
+    end
+end
+end
+
+function tf = sites_include_pag_probe(sites)
+tf = false;
+for site_n = 1:numel(sites)
+    names = border_region_names(sites(site_n).area_key);
+    for name_n = 1:numel(names)
+        if token_is_pag_probe(names{name_n})
+            tf = true;
+            return
+        end
+    end
+end
+end
+
+function tf = token_is_pag_probe(name)
+name = strtrim(char(string(name)));
+if isempty(name)
+    tf = false;
+    return
+end
+tf = name_is_pag(name) || name_is_supcol(name) || name_is_dr(name) || ...
+    any(strcmpi(name, {'InfCol', '4N', 'isRt', 'mlf'}));
+end
+
+function tf = token_is_other_probe(name)
+compact = upper(strrep(strtrim(char(string(name))), ' ', ''));
+tf = any(strcmp(compact, {'MPFC', 'PFC', 'LS', 'LSD', 'LSI', 'LSV'}));
+end
+
+function key = remove_other_probe_regions(key)
+names = border_region_names(key);
+kept = cell(1, 0);
+for name_n = 1:numel(names)
+    if token_is_other_probe(names{name_n})
+        continue
+    end
+    kept{end + 1} = names{name_n}; %#ok<AGROW>
+end
+if isempty(kept)
+    key = '';
+    return
+end
+kept = sort(kept);
+key = kept{1};
+for name_n = 2:numel(kept)
+    key = [key, ',', kept{name_n}]; %#ok<AGROW>
+end
 end
 
 function key = region_border_key(label)
@@ -1029,14 +1134,16 @@ spectra = {welch_spectrum, fourier_spectrum};
 n_methods = numel(method_ids);
 selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
 
-figure('Name', ['Band profiles | ', session_label], 'Color', 'w', ...
-    'Position', [120 120 max(360, 280 * n_groups) 720]);
-
-for method_slot = 1:n_methods
-    method_n = method_ids(method_slot);
-    for group_n = 1:n_groups
-        subplot(n_methods, n_groups, (method_slot - 1) * n_groups + group_n)
-        this_group = probe_groups(group_n);
+for group_n = 1:n_groups
+    this_group = probe_groups(group_n);
+    figure('Name', ['Band profiles | ', session_label, ' | ', this_group.label], ...
+        'Color', 'w', ...
+        'Position', [120 + 48 * (group_n - 1), 120, 640, 720]);
+    for method_slot = 1:n_methods
+        method_n = method_ids(method_slot);
+        if n_methods > 1
+            subplot(n_methods, 1, method_slot)
+        end
         this_spectrum = spectra{method_n}(this_group.channel_index, :);
         band_power = [ ...
             mean_in_band(this_spectrum, frequency, delta_band), ...
@@ -1070,17 +1177,16 @@ for method_slot = 1:n_methods
         end
         draw_area_borders(these_borders, this_group.depth_um, true)
         xlabel(profile_xlabel(spectrum_field))
-        if group_n == 1
-            ylabel('Distance to tip (µm)')
-        end
+        ylabel('Distance to tip (µm)')
         title(sprintf('%s | %s', method_names{method_slot}, this_group.label))
-        if method_slot == 1 && group_n == 1
+        if method_slot == 1
             legend(line_handles, selection.labels, 'Location', 'best')
         end
         box off
     end
+    sgtitle({session_label, this_group.label, 'Band means along the probe'}, ...
+        'Interpreter', 'none')
 end
-sgtitle({session_label, 'Band means along the probe'}, 'Interpreter', 'none')
 end
 
 function probe_groups = probe_groups_by_depth(channel_table)
@@ -1377,11 +1483,11 @@ if probe_spectra.npx_type == 1
         fprintf('Area table has no Probe_Area column. NPX1 borders are omitted.\n');
         return
     end
-    keep = keep & ismember(area_limit.Probe_Area, 'PAG');
     probe_number(:) = 1;
 else
     keep = keep & isfinite(probe_number);
 end
+keep = keep_pag_probe_borders(area_limit, names, keep);
 names = names(keep);
 depth_start = depth_start(keep);
 depth_end = depth_end(keep);
@@ -1406,6 +1512,28 @@ for border_n = 1:numel(names)
 end
 fprintf('Area borders for %s: %d\n', ...
     probe_spectra.animal_area_table_name, numel(borders));
+end
+
+function keep = keep_pag_probe_borders(area_limit, names, keep)
+% Dual-probe tables tag one shank as PAG and another as mPFC or LS.
+% Borders stay on the PAG tag. mPFC and LS names are removed as well.
+for row_n = 1:numel(names)
+    if token_is_other_probe(names{row_n})
+        keep(row_n) = false;
+    end
+end
+if ~ismember('Probe_Area', area_limit.Properties.VariableNames)
+    return
+end
+probe_area = cellstr(string(area_limit.Probe_Area));
+for row_n = 1:numel(keep)
+    if ~keep(row_n)
+        continue
+    end
+    if ~strcmpi(strtrim(probe_area{row_n}), 'PAG')
+        keep(row_n) = false;
+    end
+end
 end
 
 function these = borders_for_probe(area_borders, probe_number)
@@ -1885,7 +2013,7 @@ for method_n = 1:numel(method_names)
         power = power_table.(selection.fields{slot_n});
         figure('Name', sprintf('%s | %s vs distance to mid-LPAG', ...
             method_names{method_n}, selection.labels{slot_n}), ...
-            'Color', 'w', 'Position', [60 + 24 * figure_n, 60, 760, 560]);
+            'Color', 'w', 'Position', [60 + 24 * figure_n, 60, 920, 560]);
         hold on
         yline(0, ':k', 'HandleVisibility', 'off');
         xline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
@@ -2132,7 +2260,7 @@ for method_n = 1:numel(method_names)
         figure('Name', sprintf( ...
             '%s | %s intercept by distance to mid-LPAG', ...
             method_names{method_n}, selection.labels{slot_n}), ...
-            'Color', 'w', 'Position', [80 + 24 * figure_n, 100, 980, 560]);
+            'Color', 'w', 'Position', [80 + 24 * figure_n, 100, 1180, 560]);
         hold on
         yline(0, ':k', 'HandleVisibility', 'off');
         xline(0, '--k', 'mid-LPAG', 'HandleVisibility', 'off', ...
@@ -2593,7 +2721,7 @@ for method_n = 1:numel(method_names)
     end
     figure('Name', sprintf('%s | %s', method_names{method_n}, figure_name), ...
         'Color', 'w', ...
-        'Position', [110, 80, max(720, 360 * n_bands), 560]);
+        'Position', [110, 80, max(880, 440 * n_bands), 560]);
     for slot_n = 1:n_bands
         subplot(1, n_bands, slot_n)
         obs = band_obs{slot_n};
@@ -3174,7 +3302,7 @@ n_methods = numel(method_ids);
 selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
 n_bands = numel(selection.index);
 figure('Name', 'Profiles aligned on mid-LPAG', 'Color', 'w', ...
-    'Position', [60 60 max(420, 360 * n_bands) 720]);
+    'Position', [60 60 max(520, 440 * n_bands) 720]);
 for method_slot = 1:n_methods
     method_n = method_ids(method_slot);
     for slot_n = 1:n_bands
@@ -3221,7 +3349,7 @@ n_methods = numel(method_ids);
 selection = selected_bands(bands_to_display, delta_band, theta_band, gamma_band);
 n_bands = numel(selection.index);
 figure('Name', 'Confidence intervals aligned on mid-LPAG', 'Color', 'w', ...
-    'Position', [100 100 max(420, 360 * n_bands) 720]);
+    'Position', [100 100 max(520, 440 * n_bands) 720]);
 for method_slot = 1:n_methods
     method_n = method_ids(method_slot);
     for slot_n = 1:n_bands
@@ -3377,7 +3505,7 @@ n_methods = numel(method_ids);
 class_fields = {'stays_pag', 'goes_sc', 'goes_dr'};
 class_titles = {'Stays in PAG', 'Through SupCol', 'Through DR'};
 figure('Name', 'Spectra aligned on mid-LPAG', 'Color', 'w', ...
-    'Position', [80 80 1100 720]);
+    'Position', [80 80 1320 720]);
 colors = diverging_or_sequential(spectrum_field);
 for method_slot = 1:n_methods
     method_n = method_ids(method_slot);
@@ -3557,13 +3685,13 @@ for kind_n = 1:numel(panel_kinds)
         if strcmp(panel_kind, 'tracks')
             figure_name = sprintf('%s power vs distance to region center', ...
                 method_names{method_slot});
-            figure_position = [40 40 980 max(480, 240 * n_regions)];
+            figure_position = [40 40 1180 max(480, 240 * n_regions)];
             figure_note = region_distance_note(region_distance_scale, false, ...
                 region_distance_bin_um, region_distance_min_session_fraction);
         else
             figure_name = sprintf('%s intercept by distance to region center', ...
                 method_names{method_slot});
-            figure_position = [90 40 980 max(480, 240 * n_regions)];
+            figure_position = [90 40 1180 max(480, 240 * n_regions)];
             figure_note = region_distance_note(region_distance_scale, true, ...
                 region_distance_bin_um, region_distance_min_session_fraction);
             figure_note = sprintf(['%s Rectangles cover the upper 90%% of the ' ...
@@ -4427,7 +4555,7 @@ function draw_region_spectrum_panels(frequency, region_names, fits, ...
 n_regions = numel(region_names);
 figure('Name', sprintf('Region spectra | %s | %s removed', ...
     method_name, range_label), 'Color', 'w', ...
-    'Position', [70 30 860 180 * n_regions]);
+    'Position', [70 30 1040 180 * n_regions]);
 y_limits = spectrum_panel_limits(fits, center_fit);
 for region_n = 1:n_regions
     subplot(n_regions, 1, region_n)
@@ -4527,7 +4655,7 @@ n_regions = numel(region_names);
 labels = cellfun(@region_display_name, region_names, 'UniformOutput', false);
 figure('Name', sprintf('Region effect by frequency | %s | %s removed', ...
     method_name, range_label), ...
-    'Color', 'w', 'Position', [100 40 960 760]);
+    'Color', 'w', 'Position', [100 40 1160 760]);
 heatmap_axis = subplot(3, 1, 1);
 finite_values = effect.emm(isfinite(effect.emm));
 imagesc(heatmap_axis, frequency, 1:n_regions, effect.emm);
