@@ -16,8 +16,8 @@
 % (darker bar) or below 0 (lighter bar). Blue is self, red is other.
 % Play vs non-play uses the same bars: red play on top, black non-play below.
 % Onset and offset lines are drawn after those bars and span the y axis.
-% Figures open maximized. psth_<band>_onset_pre_spectrum_* is the spectrum
-% of the electrode-1 trial-averaged power in the 5 s before onset.
+% Figures open maximized. psth_<band>_onset_pre_spectrum_*_periodic is the
+% FOOOF periodic component of the electrode-1 mean power from -5 s to onset.
 % %% Save open figures as SVG writes every named figure with print -dsvg.
 % Run Estimate_psth_all_behaviors_theta_gamma.m first so those PSTH files exist.
 
@@ -604,10 +604,16 @@ mark_significant_psth(time_analysis_time_wrapped, self_matrix, other_matrix)
 extend_event_lines([0 5])
 
 %% Pre-onset spectrum of the onset-aligned power
-% Spectrum of the electrode-1 mean power from -5 s to onset, per behavior.
+% FOOOF periodic component of the electrode-1 mean power from -5 s to onset.
+% The aperiodic fit uses 0-20 Hz. The figures show the periodic part up to 8 Hz.
 % Upper rows are behaviors. Lower panel is the mean across behaviors with a t interval.
 % The gray band on the lower panel is 1-5 Hz.
 pre_window = [-5 0];
+fooof_fit_max_hz = 20;
+plot_max_hz = 8;
+fooof_peak_widths = [0.5 12];
+fooof_aperiodic_mode = 'fixed';
+addpath(fileparts(this_file));
 n_col = 4000;
 for b = 1:numel(all_behaviors)
     if ~isempty(all_psth_onset_self{1,b})
@@ -619,19 +625,21 @@ bin_offsets = floor(psth_ranges(1) / bin_size) + (0:n_col-1);
 time_psth = bin_offsets * bin_size;
 pre_mask = time_psth >= pre_window(1) & time_psth < pre_window(2);
 n_pre = nnz(pre_mask);
-freq_hz = (1:floor(n_pre / 2)) * ((1 / bin_size) / n_pre);
-freq_hz = freq_hz(freq_hz <= 8);
+freq_fit = (1:floor(n_pre / 2)) * ((1 / bin_size) / n_pre);
+freq_fit = freq_fit(freq_fit <= fooof_fit_max_hz);
+freq_hz = freq_fit(freq_fit <= plot_max_hz);
 
-spec_self = nan(numel(all_behaviors), numel(freq_hz));
-spec_other = nan(numel(all_behaviors), numel(freq_hz));
+spec_self = nan(numel(all_behaviors), numel(freq_fit));
+spec_other = nan(numel(all_behaviors), numel(freq_fit));
+disp(['FOOOF periodic component, ' band_name])
 for b = 1:numel(all_behaviors)
-    spec_self(b,:) = mean_trace_spectrum(all_psth_onset_self{1,b}, all_electrode_index_self{b}, pre_mask, freq_hz, 1 / bin_size);
-    spec_other(b,:) = mean_trace_spectrum(all_psth_onset_other{1,b}, all_electrode_index_other{b}, pre_mask, freq_hz, 1 / bin_size);
+    linear_self = mean_trace_spectrum(all_psth_onset_self{1,b}, all_electrode_index_self{b}, pre_mask, freq_fit, 1 / bin_size);
+    linear_other = mean_trace_spectrum(all_psth_onset_other{1,b}, all_electrode_index_other{b}, pre_mask, freq_fit, 1 / bin_size);
+    spec_self(b,:) = periodic_component_fooof(freq_fit, linear_self, fooof_aperiodic_mode, fooof_peak_widths);
+    spec_other(b,:) = periodic_component_fooof(freq_fit, linear_other, fooof_aperiodic_mode, fooof_peak_widths);
 end
-spec_self = log10(spec_self);
-spec_other = log10(spec_other);
-spec_self(~isfinite(spec_self)) = NaN;
-spec_other(~isfinite(spec_other)) = NaN;
+spec_self = spec_self(:, freq_fit <= plot_max_hz);
+spec_other = spec_other(:, freq_fit <= plot_max_hz);
 
 if isempty(freq_hz)
     disp(['no pre-onset samples for ' band_name])
@@ -642,7 +650,7 @@ rows_play_nonplay = [spec_self(play_beh,:); spec_other(play_beh,:); spec_self(no
 labels_play_nonplay = [strcat(all_behaviors(play_beh), ' self'), strcat(all_behaviors(play_beh), ' other'), ...
     strcat(all_behaviors(nonplay_beh), ' self'), strcat(all_behaviors(nonplay_beh), ' other')];
 figure
-name_psth_figure(band_name, 'onset_pre_spectrum_play_nonplay')
+name_psth_figure(band_name, 'onset_pre_spectrum_play_nonplay_periodic')
 plot_spectrum_stack(freq_hz, rows_play_nonplay, labels_play_nonplay, ...
     1:(2 * numel(play_beh)), (2 * numel(play_beh) + 1):size(rows_play_nonplay, 1), ...
     [0.85 0.15 0.15], [0.15 0.15 0.15], 'Play', 'Non-play')
@@ -650,7 +658,7 @@ plot_spectrum_stack(freq_hz, rows_play_nonplay, labels_play_nonplay, ...
 rows_self_other = [spec_self(play_beh,:); spec_other(play_beh,:)];
 labels_self_other = [strcat(all_behaviors(play_beh), ' self'), strcat(all_behaviors(play_beh), ' other')];
 figure
-name_psth_figure(band_name, 'onset_pre_spectrum_self_other_play')
+name_psth_figure(band_name, 'onset_pre_spectrum_self_other_play_periodic')
 plot_spectrum_stack(freq_hz, rows_self_other, labels_self_other, ...
     1:numel(play_beh), numel(play_beh) + (1:numel(play_beh)), ...
     [0.10 0.25 0.80], [0.80 0.15 0.15], 'Self play', 'Other play')
@@ -795,6 +803,7 @@ ax2 = subplot(3,1,2:3);
 hold on
 draw_group_spectrum(freq, rows(idx_b, :), color_b)
 draw_group_spectrum(freq, rows(idx_a, :), color_a)
+plot(freq([1 end]), [0 0], 'k:')
 axis tight
 yl = ylim;
 delta_patch = patch([1 5 5 1], [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
@@ -802,7 +811,7 @@ delta_patch = patch([1 5 5 1], [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
 uistack(delta_patch, 'bottom')
 xlim([freq(1) freq(end)])
 xlabel('Frequency (Hz)')
-ylabel('log10 power')
+ylabel('Periodic power (log10)')
 title([name_a ' vs ' name_b])
 set(gca, 'TickDir', 'out')
 
@@ -839,4 +848,27 @@ if size(rows, 1) >= 2
         'FaceAlpha', 0.2, 'EdgeColor', 'none', 'HandleVisibility', 'off')
 end
 plot(freq, mean(rows, 1), 'Color', color, 'LineWidth', 1.5)
+end
+
+function periodic = periodic_component_fooof(freq, linear_power, aperiodic_mode, peak_widths)
+% FOOOF Gaussian periodic component, in log10 power. Same settings as the
+% play-session spectra: fixed aperiodic mode, peak widths [0.5 12] Hz.
+periodic = nan(1, numel(freq));
+freq = freq(:).';
+linear_power = linear_power(:).';
+if numel(freq) < 8 || numel(linear_power) ~= numel(freq)
+    return
+end
+if any(~isfinite(freq)) || any(~isfinite(linear_power))
+    return
+end
+if all(linear_power <= 0)
+    periodic = zeros(1, numel(freq));
+    return
+end
+linear_power = max(linear_power, realmin('double'));
+out = fooof_matlab(freq(:), linear_power(:), ...
+    'AperiodicMode', aperiodic_mode, ...
+    'PeakWidthLimits', peak_widths);
+periodic = out.peak_fit(:).';
 end
