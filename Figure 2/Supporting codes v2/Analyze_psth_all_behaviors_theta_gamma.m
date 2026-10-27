@@ -14,6 +14,8 @@
 % delta, theta, and gamma, and safe to use as a Windows file name.
 % Self vs other plots mark times when that mean is significantly above 0
 % (darker bar) or below 0 (lighter bar). Blue is self, red is other.
+% Play vs non-play uses the same bars: red play on top, black non-play below.
+% Onset and offset lines are drawn after those bars and span the y axis.
 % Run Estimate_psth_all_behaviors_theta_gamma.m first so those PSTH files exist.
 
 this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_all_behaviors_theta_gamma.m';
@@ -267,9 +269,10 @@ matrix2plot = matrix_play;
 fill([time_analysis fliplr(time_analysis)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
 plot(time_analysis, mean(matrix2plot), 'r')
 plot(time_analysis([1 end]), [0 0], 'k:')
-plot([0 0], [-2.5 2.5], 'k')
 axis tight
 set(gca,'TickDir','out')
+mark_significant_psth(time_analysis, matrix_play, matrix_noplay, [0.85 0.15 0.15], [0.15 0.15 0.15])
+extend_event_lines(0)
 ax1 = subplot(3,1,1);
 matrix2plot = [matrix_play; matrix_noplay];
 imagesc(time_analysis, 1:size(matrix2plot,1), matrix2plot)
@@ -277,10 +280,10 @@ axis xy
 clim([-4 4])
 hold on
 plot(time_analysis([1 end]), [1 1]*size(matrix_play,1), 'w', 'LineWidth',2)
-plot([0 0], [0 1]*size(matrix2plot,1), 'w', 'LineWidth',2)
 yticks(1:size(matrix2plot,1))
 yticklabels(all_behaviors_2x([play_indexes, noplay_indexes]))
 set(gca,'TickDir','out')
+extend_event_lines(0, 'w', 2)
 colorbar
 ax2.Position(1) = ax1.Position(1);
 ax2.Position(3) = ax1.Position(3);
@@ -340,10 +343,10 @@ plot(time_analysis, mean(self_matrix), 'b')
 fill([time_analysis fliplr(time_analysis)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
 plot(time_analysis, mean(other_matrix), 'r')
 plot(time_analysis([1 end]), [0 0], 'k:')
-plot([0 0], [-2 4], 'k')
 axis tight
 set(gca,'TickDir','out')
 mark_significant_psth(time_analysis, self_matrix, other_matrix)
+extend_event_lines(0)
 print(gcf,'-vector','-dsvg',fullfile(figure_2_new_folder, [get(gcf, 'Name') '.svg']))
 
 %% Plot self vs other — non-play behaviors
@@ -363,10 +366,10 @@ plot(time_analysis, mean(self_matrix), 'b')
 fill([time_analysis fliplr(time_analysis)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
 plot(time_analysis, mean(other_matrix), 'r')
 plot(time_analysis([1 end]), [0 0], 'k:')
-plot([0 0], [-4 2], 'k')
 axis tight
 set(gca,'TickDir','out')
 mark_significant_psth(time_analysis, self_matrix, other_matrix)
+extend_event_lines(0)
 
 %% LME analysis — time-wrapped PSTH
 % Skipped when results_full_lfp_per_behavior_time_warpped_<band>.mat is already saved.
@@ -496,10 +499,10 @@ plot(time_analysis_time_wrapped, mean(matrix_noplay), 'k')
 fill([time_analysis_time_wrapped fliplr(time_analysis_time_wrapped)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
 plot(time_analysis_time_wrapped, mean(matrix_play), 'r')
 plot(time_analysis_time_wrapped([1 end]), [0 0], 'k:')
-plot([0 0], [-5 5], 'k')
-plot([5 5], [-5 5], 'k')
 axis tight
 set(gca,'TickDir','out')
+mark_significant_psth(time_analysis_time_wrapped, matrix_play, matrix_noplay, [0.85 0.15 0.15], [0.15 0.15 0.15])
+extend_event_lines([0 5])
 ax1 = subplot(3,1,1);
 matrix2plot = [matrix_play; matrix_noplay];
 imagesc(time_analysis_time_wrapped, 1:size(matrix2plot,1), matrix2plot)
@@ -507,10 +510,10 @@ axis xy
 clim([-10 10])
 hold on
 plot(time_analysis_time_wrapped([1 end]), [1 1]*size(matrix_play,1), 'w', 'LineWidth',2)
-plot([0 0], [0 1]*size(matrix2plot,1), 'w', 'LineWidth',2)
 yticks(1:size(matrix2plot,1))
 yticklabels(all_behaviors_2x([play_indexes, noplay_indexes]))
 set(gca,'TickDir','out')
+extend_event_lines([0 5], 'w', 2)
 colorbar
 ax2.Position(1) = ax1.Position(1);
 ax2.Position(3) = ax1.Position(3);
@@ -571,11 +574,10 @@ plot(time_analysis_time_wrapped, mean(self_matrix), 'b')
 fill([time_analysis_time_wrapped fliplr(time_analysis_time_wrapped)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
 plot(time_analysis_time_wrapped, mean(other_matrix), 'r')
 plot(time_analysis_time_wrapped([1 end]), [0 0], 'k:')
-plot([0 0], [-5 5], 'k')
-plot([5 5], [-5 5], 'k')
 axis tight
 set(gca,'TickDir','out')
 mark_significant_psth(time_analysis_time_wrapped, self_matrix, other_matrix)
+extend_event_lines([0 5])
 
 %% Plot self vs other — non-play behaviors, time-wrapped
 figure
@@ -593,11 +595,10 @@ plot(time_analysis_time_wrapped, mean(self_matrix), 'b')
 fill([time_analysis_time_wrapped fliplr(time_analysis_time_wrapped)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
 plot(time_analysis_time_wrapped, mean(other_matrix), 'r')
 plot(time_analysis_time_wrapped([1 end]), [0 0], 'k:')
-plot([0 0], [-5 5], 'k')
-plot([5 5], [-5 5], 'k')
 axis tight
 set(gca,'TickDir','out')
 mark_significant_psth(time_analysis_time_wrapped, self_matrix, other_matrix)
+extend_event_lines([0 5])
 end
 
 function name_psth_figure(band_name, plot_id)
@@ -605,17 +606,35 @@ function name_psth_figure(band_name, plot_id)
 set(gcf, 'NumberTitle', 'off', 'Name', ['psth_' band_name '_' plot_id]);
 end
 
-function mark_significant_psth(time_axis, self_matrix, other_matrix)
-% Strips above the axes. Blue is self, red is other.
+function mark_significant_psth(time_axis, upper_matrix, lower_matrix, upper_color, lower_color)
+% Strips above the axes. Upper trace, then lower trace.
 % Darker rectangles: mean significantly above 0. Lighter: significantly below 0.
+if nargin < 4
+    upper_color = [0.10 0.25 0.80];
+    lower_color = [0.80 0.15 0.15];
+end
 yl = ylim;
 pad = 0.045 * diff(yl);
 if ~(pad > 0)
     pad = 0.1;
 end
 ylim([yl(1), yl(2) + 2.6 * pad]);
-shade_one_trace(time_axis, self_matrix, [0.10 0.25 0.80], yl(2) + 1.35 * pad, pad);
-shade_one_trace(time_axis, other_matrix, [0.80 0.15 0.15], yl(2) + 0.15 * pad, pad);
+shade_one_trace(time_axis, upper_matrix, upper_color, yl(2) + 1.35 * pad, pad);
+shade_one_trace(time_axis, lower_matrix, lower_color, yl(2) + 0.15 * pad, pad);
+end
+
+function extend_event_lines(x_positions, line_color, line_width)
+% Vertical onset or offset lines across the y axis after it has been set.
+if nargin < 2 || isempty(line_color)
+    line_color = 'k';
+end
+if nargin < 3 || isempty(line_width)
+    line_width = 1;
+end
+yl = ylim;
+for x = x_positions(:)'
+    plot([x x], yl, 'Color', line_color, 'LineWidth', line_width, 'HandleVisibility', 'off');
+end
 end
 
 function shade_one_trace(time_axis, values, color, y0, height)
