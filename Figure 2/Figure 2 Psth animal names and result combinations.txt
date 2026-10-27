@@ -185,8 +185,12 @@ when they were not already present.
 
 1c) Analyze_behavior_class_from_timewrap_power.m
    Classify two Type2 groups from mean time-wrapped band power.
+   The first model pools electrode-1 events from every kept animal and
+   every session, then cross-validates that pool. Leave-one-session-out
+   is a later check.
    Loads the per-behavior PSTH mats above (delta, theta, or gamma).
    Default classes are Pounce (1) and PounceI (2), default model is LDA.
+   Each event is a baseline z-score. Training folds use equal class counts.
    Loaded by      : Analyze_behavior_class_from_timewrap_power.m
 
 2) Analyze_freq_coupling.m

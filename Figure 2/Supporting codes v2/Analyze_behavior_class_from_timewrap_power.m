@@ -3,12 +3,16 @@
 % Uses the time-wrapped PSTHs already saved by
 % Estimate_psth_all_behaviors_theta_gamma.m. It does not reload LFP.
 %
+% First approach: one model, trained on events pooled from every kept
+% animal and every session. Events are not split into a separate model
+% per animal or per session.
+%
 % Each row of classification_table is one behavior event from the repeated
 % animal, electrode 1. Column 1, mean_power, is the mean baseline z-score
 % over the time-wrapped behavior. Each event is z-scored to its own
 % pre-onset baseline before that mean is taken. Column 2, behavior_class,
-% is 1 for behavior_class_1 and 2 for behavior_class_2. behavior_name and
-% session_name are kept so each row can be traced back to a Type2 event.
+% is 1 for behavior_class_1 and 2 for behavior_class_2. behavior_name,
+% animal_name, and session_name trace each row back to a Type2 event.
 %
 % classifier_name:
 %   'lda'          fitcdiscr, the default
@@ -17,12 +21,14 @@
 %   'tree'         fitctree
 %   'logit'        fitglm, binomial
 %
-% Each row is one behavior event. Cross-validation holds out single events.
-% Each training fold keeps the same number of events from each class, so the
-% larger class does not win by count. Held-out events keep their natural counts.
-% behavior_class_2 is the positive class. Confusion values are the percent
-% of those single events, and the four percentages of one band sum to 100.
-% The last figure compares delta, theta, and gamma on that same scale.
+% Cross-validation holds out single events from that pooled table. Each
+% training fold still mixes the remaining sessions and animals, then keeps
+% the same number of events from each class. Held-out events keep their
+% natural counts. behavior_class_2 is the positive class. Confusion values
+% are the percent of those single events, and the four percentages of one
+% band sum to 100. The last figure compares delta, theta, and gamma on that
+% same pooled scale. Leave-one-session-out is printed afterward as a later
+% check. It is not the first model.
 
 %% Choose the band, the two behavior groups, and the classifier
 band_name = 'gamma';
@@ -81,8 +87,15 @@ if n_class_1 < 2 || n_class_2 < 2
         n_class_1, n_class_2);
 end
 n_folds = min([n_folds_requested, n_class_1, n_class_2]);
+pooled_animals = unique(classification_table.animal_name, 'stable');
+pooled_sessions = unique(classification_table.session_name, 'stable');
+n_animals_pooled = numel(pooled_animals);
+n_sessions_pooled = numel(pooled_sessions);
 
 %% Cross-validated classification
+% First approach. classification_table holds every electrode-1 event from
+% every kept animal and every session. Each training fold uses that pool
+% minus the held-out events, then subsamples to equal class counts.
 rng(rng_seed);
 [cv_prediction, cv_scored] = cross_validated_predictions( ...
     classification_table.mean_power, classification_table.behavior_class, ...
@@ -149,6 +162,12 @@ classification_result.behavior_class_1 = behavior_class_1;
 classification_result.behavior_class_2 = behavior_class_2;
 classification_result.classifier_name = classifier_name;
 classification_result.power_time_window = power_time_window;
+classification_result.baseline_time_window = baseline_time_window;
+classification_result.pooling = 'all_sessions_all_animals';
+classification_result.n_animals = n_animals_pooled;
+classification_result.n_sessions = n_sessions_pooled;
+classification_result.pooled_animals = pooled_animals;
+classification_result.pooled_sessions = pooled_sessions;
 classification_result.n_class_1 = n_class_1;
 classification_result.n_class_2 = n_class_2;
 classification_result.n_folds = n_folds;
@@ -168,17 +187,21 @@ classification_result.permutation_p = permutation_p;
 classification_result.session_balanced_accuracy = session_balanced_accuracy;
 classification_result.cv_prediction = cv_prediction;
 
-fprintf('\n%s power, %s\n', band_name, classifier_name)
+fprintf('\nFirst approach: train on events pooled from all sessions and all animals.\n')
+fprintf('%s power, %s\n', band_name, classifier_name)
+fprintf('Pooled animals (%d): %s\n', n_animals_pooled, strjoin(pooled_animals, ', '))
+fprintf('Pooled sessions (%d): %s\n', n_sessions_pooled, strjoin(pooled_sessions, ', '))
 fprintf('Class 1 (%s): %d single events\n', strjoin(behavior_class_1, ', '), n_class_1)
 fprintf('Class 2 (%s): %d single events\n', strjoin(behavior_class_2, ', '), n_class_2)
 fprintf('Held-out single events: %d\n', n_single_events)
-fprintf('Stratified %d-fold accuracy: %.1f%% of single events\n', n_folds, 100 * cv_accuracy)
+fprintf('Stratified %d-fold accuracy on the pooled events: %.1f%% of single events\n', n_folds, 100 * cv_accuracy)
 fprintf('Stratified %d-fold balanced accuracy: %.1f%%\n', n_folds, 100 * cv_balanced_accuracy)
 fprintf('Majority-class chance: %.1f%%\n', 100 * chance_accuracy)
 fprintf('Permutation p of balanced accuracy: %.4f (%d shuffles)\n', permutation_p, n_permutations)
-fprintf('Leave-one-session-out balanced accuracy: %.1f%%\n', 100 * session_balanced_accuracy)
-fprintf('Positive class is %s. Each training fold uses equal class counts.\n', class_2_label)
+fprintf('Positive class is %s. Each training fold uses the pooled events, minus the held-out events, with equal class counts.\n', class_2_label)
 fprintf('Confusion percentages sum to 100 over held-out single events.\n')
+fprintf('Later check, not the first model: leave-one-session-out balanced accuracy %.1f%%\n', ...
+    100 * session_balanced_accuracy)
 fprintf('%s baseline z-score: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
     band_name, mean(classification_table.mean_power(classification_table.behavior_class == 1)), n_class_1, ...
     mean(classification_table.mean_power(classification_table.behavior_class == 2)), n_class_2)
@@ -194,8 +217,8 @@ outcome_bars.FaceColor = 'flat';
 outcome_bars.CData = [0.20 0.45 0.70; 0.85 0.35 0.20; 0.85 0.35 0.20; 0.20 0.45 0.70];
 xticklabels({'True negative', 'False positive', 'False negative', 'True positive'})
 ylabel('Percent of single events')
-title(sprintf('%s, %s. %d single events. Positive class: %s', ...
-    band_name, classifier_name, n_single_events, class_2_label))
+title(sprintf('%s, %s. Pooled, %d animals, %d sessions, %d events. Positive class: %s', ...
+    band_name, classifier_name, n_animals_pooled, n_sessions_pooled, n_single_events, class_2_label))
 ylim([0 100])
 text(1:4, outcome_percent, compose('%.1f%%', outcome_percent), ...
     'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
@@ -229,7 +252,7 @@ confusion_chart = confusionchart( ...
     categorical(true_label(cv_scored), {class_1_label, class_2_label}), ...
     categorical(predicted_label(cv_scored), {class_1_label, class_2_label}), ...
     'Normalization', 'total-normalized');
-confusion_chart.Title = sprintf('Percent of %d single events. Balanced accuracy %.1f%%', ...
+confusion_chart.Title = sprintf('Pooled events. Percent of %d single events. Balanced accuracy %.1f%%', ...
     n_single_events, 100 * cv_balanced_accuracy);
 
 %% Compare confusion outcomes across delta, theta, and gamma
@@ -268,8 +291,9 @@ for band_n = 1:numel(bands_to_compare)
     end
     class_1_power = this_table.mean_power(this_table.behavior_class == 1);
     class_2_power = this_table.mean_power(this_table.behavior_class == 2);
-    fprintf('%s baseline z-score: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
-        this_band, mean(class_1_power), numel(class_1_power), mean(class_2_power), numel(class_2_power))
+    fprintf('%s pooled across %d animals and %d sessions. Baseline z-score: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
+        this_band, numel(unique(this_table.animal_name)), numel(unique(this_table.session_name)), ...
+        mean(class_1_power), numel(class_1_power), mean(class_2_power), numel(class_2_power))
     band_outcome_counts(band_n, :) = this_counts;
     band_outcome_percent(band_n, :) = 100 * this_counts / sum(this_counts);
 end
@@ -291,7 +315,8 @@ xticklabels({'True negative', 'False positive', 'False negative', 'True positive
 ylabel('Percent of single events')
 ylim([0 100])
 legend(bands_to_compare, 'Location', 'best')
-title(sprintf('%s. Equal training counts. Positive class: %s', classifier_name, class_2_label))
+title(sprintf('%s. Pooled across sessions and animals. Equal training counts. Positive class: %s', ...
+    classifier_name, class_2_label))
 set(gca, 'TickDir', 'out')
 
 function [prediction, scored] = cross_validated_predictions(power, class_label, classifier_name, n_folds)
@@ -386,7 +411,7 @@ end
 function figure_name = classification_figure_name(band_name, class_1, class_2, classifier_name)
 class_1_name = strjoin(class_1, '_');
 class_2_name = strjoin(class_2, '_');
-figure_name = ['classify_' band_name '_' class_1_name '_vs_' class_2_name '_' classifier_name];
+figure_name = ['classify_' band_name '_' class_1_name '_vs_' class_2_name '_' classifier_name '_pooled'];
 figure_name = regexprep(figure_name, '[^A-Za-z0-9_]', '');
 end
 
@@ -425,8 +450,10 @@ end
 psth_timewrap_self = cell(1, numel(all_behaviors));
 session_index_self = cell(1, numel(all_behaviors));
 electrode_index_self = cell(1, numel(all_behaviors));
+animal_name_self = cell(1, numel(all_behaviors));
 session_name_self = cell(1, numel(all_behaviors));
 for behavior_n = 1:numel(all_behaviors)
+    animal_name_self{behavior_n} = cell(0, 1);
     session_name_self{behavior_n} = cell(0, 1);
 end
 
@@ -437,7 +464,8 @@ for j = 1:numel(psth_structure)
     animal_num = find(cell2mat(cellfun(@(name) contains(animal_names{j, 1}, name), ...
         animal_label, 'UniformOutput', false)));
     electrode_num = animal_names{j, 2};
-    this_session_name = animal_label{animal_num(1)};
+    this_animal_name = animal_label{animal_num(1)};
+    this_session_name = char(animal_names{j, 1});
 
     for b = requested_index
         this_psth = psth_structure(j).all_behavior_psth_self{3, b};
@@ -448,6 +476,7 @@ for j = 1:numel(psth_structure)
         psth_timewrap_self{b} = [psth_timewrap_self{b}; this_psth];
         session_index_self{b} = [session_index_self{b}; animal_num(1) * ones(n_events, 1)];
         electrode_index_self{b} = [electrode_index_self{b}; electrode_num * ones(n_events, 1)];
+        animal_name_self{b} = [animal_name_self{b}; repmat({this_animal_name}, n_events, 1)];
         session_name_self{b} = [session_name_self{b}; repmat({this_session_name}, n_events, 1)];
     end
 end
@@ -455,6 +484,7 @@ end
 mean_power = [];
 behavior_class = [];
 behavior_name = cell(0, 1);
+animal_name = cell(0, 1);
 session_name = cell(0, 1);
 for class_id = 1:2
     if class_id == 1
@@ -466,16 +496,19 @@ for class_id = 1:2
         behavior_index = find(strcmp(all_behaviors, class_behaviors{name_n}));
         psth = psth_timewrap_self{behavior_index};
         electrode = electrode_index_self{behavior_index};
+        event_animal_name = animal_name_self{behavior_index};
         event_session_name = session_name_self{behavior_index};
         if isempty(psth)
             continue
         end
-        n_use = min([size(psth, 1), numel(electrode), numel(event_session_name)]);
+        n_use = min([size(psth, 1), numel(electrode), numel(event_animal_name), numel(event_session_name)]);
         psth = psth(1:n_use, :);
         electrode = electrode(1:n_use);
+        event_animal_name = event_animal_name(1:n_use);
         event_session_name = event_session_name(1:n_use);
         keep = electrode == 1;
         psth = psth(keep, :);
+        event_animal_name = event_animal_name(keep);
         event_session_name = event_session_name(keep);
         if isempty(psth)
             continue
@@ -505,9 +538,10 @@ for class_id = 1:2
         mean_power = [mean_power; this_mean(valid)]; %#ok<AGROW>
         behavior_class = [behavior_class; class_id * ones(nnz(valid), 1)]; %#ok<AGROW>
         behavior_name = [behavior_name; repmat(class_behaviors(name_n), nnz(valid), 1)]; %#ok<AGROW>
+        animal_name = [animal_name; event_animal_name(valid)]; %#ok<AGROW>
         session_name = [session_name; event_session_name(valid)]; %#ok<AGROW>
     end
 end
 
-event_table = table(mean_power, behavior_class, behavior_name, session_name);
+event_table = table(mean_power, behavior_class, behavior_name, animal_name, session_name);
 end
