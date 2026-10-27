@@ -510,25 +510,20 @@ fprintf('Full model average CV R²: %.6f\n\n', avgR2_full);
 for i = 1:numel(predictors)
     toRemove = predictors{i};
     fprintf('Testing predictor removal: %s\n', toRemove);
-    
-    % Regex pattern to safely remove predictor
-   
-    if i==1
-        pattern = ['(\s*\+\s*)?' toRemove '(\s*\+\s*)?'];
-        formula_reduced = regexprep(formula_full, pattern, '');
-        formula_reduced = regexprep(formula_reduced, '^\s*\+\s*', '');    
-        formula_reduced = regexprep(formula_reduced, '\s*\+\s*$', '');    
-        formula_reduced = regexprep(formula_reduced, '\s*\+\s*\+', ' + '); 
-        formula_reduced = strtrim(formula_reduced);
-    else
-        formula_reduced = regexprep(formula_full, ['\s*\+\s*' toRemove], '');
-    end
 
-    
+    % Drop the predictor by name. Building the formula from the kept names
+    % avoids a partial match on the formula string.
+    kept = predictors(~strcmp(predictors, toRemove));
+    if numel(kept) ~= numel(predictors) - 1
+        error('Failed to drop %s from the reduced model.', toRemove);
+    end
+    formula_reduced = ['Power ~ ' strjoin(kept, ' + ') ' + (1|Animal)'];
 
     mse_reduced_allfolds = zeros(k,1);
     r2_reduced_allfolds = zeros(k,1);
-    for fold = 1:13
+    % Fit every fold. Stopping early leaves the preallocated zeros in place,
+    % and Figure 2 then treats those folds as ΔR² = R²_full.
+    for fold = 1:k
         trainIdx = training(cv, fold);
         testIdx = test(cv, fold);
         trainData = regressor_table(trainIdx,:);

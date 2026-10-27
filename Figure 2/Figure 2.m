@@ -453,6 +453,19 @@ predictors = cvResults.predictors;
 R2_full_allfolds =cvResults.Call.r2_full;
 avgR2_full = mean(R2_full_allfolds);
 
+% Reduced-model R² is preallocated to 0. Folds that were never fit stay
+% exactly 0 while the full-model R² does not, so full-minus-reduced equals
+% the full-model R² for those folds.
+r2_reduced_probe = cvResults.(predictors{1}).r2_reduced;
+uncomputed_probe = r2_reduced_probe == 0 & R2_full_allfolds ~= 0;
+if nnz(uncomputed_probe) >= 5
+    warning('Figure2:IncompleteCVFolds', ...
+        ['%d of %d CV folds still have reduced-model R^2 exactly 0. ' ...
+         'Those folds were never fit, so they plot at the full-model R^2 and pull every predictor mean toward (uncomputed/k)*100%%. ' ...
+         'They are omitted here. Re-run Estimate percentage of R2.m to fit all %d folds.'], ...
+        nnz(uncomputed_probe), k, k);
+end
+
 y_for_sig = 20;
 figure('units','normalized','outerposition',[.5 0 .5 1]);
 hold on
@@ -468,7 +481,8 @@ for j=1:numel(predictors)
     % Extract R² values for this predictor
     r2_full = cvResults.(predictors{re_order(j)}).r2_full;
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
-    mean_diff(j) =mean( r2_full - r2_reduced)/mean(r2_full); % difference per fold
+    valid = computed_reduced_folds(r2_full, r2_reduced);
+    mean_diff(j) = mean(r2_full(valid) - r2_reduced(valid)) / mean(r2_full); % difference per fold
 end
 [~, re_order] =  sort(mean_diff, 'descend'); 
 
@@ -480,10 +494,11 @@ for j=1:numel(re_order)
     % Extract R² values for this predictor
     r2_full = cvResults.(predictors{re_order(j)}).r2_full;
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
-    r2_diff = r2_full - r2_reduced; % difference per fold
+    valid = computed_reduced_folds(r2_full, r2_reduced);
+    r2_diff = r2_full(valid) - r2_reduced(valid); % difference per computed fold
 
-    % Plot swarm of differences
-    swarmchart((2*j-1)*ones(k,1), 100*r2_diff/avgR2_full, 'o', 'MarkerFaceColor','flat', 'MarkerFaceAlpha',.25);
+    % Plot swarm of differences, as a percentage of the full-model R²
+    swarmchart((2*j-1)*ones(numel(r2_diff),1), 100*r2_diff/avgR2_full, 'o', 'MarkerFaceColor','flat', 'MarkerFaceAlpha',.25);
     plot((2*j-1), 100*mean(r2_diff/avgR2_full), '_r','MarkerSize',10,'LineWidth',2);
 
     % Paired t-test (full vs reduced)
@@ -514,7 +529,7 @@ plot([0 2*numel(predictors)], [0 0], 'k')
 xticks(1:2:2*numel(predictors))
 xticks(1:2:2*numel(predictors))
 xticklabels(predictors(re_order))
-ylabel('\Delta R^2 (Full - Reduced)')
+ylabel('\DeltaR^2 / R^2_{full} (%)')
 ylim([-1 y_for_sig+10])
 title('Cross-validated \DeltaR^2 when removing each predictor')
 set(gca, 'FontSize', 24)
@@ -970,3 +985,14 @@ end
 
 plot(data_together(indexes2plot,1), data_together(indexes2plot,2), '.k', 'MarkerSize',    .1)
 axis xy
+
+function valid = computed_reduced_folds(r2_full, r2_reduced)
+% Folds left at the preallocated 0 were not fit. A computed R² is not
+% exactly 0, so exact zeros mark those missing reduced-model fits.
+uncomputed = r2_reduced == 0 & r2_full ~= 0;
+if nnz(uncomputed) >= 5
+    valid = ~uncomputed;
+else
+    valid = true(size(r2_full));
+end
+end
