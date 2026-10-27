@@ -16,9 +16,10 @@
 %   'tree'         fitctree
 %   'logit'        fitglm, binomial
 %
-% behavior_class_2 is the positive class. A cross-validated call is then
-% true positive, true negative, false positive, or false negative.
-% The last figure compares those four counts for delta, theta, and gamma.
+% Each row is one behavior event. Cross-validation holds out single events.
+% behavior_class_2 is the positive class. Confusion values are the percent
+% of those single events, and the four percentages of one band sum to 100.
+% The last figure compares delta, theta, and gamma on that same scale.
 
 %% Choose the band, the two behavior groups, and the classifier
 band_name = 'gamma';
@@ -106,8 +107,10 @@ outcome_meaning = {
     sprintf('%s predicted as %s', class_2_label, class_1_label)
     sprintf('%s predicted as %s', class_2_label, class_2_label)
     };
-confusion_outcomes = table(outcome_name, outcome_count(:), outcome_meaning, ...
-    'VariableNames', {'outcome', 'count', 'meaning'});
+n_single_events = numel(scored_class);
+outcome_percent = 100 * outcome_count(:) / n_single_events;
+confusion_outcomes = table(outcome_name, outcome_count(:), outcome_percent, outcome_meaning, ...
+    'VariableNames', {'outcome', 'count', 'percent_of_single_events', 'meaning'});
 
 permutation_balanced_accuracy = nan(n_permutations, 1);
 for permutation_n = 1:n_permutations
@@ -153,20 +156,23 @@ classification_result.true_negative = true_negative;
 classification_result.false_positive = false_positive;
 classification_result.false_negative = false_negative;
 classification_result.true_positive = true_positive;
+classification_result.n_single_events = n_single_events;
+classification_result.outcome_percent = outcome_percent;
 classification_result.permutation_balanced_accuracy = permutation_balanced_accuracy;
 classification_result.permutation_p = permutation_p;
 classification_result.session_balanced_accuracy = session_balanced_accuracy;
 classification_result.cv_prediction = cv_prediction;
 
 fprintf('\n%s power, %s\n', band_name, classifier_name)
-fprintf('Class 1 (%s): %d events\n', strjoin(behavior_class_1, ', '), n_class_1)
-fprintf('Class 2 (%s): %d events\n', strjoin(behavior_class_2, ', '), n_class_2)
-fprintf('Stratified %d-fold accuracy: %.3f\n', n_folds, cv_accuracy)
-fprintf('Stratified %d-fold balanced accuracy: %.3f\n', n_folds, cv_balanced_accuracy)
-fprintf('Majority-class chance: %.3f\n', chance_accuracy)
+fprintf('Class 1 (%s): %d single events\n', strjoin(behavior_class_1, ', '), n_class_1)
+fprintf('Class 2 (%s): %d single events\n', strjoin(behavior_class_2, ', '), n_class_2)
+fprintf('Held-out single events: %d\n', n_single_events)
+fprintf('Stratified %d-fold accuracy: %.1f%% of single events\n', n_folds, 100 * cv_accuracy)
+fprintf('Stratified %d-fold balanced accuracy: %.1f%%\n', n_folds, 100 * cv_balanced_accuracy)
+fprintf('Majority-class chance: %.1f%%\n', 100 * chance_accuracy)
 fprintf('Permutation p of balanced accuracy: %.4f (%d shuffles)\n', permutation_p, n_permutations)
-fprintf('Leave-one-session-out balanced accuracy: %.3f\n', session_balanced_accuracy)
-fprintf('Positive class is %s.\n', class_2_label)
+fprintf('Leave-one-session-out balanced accuracy: %.1f%%\n', 100 * session_balanced_accuracy)
+fprintf('Positive class is %s. Confusion percentages sum to 100 over single events.\n', class_2_label)
 disp(confusion_outcomes)
 disp(classification_table(1:min(8, height(classification_table)), :))
 
@@ -174,14 +180,15 @@ outcome_figure_name = classification_figure_name(band_name, behavior_class_1, be
     [classifier_name '_outcomes']);
 figure
 set(gcf, 'WindowState', 'maximized', 'NumberTitle', 'off', 'Name', outcome_figure_name)
-outcome_bars = bar(outcome_count);
+outcome_bars = bar(outcome_percent);
 outcome_bars.FaceColor = 'flat';
 outcome_bars.CData = [0.20 0.45 0.70; 0.85 0.35 0.20; 0.85 0.35 0.20; 0.20 0.45 0.70];
 xticklabels({'True negative', 'False positive', 'False negative', 'True positive'})
-ylabel('Cross-validated events')
-title(sprintf('%s, %s. Positive class: %s', band_name, classifier_name, class_2_label))
-ylim([0, max(outcome_count) * 1.15 + 1])
-text(1:4, outcome_count, compose('%d', outcome_count), ...
+ylabel('Percent of single events')
+title(sprintf('%s, %s. %d single events. Positive class: %s', ...
+    band_name, classifier_name, n_single_events, class_2_label))
+ylim([0 100])
+text(1:4, outcome_percent, compose('%.1f%%', outcome_percent), ...
     'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
 set(gca, 'TickDir', 'out')
 
@@ -204,25 +211,27 @@ scatter(classification_table.behavior_class + (rand(height(classification_table)
 xlim([0.5 2.5])
 xticks([1 2])
 xticklabels({class_1_label, class_2_label})
-ylabel('Mean log10 power')
-title(sprintf('%s, %s', band_name, classifier_name))
+ylabel('Log10 power of one event')
+title(sprintf('%s, %s, one event per point', band_name, classifier_name))
 set(gca, 'TickDir', 'out')
 
 subplot(1, 2, 2)
 confusion_chart = confusionchart( ...
     categorical(true_label(cv_scored), {class_1_label, class_2_label}), ...
     categorical(predicted_label(cv_scored), {class_1_label, class_2_label}), ...
-    'RowSummary', 'row-normalized');
-confusion_chart.Title = sprintf('Balanced accuracy %.3f, permutation p %.4f', ...
-    cv_balanced_accuracy, permutation_p);
+    'Normalization', 'total-normalized');
+confusion_chart.Title = sprintf('Percent of %d single events. Balanced accuracy %.1f%%', ...
+    n_single_events, 100 * cv_balanced_accuracy);
 
 %% Compare confusion outcomes across delta, theta, and gamma
 bands_to_compare = {'delta', 'theta', 'gamma'};
 band_outcome_counts = nan(numel(bands_to_compare), 4);
+band_outcome_percent = nan(numel(bands_to_compare), 4);
 for band_n = 1:numel(bands_to_compare)
     this_band = bands_to_compare{band_n};
     if strcmp(this_band, band_name)
         band_outcome_counts(band_n, :) = outcome_count(:).';
+        band_outcome_percent(band_n, :) = outcome_percent(:).';
         continue
     end
     try
@@ -246,26 +255,30 @@ for band_n = 1:numel(bands_to_compare)
         warning('No cross-validation fold was fit for %s.', this_band);
         continue
     end
-    band_outcome_counts(band_n, :) = confusion_outcome_counts( ...
+    this_counts = confusion_outcome_counts( ...
         this_table.behavior_class(this_scored), this_prediction(this_scored));
+    band_outcome_counts(band_n, :) = this_counts;
+    band_outcome_percent(band_n, :) = 100 * this_counts / sum(this_counts);
 end
 
-band_confusion_outcomes = array2table(band_outcome_counts, ...
+band_confusion_outcomes = array2table(band_outcome_percent, ...
     'VariableNames', outcome_name', 'RowNames', bands_to_compare);
+disp('Percent of single events')
 disp(band_confusion_outcomes)
 
 comparison_figure_name = classification_figure_name('delta_theta_gamma', ...
     behavior_class_1, behavior_class_2, [classifier_name '_outcomes']);
 figure
 set(gcf, 'WindowState', 'maximized', 'NumberTitle', 'off', 'Name', comparison_figure_name)
-comparison_bars = bar(band_outcome_counts.');
+comparison_bars = bar(band_outcome_percent.');
 comparison_bars(1).FaceColor = [0.35 0.35 0.35];
 comparison_bars(2).FaceColor = [0.20 0.55 0.35];
 comparison_bars(3).FaceColor = [0.75 0.35 0.55];
 xticklabels({'True negative', 'False positive', 'False negative', 'True positive'})
-ylabel('Cross-validated events')
+ylabel('Percent of single events')
+ylim([0 100])
 legend(bands_to_compare, 'Location', 'best')
-title(sprintf('%s. Positive class: %s', classifier_name, class_2_label))
+title(sprintf('%s. Three bars per outcome. Positive class: %s', classifier_name, class_2_label))
 set(gca, 'TickDir', 'out')
 
 function [prediction, scored] = cross_validated_predictions(power, class_label, classifier_name, n_folds)
