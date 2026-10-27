@@ -17,6 +17,8 @@
 %   'logit'        fitglm, binomial
 %
 % Each row is one behavior event. Cross-validation holds out single events.
+% Each training fold keeps the same number of events from each class, so the
+% larger class does not win by count. Held-out events keep their natural counts.
 % behavior_class_2 is the positive class. Confusion values are the percent
 % of those single events, and the four percentages of one band sum to 100.
 % The last figure compares delta, theta, and gamma on that same scale.
@@ -172,7 +174,11 @@ fprintf('Stratified %d-fold balanced accuracy: %.1f%%\n', n_folds, 100 * cv_bala
 fprintf('Majority-class chance: %.1f%%\n', 100 * chance_accuracy)
 fprintf('Permutation p of balanced accuracy: %.4f (%d shuffles)\n', permutation_p, n_permutations)
 fprintf('Leave-one-session-out balanced accuracy: %.1f%%\n', 100 * session_balanced_accuracy)
-fprintf('Positive class is %s. Confusion percentages sum to 100 over single events.\n', class_2_label)
+fprintf('Positive class is %s. Each training fold uses equal class counts.\n', class_2_label)
+fprintf('Confusion percentages sum to 100 over held-out single events.\n')
+fprintf('%s single-event log10 power: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
+    band_name, mean(classification_table.mean_power(classification_table.behavior_class == 1)), n_class_1, ...
+    mean(classification_table.mean_power(classification_table.behavior_class == 2)), n_class_2)
 disp(confusion_outcomes)
 disp(classification_table(1:min(8, height(classification_table)), :))
 
@@ -230,33 +236,37 @@ band_outcome_percent = nan(numel(bands_to_compare), 4);
 for band_n = 1:numel(bands_to_compare)
     this_band = bands_to_compare{band_n};
     if strcmp(this_band, band_name)
-        band_outcome_counts(band_n, :) = outcome_count(:).';
-        band_outcome_percent(band_n, :) = outcome_percent(:).';
-        continue
+        this_table = classification_table;
+        this_counts = outcome_count(:).';
+    else
+        try
+            this_table = behavior_event_table(saving_folder, this_band, all_behaviors, ...
+                animal_label, behavior_class_1, behavior_class_2, power_time_window);
+        catch band_error
+            warning('Could not load %s: %s', this_band, band_error.message);
+            continue
+        end
+        this_n_class_1 = nnz(this_table.behavior_class == 1);
+        this_n_class_2 = nnz(this_table.behavior_class == 2);
+        if this_n_class_1 < 2 || this_n_class_2 < 2
+            warning('%s has too few events for classification.', this_band);
+            continue
+        end
+        this_n_folds = min([n_folds_requested, this_n_class_1, this_n_class_2]);
+        rng(rng_seed);
+        [this_prediction, this_scored] = cross_validated_predictions( ...
+            this_table.mean_power, this_table.behavior_class, classifier_name, this_n_folds);
+        if ~any(this_scored)
+            warning('No cross-validation fold was fit for %s.', this_band);
+            continue
+        end
+        this_counts = confusion_outcome_counts( ...
+            this_table.behavior_class(this_scored), this_prediction(this_scored));
     end
-    try
-        this_table = behavior_event_table(saving_folder, this_band, all_behaviors, ...
-            animal_label, behavior_class_1, behavior_class_2, power_time_window);
-    catch band_error
-        warning('Could not load %s: %s', this_band, band_error.message);
-        continue
-    end
-    this_n_class_1 = nnz(this_table.behavior_class == 1);
-    this_n_class_2 = nnz(this_table.behavior_class == 2);
-    if this_n_class_1 < 2 || this_n_class_2 < 2
-        warning('%s has too few events for classification.', this_band);
-        continue
-    end
-    this_n_folds = min([n_folds_requested, this_n_class_1, this_n_class_2]);
-    rng(rng_seed);
-    [this_prediction, this_scored] = cross_validated_predictions( ...
-        this_table.mean_power, this_table.behavior_class, classifier_name, this_n_folds);
-    if ~any(this_scored)
-        warning('No cross-validation fold was fit for %s.', this_band);
-        continue
-    end
-    this_counts = confusion_outcome_counts( ...
-        this_table.behavior_class(this_scored), this_prediction(this_scored));
+    class_1_power = this_table.mean_power(this_table.behavior_class == 1);
+    class_2_power = this_table.mean_power(this_table.behavior_class == 2);
+    fprintf('%s single-event log10 power: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
+        this_band, mean(class_1_power), numel(class_1_power), mean(class_2_power), numel(class_2_power))
     band_outcome_counts(band_n, :) = this_counts;
     band_outcome_percent(band_n, :) = 100 * this_counts / sum(this_counts);
 end
@@ -278,14 +288,14 @@ xticklabels({'True negative', 'False positive', 'False negative', 'True positive
 ylabel('Percent of single events')
 ylim([0 100])
 legend(bands_to_compare, 'Location', 'best')
-title(sprintf('%s. Three bars per outcome. Positive class: %s', classifier_name, class_2_label))
+title(sprintf('%s. Equal training counts. Positive class: %s', classifier_name, class_2_label))
 set(gca, 'TickDir', 'out')
 
 function [prediction, scored] = cross_validated_predictions(power, class_label, classifier_name, n_folds)
 prediction = nan(size(class_label));
 partition = cvpartition(class_label, 'KFold', n_folds, 'Stratify', true);
 for fold_n = 1:n_folds
-    train_index = training(partition, fold_n);
+    train_index = balanced_training_index(training(partition, fold_n), class_label);
     test_index = test(partition, fold_n);
     try
         model = train_behavior_classifier(power(train_index), class_label(train_index), classifier_name);
@@ -303,7 +313,7 @@ prediction = nan(size(class_label));
 sessions = unique(session_label);
 for session_n = 1:numel(sessions)
     test_index = strcmp(session_label, sessions{session_n});
-    train_index = ~test_index;
+    train_index = balanced_training_index(~test_index, class_label);
     if numel(unique(class_label(train_index))) < 2
         continue
     end
@@ -323,11 +333,11 @@ power = power(:);
 class_label = class_label(:);
 switch classifier_name
     case 'lda'
-        model = fitcdiscr(power, class_label, 'DiscrimType', 'linear');
+        model = fitcdiscr(power, class_label, 'DiscrimType', 'linear', 'Prior', 'uniform');
     case 'svm'
         model = fitcsvm(power, class_label, 'KernelFunction', 'linear', 'Standardize', true);
     case 'naive_bayes'
-        model = fitcnb(power, class_label);
+        model = fitcnb(power, class_label, 'Prior', 'uniform');
     case 'tree'
         model = fitctree(power, class_label);
     case 'logit'
@@ -345,6 +355,23 @@ else
     prediction = predict(model, power);
 end
 prediction = prediction(:);
+end
+
+function balanced_index = balanced_training_index(train_index, class_label)
+% Keep every event from the smaller class, and the same number from the larger class.
+positions = find(train_index);
+labels = class_label(positions);
+class_1_positions = positions(labels == 1);
+class_2_positions = positions(labels == 2);
+n_keep = min(numel(class_1_positions), numel(class_2_positions));
+balanced_index = false(size(train_index));
+if n_keep < 1
+    return
+end
+class_1_positions = class_1_positions(randperm(numel(class_1_positions), n_keep));
+class_2_positions = class_2_positions(randperm(numel(class_2_positions), n_keep));
+balanced_index(class_1_positions) = true;
+balanced_index(class_2_positions) = true;
 end
 
 function value = balanced_accuracy(true_class, predicted_class)
