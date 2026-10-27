@@ -202,7 +202,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | PSTH per behavior | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
 | Area maps | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Call-locked PSTH | `Estimate_psth_calls_all_animals.m` | `Figure 2.m` `%% 13`–`%% 17` |
-| GLM / unique $R^2$ | `Estimate_psth_all_regressors.m` | `Figure 2.m` `%% 7` |
+| GLM / unique $R^2$ | `Estimate_psth_all_regressors.m`, then `Estimate percentage of R2.m` | `Figure 2.m` `%% 7` |
 | Reciprocity | (uses regressor PSTH) | `Reciprocity.m` |
 | Partner identity | (uses play-bout PSTH) | `Play partner.m` |
 | Speed vs band power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m`; `Figure 2.m` `%% 18`–`%% 21` |
