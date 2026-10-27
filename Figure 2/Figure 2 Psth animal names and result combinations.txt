@@ -101,6 +101,18 @@ THETA
    Path           : Data\Analysis results\psth power by frequency and behavior\
    Loaded by      : Figure 2.m (swap filenames)
 
+4) theta per behavior (self and other, onset and time-wrapped)
+   psth_structure : psth_structure_theta_all_behaviors_self_other_partner.mat
+   animal_names   : animal_names_theta_all_behaviors_self_other_partner.mat
+   results        : results_full_lfp_per_behavior_theta.mat
+   results (TW)   : results_full_lfp_per_behavior_time_warpped_theta.mat
+   Path           : Data\Analysis results\psth power by frequency and behavior\
+   Saved by       : Estimate_psth_all_behaviors_theta_gamma.m (PSTH)
+                    Analyze_psth_all_behaviors_theta_gamma.m (LME)
+   Loaded by      : Analyze_psth_all_behaviors_theta_gamma.m
+   Note           : 6-12 Hz, 0.5 s window, 10 ms step. Separate from the delta
+                    per-behavior scripts. LFP_PAG is loaded once per animal.
+
 --------------------------------------------------------------------------------
 GAMMA
 --------------------------------------------------------------------------------
@@ -124,6 +136,18 @@ GAMMA
    cvResults      : cvResults_mean_calls_gamma_AlllVar_play_baut.mat
    Path           : Data\Analysis results\psth power by frequency and behavior\
    Loaded by      : Figure 2.m (swap filenames)
+
+4) gamma per behavior (self and other, onset and time-wrapped)
+   psth_structure : psth_structure_gamma_all_behaviors_self_other_partner.mat
+   animal_names   : animal_names_gamma_all_behaviors_self_other_partner.mat
+   results        : results_full_lfp_per_behavior_gamma.mat
+   results (TW)   : results_full_lfp_per_behavior_time_warpped_gamma.mat
+   Path           : Data\Analysis results\psth power by frequency and behavior\
+   Saved by       : Estimate_psth_all_behaviors_theta_gamma.m (PSTH)
+                    Analyze_psth_all_behaviors_theta_gamma.m (LME)
+   Loaded by      : Analyze_psth_all_behaviors_theta_gamma.m
+   Note           : 35-90 Hz, 0.1 s window, 10 ms step. Separate from the delta
+                    per-behavior scripts. LFP_PAG is loaded once per animal.
 
 --------------------------------------------------------------------------------
 PHASE (delta band, exploratory bout onset)
@@ -151,6 +175,23 @@ when they were not already present.
    Path           : Data\Analysis results\psth power by frequency and behavior\
    Loaded by      : Analyze_psth_all_behaviors.m
    Note           : results files are also saved by the same script (onset-aligned and time-wrapped LME)
+
+1b) Analyze_psth_all_behaviors_theta_gamma.m
+   Same LME as (1), for theta and gamma. Does not edit the delta script.
+   Theta and gamma file names are listed under THETA #4 and GAMMA #4.
+   Saved by       : Estimate_psth_all_behaviors_theta_gamma.m
+                    (GENERATE_PSTH_ALL_BEHAVIORS_BANDS)
+   Loaded by      : Analyze_psth_all_behaviors_theta_gamma.m
+
+1c) Analyze_behavior_class_from_timewrap_power.m
+   Classify two Type2 groups from mean time-wrapped band power.
+   The first model pools electrode-1 events from every kept animal and
+   every session, then cross-validates that pool. Leave-one-session-out
+   is a later check.
+   Loads the per-behavior PSTH mats above (delta, theta, or gamma).
+   Default classes are Pounce (1) and PounceI (2), default model is LDA.
+   Each event is a baseline z-score. Training folds use equal class counts.
+   Loaded by      : Analyze_behavior_class_from_timewrap_power.m
 
 2) Analyze_freq_coupling.m
    Cross-frequency coupling (delta phase vs gamma amplitude).
