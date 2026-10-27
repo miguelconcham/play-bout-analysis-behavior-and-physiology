@@ -16,6 +16,9 @@
 % (darker bar) or below 0 (lighter bar). Blue is self, red is other.
 % Play vs non-play uses the same bars: red play on top, black non-play below.
 % Onset and offset lines are drawn after those bars and span the y axis.
+% Figures open maximized. psth_<band>_onset_pre_spectrum_* is the spectrum
+% of the electrode-1 trial-averaged power in the 5 s before onset.
+% %% Save open figures as SVG writes every named figure with print -dsvg.
 % Run Estimate_psth_all_behaviors_theta_gamma.m first so those PSTH files exist.
 
 this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_all_behaviors_theta_gamma.m';
@@ -599,11 +602,86 @@ axis tight
 set(gca,'TickDir','out')
 mark_significant_psth(time_analysis_time_wrapped, self_matrix, other_matrix)
 extend_event_lines([0 5])
+
+%% Pre-onset spectrum of the onset-aligned power
+% Spectrum of the electrode-1 mean power from -5 s to onset, per behavior.
+% Upper rows are behaviors. Lower panel is the mean across behaviors with a t interval.
+% The gray band on the lower panel is 1-5 Hz.
+pre_window = [-5 0];
+n_col = 4000;
+for b = 1:numel(all_behaviors)
+    if ~isempty(all_psth_onset_self{1,b})
+        n_col = size(all_psth_onset_self{1,b}, 2);
+        break
+    end
+end
+bin_offsets = floor(psth_ranges(1) / bin_size) + (0:n_col-1);
+time_psth = bin_offsets * bin_size;
+pre_mask = time_psth >= pre_window(1) & time_psth < pre_window(2);
+n_pre = nnz(pre_mask);
+freq_hz = (1:floor(n_pre / 2)) * ((1 / bin_size) / n_pre);
+freq_hz = freq_hz(freq_hz <= 8);
+
+spec_self = nan(numel(all_behaviors), numel(freq_hz));
+spec_other = nan(numel(all_behaviors), numel(freq_hz));
+for b = 1:numel(all_behaviors)
+    spec_self(b,:) = mean_trace_spectrum(all_psth_onset_self{1,b}, all_electrode_index_self{b}, pre_mask, freq_hz, 1 / bin_size);
+    spec_other(b,:) = mean_trace_spectrum(all_psth_onset_other{1,b}, all_electrode_index_other{b}, pre_mask, freq_hz, 1 / bin_size);
+end
+spec_self = log10(spec_self);
+spec_other = log10(spec_other);
+spec_self(~isfinite(spec_self)) = NaN;
+spec_other(~isfinite(spec_other)) = NaN;
+
+if isempty(freq_hz)
+    disp(['no pre-onset samples for ' band_name])
+else
+play_beh = group1;
+nonplay_beh = group2;
+rows_play_nonplay = [spec_self(play_beh,:); spec_other(play_beh,:); spec_self(nonplay_beh,:); spec_other(nonplay_beh,:)];
+labels_play_nonplay = [strcat(all_behaviors(play_beh), ' self'), strcat(all_behaviors(play_beh), ' other'), ...
+    strcat(all_behaviors(nonplay_beh), ' self'), strcat(all_behaviors(nonplay_beh), ' other')];
+figure
+name_psth_figure(band_name, 'onset_pre_spectrum_play_nonplay')
+plot_spectrum_stack(freq_hz, rows_play_nonplay, labels_play_nonplay, ...
+    1:(2 * numel(play_beh)), (2 * numel(play_beh) + 1):size(rows_play_nonplay, 1), ...
+    [0.85 0.15 0.15], [0.15 0.15 0.15], 'Play', 'Non-play')
+
+rows_self_other = [spec_self(play_beh,:); spec_other(play_beh,:)];
+labels_self_other = [strcat(all_behaviors(play_beh), ' self'), strcat(all_behaviors(play_beh), ' other')];
+figure
+name_psth_figure(band_name, 'onset_pre_spectrum_self_other_play')
+plot_spectrum_stack(freq_hz, rows_self_other, labels_self_other, ...
+    1:numel(play_beh), numel(play_beh) + (1:numel(play_beh)), ...
+    [0.10 0.25 0.80], [0.80 0.15 0.15], 'Self play', 'Other play')
+end
+end
+
+%% Save open figures as SVG
+% Set svg_folder, then run this section by itself.
+% Example: svg_folder = 'D:\figures\psth';
+svg_folder = '';
+if isempty(svg_folder)
+    disp('Set svg_folder, then run this section to save every open figure as SVG.')
+else
+    if exist(svg_folder, 'dir') ~= 7
+        mkdir(svg_folder)
+    end
+    open_figures = findall(0, 'Type', 'figure');
+    for fig_n = 1:numel(open_figures)
+        fig_name = get(open_figures(fig_n), 'Name');
+        if isempty(fig_name)
+            continue
+        end
+        print(open_figures(fig_n), '-vector', '-dsvg', fullfile(svg_folder, [fig_name '.svg']))
+        disp(['saved ' fig_name '.svg'])
+    end
 end
 
 function name_psth_figure(band_name, plot_id)
 % Window title is the save name. Same plot_id for delta, theta, and gamma.
-set(gcf, 'NumberTitle', 'off', 'Name', ['psth_' band_name '_' plot_id]);
+set(gcf, 'WindowState', 'maximized', 'NumberTitle', 'off', ...
+    'Name', ['psth_' band_name '_' plot_id]);
 end
 
 function mark_significant_psth(time_axis, upper_matrix, lower_matrix, upper_color, lower_color)
@@ -677,4 +755,88 @@ for k = 1:numel(starts)
     patch([x0 x1 x1 x0], [y0 y0 y0 + height y0 + height], color, ...
         'FaceAlpha', face_alpha, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 end
+end
+
+function spec = mean_trace_spectrum(psth, elec, pre_mask, freq_out, fs)
+% Power spectrum of the trial-averaged trace on the pre-onset samples.
+spec = nan(1, numel(freq_out));
+if isempty(psth) || isempty(elec) || size(psth, 2) ~= numel(pre_mask)
+    return
+end
+n_use = min(numel(elec), size(psth, 1));
+psth = psth(1:n_use, :);
+elec = elec(1:n_use);
+psth = psth(elec == 1, :);
+if isempty(psth)
+    return
+end
+seg = psth(:, pre_mask);
+if size(seg, 2) < 8
+    return
+end
+seg = seg - mean(seg, 2, 'omitnan');
+trace = mean(seg, 1, 'omitnan');
+if all(~isfinite(trace))
+    return
+end
+trace(~isfinite(trace)) = 0;
+n = numel(trace);
+yf = fft(trace);
+n_keep = floor(n / 2);
+pow = abs(yf(2:n_keep + 1)).^2 / n;
+freq = (1:n_keep) * (fs / n);
+spec = interp1(freq, pow, freq_out, 'linear', nan);
+end
+
+function plot_spectrum_stack(freq, rows, labels, idx_a, idx_b, color_a, color_b, name_a, name_b)
+% Same layout as the onset play vs non-play figure.
+% Upper image: one behavior per row. Lower panel: group means and t intervals.
+ax2 = subplot(3,1,2:3);
+hold on
+draw_group_spectrum(freq, rows(idx_b, :), color_b)
+draw_group_spectrum(freq, rows(idx_a, :), color_a)
+axis tight
+yl = ylim;
+delta_patch = patch([1 5 5 1], [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
+    'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+uistack(delta_patch, 'bottom')
+xlim([freq(1) freq(end)])
+xlabel('Frequency (Hz)')
+ylabel('log10 power')
+title([name_a ' vs ' name_b])
+set(gca, 'TickDir', 'out')
+
+ax1 = subplot(3,1,1);
+imagesc(freq, 1:size(rows, 1), rows)
+axis xy
+finite_vals = rows(isfinite(rows));
+if ~isempty(finite_vals)
+    lo = prctile(finite_vals, 5);
+    hi = prctile(finite_vals, 95);
+    if hi > lo
+        clim([lo hi])
+    end
+end
+hold on
+plot(freq([1 end]), [1 1] * numel(idx_a), 'w', 'LineWidth', 2)
+yticks(1:size(rows, 1))
+yticklabels(labels)
+set(gca, 'TickDir', 'out')
+colormap(ax1, jet(256))
+colorbar
+ax2.Position(1) = ax1.Position(1);
+ax2.Position(3) = ax1.Position(3);
+end
+
+function draw_group_spectrum(freq, rows, color)
+rows = rows(all(isfinite(rows), 2), :);
+if isempty(rows)
+    return
+end
+if size(rows, 1) >= 2
+    [~, ~, ci] = ttest(rows);
+    fill([freq fliplr(freq)], [ci(1,:) fliplr(ci(2,:))], color, ...
+        'FaceAlpha', 0.2, 'EdgeColor', 'none', 'HandleVisibility', 'off')
+end
+plot(freq, mean(rows, 1), 'Color', color, 'LineWidth', 1.5)
 end
