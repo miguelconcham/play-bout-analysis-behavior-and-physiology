@@ -10,6 +10,10 @@
 % Each LME is skipped when that file is already in saving_folder.
 % The %% Save sections only write the workspace, so a finished fit can be
 % saved without fitting again.
+% Figure window titles are psth_<band>_<plot>, the same plot name for
+% delta, theta, and gamma, and safe to use as a Windows file name.
+% Self vs other plots mark times when that mean is significantly above 0
+% (darker bar) or below 0 (lighter bar). Blue is self, red is other.
 % Run Estimate_psth_all_behaviors_theta_gamma.m first so those PSTH files exist.
 
 this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_all_behaviors_theta_gamma.m';
@@ -19,7 +23,7 @@ saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency
 figure_2_new_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\FIgure 2 delta modulation per behavior';
 
 all_behaviors = {'Pounce', 'CC','Boxing', 'Evasion','Pin', 'Escape', 'CB', 'CD','Grooming','Rearing', 'Sniffing','Scratching','PounceI', 'Bite'};
-band_list = {'theta', 'gamma'};
+band_list = {'delta', 'theta', 'gamma'};
 
 for band_n = 1:numel(band_list)
 band_name = band_list{band_n};
@@ -95,7 +99,7 @@ end
 
 %% Preview — time-wrapped mean PSTH per behavior
 figure
-set(gcf, 'Name', band_name)
+name_psth_figure(band_name, 'timewrap_preview')
 for b = 1:14
     subplot(4,4,b)
     plot(time_wrap_time, mean(all_psth_onset_self{3,b}, 'omitmissing'))
@@ -108,7 +112,7 @@ end
 
 %% Preview — onset-aligned mean PSTH per behavior
 figure
-set(gcf, 'Name', band_name)
+name_psth_figure(band_name, 'onset_preview')
 for b = 1:14
     subplot(4,4,b)
     plot(time(2:end), mean(all_psth_onset_self{1,b}, 'omitmissing'))
@@ -250,7 +254,7 @@ matrix_noplay(~any(pval_noplay<alpha_tresh,2),:) = NaN;
 noplay_indexes = [group2, group2+numel(all_behaviors)];
 
 figure
-set(gcf, 'Name', band_name)
+name_psth_figure(band_name, 'onset_play_nonplay')
 colormap(jet(256))
 ax2 = subplot(3,1,2:3);
 matrix2plot = matrix_noplay;
@@ -283,7 +287,7 @@ ax2.Position(3) = ax1.Position(3);
 
 %% Plot bar and scatter comparison (onset-aligned)
 figure
-set(gcf, 'Name', band_name)
+name_psth_figure(band_name, 'onset_bars')
 subplot(1,2,1)
 y_lim = [-5 5];
 time2compare = [-.2 .5];
@@ -322,45 +326,47 @@ ylim([-2.5 3.5])
 
 %% Plot self vs other — play behaviors
 figure
-set(gcf, 'Name', band_name)
+name_psth_figure(band_name, 'onset_self_other_play')
 index_self = group1;
 index_other = 1:numel(play_indexes);
 index_other(index_self) = [];
-matrix2plot = matrix_play(index_self,:);
-[~, ~, ci] = ttest(matrix2plot);
+self_matrix = matrix_play(index_self,:);
+other_matrix = matrix_play(index_other,:);
+[~, ~, ci] = ttest(self_matrix);
 fill([time_analysis fliplr(time_analysis)], [ci(1,:) fliplr(ci(2,:))], 'b', 'FaceAlpha',.2, 'EdgeColor','none')
 hold on
-plot(time_analysis, mean(matrix2plot), 'b')
-matrix2plot = matrix_play(index_other,:);
-[~, ~, ci] = ttest(matrix2plot);
+plot(time_analysis, mean(self_matrix), 'b')
+[~, ~, ci] = ttest(other_matrix);
 fill([time_analysis fliplr(time_analysis)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
-plot(time_analysis, mean(matrix2plot), 'r')
+plot(time_analysis, mean(other_matrix), 'r')
 plot(time_analysis([1 end]), [0 0], 'k:')
 plot([0 0], [-2 4], 'k')
 axis tight
 set(gca,'TickDir','out')
-print(gcf,'-vector','-dsvg',fullfile(figure_2_new_folder, svg_name))
+mark_significant_psth(time_analysis, self_matrix, other_matrix)
+print(gcf,'-vector','-dsvg',fullfile(figure_2_new_folder, [get(gcf, 'Name') '.svg']))
 
 %% Plot self vs other — non-play behaviors
 figure
-set(gcf, 'Name', band_name)
+name_psth_figure(band_name, 'onset_self_other_nonplay')
 no_play_indexes = [group2, group2+numel(all_behaviors)];
 index_self = 1:numel(group2);
 index_other = 1:numel(no_play_indexes);
 index_other(index_self) = [];
-matrix2plot = matrix_noplay(index_self,:);
-[~, ~, ci] = ttest(matrix2plot);
+self_matrix = matrix_noplay(index_self,:);
+other_matrix = matrix_noplay(index_other,:);
+[~, ~, ci] = ttest(self_matrix);
 fill([time_analysis fliplr(time_analysis)], [ci(1,:) fliplr(ci(2,:))], 'b', 'FaceAlpha',.2, 'EdgeColor','none')
 hold on
-plot(time_analysis, mean(matrix2plot), 'b')
-matrix2plot = matrix_noplay(index_other,:);
-[~, ~, ci] = ttest(matrix2plot);
+plot(time_analysis, mean(self_matrix), 'b')
+[~, ~, ci] = ttest(other_matrix);
 fill([time_analysis fliplr(time_analysis)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
-plot(time_analysis, mean(matrix2plot), 'r')
+plot(time_analysis, mean(other_matrix), 'r')
 plot(time_analysis([1 end]), [0 0], 'k:')
 plot([0 0], [-4 2], 'k')
 axis tight
 set(gca,'TickDir','out')
+mark_significant_psth(time_analysis, self_matrix, other_matrix)
 
 %% LME analysis — time-wrapped PSTH
 % Skipped when results_full_lfp_per_behavior_time_warpped_<band>.mat is already saved.
@@ -479,7 +485,7 @@ pval_noplay = results_time_wrapped(2).p_beh;
 matrix_noplay(~any(pval_noplay<alpha_tresh,2),:) = NaN;
 
 figure
-set(gcf, 'Name', band_name)
+name_psth_figure(band_name, 'timewrap_play_nonplay')
 colormap(jet(256))
 ax2 = subplot(3,1,2:3);
 [~, ~, ci] = ttest(matrix_noplay);
@@ -512,7 +518,7 @@ ax2.Position(3) = ax1.Position(3);
 %% Plot bar and scatter comparison (time-wrapped)
 alpha_level = 0.01;
 figure
-set(gcf, 'Name', band_name)
+name_psth_figure(band_name, 'timewrap_bars')
 subplot(1,2,1)
 y_lim = [-5 5];
 time2compare = [0 5];
@@ -548,4 +554,108 @@ plot([-.25 .25]+1, mean(play_bars)*[1 1], 'r', 'MarkerSize', 8)
 [p, ~, stats] = ranksum(non_play_bars, play_bars);
 title([num2str(stats.zval), ' ', num2str(stats.ranksum), ' ', num2str(p)])
 ylim(y_lim)
+
+%% Plot self vs other — play behaviors, time-wrapped
+figure
+name_psth_figure(band_name, 'timewrap_self_other_play')
+index_self = group1;
+index_other = 1:numel(play_indexes);
+index_other(index_self) = [];
+self_matrix = matrix_play(index_self,:);
+other_matrix = matrix_play(index_other,:);
+[~, ~, ci] = ttest(self_matrix);
+fill([time_analysis_time_wrapped fliplr(time_analysis_time_wrapped)], [ci(1,:) fliplr(ci(2,:))], 'b', 'FaceAlpha',.2, 'EdgeColor','none')
+hold on
+plot(time_analysis_time_wrapped, mean(self_matrix), 'b')
+[~, ~, ci] = ttest(other_matrix);
+fill([time_analysis_time_wrapped fliplr(time_analysis_time_wrapped)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
+plot(time_analysis_time_wrapped, mean(other_matrix), 'r')
+plot(time_analysis_time_wrapped([1 end]), [0 0], 'k:')
+plot([0 0], [-5 5], 'k')
+plot([5 5], [-5 5], 'k')
+axis tight
+set(gca,'TickDir','out')
+mark_significant_psth(time_analysis_time_wrapped, self_matrix, other_matrix)
+
+%% Plot self vs other — non-play behaviors, time-wrapped
+figure
+name_psth_figure(band_name, 'timewrap_self_other_nonplay')
+index_self = 1:numel(group2);
+index_other = 1:numel(noplay_indexes);
+index_other(index_self) = [];
+self_matrix = matrix_noplay(index_self,:);
+other_matrix = matrix_noplay(index_other,:);
+[~, ~, ci] = ttest(self_matrix);
+fill([time_analysis_time_wrapped fliplr(time_analysis_time_wrapped)], [ci(1,:) fliplr(ci(2,:))], 'b', 'FaceAlpha',.2, 'EdgeColor','none')
+hold on
+plot(time_analysis_time_wrapped, mean(self_matrix), 'b')
+[~, ~, ci] = ttest(other_matrix);
+fill([time_analysis_time_wrapped fliplr(time_analysis_time_wrapped)], [ci(1,:) fliplr(ci(2,:))], 'r', 'FaceAlpha',.2, 'EdgeColor','none')
+plot(time_analysis_time_wrapped, mean(other_matrix), 'r')
+plot(time_analysis_time_wrapped([1 end]), [0 0], 'k:')
+plot([0 0], [-5 5], 'k')
+plot([5 5], [-5 5], 'k')
+axis tight
+set(gca,'TickDir','out')
+mark_significant_psth(time_analysis_time_wrapped, self_matrix, other_matrix)
+end
+
+function name_psth_figure(band_name, plot_id)
+% Window title is the save name. Same plot_id for delta, theta, and gamma.
+set(gcf, 'NumberTitle', 'off', 'Name', ['psth_' band_name '_' plot_id]);
+end
+
+function mark_significant_psth(time_axis, self_matrix, other_matrix)
+% Strips above the axes. Blue is self, red is other.
+% Darker rectangles: mean significantly above 0. Lighter: significantly below 0.
+yl = ylim;
+pad = 0.045 * diff(yl);
+if ~(pad > 0)
+    pad = 0.1;
+end
+ylim([yl(1), yl(2) + 2.6 * pad]);
+shade_one_trace(time_axis, self_matrix, [0.10 0.25 0.80], yl(2) + 1.35 * pad, pad);
+shade_one_trace(time_axis, other_matrix, [0.80 0.15 0.15], yl(2) + 0.15 * pad, pad);
+end
+
+function shade_one_trace(time_axis, values, color, y0, height)
+[above, below] = trace_vs_zero(values);
+paint_mask(time_axis, above, y0 + 0.55 * height, 0.45 * height, color, 0.75);
+paint_mask(time_axis, below, y0, 0.45 * height, color, 0.30);
+end
+
+function [above, below] = trace_vs_zero(values)
+n_time = size(values, 2);
+above = false(1, n_time);
+below = false(1, n_time);
+mean_trace = mean(values, 1, 'omitnan');
+for t = 1:n_time
+    sample = values(:, t);
+    sample = sample(~isnan(sample));
+    if numel(sample) < 2 || std(sample) == 0
+        continue
+    end
+    [~, p] = ttest(sample, 0);
+    if p < 0.05 && mean_trace(t) > 0
+        above(t) = true;
+    elseif p < 0.05 && mean_trace(t) < 0
+        below(t) = true;
+    end
+end
+end
+
+function paint_mask(time_axis, mask, y0, height, color, face_alpha)
+if ~any(mask) || numel(time_axis) < 2
+    return
+end
+dt = median(diff(time_axis));
+edges = [false, mask(:)', false];
+starts = find(diff(edges) == 1);
+stops = find(diff(edges) == -1) - 1;
+for k = 1:numel(starts)
+    x0 = time_axis(starts(k)) - dt / 2;
+    x1 = time_axis(stops(k)) + dt / 2;
+    patch([x0 x1 x1 x0], [y0 y0 y0 + height y0 + height], color, ...
+        'FaceAlpha', face_alpha, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+end
 end
