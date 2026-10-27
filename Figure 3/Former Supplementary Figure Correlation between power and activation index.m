@@ -1,22 +1,34 @@
-%% Supp Fig 3 — Correlation between delta power and activation index
+%% Supp Fig 3 — Correlation between band power and activation index
 % Relates two behavior-resolved measures: (i) the cell-type activation
 % index (how that cell type ranks inside each structure) and (ii) PAG
-% delta-power PSTHs. Behaviors are matched by name and self/other role,
+% band-power PSTHs. Behaviors are matched by name and self/other role,
 % not by list order, then correlated in time and as bout averages.
 % Section 11 repeats that correlation on the 5 s before behavior onset.
+% band_list selects delta, theta, and/or gamma. Each band is loaded and,
+% when save_correlation is true, written with the filenames from
+% Analyze_psth_all_behaviors_theta_gamma.m.
 
-%% 1 Load activation-index and delta-power results
+%% 1 Load the activation index and choose which bands to save
 % stacked_psth_by_area_celltype.mat : logit activation index per behavior,
 %   area, and cell type (Estimate_activation_index...).
-% results_full_lfp_per_behavior_time_warpped.mat : time-warped LME beta
-%   for delta power, play vs non-play (Analyze_psth_all_behaviors).
+% Time-warped LME beta for one band, play vs non-play:
+%   delta -> results_full_lfp_per_behavior_time_warpped.mat
+%   theta -> results_full_lfp_per_behavior_time_warpped_theta.mat
+%   gamma -> results_full_lfp_per_behavior_time_warpped_gamma.mat
+% Delta keeps the original name. Theta and gamma take the _<band> suffix
+% written by Analyze_psth_all_behaviors_theta_gamma.m. A listed band whose
+% file is missing is skipped. The correlation summary is saved beside the
+% loaded LME file when save_correlation is true.
 
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 figure_2_new_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\FIgure 2 delta modulation per behavior';
 saving_folder = [data_root, '\Analysis results\phase locking data'];
+lfp_results_folder = [data_root, '\Analysis results\psth power by frequency and behavior'];
 
-load([saving_folder,'\results_full_lfp_per_behavior_time_warpped.mat'])
-load([saving_folder,'\stacked_psth_by_area_celltype.mat'])   
+band_list = {'delta', 'theta', 'gamma'};
+save_correlation = true;
+
+load([saving_folder,'\stacked_psth_by_area_celltype.mat'])
 stacked_labels = saved_data(1,1).labels;
 
 %% 2 Preview the two measures
@@ -28,7 +40,7 @@ stacked_labels = saved_data(1,1).labels;
 % (play then non-play). Columns in the grid = peak / trough / unlocked.
 
 
-figure
+figure('Name', 'Activation index')
 
 y_lim = [-2 2];
 
@@ -86,11 +98,40 @@ for an = 1:5
     end
 end
 
-%%% Delta-power PSTHs (play vs non-play)
-% Time-warped LME beta for delta power. Heatmap: all behaviors (self/other);
-% traces: mean ± CI (play red, non-play black). This is the LFP measure
-% later correlated with the activation index.
-load([saving_folder,'\results_full_lfp_per_behavior_time_warpped.mat'])
+%%% Band-power PSTHs (play vs non-play)
+% One pass per band in band_list. Time-warped LME beta. Heatmap: all
+% behaviors (self/other); traces: mean ± CI (play red, non-play black).
+% This is the LFP measure later correlated with the activation index.
+
+for band_n = 1:numel(band_list)
+band_name = band_list{band_n};
+power_label = [upper(band_name(1)), band_name(2:end), ' power'];
+
+if strcmp(band_name, 'delta')
+    results_tw_file = 'results_full_lfp_per_behavior_time_warpped.mat';
+    corr_file_name = 'activation_index_vs_power_correlation.mat';
+else
+    results_tw_file = ['results_full_lfp_per_behavior_time_warpped_', band_name, '.mat'];
+    corr_file_name = ['activation_index_vs_power_correlation_', band_name, '.mat'];
+end
+
+band_results_folder = '';
+candidate_folders = {saving_folder, lfp_results_folder};
+for folder_n = 1:numel(candidate_folders)
+    if exist([candidate_folders{folder_n}, '\', results_tw_file], 'file')
+        band_results_folder = candidate_folders{folder_n};
+        break
+    end
+end
+if isempty(band_results_folder)
+    fprintf('Skipping %s: %s was not found.\n', band_name, results_tw_file);
+    continue
+end
+
+fprintf('Correlating activation index with %s (%s)\n', power_label, results_tw_file);
+load([band_results_folder, '\', results_tw_file])
+band_name = band_list{band_n};
+
 all_behaviors = {'Pounce','CC','Boxing','Evasion','Pin','Escape','CB','CD', ...
                  'Grooming','Rearing','Sniffing','Scratching','PounceI','Bite'};
 
@@ -112,7 +153,7 @@ pval_noplay_ai = -log10(pval_noplay).*matrix_noplay;
 matrix_noplay(~any(pval_noplay<alpha_tresh,2),:) = NaN;
 noplay_indexes = [group2,group2+numel(all_behaviors)];
 
-figure
+open_band_figure(band_name)
 colormap(jet(256))
 
 
@@ -172,7 +213,7 @@ ax2.Position(3) = pos1(3);   % optional: match width
 
 alpha_level = 0.01;
 
-figure
+open_band_figure(band_name)
 subplot(1,2,1)
 y_lim = [-5 5];
 time2compare = [0 5];
@@ -444,7 +485,7 @@ time_correalion_p =nan(5,3,26);
 time_correalion_r =nan(5,3,26);
 crossed_correlations = cell(5,3);
 
-figure
+open_band_figure(band_name)
 
 %%% 4.11 Main loop: align, correlate, scatter
 % For each area × cell type: bout-averaged AI vs delta power (scatter),
@@ -565,7 +606,7 @@ end
 % Bout-averaged r from section 4 (activation index vs delta power, 0–5 s).
 % Rows = structures, columns = peak / trough / unlocked.
 
-figure
+open_band_figure(band_name)
 imagesc(R)
 
 clim([-1 1])
@@ -574,7 +615,7 @@ colorbar
 xlabel('Cell type')
 ylabel('Area')
 
-title('PSTH vs LFP correlation (0–5 s)')
+title(['PSTH vs ', power_label, ' (0–5 s)'])
 
 set(gca,'XTick',1:3)
 set(gca,'XTickLabel',{'Peak','Trough','Unlocked'})
@@ -587,7 +628,7 @@ set(gca,'YTick',1:5)
 
 alpha_level = 0.01;
 
-figure
+open_band_figure(band_name)
 for an=1:5
     for j=1:3
         subplot(5,3,(an-1)*3 + j)
@@ -612,7 +653,7 @@ end
 alpha_level = 0.01;
 mean_r_per_area = nan(5,3);
 p_val_per_area = nan(5,3);
-figure
+open_band_figure(band_name)
 for an=1:5
     for j=1:3
         subplot(5,3,(an-1)*3 + j)
@@ -646,7 +687,7 @@ mean_r_per_area_t = mean_r_per_area';
 p_val_t = p_val_per_area';
 mean_r_per_area_t = mean_r_per_area_t(:);
 p_val_t = p_val_t(:);
-figure
+open_band_figure(band_name)
 hold on
 for j=1:numel(mean_r_per_area_t)
 
@@ -677,7 +718,7 @@ j=2;
 an_comp = 1;
 stacked_matrix = saved_data(an,j).stacked_matrix;
 comparison_stacked = saved_data(an_comp,j).stacked_matrix;
-figure
+open_band_figure(band_name)
 for i=1:26
 
 lfp_i = ref_idx(i);
@@ -697,12 +738,12 @@ plot(time_psth, movmean(comparison_stacked(i,:),1), 'k')
 
 title([strrep(mapping.psth_key(i), '_',' '),  ' ', num2str(r)])
 end
-legend({'Activation Index Trough/LPAG','Delta power','ACtivation Index Trough/SC'})
+legend({'Activation Index Trough/LPAG', power_label, 'ACtivation Index Trough/SC'})
 
 
 %% 10 Example traces: trough cells in VLPAG (as on former supplementary figure)
 % Same overlay as section 9, for trough cells in VLPAG vs SC.
-figure
+open_band_figure(band_name)
 
 
 an=4;
@@ -710,7 +751,7 @@ j=2;
 an_comp = 1;
 stacked_matrix = saved_data(an,j).stacked_matrix;
 comparison_stacked = saved_data(an_comp,j).stacked_matrix;
-figure
+open_band_figure(band_name)
 for i=1:26
 
 lfp_i = ref_idx(i);
@@ -730,7 +771,7 @@ plot(time_psth, movmean(comparison_stacked(i,:),1), 'k')
 
 title([mapping.psth_key(i),  ' ', num2str(r)])
 end
-legend({'Activation Index Trough/VLPAG','Delta power','ACtivation Index Trough/SC'})
+legend({'Activation Index Trough/VLPAG', power_label, 'ACtivation Index Trough/SC'})
 
 
 %% 11 Correlation before behavior onset
@@ -748,8 +789,8 @@ pre_onset_window = [-5 0];
 idx_psth_pre = time_psth >= pre_onset_window(1) & time_psth < pre_onset_window(2);
 idx_lfp_pre  = time_lfp  >= pre_onset_window(1) & time_lfp  < pre_onset_window(2);
 
-fprintf('Pre-onset window [%.0f, 0) s: %d activation-index samples, %d delta-power samples\n', ...
-    pre_onset_window(1), nnz(idx_psth_pre), nnz(idx_lfp_pre));
+fprintf('Pre-onset window [%.0f, 0) s: %d activation-index samples, %d %s samples\n', ...
+    pre_onset_window(1), nnz(idx_psth_pre), nnz(idx_lfp_pre), power_label);
 
 lfp_activity_pre = mean(lfp_all(:, idx_lfp_pre), 2);
 
@@ -767,7 +808,7 @@ end
 
 %%% 11.1 Pre-onset means: scatter per area × cell type
 
-figure
+open_band_figure(band_name)
 for an = 1:5
     for j = 1:3
         subplot(5, 3, (an-1)*3 + j)
@@ -822,22 +863,22 @@ for an = 1:5
             xlabel('Activation index')
         end
         if j == 1
-            ylabel('Delta power')
+            ylabel(power_label)
         end
         set(gca, 'TickDir', 'out')
     end
 end
-sgtitle('Pre-onset means (−5 to 0 s): activation index vs delta power')
+sgtitle(['Pre-onset means (−5 to 0 s): activation index vs ', power_label])
 
 %%% 11.2 Area × cell-type matrix of the pre-onset mean correlation
 
-figure
+open_band_figure(band_name)
 imagesc(R_pre)
 clim([-1 1])
 colorbar
 xlabel('Cell type')
 ylabel('Area')
-title('PSTH vs LFP correlation (before onset, −5 to 0 s)')
+title(['PSTH vs ', power_label, ' (before onset, −5 to 0 s)'])
 set(gca, 'XTick', 1:3, 'XTickLabel', cell_type_labels)
 set(gca, 'YTick', 1:5, 'YTickLabel', area_names_pre)
 set(gca, 'TickDir', 'out')
@@ -847,7 +888,7 @@ set(gca, 'TickDir', 'out')
 
 alpha_level = 0.01;
 
-figure
+open_band_figure(band_name)
 for an = 1:5
     for j = 1:3
         subplot(5, 3, (an-1)*3 + j)
@@ -876,7 +917,7 @@ for an = 1:5
         set(gca, 'TickDir', 'out')
     end
 end
-sgtitle('Pre-onset time-course r (red: p \leq 0.01)')
+sgtitle(['Pre-onset time-course r, ', power_label, ' (red: p \leq 0.01)'])
 
 %%% 11.4 Distribution of the pre-onset time-course r
 % Title is the t-test p of the mean r against 0.
@@ -884,7 +925,7 @@ sgtitle('Pre-onset time-course r (red: p \leq 0.01)')
 mean_r_pre = nan(5, 3);
 p_val_pre  = nan(5, 3);
 
-figure
+open_band_figure(band_name)
 for an = 1:5
     for j = 1:3
         subplot(5, 3, (an-1)*3 + j)
@@ -914,7 +955,7 @@ for an = 1:5
         set(gca, 'TickDir', 'out')
     end
 end
-sgtitle('Pre-onset time-course r (t-test vs 0)')
+sgtitle(['Pre-onset time-course r, ', power_label, ' (t-test vs 0)'])
 
 %%% 11.5 Mean pre-onset r per structure
 % Bars grouped peak / trough / unlocked within each area.
@@ -927,7 +968,7 @@ p_val_pre_t  = p_val_pre';
 mean_r_pre_t = mean_r_pre_t(:);
 p_val_pre_t  = p_val_pre_t(:);
 
-figure
+open_band_figure(band_name)
 hold on
 for j = 1:numel(mean_r_pre_t)
     if ~isfinite(p_val_pre_t(j)) || p_val_pre_t(j) > 0.05
@@ -942,6 +983,24 @@ end
 xticks(2:3:16)
 xticklabels(area_names_pre)
 ylabel('Mean r')
-title('Mean pre-onset time-course r')
+title(['Mean pre-onset time-course r, ', power_label])
 set(gca, 'TickDir', 'out')
+
+if save_correlation
+    corr_file = [band_results_folder, '\', corr_file_name];
+    save(corr_file, ...
+        'band_name', 'R', 'P', ...
+        'time_correalion_r', 'time_correalion_p', 'crossed_correlations', ...
+        'mean_r_per_area', 'p_val_per_area', ...
+        'R_pre', 'P_pre', 'time_correlation_r_pre', 'time_correlation_p_pre', ...
+        'mean_r_pre', 'p_val_pre', 'pre_onset_window', '-v7.3');
+    fprintf('Saved %s\n', corr_file);
+end
+
+end
+
+function open_band_figure(band_name)
+figure
+set(gcf, 'Name', band_name)
+end
 
