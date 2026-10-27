@@ -4,9 +4,10 @@
 % Estimate_psth_all_behaviors_theta_gamma.m. It does not reload LFP.
 %
 % Each row of classification_table is one behavior event from the repeated
-% animal, electrode 1. Column 1, mean_power, is the mean log10 band power
-% over the time-wrapped behavior. Column 2, behavior_class, is 1 for
-% behavior_class_1 and 2 for behavior_class_2. behavior_name and
+% animal, electrode 1. Column 1, mean_power, is the mean baseline z-score
+% over the time-wrapped behavior. Each event is z-scored to its own
+% pre-onset baseline before that mean is taken. Column 2, behavior_class,
+% is 1 for behavior_class_1 and 2 for behavior_class_2. behavior_name and
 % session_name are kept so each row can be traced back to a Type2 event.
 %
 % classifier_name:
@@ -36,8 +37,10 @@ behavior_class_2 = {'PounceI'};
 classifier_name = 'lda';
 % 'lda', 'svm', 'naive_bayes', 'tree', 'logit'
 
-% Time-wrapped axis. (0, 5] is the behavior itself. Pre-onset is (-5, 0].
+% Time-wrapped axis. (0, 5] is the behavior itself.
+% Each event is z-scored to its own samples inside the baseline window.
 power_time_window = [0 5];
+baseline_time_window = [-5 0];
 n_folds_requested = 10;
 n_permutations = 200;
 rng_seed = 1;
@@ -69,7 +72,7 @@ end
 
 %% Mean power of each behavior event
 classification_table = behavior_event_table(saving_folder, band_name, all_behaviors, ...
-    animal_label, behavior_class_1, behavior_class_2, power_time_window);
+    animal_label, behavior_class_1, behavior_class_2, power_time_window, baseline_time_window);
 
 n_class_1 = nnz(classification_table.behavior_class == 1);
 n_class_2 = nnz(classification_table.behavior_class == 2);
@@ -176,7 +179,7 @@ fprintf('Permutation p of balanced accuracy: %.4f (%d shuffles)\n', permutation_
 fprintf('Leave-one-session-out balanced accuracy: %.1f%%\n', 100 * session_balanced_accuracy)
 fprintf('Positive class is %s. Each training fold uses equal class counts.\n', class_2_label)
 fprintf('Confusion percentages sum to 100 over held-out single events.\n')
-fprintf('%s single-event log10 power: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
+fprintf('%s baseline z-score: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
     band_name, mean(classification_table.mean_power(classification_table.behavior_class == 1)), n_class_1, ...
     mean(classification_table.mean_power(classification_table.behavior_class == 2)), n_class_2)
 disp(confusion_outcomes)
@@ -217,7 +220,7 @@ scatter(classification_table.behavior_class + (rand(height(classification_table)
 xlim([0.5 2.5])
 xticks([1 2])
 xticklabels({class_1_label, class_2_label})
-ylabel('Log10 power of one event')
+ylabel('Baseline z-score of one event')
 title(sprintf('%s, %s, one event per point', band_name, classifier_name))
 set(gca, 'TickDir', 'out')
 
@@ -241,7 +244,7 @@ for band_n = 1:numel(bands_to_compare)
     else
         try
             this_table = behavior_event_table(saving_folder, this_band, all_behaviors, ...
-                animal_label, behavior_class_1, behavior_class_2, power_time_window);
+                animal_label, behavior_class_1, behavior_class_2, power_time_window, baseline_time_window);
         catch band_error
             warning('Could not load %s: %s', this_band, band_error.message);
             continue
@@ -265,7 +268,7 @@ for band_n = 1:numel(bands_to_compare)
     end
     class_1_power = this_table.mean_power(this_table.behavior_class == 1);
     class_2_power = this_table.mean_power(this_table.behavior_class == 2);
-    fprintf('%s single-event log10 power: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
+    fprintf('%s baseline z-score: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
         this_band, mean(class_1_power), numel(class_1_power), mean(class_2_power), numel(class_2_power))
     band_outcome_counts(band_n, :) = this_counts;
     band_outcome_percent(band_n, :) = 100 * this_counts / sum(this_counts);
@@ -396,7 +399,7 @@ counts = [confusion_counts(1, 1), confusion_counts(1, 2), ...
 end
 
 function event_table = behavior_event_table(saving_folder, band_name, all_behaviors, ...
-        animal_label, behavior_class_1, behavior_class_2, power_time_window)
+        animal_label, behavior_class_1, behavior_class_2, power_time_window, baseline_time_window)
 structure_file = ['psth_structure_' band_name '_all_behaviors_self_other_partner.mat'];
 names_file = ['animal_names_' band_name '_all_behaviors_self_other_partner.mat'];
 disp(['loading ' band_name])
@@ -479,13 +482,25 @@ for class_id = 1:2
         end
         n_time = min(size(psth, 2), numel(time_wrap_time));
         in_window = false(1, size(psth, 2));
+        in_baseline = false(1, size(psth, 2));
         in_window(1:n_time) = time_wrap_time(1:n_time) > power_time_window(1) & ...
             time_wrap_time(1:n_time) <= power_time_window(2);
+        in_baseline(1:n_time) = time_wrap_time(1:n_time) >= baseline_time_window(1) & ...
+            time_wrap_time(1:n_time) <= baseline_time_window(2);
         if ~any(in_window)
             error('power_time_window [%g %g] contains no time-wrapped samples.', ...
                 power_time_window(1), power_time_window(2));
         end
-        this_mean = mean(psth(:, in_window), 2, 'omitnan');
+        if ~any(in_baseline)
+            error('baseline_time_window [%g %g] contains no time-wrapped samples.', ...
+                baseline_time_window(1), baseline_time_window(2));
+        end
+        baseline = psth(:, in_baseline);
+        baseline_mean = mean(baseline, 2, 'omitnan');
+        baseline_sd = std(baseline, 0, 2, 'omitnan');
+        baseline_sd(baseline_sd == 0) = NaN;
+        z_behavior = (psth(:, in_window) - baseline_mean) ./ baseline_sd;
+        this_mean = mean(z_behavior, 2, 'omitnan');
         valid = isfinite(this_mean);
         mean_power = [mean_power; this_mean(valid)]; %#ok<AGROW>
         behavior_class = [behavior_class; class_id * ones(nnz(valid), 1)]; %#ok<AGROW>
