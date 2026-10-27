@@ -3,6 +3,7 @@
 % index (how that cell type ranks inside each structure) and (ii) PAG
 % delta-power PSTHs. Behaviors are matched by name and self/other role,
 % not by list order, then correlated in time and as bout averages.
+% Section 11 repeats that correlation on the 5 s before behavior onset.
 
 %% 1 Load activation-index and delta-power results
 % stacked_psth_by_area_celltype.mat : logit activation index per behavior,
@@ -730,4 +731,217 @@ plot(time_psth, movmean(comparison_stacked(i,:),1), 'k')
 title([mapping.psth_key(i),  ' ', num2str(r)])
 end
 legend({'Activation Index Trough/VLPAG','Delta power','ACtivation Index Trough/SC'})
+
+
+%% 11 Correlation before behavior onset
+% Same behavior matching as section 4, restricted to the 5 s immediately
+% before onset (time < 0). That window matches the length of the [0 5] s
+% bout window and is the baseline stretch of both warped time axes.
+% Two estimates, each plotted below:
+%   (i)  mean activation index vs mean delta power across behaviors
+%        (one r per area × cell type);
+%   (ii) within-behavior correlation of the two traces, using only the
+%        pre-onset samples (one r per area × cell type × behavior).
+
+pre_onset_window = [-5 0];
+
+idx_psth_pre = time_psth >= pre_onset_window(1) & time_psth < pre_onset_window(2);
+idx_lfp_pre  = time_lfp  >= pre_onset_window(1) & time_lfp  < pre_onset_window(2);
+
+fprintf('Pre-onset window [%.0f, 0) s: %d activation-index samples, %d delta-power samples\n', ...
+    pre_onset_window(1), nnz(idx_psth_pre), nnz(idx_lfp_pre));
+
+lfp_activity_pre = mean(lfp_all(:, idx_lfp_pre), 2);
+
+n_psth = numel(psth_key);
+R_pre = nan(5, 3);
+P_pre = nan(5, 3);
+time_correlation_r_pre = nan(5, 3, n_psth);
+time_correlation_p_pre = nan(5, 3, n_psth);
+
+cell_type_labels = {saved_data(1,1).cell_type, saved_data(1,2).cell_type, saved_data(1,3).cell_type};
+area_names_pre = cell(1, 5);
+for an = 1:5
+    area_names_pre{an} = saved_data(an,1).area;
+end
+
+%%% 11.1 Pre-onset means: scatter per area × cell type
+
+figure
+for an = 1:5
+    for j = 1:3
+        subplot(5, 3, (an-1)*3 + j)
+
+        stacked_matrix = saved_data(an,j).stacked_matrix;
+        psth_activity_pre = mean(stacked_matrix(:, idx_psth_pre), 2);
+
+        psth_vals = [];
+        lfp_vals  = [];
+
+        for i = 1:n_psth
+            if ~present_in_ref(i)
+                continue
+            end
+
+            lfp_i = ref_idx(i);
+
+            psth_vals(end+1,1) = psth_activity_pre(i);
+            lfp_vals(end+1,1)  = lfp_activity_pre(lfp_i);
+
+            aux_lfp = lfp_all(lfp_i, :);
+            lfp_on_psth_time = interp1(time_lfp, aux_lfp, time_psth);
+            ai_pre  = stacked_matrix(i, idx_psth_pre);
+            lfp_pre = lfp_on_psth_time(idx_psth_pre);
+            ai_pre  = ai_pre(:);
+            lfp_pre = lfp_pre(:);
+            no_nan = ~isnan(ai_pre) & ~isnan(lfp_pre);
+
+            if nnz(no_nan) >= 3
+                [r, p] = corr(lfp_pre(no_nan), ai_pre(no_nan));
+                time_correlation_r_pre(an, j, i) = r;
+                time_correlation_p_pre(an, j, i) = p;
+            end
+        end
+
+        valid = ~isnan(psth_vals) & ~isnan(lfp_vals);
+        psth_vals = psth_vals(valid);
+        lfp_vals  = lfp_vals(valid);
+
+        if numel(psth_vals) >= 3
+            [r, p] = corr(psth_vals, lfp_vals);
+            plot(psth_vals, lfp_vals, 'k.')
+            R_pre(an, j) = r;
+            P_pre(an, j) = p;
+            title(sprintf('%s / %s\nr = %.2f, p = %.3g', ...
+                saved_data(an,j).area, saved_data(an,j).cell_type, r, p))
+        else
+            title(sprintf('%s / %s', saved_data(an,j).area, saved_data(an,j).cell_type))
+        end
+
+        if an == 5
+            xlabel('Activation index')
+        end
+        if j == 1
+            ylabel('Delta power')
+        end
+        set(gca, 'TickDir', 'out')
+    end
+end
+sgtitle('Pre-onset means (−5 to 0 s): activation index vs delta power')
+
+%%% 11.2 Area × cell-type matrix of the pre-onset mean correlation
+
+figure
+imagesc(R_pre)
+clim([-1 1])
+colorbar
+xlabel('Cell type')
+ylabel('Area')
+title('PSTH vs LFP correlation (before onset, −5 to 0 s)')
+set(gca, 'XTick', 1:3, 'XTickLabel', cell_type_labels)
+set(gca, 'YTick', 1:5, 'YTickLabel', area_names_pre)
+set(gca, 'TickDir', 'out')
+
+%%% 11.3 Per-behavior correlation of the pre-onset traces
+% One point per matched behavior. Red: p ≤ 0.01; black: n.s.
+
+alpha_level = 0.01;
+
+figure
+for an = 1:5
+    for j = 1:3
+        subplot(5, 3, (an-1)*3 + j)
+
+        p_this = squeeze(time_correlation_p_pre(an, j, :));
+        r_this = squeeze(time_correlation_r_pre(an, j, :));
+        rand_x = (rand(size(r_this)) - 0.5) / 2;
+
+        ns = p_this > alpha_level & isfinite(r_this);
+        sig = p_this <= alpha_level & isfinite(r_this);
+
+        plot(rand_x(ns), r_this(ns), 'k.', 'MarkerSize', 4)
+        hold on
+        plot(rand_x(sig), r_this(sig), 'r.', 'MarkerSize', 8)
+        plot([-1 1], [0 0], 'k:')
+
+        xlim([-1 1])
+        ylim([-1 1])
+        title(sprintf('%s / %s', saved_data(an,j).area, saved_data(an,j).cell_type))
+        if an == 5
+            xlabel('Behavior')
+        end
+        if j == 1
+            ylabel('r')
+        end
+        set(gca, 'TickDir', 'out')
+    end
+end
+sgtitle('Pre-onset time-course r (red: p \leq 0.01)')
+
+%%% 11.4 Distribution of the pre-onset time-course r
+% Title is the t-test p of the mean r against 0.
+
+mean_r_pre = nan(5, 3);
+p_val_pre  = nan(5, 3);
+
+figure
+for an = 1:5
+    for j = 1:3
+        subplot(5, 3, (an-1)*3 + j)
+
+        r_this = squeeze(time_correlation_r_pre(an, j, :));
+        r_finite = r_this(isfinite(r_this));
+
+        histogram(r_finite, -1:0.1:1, 'FaceColor', 'r', 'FaceAlpha', 0.8, ...
+            'Normalization', 'percentage')
+        hold on
+        plot([0 0], ylim, 'k:')
+
+        mean_r_pre(an, j) = mean(r_finite);
+        if numel(r_finite) >= 2
+            [~, p] = ttest(r_finite);
+            p_val_pre(an, j) = p;
+        end
+
+        title(sprintf('%s / %s\np = %.3g', ...
+            saved_data(an,j).area, saved_data(an,j).cell_type, p_val_pre(an, j)))
+        if an == 5
+            xlabel('r')
+        end
+        if j == 1
+            ylabel('% behaviors')
+        end
+        set(gca, 'TickDir', 'out')
+    end
+end
+sgtitle('Pre-onset time-course r (t-test vs 0)')
+
+%%% 11.5 Mean pre-onset r per structure
+% Bars grouped peak / trough / unlocked within each area.
+% Filled: p ≤ 0.05 from section 11.4; hollow: n.s.
+
+color_code_pre = {'r','b','g','r','b','g','r','b','g','r','b','g','r','b','g'};
+
+mean_r_pre_t = mean_r_pre';
+p_val_pre_t  = p_val_pre';
+mean_r_pre_t = mean_r_pre_t(:);
+p_val_pre_t  = p_val_pre_t(:);
+
+figure
+hold on
+for j = 1:numel(mean_r_pre_t)
+    if ~isfinite(p_val_pre_t(j)) || p_val_pre_t(j) > 0.05
+        bar(j, mean_r_pre_t(j), 'FaceColor', 'none', 'EdgeColor', color_code_pre{j});
+    else
+        bar(j, mean_r_pre_t(j), 'FaceColor', color_code_pre{j}, 'EdgeColor', color_code_pre{j});
+    end
+end
+for j = 1:4
+    plot([3 3]*j + 0.5, [-0.25 0.25], 'k:')
+end
+xticks(2:3:16)
+xticklabels(area_names_pre)
+ylabel('Mean r')
+title('Mean pre-onset time-course r')
+set(gca, 'TickDir', 'out')
 
