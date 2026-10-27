@@ -27,7 +27,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | HMM states, play score, engaged vs unengaged | Fig 1e–f, Supp 2 | after Python HMM | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` then `Figure 1/Figure 1 HMM.m` |
 | Manual click tracking (focal animal, partner, arena) | extra (feeds Fig 1) | — | `manual traking/manual_traking.m` |
 | Play-bout LFP band-power PSTH (delta / theta / gamma) | Fig 2c–f, Supp 4a,d | `Figure 2/Supporting codes v2/Estimate_psth_band_power.m` | `Figure 2/Figure 2.m` |
-| Unique \(R^2\) / GLM of band power | Fig 2g, Supp 4c,f | `Figure 2/Supporting codes v2/Estimate_psth_all_regressors.m`, then `Figure 2/Supporting codes v2/Estimate percentage of R2.m` | `Figure 2/Figure 2.m` (`%% 7`) |
+| Unique \(R^2\) / GLM of band power | Fig 2g, Supp 4c,f | `Figure 2/Supporting codes v2/Estimate_psth_all_regressors.m` | `Figure 2/Figure 2.m` (`%% 7`) |
 | Reciprocal vs non-reciprocal play vs delta | Fig 2h, Supp 3a–f | `Estimate_psth_all_regressors.m` | `Figure 2/Reciprocity.m` |
 | First vs second play partner vs delta | Supp 3g–i | play-bout PSTH (`Estimate_psth_band_power.m`) | `Figure 2/Play partner.m` |
 | Delta PSTH per annotated behavior | extra (feeds Supp 3) | `Figure 2/Supporting codes v2/Estimate_psth_all_behaviors.m` | `Figure 2/Supporting codes v2/Analyze_psth_all_behaviors.m` |
