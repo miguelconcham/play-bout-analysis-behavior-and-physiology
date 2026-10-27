@@ -28,6 +28,19 @@ lfp_results_folder = [data_root, '\Analysis results\psth power by frequency and 
 band_list = {'delta', 'theta', 'gamma'};
 save_correlation = true;
 
+% Every figure is optional. Names are the SVG file stem (letters, digits,
+% and underscores only) and are distinct across bands, so the save section
+% does not overwrite one figure with another.
+% On by default, per band:
+%   <band>_correlation_bars
+%   <band>_preonset_correlation_bars
+%   <band>_overlap_lpag_trough
+%   <band>_overlap_vlpag_trough
+plot_optional_figures = false;
+plot_overlap_examples = true;
+plot_correlation_bars = true;
+plot_preonset_correlation_bars = true;
+
 load([saving_folder,'\stacked_psth_by_area_celltype.mat'])
 stacked_labels = saved_data(1,1).labels;
 
@@ -40,7 +53,8 @@ stacked_labels = saved_data(1,1).labels;
 % (play then non-play). Columns in the grid = peak / trough / unlocked.
 
 
-figure('Name', 'Activation index')
+if plot_optional_figures
+figure('Name', 'activation_index_heatmap')
 
 y_lim = [-2 2];
 
@@ -96,6 +110,7 @@ for an = 1:5
         clim([-4 4])
         axis tight
     end
+end
 end
 
 %%% Band-power PSTHs (play vs non-play)
@@ -153,7 +168,8 @@ pval_noplay_ai = -log10(pval_noplay).*matrix_noplay;
 matrix_noplay(~any(pval_noplay<alpha_tresh,2),:) = NaN;
 noplay_indexes = [group2,group2+numel(all_behaviors)];
 
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_power_psth'])
 colormap(jet(256))
 
 
@@ -205,6 +221,7 @@ pos2 = ax2.Position;
 
 ax2.Position(1) = pos1(1);   % align left edges
 ax2.Position(3) = pos1(3);   % optional: match width
+end
 
 %% 3 Bout-averaged delta power
 % Mean LME beta during the bout window [0 5] s. Filled bars: any time bin
@@ -213,7 +230,8 @@ ax2.Position(3) = pos1(3);   % optional: match width
 
 alpha_level = 0.01;
 
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_bout_mean_power'])
 subplot(1,2,1)
 y_lim = [-5 5];
 time2compare = [0 5];
@@ -277,6 +295,7 @@ plot([-.25 .25]+1, mean(play_bars)*[1 1], 'r', 'MarkerSize',8)
 title([num2str(stats.zval), ' ', num2str(stats.ranksum),' ',num2str(p)])
 
 ylim(y_lim)
+end
 
 %% 4 Match behaviors and correlate activation index with delta power
 % Decode short PSTH codes (GR, PO, …) and LFP names onto the same
@@ -485,7 +504,9 @@ time_correalion_p =nan(5,3,26);
 time_correalion_r =nan(5,3,26);
 crossed_correlations = cell(5,3);
 
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_bout_correlation_scatter'])
+end
 
 %%% 4.11 Main loop: align, correlate, scatter
 % For each area × cell type: bout-averaged AI vs delta power (scatter),
@@ -494,7 +515,9 @@ open_band_figure(band_name)
 for an = 1:5
 
     for j = 1:3
-        subplot(5,3,(an-1)*3 + j)
+        if plot_optional_figures
+            subplot(5,3,(an-1)*3 + j)
+        end
 
         %%% PSTH (activation-index) activity in the bout window
 
@@ -590,8 +613,10 @@ for an = 1:5
         if numel(psth_vals) >= 3
             [r,p] = corr(psth_vals, lfp_vals);
 
-            plot(psth_vals,lfp_vals, 'k.')
-            title(num2str([p r]))
+            if plot_optional_figures
+                plot(psth_vals,lfp_vals, 'k.')
+                title(num2str([p r]))
+            end
 
             R(an,j) = r;
             P(an,j) = p;
@@ -606,7 +631,8 @@ end
 % Bout-averaged r from section 4 (activation index vs delta power, 0–5 s).
 % Rows = structures, columns = peak / trough / unlocked.
 
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_bout_correlation_matrix'])
 imagesc(R)
 
 clim([-1 1])
@@ -621,6 +647,7 @@ set(gca,'XTick',1:3)
 set(gca,'XTickLabel',{'Peak','Trough','Unlocked'})
 
 set(gca,'YTick',1:5)
+end
 
 %% 6 Per-behavior time-course correlations
 % r of the full warped traces (activation index vs interpolated delta power),
@@ -628,7 +655,8 @@ set(gca,'YTick',1:5)
 
 alpha_level = 0.01;
 
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_timecourse_r_points'])
 for an=1:5
     for j=1:3
         subplot(5,3,(an-1)*3 + j)
@@ -644,6 +672,7 @@ for an=1:5
 
     end
 end
+end
 
 %% 7 Distribution of time-course r
 % Histogram of the per-behavior r values from section 6, for each structure
@@ -653,19 +682,23 @@ end
 alpha_level = 0.01;
 mean_r_per_area = nan(5,3);
 p_val_per_area = nan(5,3);
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_timecourse_r_histogram'])
+end
 for an=1:5
     for j=1:3
-        subplot(5,3,(an-1)*3 + j)
         r_this_cond = squeeze(time_correalion_r(an,j,:));
         control_r = crossed_correlations{an,j};
-               % histogram(control_r,-1:.1:1, 'FaceColor','k', 'FaceAlpha',.2, 'Normalization','percentage')
-        hold on
-       histogram(r_this_cond,-1:.1:1, 'FaceColor','r', 'FaceAlpha',.8, 'Normalization','percentage')
         mean_r_per_area(an,j)  = mean(r_this_cond, 'omitmissing');
-      [h,p]= ttest(r_this_cond);
-      p_val_per_area(an,j)=p;
-      title(p)
+        [h,p]= ttest(r_this_cond);
+        p_val_per_area(an,j)=p;
+        if plot_optional_figures
+            subplot(5,3,(an-1)*3 + j)
+            % histogram(control_r,-1:.1:1, 'FaceColor','k', 'FaceAlpha',.2, 'Normalization','percentage')
+            hold on
+            histogram(r_this_cond,-1:.1:1, 'FaceColor','r', 'FaceAlpha',.8, 'Normalization','percentage')
+            title(p)
+        end
 
     end
 end
@@ -687,7 +720,8 @@ mean_r_per_area_t = mean_r_per_area';
 p_val_t = p_val_per_area';
 mean_r_per_area_t = mean_r_per_area_t(:);
 p_val_t = p_val_t(:);
-open_band_figure(band_name)
+if plot_correlation_bars
+figure('Name', [band_name, '_correlation_bars'])
 hold on
 for j=1:numel(mean_r_per_area_t)
 
@@ -705,6 +739,7 @@ end
 
 xticks(2:3:16)
 xticklabels(area_names)
+end
 
 
 
@@ -718,7 +753,8 @@ j=2;
 an_comp = 1;
 stacked_matrix = saved_data(an,j).stacked_matrix;
 comparison_stacked = saved_data(an_comp,j).stacked_matrix;
-open_band_figure(band_name)
+if plot_overlap_examples
+figure('Name', [band_name, '_overlap_lpag_trough'])
 for i=1:26
 
 lfp_i = ref_idx(i);
@@ -739,19 +775,19 @@ plot(time_psth, movmean(comparison_stacked(i,:),1), 'k')
 title([strrep(mapping.psth_key(i), '_',' '),  ' ', num2str(r)])
 end
 legend({'Activation Index Trough/LPAG', power_label, 'ACtivation Index Trough/SC'})
+end
 
 
 %% 10 Example traces: trough cells in VLPAG (as on former supplementary figure)
 % Same overlay as section 9, for trough cells in VLPAG vs SC.
-open_band_figure(band_name)
-
 
 an=4;
 j=2;
 an_comp = 1;
 stacked_matrix = saved_data(an,j).stacked_matrix;
 comparison_stacked = saved_data(an_comp,j).stacked_matrix;
-open_band_figure(band_name)
+if plot_overlap_examples
+figure('Name', [band_name, '_overlap_vlpag_trough'])
 for i=1:26
 
 lfp_i = ref_idx(i);
@@ -772,6 +808,7 @@ plot(time_psth, movmean(comparison_stacked(i,:),1), 'k')
 title([mapping.psth_key(i),  ' ', num2str(r)])
 end
 legend({'Activation Index Trough/VLPAG', power_label, 'ACtivation Index Trough/SC'})
+end
 
 
 %% 11 Correlation before behavior onset
@@ -808,10 +845,14 @@ end
 
 %%% 11.1 Pre-onset means: scatter per area × cell type
 
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_preonset_correlation_scatter'])
+end
 for an = 1:5
     for j = 1:3
-        subplot(5, 3, (an-1)*3 + j)
+        if plot_optional_figures
+            subplot(5, 3, (an-1)*3 + j)
+        end
 
         stacked_matrix = saved_data(an,j).stacked_matrix;
         psth_activity_pre = mean(stacked_matrix(:, idx_psth_pre), 2);
@@ -850,29 +891,36 @@ for an = 1:5
 
         if numel(psth_vals) >= 3
             [r, p] = corr(psth_vals, lfp_vals);
-            plot(psth_vals, lfp_vals, 'k.')
             R_pre(an, j) = r;
             P_pre(an, j) = p;
-            title(sprintf('%s / %s\nr = %.2f, p = %.3g', ...
-                saved_data(an,j).area, saved_data(an,j).cell_type, r, p))
-        else
+            if plot_optional_figures
+                plot(psth_vals, lfp_vals, 'k.')
+                title(sprintf('%s / %s\nr = %.2f, p = %.3g', ...
+                    saved_data(an,j).area, saved_data(an,j).cell_type, r, p))
+            end
+        elseif plot_optional_figures
             title(sprintf('%s / %s', saved_data(an,j).area, saved_data(an,j).cell_type))
         end
 
-        if an == 5
-            xlabel('Activation index')
+        if plot_optional_figures
+            if an == 5
+                xlabel('Activation index')
+            end
+            if j == 1
+                ylabel(power_label)
+            end
+            set(gca, 'TickDir', 'out')
         end
-        if j == 1
-            ylabel(power_label)
-        end
-        set(gca, 'TickDir', 'out')
     end
 end
+if plot_optional_figures
 sgtitle(['Pre-onset means (−5 to 0 s): activation index vs ', power_label])
+end
 
 %%% 11.2 Area × cell-type matrix of the pre-onset mean correlation
 
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_preonset_correlation_matrix'])
 imagesc(R_pre)
 clim([-1 1])
 colorbar
@@ -882,13 +930,15 @@ title(['PSTH vs ', power_label, ' (before onset, −5 to 0 s)'])
 set(gca, 'XTick', 1:3, 'XTickLabel', cell_type_labels)
 set(gca, 'YTick', 1:5, 'YTickLabel', area_names_pre)
 set(gca, 'TickDir', 'out')
+end
 
 %%% 11.3 Per-behavior correlation of the pre-onset traces
 % One point per matched behavior. Red: p ≤ 0.01; black: n.s.
 
 alpha_level = 0.01;
 
-open_band_figure(band_name)
+if plot_optional_figures
+figure('Name', [band_name, '_preonset_timecourse_r_points'])
 for an = 1:5
     for j = 1:3
         subplot(5, 3, (an-1)*3 + j)
@@ -918,73 +968,60 @@ for an = 1:5
     end
 end
 sgtitle(['Pre-onset time-course r, ', power_label, ' (red: p \leq 0.01)'])
+end
 
 %%% 11.4 Distribution of the pre-onset time-course r
-% Title is the t-test p of the mean r against 0.
+% Same mean and t-test as section 7, on the pre-onset r values.
+% The histogram is optional. The bar plot in 11.5 uses these p values.
 
-mean_r_pre = nan(5, 3);
-p_val_pre  = nan(5, 3);
-
-open_band_figure(band_name)
-for an = 1:5
-    for j = 1:3
-        subplot(5, 3, (an-1)*3 + j)
-
-        r_this = squeeze(time_correlation_r_pre(an, j, :));
-        r_finite = r_this(isfinite(r_this));
-
-        histogram(r_finite, -1:0.1:1, 'FaceColor', 'r', 'FaceAlpha', 0.8, ...
-            'Normalization', 'percentage')
-        hold on
-        plot([0 0], ylim, 'k:')
-
-        mean_r_pre(an, j) = mean(r_finite);
-        if numel(r_finite) >= 2
-            [~, p] = ttest(r_finite);
-            p_val_pre(an, j) = p;
+mean_r_pre = nan(5,3);
+p_val_pre = nan(5,3);
+if plot_optional_figures
+figure('Name', [band_name, '_preonset_timecourse_r_histogram'])
+end
+for an=1:5
+    for j=1:3
+        r_this_cond = squeeze(time_correlation_r_pre(an,j,:));
+        mean_r_pre(an,j) = mean(r_this_cond, 'omitmissing');
+        [h,p] = ttest(r_this_cond);
+        p_val_pre(an,j) = p;
+        if plot_optional_figures
+            subplot(5,3,(an-1)*3 + j)
+            hold on
+            histogram(r_this_cond,-1:.1:1, 'FaceColor','r', 'FaceAlpha',.8, 'Normalization','percentage')
+            title(p)
         end
-
-        title(sprintf('%s / %s\np = %.3g', ...
-            saved_data(an,j).area, saved_data(an,j).cell_type, p_val_pre(an, j)))
-        if an == 5
-            xlabel('r')
-        end
-        if j == 1
-            ylabel('% behaviors')
-        end
-        set(gca, 'TickDir', 'out')
     end
 end
-sgtitle(['Pre-onset time-course r, ', power_label, ' (t-test vs 0)'])
 
 %%% 11.5 Mean pre-onset r per structure
-% Bars grouped peak / trough / unlocked within each area.
-% Filled: p ≤ 0.05 from section 11.4; hollow: n.s.
-
-color_code_pre = {'r','b','g','r','b','g','r','b','g','r','b','g','r','b','g'};
+% Same display as section 8: filled bar when p ≤ 0.05, hollow otherwise.
+% Peak / trough / unlocked stay red / blue / green inside each area.
 
 mean_r_pre_t = mean_r_pre';
-p_val_pre_t  = p_val_pre';
+p_val_pre_t = p_val_pre';
 mean_r_pre_t = mean_r_pre_t(:);
-p_val_pre_t  = p_val_pre_t(:);
-
-open_band_figure(band_name)
+p_val_pre_t = p_val_pre_t(:);
+if plot_preonset_correlation_bars
+figure('Name', [band_name, '_preonset_correlation_bars'])
 hold on
-for j = 1:numel(mean_r_pre_t)
-    if ~isfinite(p_val_pre_t(j)) || p_val_pre_t(j) > 0.05
-        bar(j, mean_r_pre_t(j), 'FaceColor', 'none', 'EdgeColor', color_code_pre{j});
+for j=1:numel(mean_r_pre_t)
+
+    if p_val_pre_t(j)>0.05
+        bar(j,mean_r_pre_t(j), 'FaceColor','none', 'EdgeColor',color_code{j});
+
     else
-        bar(j, mean_r_pre_t(j), 'FaceColor', color_code_pre{j}, 'EdgeColor', color_code_pre{j});
+         bar(j,mean_r_pre_t(j), 'FaceColor',color_code{j}, 'EdgeColor',color_code{j});
+
     end
 end
-for j = 1:4
-    plot([3 3]*j + 0.5, [-0.25 0.25], 'k:')
+for j=1:4
+plot([3 3]*j+.5, [-.25 .25], 'k:')
 end
+
 xticks(2:3:16)
-xticklabels(area_names_pre)
-ylabel('Mean r')
-title(['Mean pre-onset time-course r, ', power_label])
-set(gca, 'TickDir', 'out')
+xticklabels(area_names)
+end
 
 if save_correlation
     corr_file = [band_results_folder, '\', corr_file_name];
@@ -997,10 +1034,5 @@ if save_correlation
     fprintf('Saved %s\n', corr_file);
 end
 
-end
-
-function open_band_figure(band_name)
-figure
-set(gcf, 'Name', band_name)
 end
 
