@@ -31,6 +31,18 @@ run(fullfile(repo_root, 'add_repo_paths.m'));
 parameters = speed_peak_options();
 saving_folder = fullfile(parameters.data_root, 'Analysis results', ...
     'speed peak frequency');
+
+%% Correlation histogram settings (edit these values for Figure 4)
+% bin_width is in correlation-coefficient units. Use 0.20 for wider bins.
+correlation_histogram_parameters = struct();
+correlation_histogram_parameters.correlation_type = 'Pearson';
+correlation_histogram_parameters.bin_width = 0.10;
+correlation_histogram_parameters.x_limits = [-1 1];
+correlation_histogram_parameters.normalization = 'count';
+correlation_histogram_parameters.face_color = [0.25 0.45 0.70];
+correlation_histogram_parameters.face_alpha = 0.85;
+correlation_histogram_parameters.edge_color = 'none';
+
 input_file = fullfile(saving_folder, 'speed_peak_frequency.mat');
 if ~isfile(input_file)
     error('Analyze_speed_peak_frequency:missing', ...
@@ -124,6 +136,7 @@ pooled_model_table = fit_pooled_models(peak_table, methods, ...
 
 plot_peak_vs_speed(peak_table, session_keys, delta_columns, theta_columns, methods);
 plot_session_correlations(correlation_table);
+plot_correlation_histograms(correlation_table, correlation_histogram_parameters);
 plot_peak_model_fits(peak_table, session_keys, methods, delta_columns, ...
     theta_columns, analysis_parameters.min_bins_for_correlation);
 
@@ -132,7 +145,8 @@ if ~isfolder(saving_folder)
 end
 analysis_file = fullfile(saving_folder, 'speed_peak_frequency_analysis.mat');
 save(analysis_file, 'peak_table', 'correlation_table', 'session_model_table', ...
-    'pooled_model_table', 'model_specification', 'analysis_parameters', '-v7.3');
+    'pooled_model_table', 'model_specification', 'analysis_parameters', ...
+    'correlation_histogram_parameters', '-v7.3');
 writetable(peak_table, fullfile(saving_folder, 'speed_peak_by_session.csv'));
 writetable(correlation_table, fullfile(saving_folder, 'speed_peak_correlations_recomputed.csv'));
 writetable(session_model_table, fullfile(saving_folder, 'speed_peak_session_models.csv'));
@@ -240,6 +254,79 @@ for method_n = 1:numel(methods)
         title(panel_titles{panel_n})
     end
 end
+end
+
+function plot_correlation_histograms(correlation_table, parameters)
+validate_histogram_parameters(parameters);
+methods = {'Welch', 'Fourier'};
+value_names = { ...
+    [parameters.correlation_type 'Delta'], ...
+    [parameters.correlation_type 'Theta']};
+band_names = {'Delta', 'Theta'};
+edges = histogram_edges(parameters.x_limits, parameters.bin_width);
+
+figure('Name', sprintf('Delta and theta %s correlations', ...
+    parameters.correlation_type))
+for method_n = 1:numel(methods)
+    method_rows = strcmp(correlation_table.Method, methods{method_n});
+    for band_n = 1:numel(value_names)
+        panel_n = (method_n - 1) * numel(value_names) + band_n;
+        subplot(numel(methods), numel(value_names), panel_n)
+        values = correlation_table.(value_names{band_n})(method_rows);
+        values = values(isfinite(values));
+        histogram(values, edges, ...
+            'Normalization', parameters.normalization, ...
+            'FaceColor', parameters.face_color, ...
+            'FaceAlpha', parameters.face_alpha, ...
+            'EdgeColor', parameters.edge_color);
+        hold on
+        xline(0, 'k:', 'LineWidth', 1)
+        xlim(parameters.x_limits)
+        xlabel(sprintf('%s correlation coefficient', ...
+            parameters.correlation_type))
+        if strcmp(parameters.normalization, 'count')
+            ylabel('Session-channel count')
+        else
+            ylabel(parameters.normalization)
+        end
+        title(sprintf('%s %s (n = %d)', ...
+            methods{method_n}, band_names{band_n}, numel(values)))
+        box off
+    end
+end
+end
+
+function validate_histogram_parameters(parameters)
+required = {'correlation_type', 'bin_width', 'x_limits', 'normalization', ...
+    'face_color', 'face_alpha', 'edge_color'};
+for field_n = 1:numel(required)
+    if ~isfield(parameters, required{field_n})
+        error('Analyze_speed_peak_frequency:histogramParameter', ...
+            'Missing histogram parameter %s.', required{field_n});
+    end
+end
+if ~any(strcmp(parameters.correlation_type, {'Pearson', 'Spearman'}))
+    error('Analyze_speed_peak_frequency:histogramCorrelation', ...
+        'Histogram correlation_type must be Pearson or Spearman.');
+end
+if ~isscalar(parameters.bin_width) || ~isfinite(parameters.bin_width) || ...
+        parameters.bin_width <= 0
+    error('Analyze_speed_peak_frequency:histogramBinWidth', ...
+        'Histogram bin_width must be a positive finite scalar.');
+end
+if numel(parameters.x_limits) ~= 2 || ...
+        any(~isfinite(parameters.x_limits)) || ...
+        parameters.x_limits(2) <= parameters.x_limits(1)
+    error('Analyze_speed_peak_frequency:histogramLimits', ...
+        'Histogram x_limits must be two increasing finite values.');
+end
+end
+
+function edges = histogram_edges(x_limits, bin_width)
+% Keep every bin at the requested width. The final edge can exceed the
+% displayed upper limit when the range is not a multiple of bin_width.
+n_bins = ceil((x_limits(2) - x_limits(1)) / bin_width);
+edges = x_limits(1) + (0:n_bins) * bin_width;
 end
 
 function session_model_table = fit_session_models(peak_table, session_keys, ...
