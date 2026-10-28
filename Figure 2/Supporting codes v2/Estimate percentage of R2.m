@@ -1,6 +1,24 @@
 %% 1 LOAD DATA
 % Regressor PSTH structs live under Data\Analysis results\Theta psth.
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth';
+results_folder = fullfile(fileparts(saving_folder), 'psth power by frequency and behavior');
+
+% Use the saved delta model as the canonical predictor set and ordering for
+% follow-up theta/gamma models.
+delta_reference_file = fullfile(results_folder, 'cvResults_mean_calls_delta_v2_AlllVar.mat');
+delta_reference = load(delta_reference_file, 'cvResults');
+reference_predictors = delta_reference.cvResults.predictors(:)';
+if isstring(reference_predictors)
+    reference_predictors = cellstr(reference_predictors);
+elseif ~iscellstr(reference_predictors)
+    error('Delta reference does not contain a valid cvResults.predictors list: %s', ...
+        delta_reference_file);
+end
+if isempty(reference_predictors)
+    error('Delta reference predictor list is empty: %s', delta_reference_file);
+end
+clear delta_reference
+
 disp('Loading')
 % load([saving_folder,'\psth_structure_all_regressors_beta_gamma.mat'],'psth_structure'); 
 % load([saving_folder,'\animal_names_all_regressors_beta_gamma.mat'],'animal_names');
@@ -447,10 +465,12 @@ regressor_table = table(call_regressor, other_speed_regressro,self_speed_regress
       'PlayBout','Animal','ChannelNum','AnimalDist','Power'});
 
 
-predictors = {'Call', 'OtherSpeed','SelfSpeed','OtherAcc','SelfAcc', ...
-    'SelfBool', 'OtherBool','OtherAngleSpeed','OtherAngleAccc','RelativeSpeed', ...
-    'SelfAngleSpeed','SelfAngleAccc', 'PartnerNumber', ...
-      'PlayBout','AnimalDist', 'SelfPlayRecipr', 'OtherPlayRecipr'};
+predictors = reference_predictors;
+missing_predictors = predictors(~ismember(predictors, regressor_table.Properties.VariableNames));
+if ~isempty(missing_predictors)
+    error('Delta-reference predictors missing from regressor_table: %s', ...
+        strjoin(missing_predictors, ', '));
+end
 
 regressor_table(any(isnan(regressor_table{:,predictors}),2),:) = [];
 
@@ -462,10 +482,6 @@ regressor_table(any(isnan(regressor_table{:,predictors}),2),:) = [];
 k = 30; % number of folds
 cv = cvpartition(height(regressor_table), 'KFold', k);
 
- predictors = {'Call', 'OtherSpeed','SelfSpeed','OtherAcc','SelfAcc', ...
-   'SelfBool', 'OtherBool','OtherAngleSpeed','OtherAngleAccc','RelativeSpeed', ...
-    'SelfAngleSpeed','SelfAngleAccc', 'PartnerNumber', ...
-      'PlayBout','AnimalDist'}; 
 % Full model formula
 % formula_full = 'Power ~ Call + SelfSpeed + OtherSpeed + OtherAcc + SelfAcc + PlayBout + AnimalDist + (1|Animal)';
 % Join predictor names with ' + '
