@@ -13,6 +13,7 @@ test_criterion_selection();
 test_search_plan_caps_gaussians_and_restarts();
 test_remaining_time_scales_with_work();
 test_saved_region_fit_is_recognized();
+test_plot_selection_skips_missing_regions();
 test_short_samples_are_not_fitted();
 test_distribution_figure();
 if exist('fitgmdist', 'file') == 2
@@ -152,6 +153,55 @@ assert(region_mixture_already_saved(struct('fit', struct('status', 'fitted'))), 
 assert(region_mixture_already_saved(struct('fit', struct( ...
     'status', 'fewer than 5 finite center frequencies'))), ...
     'A completed skip was treated as missing.');
+end
+
+function test_plot_selection_skips_missing_regions()
+saved = saved_four_regions();
+[selected, missing] = select_saved_region_gaussian_centers( ...
+    saved, {'DR', 'SupCol', 'SC', 'InfCol'}, 'Fourier');
+assert(numel(selected) == 1 && strcmp(selected.name, 'DR'), ...
+    'The finished DR fit was not the only selected region.');
+assert(any(strcmp({missing.name}, 'SupCol')), ...
+    'SupCol was not reported as missing.');
+assert(sum(strcmp({missing.name}, 'SupCol')) == 1, ...
+    'SC was listed separately from SupCol.');
+assert(any(strcmp({missing.name}, 'InfCol')), ...
+    'InfCol was not reported as an unknown region.');
+assert(strcmp(missing(strcmp({missing.name}, 'SupCol')).reason, ...
+    'fit not saved yet'), ...
+    'A saved region with an empty fit was not described as unfinished.');
+
+[selected, missing] = select_saved_region_gaussian_centers( ...
+    saved, {}, 'Fourier');
+assert(isequal({selected.name}, {'DR', 'VLPAG', 'LPAG', 'DLPAG'}), ...
+    'An empty region list did not keep every finished region.');
+assert(numel(missing) == 1 && strcmp(missing.name, 'SupCol'), ...
+    'An empty region list hid the unfinished SupCol fit.');
+
+[selected, missing] = select_saved_region_gaussian_centers( ...
+    saved, {'DR', 'LPAG'}, 'Welch');
+assert(isempty(selected), ...
+    'A spectrum that was not saved still returned regions.');
+assert(all(strcmp({missing.reason}, 'Welch results were not saved')), ...
+    'A missing spectrum was not reported.');
+end
+
+function saved = saved_four_regions()
+names = {'DR', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
+by_region = repmat(struct( ...
+    'name', '', 'n_peaks', 0, 'n_channels', 0, 'n_sessions', 0, 'fit', []), ...
+    numel(names), 1);
+for region_n = 1:4
+    by_region(region_n).name = names{region_n};
+    by_region(region_n).n_peaks = 10;
+    by_region(region_n).fit = struct('status', 'fitted', ...
+        'best_n_components', 2);
+end
+by_region(5).name = 'SupCol';
+saved = struct();
+saved.regions = names;
+saved.methods.Fourier.complete = false;
+saved.methods.Fourier.by_region = by_region;
 end
 
 function test_short_samples_are_not_fitted()
