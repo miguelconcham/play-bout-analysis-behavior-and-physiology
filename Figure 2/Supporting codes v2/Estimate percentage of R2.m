@@ -1,6 +1,24 @@
 %% 1 LOAD DATA
 % Regressor PSTH structs live under Data\Analysis results\Theta psth.
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth';
+results_folder = fullfile(fileparts(saving_folder), 'psth power by frequency and behavior');
+
+% Use the saved delta model as the canonical predictor set and ordering for
+% follow-up theta/gamma models.
+delta_reference_file = fullfile(results_folder, 'cvResults_mean_calls_delta_v2_AlllVar.mat');
+delta_reference = load(delta_reference_file, 'cvResults');
+reference_predictors = delta_reference.cvResults.predictors(:)';
+if isstring(reference_predictors)
+    reference_predictors = cellstr(reference_predictors);
+elseif ~iscellstr(reference_predictors)
+    error('Delta reference does not contain a valid cvResults.predictors list: %s', ...
+        delta_reference_file);
+end
+if isempty(reference_predictors)
+    error('Delta reference predictor list is empty: %s', delta_reference_file);
+end
+clear delta_reference
+
 disp('Loading')
 % load([saving_folder,'\psth_structure_all_regressors_beta_gamma.mat'],'psth_structure'); 
 % load([saving_folder,'\animal_names_all_regressors_beta_gamma.mat'],'animal_names');
@@ -443,14 +461,16 @@ regressor_table = table(call_regressor, other_speed_regressro,self_speed_regress
     'VariableNames', {'Call', 'OtherSpeed','SelfSpeed','OtherAcc','SelfAcc', ...
     'SelfBool', 'OtherBool','OtherAngleSpeed','OtherAngleAccc','RelativeSpeed', ...
     'SelfAngleSpeed','SelfAngleAccc', 'PartnerNumber',...
-     'SelfPlayRecipr', 'OtherPlayRecipr','PlayboutRecipr',...
+     'OtherPlayRecipr', 'SelfPlayRecipr','PlayboutRecipr',...
       'PlayBout','Animal','ChannelNum','AnimalDist','Power'});
 
 
-predictors = {'Call', 'OtherSpeed','SelfSpeed','OtherAcc','SelfAcc', ...
-    'SelfBool', 'OtherBool','OtherAngleSpeed','OtherAngleAccc','RelativeSpeed', ...
-    'SelfAngleSpeed','SelfAngleAccc', 'PartnerNumber', ...
-      'PlayBout','AnimalDist', 'SelfPlayRecipr', 'OtherPlayRecipr'};
+predictors = reference_predictors;
+missing_predictors = predictors(~ismember(predictors, regressor_table.Properties.VariableNames));
+if ~isempty(missing_predictors)
+    error('Delta-reference predictors missing from regressor_table: %s', ...
+        strjoin(missing_predictors, ', '));
+end
 
 regressor_table(any(isnan(regressor_table{:,predictors}),2),:) = [];
 
@@ -462,10 +482,6 @@ regressor_table(any(isnan(regressor_table{:,predictors}),2),:) = [];
 k = 30; % number of folds
 cv = cvpartition(height(regressor_table), 'KFold', k);
 
- predictors = {'Call', 'OtherSpeed','SelfSpeed','OtherAcc','SelfAcc', ...
-   'SelfBool', 'OtherBool','OtherAngleSpeed','OtherAngleAccc','RelativeSpeed', ...
-    'SelfAngleSpeed','SelfAngleAccc', 'PartnerNumber', ...
-      'PlayBout','AnimalDist'}; 
 % Full model formula
 % formula_full = 'Power ~ Call + SelfSpeed + OtherSpeed + OtherAcc + SelfAcc + PlayBout + AnimalDist + (1|Animal)';
 % Join predictor names with ' + '
@@ -510,25 +526,20 @@ fprintf('Full model average CV R²: %.6f\n\n', avgR2_full);
 for i = 1:numel(predictors)
     toRemove = predictors{i};
     fprintf('Testing predictor removal: %s\n', toRemove);
-    
-    % Regex pattern to safely remove predictor
-   
-    if i==1
-        pattern = ['(\s*\+\s*)?' toRemove '(\s*\+\s*)?'];
-        formula_reduced = regexprep(formula_full, pattern, '');
-        formula_reduced = regexprep(formula_reduced, '^\s*\+\s*', '');    
-        formula_reduced = regexprep(formula_reduced, '\s*\+\s*$', '');    
-        formula_reduced = regexprep(formula_reduced, '\s*\+\s*\+', ' + '); 
-        formula_reduced = strtrim(formula_reduced);
-    else
-        formula_reduced = regexprep(formula_full, ['\s*\+\s*' toRemove], '');
-    end
 
-    
+    % Drop the predictor by name. Building the formula from the kept names
+    % avoids a partial match on the formula string.
+    kept = predictors(~strcmp(predictors, toRemove));
+    if numel(kept) ~= numel(predictors) - 1
+        error('Failed to drop %s from the reduced model.', toRemove);
+    end
+    formula_reduced = ['Power ~ ' strjoin(kept, ' + ') ' + (1|Animal)'];
 
     mse_reduced_allfolds = zeros(k,1);
     r2_reduced_allfolds = zeros(k,1);
-    for fold = 1:13
+    % Fit every fold. Stopping early leaves the preallocated zeros in place,
+    % and Figure 2 then treats those folds as ΔR² = R²_full.
+    for fold = 1:k
         trainIdx = training(cv, fold);
         testIdx = test(cv, fold);
         trainData = regressor_table(trainIdx,:);
