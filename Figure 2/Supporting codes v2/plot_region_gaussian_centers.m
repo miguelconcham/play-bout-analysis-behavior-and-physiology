@@ -18,7 +18,12 @@ if nargin < 6 || isempty(spectral_method)
 end
 
 n_regions = numel(region_results);
-criterion = upper(strtrim(char(string(selection_criterion))));
+criterion = strtrim(char(string(selection_criterion)));
+if strcmpi(criterion, 'AIC')
+    criterion = 'AIC';
+elseif strcmpi(criterion, 'BIC')
+    criterion = 'BIC';
+end
 figure_name = 'Regional Gaussian-center mixtures';
 if ~isempty(spectral_method)
     figure_name = sprintf('%s | %s', figure_name, spectral_method);
@@ -91,16 +96,21 @@ if any(ineligible)
 end
 
 best_n = this_region.fit.best_n_components;
-if isfinite(best_n)
-    best_row = model_table.NComponents == best_n;
-    if strcmp(criterion, 'AIC')
-        selected_value = model_table.AIC(best_row);
+best_index = find(model_table.NComponents == best_n, 1, 'first');
+if isfinite(best_n) && ~isempty(best_index)
+    if strcmp(criterion, 'AIC') && ...
+            ismember('AIC', model_table.Properties.VariableNames)
+        selected_value = model_table.AIC(best_index);
+    elseif ismember('BIC', model_table.Properties.VariableNames)
+        selected_value = model_table.BIC(best_index);
     else
-        selected_value = model_table.BIC(best_row);
+        selected_value = NaN;
     end
-    legend_handles(end + 1, 1) = plot(best_n, selected_value, 'o', ...
-        'Color', [0.75 0.15 0.55], 'MarkerSize', 11, 'LineWidth', 1.8);
-    legend_labels{end + 1} = sprintf('Selected %s', criterion); %#ok<AGROW>
+    if isfinite(selected_value)
+        legend_handles(end + 1, 1) = plot(best_n, selected_value, 'o', ...
+            'Color', [0.75 0.15 0.55], 'MarkerSize', 11, 'LineWidth', 1.8);
+        legend_labels{end + 1} = sprintf('Selected %s', criterion); %#ok<AGROW>
+    end
 end
 
 xlabel_if(label_x, 'Number of Gaussian components')

@@ -5,6 +5,12 @@
 % regions_to_plot chooses the rows. Leave it empty to draw every saved
 % region. A region that has no fit yet is named in the command window and
 % left out of the figure. SupCol and SC are the same region.
+%
+% selection_criterion chooses which saved rule supplies the mixture.
+% Leave it empty to draw the criterion stored by Estimate, usually BIC.
+% After Select_play_session_region_gaussian_centers.m, set it to one of
+% the printed names, for example 'ICL' or 'SlopeHeuristicRegression'.
+% The elbow and overlap settings below must match that script.
 
 %% Regions to draw
 saving_folder = ['\\experimentfs.home.bccn-berlin.de\experiment\' ...
@@ -21,6 +27,20 @@ regions_to_plot = {'DR', 'VLPAG', 'LPAG', 'DLPAG', 'SupCol'};
 %   spectral_method = 'Welch';
 %   spectral_method = {'Welch', 'Fourier'};
 spectral_method = 'Fourier';
+
+% '' draws the criterion saved by Estimate. Otherwise use a name from
+% Select_play_session_region_gaussian_centers.m:
+%   selection_criterion = 'ICL';
+%   selection_criterion = 'SlopeHeuristicRegression';
+%   selection_criterion = 'ElbowBICSuccessive';
+selection_criterion = '';
+
+% Keep these equal to the selection script when the chosen rule uses them.
+elbow_fraction = 0.05;
+ashman_d_minimum = 2;
+bhattacharyya_maximum = 0.5;
+gof_relative_tolerance = 0.1;
+nec_one_component_threshold = 1;
 
 % NaN uses the value stored by Estimate. [] omits the reference line.
 % A number such as 8 draws that line. It does not choose the mixture.
@@ -58,12 +78,20 @@ if isempty(frequency)
 else
     frequency_limits = frequency([1 end]);
 end
-if isfield(region_gaussian_centers, 'selection_criterion') && ...
-        ~isempty(region_gaussian_centers.selection_criterion)
-    selection_criterion = region_gaussian_centers.selection_criterion;
-else
-    selection_criterion = 'BIC';
+if isempty(selection_criterion)
+    if isfield(region_gaussian_centers, 'selection_criterion') && ...
+            ~isempty(region_gaussian_centers.selection_criterion)
+        selection_criterion = region_gaussian_centers.selection_criterion;
+    else
+        selection_criterion = 'BIC';
+    end
 end
+selection_options = struct( ...
+    'elbow_fraction', elbow_fraction, ...
+    'ashman_d_minimum', ashman_d_minimum, ...
+    'bhattacharyya_maximum', bhattacharyya_maximum, ...
+    'gof_relative_tolerance', gof_relative_tolerance, ...
+    'nec_one_component_threshold', nec_one_component_threshold);
 threshold_hz = resolve_plot_threshold( ...
     low_frequency_threshold_hz, region_gaussian_centers);
 bin_hz = resolve_histogram_bin(histogram_bin_hz, region_gaussian_centers);
@@ -78,11 +106,34 @@ for method_n = 1:numel(method_names)
         fprintf('%s: no saved region to plot.\n', method_name);
         continue
     end
-    fprintf('%s figure: %s.\n', method_name, strjoin({selected.name}, ', '));
-    plot_region_gaussian_centers(selected, frequency_limits, ...
-        selection_criterion, threshold_hz, bin_hz, method_name);
+    plotted = selected([]);
     for region_n = 1:numel(selected)
-        this_region = selected(region_n);
+        [updated, outcome] = region_mixture_for_criterion( ...
+            selected(region_n), selection_criterion, frequency_limits, ...
+            selection_options);
+        if ~outcome.applied
+            fprintf('  %s left out: %s.\n', selected(region_n).name, ...
+                outcome.note);
+            continue
+        end
+        fprintf('  %s: %s selects %g.\n', updated.name, ...
+            outcome.criterion, outcome.selected_n);
+        if isempty(plotted)
+            plotted = updated;
+        else
+            plotted(end + 1, 1) = updated; %#ok<AGROW>
+        end
+    end
+    if isempty(plotted)
+        fprintf('%s: no region can be drawn with %s.\n', ...
+            method_name, char(string(selection_criterion)));
+        continue
+    end
+    fprintf('%s figure: %s.\n', method_name, strjoin({plotted.name}, ', '));
+    plot_region_gaussian_centers(plotted, frequency_limits, ...
+        selection_criterion, threshold_hz, bin_hz, method_name);
+    for region_n = 1:numel(plotted)
+        this_region = plotted(region_n);
         best_n = NaN;
         if isfield(this_region.fit, 'best_n_components')
             best_n = this_region.fit.best_n_components;
