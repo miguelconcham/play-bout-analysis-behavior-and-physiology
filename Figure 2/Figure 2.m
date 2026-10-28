@@ -652,9 +652,9 @@ end
 % Power ~ 1 + Partner + (1|Session). results.est is the Partner1 level.
 % load(fullfile(saving_folder, 'results_play_bout.mat'), 'results'); % all time points
 load(fullfile(saving_folder, 'results_play_bout_PBonly_zscore4_updated.mat'), 'results'); % play-bout-only bins
-est = results.est;
+est = results.est(:);
 ci = results.ci;
-pvals_fdr = results.pvals;
+pvals_fdr = results.pvals(:);
 %% 12 (Fig 2e,f and Supp Fig 4a,d) plot all together
 
 X_lim = [-1 3];
@@ -682,8 +682,12 @@ title('All data')
 
 subplot(2,1,2)
 
-[~, ~, ci]  = ttest(array);
-fill([time2use fliplr(time2use)], [ci(1,:) fliplr(ci(2,:))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
+limited_time = results.time(:);
+ci = results.ci;
+ci_valid = isfinite(limited_time) & all(isfinite(ci), 2);
+fill([limited_time(ci_valid); flipud(limited_time(ci_valid))], ...
+    [ci(ci_valid,1); flipud(ci(ci_valid,2))], ...
+    'k', 'FaceAlpha',.25, 'EdgeColor','none')
 hold on
 plot(time2use,mean(array, 'omitmissing'), 'k')
 xlim(X_lim)
@@ -694,7 +698,6 @@ plot(time2use,mean(stacked_mean_onset), 'k:')
 xlim(X_lim)
 
 sig_idx = pvals_fdr < alpha;
-limited_time = results.time;
 
 borders = [ 0 sig_idx' 0];
 beg_index = find(diff(borders)==1);
@@ -815,10 +818,10 @@ end
 %% 16 Load call mixed-model results — example: GAMMA calls (combo file GAMMA #2)
 load(fullfile(saving_folder, 'results_call_updated_gamma.mat'), 'results');
 
-limited_time = results.time;
-est = results.est;
+limited_time = results.time(:);
+est = results.est(:);
 ci = results.ci;
-pvals_fdr = results.pvals;
+pvals_fdr = results.pvals(:);
 %% 17 (Supp Fig 4e) now plot all together
 figure
 an=2;
@@ -844,11 +847,13 @@ title(animal_label{an})
 
 subplot(2,1,2)
 
-[~, ~, ci]  = ttest(array);
-no_nan = ~any(isnan(ci));
-fill([time(no_nan) fliplr(time(no_nan))], [ci(1,no_nan) fliplr(ci(2,no_nan))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
+ci_valid = isfinite(limited_time) & all(isfinite(ci), 2);
+fill([limited_time(ci_valid); flipud(limited_time(ci_valid))], ...
+    [ci(ci_valid,1); flipud(ci(ci_valid,2))], ...
+    'k', 'FaceAlpha',.25, 'EdgeColor','none')
 hold on
 plot(time,mean(array, 'omitmissing'), 'k')
+plot(limited_time, est, 'k', 'LineWidth', 2)
 
 
 
@@ -857,7 +862,6 @@ hold on
 plot(time,mean(stacked_mean), 'k:')
 
 sig_idx = pvals_fdr < alpha;
-limited_time = results.time;
 
 borders = [ 0 sig_idx' 0];
 beg_index = find(diff(borders)==1);
