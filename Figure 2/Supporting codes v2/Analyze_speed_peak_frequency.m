@@ -42,6 +42,15 @@ correlation_histogram_parameters.normalization = 'count';
 correlation_histogram_parameters.face_color = [0.25 0.45 0.70];
 correlation_histogram_parameters.face_alpha = 0.85;
 correlation_histogram_parameters.edge_color = 'none';
+correlation_histogram_parameters.significance_alpha = 0.05;
+correlation_histogram_parameters.pvalue_bin_width = 0.25;
+correlation_histogram_parameters.pvalue_log10_limits = [-10 0];
+correlation_histogram_parameters.reference_pvalues = [0.05 0.01];
+correlation_histogram_parameters.pvalue_face_color = [0.55 0.35 0.65];
+
+%% Peak-frequency model plot settings (the fitted data are unchanged)
+model_plot_parameters = struct();
+model_plot_parameters.log_speed_xlim = [-5 10];
 
 input_file = fullfile(saving_folder, 'speed_peak_frequency.mat');
 if ~isfile(input_file)
@@ -75,7 +84,7 @@ theta_columns = {'WelchThetaCF', 'FourierThetaCF'};
 session_keys = unique(peak_table(:, {'Animal', 'Partner', 'SessionIndex', ...
     'Probe', 'LPAGChannel', 'SessionSource'}), 'rows', 'stable');
 
-correlation_rows = cell(height(session_keys) * numel(methods), 18);
+correlation_rows = cell(height(session_keys) * numel(methods), 22);
 row_n = 0;
 for session_n = 1:height(session_keys)
     this_session = peak_table(session_row_mask(peak_table, session_keys, session_n), :);
@@ -95,9 +104,12 @@ for session_n = 1:height(session_keys)
             session_keys.LPAGChannel(session_n), ...
             methods{method_n}, ...
             stats.n_delta, stats.pearson_delta, stats.pearson_delta_p, ...
-            stats.spearman_delta, stats.n_theta, stats.pearson_theta, ...
-            stats.pearson_theta_p, stats.spearman_theta, stats.n_delta_theta, ...
-            stats.pearson_delta_theta, stats.pearson_delta_theta_p};
+            stats.spearman_delta, stats.spearman_delta_p, ...
+            stats.n_theta, stats.pearson_theta, stats.pearson_theta_p, ...
+            stats.spearman_theta, stats.spearman_theta_p, ...
+            stats.n_delta_theta, stats.pearson_delta_theta, ...
+            stats.pearson_delta_theta_p, stats.spearman_delta_theta, ...
+            stats.spearman_delta_theta_p};
         fprintf(['%s P%d session %d probe %g channel %g %s: ' ...
             'delta r = %+.3f (n = %d), theta r = %+.3f (n = %d), ' ...
             'delta-theta r = %+.3f (n = %d)\n'], ...
@@ -113,8 +125,10 @@ end
 correlation_table = cell2table(correlation_rows, 'VariableNames', { ...
     'Animal', 'Partner', 'SessionIndex', 'SessionSource', 'Probe', ...
     'LPAGChannel', 'Method', 'NDelta', 'PearsonDelta', 'PearsonDeltaP', ...
-    'SpearmanDelta', 'NTheta', 'PearsonTheta', 'PearsonThetaP', ...
-    'SpearmanTheta', 'NDeltaTheta', 'PearsonDeltaTheta', 'PearsonDeltaThetaP'});
+    'SpearmanDelta', 'SpearmanDeltaP', 'NTheta', 'PearsonTheta', ...
+    'PearsonThetaP', 'SpearmanTheta', 'SpearmanThetaP', 'NDeltaTheta', ...
+    'PearsonDeltaTheta', 'PearsonDeltaThetaP', 'SpearmanDeltaTheta', ...
+    'SpearmanDeltaThetaP'});
 
 for method_n = 1:numel(methods)
     method_rows = strcmp(correlation_table.Method, methods{method_n});
@@ -133,24 +147,33 @@ session_model_table = fit_session_models(peak_table, session_keys, ...
     methods, delta_columns, theta_columns, analysis_parameters.min_bins_for_correlation);
 pooled_model_table = fit_pooled_models(peak_table, methods, ...
     delta_columns, theta_columns, analysis_parameters.min_bins_for_correlation);
+correlation_summary_table = summarize_correlations( ...
+    correlation_table, correlation_histogram_parameters);
 
 plot_peak_vs_speed(peak_table, session_keys, delta_columns, theta_columns, methods);
 plot_session_correlations(correlation_table);
-plot_correlation_histograms(correlation_table, correlation_histogram_parameters);
+plot_correlation_histograms(correlation_table, correlation_summary_table, ...
+    correlation_histogram_parameters);
+plot_correlation_pvalue_histograms(correlation_table, ...
+    correlation_histogram_parameters);
 plot_peak_model_fits(peak_table, session_keys, methods, delta_columns, ...
-    theta_columns, analysis_parameters.min_bins_for_correlation);
+    theta_columns, analysis_parameters.min_bins_for_correlation, ...
+    model_plot_parameters);
 
 if ~isfolder(saving_folder)
     mkdir(saving_folder);
 end
 analysis_file = fullfile(saving_folder, 'speed_peak_frequency_analysis.mat');
 save(analysis_file, 'peak_table', 'correlation_table', 'session_model_table', ...
-    'pooled_model_table', 'model_specification', 'analysis_parameters', ...
-    'correlation_histogram_parameters', '-v7.3');
+    'pooled_model_table', 'correlation_summary_table', 'model_specification', ...
+    'analysis_parameters', 'correlation_histogram_parameters', ...
+    'model_plot_parameters', '-v7.3');
 writetable(peak_table, fullfile(saving_folder, 'speed_peak_by_session.csv'));
 writetable(correlation_table, fullfile(saving_folder, 'speed_peak_correlations_recomputed.csv'));
 writetable(session_model_table, fullfile(saving_folder, 'speed_peak_session_models.csv'));
 writetable(pooled_model_table, fullfile(saving_folder, 'speed_peak_pooled_models.csv'));
+writetable(correlation_summary_table, ...
+    fullfile(saving_folder, 'speed_peak_correlation_summary.csv'));
 fprintf('Saved %s\n', analysis_file);
 
 function report_session_lme(correlation_table, value_name, label)
@@ -256,7 +279,47 @@ for method_n = 1:numel(methods)
 end
 end
 
-function plot_correlation_histograms(correlation_table, parameters)
+function summary_table = summarize_correlations(correlation_table, parameters)
+validate_histogram_parameters(parameters);
+methods = {'Welch', 'Fourier'};
+bands = {'Delta', 'Theta'};
+names = {'Method', 'Band', 'CorrelationType', 'NCorrelation', ...
+    'MeanCorrelation', 'NTested', 'NSignificant', ...
+    'FractionSignificant', 'SignificanceAlpha'};
+rows = cell(numel(methods) * numel(bands), numel(names));
+row_n = 0;
+for method_n = 1:numel(methods)
+    method_rows = strcmp(correlation_table.Method, methods{method_n});
+    for band_n = 1:numel(bands)
+        value_name = [parameters.correlation_type bands{band_n}];
+        pvalue_name = [value_name 'P'];
+        values = correlation_table.(value_name)(method_rows);
+        pvalues = correlation_table.(pvalue_name)(method_rows);
+        finite_values = isfinite(values);
+        tested = finite_values & isfinite(pvalues) & pvalues >= 0 & pvalues <= 1;
+        n_tested = sum(tested);
+        n_significant = sum(pvalues(tested) < parameters.significance_alpha);
+        fraction_significant = NaN;
+        if n_tested > 0
+            fraction_significant = n_significant / n_tested;
+        end
+        row_n = row_n + 1;
+        rows(row_n, :) = { ...
+            methods{method_n}, bands{band_n}, parameters.correlation_type, ...
+            sum(finite_values), mean(values(finite_values)), n_tested, ...
+            n_significant, fraction_significant, ...
+            parameters.significance_alpha};
+        fprintf(['%s %s %s correlation: mean = %+.3f (n = %d); ' ...
+            'p < %.3g in %d/%d tests\n'], methods{method_n}, bands{band_n}, ...
+            parameters.correlation_type, mean(values(finite_values)), ...
+            sum(finite_values), parameters.significance_alpha, ...
+            n_significant, n_tested);
+    end
+end
+summary_table = cell2table(rows, 'VariableNames', names);
+end
+
+function plot_correlation_histograms(correlation_table, summary_table, parameters)
 validate_histogram_parameters(parameters);
 methods = {'Welch', 'Fourier'};
 value_names = { ...
@@ -289,8 +352,61 @@ for method_n = 1:numel(methods)
         else
             ylabel(parameters.normalization)
         end
-        title(sprintf('%s %s (n = %d)', ...
-            methods{method_n}, band_names{band_n}, numel(values)))
+        summary_row = strcmp(summary_table.Method, methods{method_n}) & ...
+            strcmp(summary_table.Band, band_names{band_n});
+        title(sprintf(['%s %s (n = %d)\nmean = %+.3f; ' ...
+            'p < %.3g: %d/%d'], methods{method_n}, band_names{band_n}, ...
+            numel(values), summary_table.MeanCorrelation(summary_row), ...
+            parameters.significance_alpha, ...
+            summary_table.NSignificant(summary_row), ...
+            summary_table.NTested(summary_row)))
+        box off
+    end
+end
+end
+
+function plot_correlation_pvalue_histograms(correlation_table, parameters)
+validate_histogram_parameters(parameters);
+methods = {'Welch', 'Fourier'};
+band_names = {'Delta', 'Theta'};
+edges = histogram_edges(parameters.pvalue_log10_limits, ...
+    parameters.pvalue_bin_width);
+display_floor = 10 ^ parameters.pvalue_log10_limits(1);
+
+figure('Name', sprintf('Delta and theta %s log10 p-values', ...
+    parameters.correlation_type))
+for method_n = 1:numel(methods)
+    method_rows = strcmp(correlation_table.Method, methods{method_n});
+    for band_n = 1:numel(band_names)
+        panel_n = (method_n - 1) * numel(band_names) + band_n;
+        subplot(numel(methods), numel(band_names), panel_n)
+        pvalue_name = [parameters.correlation_type band_names{band_n} 'P'];
+        pvalues = correlation_table.(pvalue_name)(method_rows);
+        pvalues = pvalues(isfinite(pvalues) & pvalues >= 0 & pvalues <= 1);
+        log_pvalues = log10(max(pvalues, display_floor));
+        histogram(log_pvalues, edges, ...
+            'Normalization', parameters.normalization, ...
+            'FaceColor', parameters.pvalue_face_color, ...
+            'FaceAlpha', parameters.face_alpha, ...
+            'EdgeColor', parameters.edge_color);
+        hold on
+        reference_styles = {'--', ':'};
+        for reference_n = 1:numel(parameters.reference_pvalues)
+            reference_p = parameters.reference_pvalues(reference_n);
+            xline(log10(reference_p), reference_styles{reference_n}, ...
+                sprintf('p = %.2g', reference_p), ...
+                'LineWidth', 1.25, ...
+                'LabelVerticalAlignment', 'middle');
+        end
+        xlim(parameters.pvalue_log10_limits)
+        xlabel('log_{10}(p)')
+        if strcmp(parameters.normalization, 'count')
+            ylabel('Session-channel count')
+        else
+            ylabel(parameters.normalization)
+        end
+        title(sprintf('%s %s p-values (n = %d)', ...
+            methods{method_n}, band_names{band_n}, numel(pvalues)))
         box off
     end
 end
@@ -298,7 +414,9 @@ end
 
 function validate_histogram_parameters(parameters)
 required = {'correlation_type', 'bin_width', 'x_limits', 'normalization', ...
-    'face_color', 'face_alpha', 'edge_color'};
+    'face_color', 'face_alpha', 'edge_color', 'significance_alpha', ...
+    'pvalue_bin_width', 'pvalue_log10_limits', 'reference_pvalues', ...
+    'pvalue_face_color'};
 for field_n = 1:numel(required)
     if ~isfield(parameters, required{field_n})
         error('Analyze_speed_peak_frequency:histogramParameter', ...
@@ -319,6 +437,32 @@ if numel(parameters.x_limits) ~= 2 || ...
         parameters.x_limits(2) <= parameters.x_limits(1)
     error('Analyze_speed_peak_frequency:histogramLimits', ...
         'Histogram x_limits must be two increasing finite values.');
+end
+if ~isscalar(parameters.significance_alpha) || ...
+        ~isfinite(parameters.significance_alpha) || ...
+        parameters.significance_alpha <= 0 || parameters.significance_alpha >= 1
+    error('Analyze_speed_peak_frequency:histogramAlpha', ...
+        'Histogram significance_alpha must be between zero and one.');
+end
+if ~isscalar(parameters.pvalue_bin_width) || ...
+        ~isfinite(parameters.pvalue_bin_width) || ...
+        parameters.pvalue_bin_width <= 0
+    error('Analyze_speed_peak_frequency:pvalueBinWidth', ...
+        'pvalue_bin_width must be a positive finite scalar.');
+end
+if numel(parameters.pvalue_log10_limits) ~= 2 || ...
+        any(~isfinite(parameters.pvalue_log10_limits)) || ...
+        parameters.pvalue_log10_limits(2) <= parameters.pvalue_log10_limits(1) || ...
+        parameters.pvalue_log10_limits(2) > 0
+    error('Analyze_speed_peak_frequency:pvalueLimits', ...
+        'pvalue_log10_limits must be increasing and no greater than zero.');
+end
+if numel(parameters.reference_pvalues) ~= 2 || ...
+        any(~isfinite(parameters.reference_pvalues)) || ...
+        any(parameters.reference_pvalues <= 0) || ...
+        any(parameters.reference_pvalues >= 1)
+    error('Analyze_speed_peak_frequency:pvalueReferences', ...
+        'reference_pvalues must contain two values between zero and one.');
 end
 end
 
@@ -630,38 +774,35 @@ fit = struct( ...
 end
 
 function plot_peak_model_fits(peak_table, session_keys, methods, ...
-        delta_columns, theta_columns, min_n)
+        delta_columns, theta_columns, min_n, plot_parameters)
+validate_model_plot_parameters(plot_parameters);
 n_sessions = height(session_keys);
 colors = lines(max(n_sessions, 1));
-labels = cell(n_sessions, 1);
-for session_n = 1:n_sessions
-    labels{session_n} = sprintf('%s P%d s%d ch%g', ...
-        session_keys.Animal{session_n}, session_keys.Partner(session_n), ...
-        session_keys.SessionIndex(session_n), session_keys.LPAGChannel(session_n));
-end
 bands = {'Delta', 'Theta'};
 for method_n = 1:numel(methods)
     peak_columns = {delta_columns{method_n}, theta_columns{method_n}};
     figure('Name', [methods{method_n} ' peak-frequency models'])
+    legend_axis = [];
     for band_n = 1:numel(bands)
         subplot(2, 2, band_n)
         plot_session_fits(peak_table, session_keys, peak_columns{band_n}, ...
-            colors, labels, min_n, 'speed')
+            colors, min_n, 'speed', plot_parameters)
+        if band_n == 1
+            legend_axis = gca;
+        end
         title(sprintf('%s: solid PeakHz ~ Speed, dashed log(PeakHz) ~ Speed', ...
             bands{band_n}))
         subplot(2, 2, band_n + 2)
         plot_session_fits(peak_table, session_keys, peak_columns{band_n}, ...
-            colors, labels, min_n, 'log_speed')
-        title(sprintf('%s: PeakHz ~ log(Speed)', bands{band_n}))
+            colors, min_n, 'log_speed', plot_parameters)
+        title(sprintf('%s: dash-dot PeakHz ~ log(Speed)', bands{band_n}))
     end
-    if n_sessions <= 12 && ~isempty(findobj(gca, 'Type', 'line'))
-        legend('show', 'Location', 'eastoutside')
-    end
+    add_peak_model_legend(legend_axis)
 end
 end
 
 function plot_session_fits(peak_table, session_keys, value_name, colors, ...
-        labels, min_n, x_scale)
+        min_n, x_scale, plot_parameters)
 hold on
 for session_n = 1:height(session_keys)
     this_session = peak_table(session_row_mask(peak_table, session_keys, session_n), :);
@@ -677,19 +818,58 @@ for session_n = 1:height(session_keys)
     if strcmp(x_scale, 'speed')
         x = speed;
         plot(x, peak, 'o', 'Color', colors(session_n, :), ...
-            'MarkerSize', 4, 'DisplayName', labels{session_n})
+            'MarkerSize', 4, 'HandleVisibility', 'off')
         draw_fit_line(models, 'linear', speed, colors(session_n, :), '-')
         draw_log_frequency_curve(models, speed, colors(session_n, :))
         xlabel('Spectrum speed (pixels/s)')
     else
-        plot(log(speed), peak, 'o', 'Color', colors(session_n, :), ...
-            'MarkerSize', 4, 'DisplayName', labels{session_n})
-        draw_fit_line(models, 'log_speed', log(speed), colors(session_n, :), '-')
-        xlabel('log spectrum speed (log pixels/s)')
+        log_speed = log(speed);
+        visible = log_speed >= plot_parameters.log_speed_xlim(1) & ...
+            log_speed <= plot_parameters.log_speed_xlim(2);
+        plot(log_speed(visible), peak(visible), 'o', ...
+            'Color', colors(session_n, :), 'MarkerSize', 4, ...
+            'HandleVisibility', 'off')
+        line_limits = [ ...
+            max(min(log_speed), plot_parameters.log_speed_xlim(1)), ...
+            min(max(log_speed), plot_parameters.log_speed_xlim(2))];
+        draw_fit_line(models, 'log_speed', line_limits, ...
+            colors(session_n, :), '-.')
+        xlabel('Natural log spectrum speed (log pixels/s)')
     end
+end
+if strcmp(x_scale, 'log_speed')
+    xlim(plot_parameters.log_speed_xlim)
 end
 ylabel('Peak frequency (Hz)')
 box off
+end
+
+function add_peak_model_legend(axis_handle)
+if isempty(axis_handle) || ~isgraphics(axis_handle)
+    return
+end
+hold(axis_handle, 'on')
+observed = plot(axis_handle, NaN, NaN, 'ko', ...
+    'MarkerSize', 4, 'LineStyle', 'none');
+linear = plot(axis_handle, NaN, NaN, 'k-', 'LineWidth', 1);
+log_frequency = plot(axis_handle, NaN, NaN, 'k--', 'LineWidth', 1);
+log_speed = plot(axis_handle, NaN, NaN, 'k-.', 'LineWidth', 1);
+legend(axis_handle, [observed, linear, log_frequency, log_speed], { ...
+    'Dot: observed speed-bin peak', ...
+    'Solid: PeakHz ~ Speed', ...
+    'Dashed: log(PeakHz) ~ Speed, displayed in Hz', ...
+    'Dash-dot: PeakHz ~ log(Speed)'}, ...
+    'Location', 'best')
+end
+
+function validate_model_plot_parameters(parameters)
+if ~isfield(parameters, 'log_speed_xlim') || ...
+        numel(parameters.log_speed_xlim) ~= 2 || ...
+        any(~isfinite(parameters.log_speed_xlim)) || ...
+        parameters.log_speed_xlim(2) <= parameters.log_speed_xlim(1)
+    error('Analyze_speed_peak_frequency:logSpeedLimits', ...
+        'model_plot_parameters.log_speed_xlim must contain two increasing values.');
+end
 end
 
 function draw_fit_line(models, model_name, x, color, style)
