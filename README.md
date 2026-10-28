@@ -199,6 +199,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | Analysis | Estimate | Analyze / paper plot |
 |----------|----------|----------------------|
 | Play-bout band-power PSTH | `Estimate_psth_band_power.m` | `Figure 2.m` |
+| Play-bout raw-LFP ERP | `Estimate_playbout_erp.m` | `Analyze_playbout_erp.m` |
 | PSTH per behavior | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
 | PSTH per behavior, theta and gamma (same alignments; LFP loaded once per animal) | `Estimate_psth_all_behaviors_theta_gamma.m` | `Analyze_psth_all_behaviors_theta_gamma.m` |
 | Classify two Type2 groups from time-wrapped band power, pooled across sessions and animals | (uses the per-behavior PSTH) | `Analyze_behavior_class_from_timewrap_power.m` |
