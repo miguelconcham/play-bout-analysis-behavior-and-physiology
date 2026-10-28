@@ -40,6 +40,10 @@ selection_criterion = 'BIC';
 % more than large_sample_centers. A projection past slow_run_seconds
 % (10 h) is reported while the fit is running. Each finished region is
 % written to the output file before the next region starts.
+%
+% resume_partial_fit keeps regions already stored in the output file and
+% fits only regions whose fit is empty. The saved peak table is reused.
+% Set it false to load the spectra and fit every region again.
 mixture_options = struct( ...
     'max_components', 20, ...
     'replicates', 50, ...
@@ -62,8 +66,55 @@ histogram_bin_hz = 1;
 recording_index = [];
 session_index = [];
 
-mixture_options.selection_criterion = selection_criterion;
+% true continues an interrupted run. Finished regions stay as they are.
+resume_partial_fit = true;
 
+mixture_options.selection_criterion = selection_criterion;
+output_file = fullfile(saving_folder, ...
+    'play_session_region_gaussian_center_mixtures.mat');
+saved_for_resume = [];
+resumed = false;
+if resume_partial_fit && exist(output_file, 'file') == 2
+    fprintf('Checking %s for finished regions.\n', output_file);
+    drawnow;
+    loaded_result = load(output_file, 'region_gaussian_centers');
+    if isfield(loaded_result, 'region_gaussian_centers')
+        saved_for_resume = loaded_result.region_gaussian_centers;
+        if saved_mixture_has_peaks(saved_for_resume)
+            region_gaussian_centers = saved_for_resume;
+            resumed = true;
+            fprintf(['Resuming. The saved peak table is reused, so the ' ...
+                'spectra are not loaded again.\n']);
+        else
+            fprintf(['The saved file has no peak table. The spectra will ' ...
+                'be loaded, and any finished region fits will still be kept.\n']);
+        end
+        drawnow;
+    end
+end
+
+if resumed
+    regions = region_gaussian_centers.regions;
+    if isstring(regions)
+        regions = cellstr(regions);
+    end
+    regions = regions(:).';
+    peak_table = region_gaussian_centers.peak_table;
+    frequency = region_gaussian_centers.frequency(:).';
+    mixture_options = region_gaussian_centers.mixture_options;
+    if isfield(region_gaussian_centers, 'selection_criterion') && ...
+            ~isempty(region_gaussian_centers.selection_criterion)
+        selection_criterion = region_gaussian_centers.selection_criterion;
+    end
+    if isfield(region_gaussian_centers, 'low_frequency_threshold_hz')
+        low_frequency_threshold_hz = ...
+            region_gaussian_centers.low_frequency_threshold_hz;
+    end
+    if isfield(region_gaussian_centers, 'histogram_bin_hz') && ...
+            ~isempty(region_gaussian_centers.histogram_bin_hz)
+        histogram_bin_hz = region_gaussian_centers.histogram_bin_hz;
+    end
+else
 %% Load every selected channel-wise spectrum
 file_patterns = probe_periodic_spectra_filename();
 file_list = dir(fullfile(saving_folder, file_patterns{1}));
@@ -149,6 +200,7 @@ if isempty(pieces)
 else
     peak_table = vertcat(pieces{:});
 end
+end
 
 if ischar(spectral_method) || isstring(spectral_method)
     method_names = cellstr(spectral_method);
@@ -162,26 +214,40 @@ else
 end
 
 %% Fit and draw one mixture per region
-region_gaussian_centers = struct();
-region_gaussian_centers.regions = regions;
-region_gaussian_centers.frequency = frequency;
-region_gaussian_centers.selection_criterion = upper(strtrim(char( ...
-    string(selection_criterion))));
-region_gaussian_centers.low_frequency_threshold_hz = ...
-    low_frequency_threshold_hz;
-region_gaussian_centers.histogram_bin_hz = histogram_bin_hz;
-region_gaussian_centers.mixture_options = mixture_options;
-region_gaussian_centers.peak_table = peak_table;
-region_gaussian_centers.methods = struct();
-output_file = fullfile(saving_folder, ...
-    'play_session_region_gaussian_center_mixtures.mat');
+if ~resumed
+    region_gaussian_centers = struct();
+    region_gaussian_centers.regions = regions;
+    region_gaussian_centers.frequency = frequency;
+    region_gaussian_centers.selection_criterion = upper(strtrim(char( ...
+        string(selection_criterion))));
+    region_gaussian_centers.low_frequency_threshold_hz = ...
+        low_frequency_threshold_hz;
+    region_gaussian_centers.histogram_bin_hz = histogram_bin_hz;
+    region_gaussian_centers.mixture_options = mixture_options;
+    region_gaussian_centers.peak_table = peak_table;
+    region_gaussian_centers.methods = struct();
+    if ~isempty(saved_for_resume) && isfield(saved_for_resume, 'methods')
+        region_gaussian_centers.methods = saved_for_resume.methods;
+    end
+end
 
 for method_n = 1:numel(method_names)
     method_name = canonical_method_name(method_names{method_n});
+    prior_results = saved_method_regions(region_gaussian_centers, method_name);
+    if method_is_complete(region_gaussian_centers, method_name)
+        fprintf(['%s mixtures are already complete. ' ...
+            'Drawing the saved figure.\n'], method_name);
+        plot_region_gaussian_centers(prior_results, frequency_limits, ...
+            region_gaussian_centers.selection_criterion, ...
+            low_frequency_threshold_hz, histogram_bin_hz, method_name);
+        drawnow;
+        continue
+    end
     in_method = strcmp(peak_table.Method, method_name);
     region_results = repmat(empty_region_result(), numel(regions), 1);
     region_centers = cell(numel(regions), 1);
     search_plans = cell(numel(regions), 1);
+    region_kept = false(numel(regions), 1);
     for region_n = 1:numel(regions)
         in_region = in_method & strcmp(peak_table.Region, regions{region_n});
         centers = peak_table.CenterFrequency(in_region);
@@ -198,10 +264,27 @@ for method_n = 1:numel(method_names)
             peak_table.SessionIndex(in_region)], 'rows'));
         search_plans{region_n} = gaussian_mixture_search_plan( ...
             numel(centers), numel(unique(centers)), mixture_options);
+        kept_fit = saved_fit_for_region(prior_results, regions{region_n});
+        region_kept(region_n) = ~isempty(kept_fit);
+        if region_kept(region_n)
+            region_results(region_n).fit = kept_fit;
+            search_plans{region_n}.already_saved = true;
+            search_plans{region_n}.work_units = 0;
+            search_plans{region_n}.runtime_note = ...
+                'already saved; this fit is kept';
+        else
+            search_plans{region_n}.already_saved = false;
+        end
     end
     print_mixture_plan(method_name, regions, search_plans, mixture_options);
 
     for region_n = 1:numel(regions)
+        if region_kept(region_n)
+            fprintf('%s %s (%d/%d): saved fit kept.\n', ...
+                method_name, regions{region_n}, region_n, numel(regions));
+            drawnow;
+            continue
+        end
         fit_options = mixture_options;
         fit_options.progress_label = sprintf('%s %s (%d/%d)', ...
             method_name, regions{region_n}, region_n, numel(regions));
@@ -325,6 +408,10 @@ total_work = 0;
 for region_n = 1:numel(regions)
     plan = search_plans{region_n};
     total_work = total_work + plan.work_units;
+    if isfield(plan, 'already_saved') && plan.already_saved
+        fprintf('  %s: saved fit kept.\n', regions{region_n});
+        continue
+    end
     if plan.restarts_reduced
         restart_text = sprintf('%d restarts, reduced from %d', ...
             plan.replicates, plan.replicates_requested);
@@ -342,7 +429,16 @@ for region_n = 1:numel(regions)
         restart_text, plan.runtime_note);
 end
 if total_work <= 0
-    fprintf('No region has enough centers for a mixture.\n');
+    kept = false(numel(search_plans), 1);
+    for region_n = 1:numel(search_plans)
+        plan = search_plans{region_n};
+        kept(region_n) = isfield(plan, 'already_saved') && plan.already_saved;
+    end
+    if all(kept)
+        fprintf('Every listed region already has a saved fit.\n');
+    else
+        fprintf('No region has enough centers for a mixture.\n');
+    end
     drawnow;
     return
 end
@@ -366,4 +462,57 @@ else
         'estimate.\n']);
 end
 drawnow;
+end
+
+function ready = saved_mixture_has_peaks(result)
+ready = isstruct(result) && isfield(result, 'peak_table') && ...
+    istable(result.peak_table) && ...
+    all(ismember({'Region', 'Method', 'CenterFrequency'}, ...
+    result.peak_table.Properties.VariableNames)) && ...
+    isfield(result, 'frequency') && isfield(result, 'regions') && ...
+    isfield(result, 'methods') && isfield(result, 'mixture_options');
+end
+
+function complete = method_is_complete(result, method_name)
+complete = false;
+method_result = saved_method_result(result, method_name);
+if isempty(method_result) || ~isfield(method_result, 'complete')
+    return
+end
+complete = isequal(method_result.complete, true);
+end
+
+function prior = saved_method_regions(result, method_name)
+prior = [];
+method_result = saved_method_result(result, method_name);
+if isempty(method_result) || ~isfield(method_result, 'by_region')
+    return
+end
+prior = method_result.by_region;
+end
+
+function method_result = saved_method_result(result, method_name)
+method_result = [];
+if ~isstruct(result) || ~isfield(result, 'methods') || ...
+        ~isstruct(result.methods) || ~isfield(result.methods, method_name)
+    return
+end
+method_result = result.methods.(method_name);
+end
+
+function kept_fit = saved_fit_for_region(prior, region_name)
+kept_fit = [];
+if isempty(prior)
+    return
+end
+for region_n = 1:numel(prior)
+    if ~isfield(prior(region_n), 'name') || ...
+            ~strcmp(prior(region_n).name, region_name)
+        continue
+    end
+    if region_mixture_already_saved(prior(region_n))
+        kept_fit = prior(region_n).fit;
+        return
+    end
+end
 end

@@ -12,6 +12,7 @@ test_region_membership();
 test_criterion_selection();
 test_search_plan_caps_gaussians_and_restarts();
 test_remaining_time_scales_with_work();
+test_saved_region_fit_is_recognized();
 test_short_samples_are_not_fitted();
 test_distribution_figure();
 if exist('fitgmdist', 'file') == 2
@@ -139,6 +140,18 @@ assert(abs(seconds - 30) < 1e-9, ...
     'Remaining time did not scale with unfinished work.');
 assert(isnan(mixture_remaining_seconds(10, 0, 300)), ...
     'A clock with no finished work returned a finite time.');
+end
+
+function test_saved_region_fit_is_recognized()
+assert(~region_mixture_already_saved(struct('fit', [])), ...
+    'An empty fit was treated as saved.');
+assert(~region_mixture_already_saved(struct('name', 'SupCol', 'fit', [])), ...
+    'A missing SupCol fit was treated as saved.');
+assert(region_mixture_already_saved(struct('fit', struct('status', 'fitted'))), ...
+    'A fitted region was not kept.');
+assert(region_mixture_already_saved(struct('fit', struct( ...
+    'status', 'fewer than 5 finite center frequencies'))), ...
+    'A completed skip was treated as missing.');
 end
 
 function test_short_samples_are_not_fitted()
