@@ -6,9 +6,13 @@
 %
 % This script saves the mixtures. It does not draw them. Run
 % Analyse_play_session_region_gaussian_centers.m to choose the regions
-% and make the figure.
+% and make the figure. Run Select_play_session_region_gaussian_centers.m
+% to compare selection rules on the stored measurements.
 %
-% BIC selects the mixture unless selection_criterion is set to AIC.
+% BIC still chooses the mixture saved for the figure, unless
+% selection_criterion is set to AIC. Every component count also stores
+% the likelihood, entropy, component overlap, and goodness-of-fit
+% summaries used by the selection script.
 % A channel labeled with two listed regions contributes its bumps to both.
 % Labels outside the list, including InfCol, are left out. SupCol and SC
 % are the same region. VLPAG is not treated as LPAG.
