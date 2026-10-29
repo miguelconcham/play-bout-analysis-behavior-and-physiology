@@ -1,5 +1,6 @@
-%% Analyze_delta_two_behaviors
-% Compare delta power for two selectable behaviors (default: Pounce/PounceI).
+%% Analyze_band_two_behaviors
+% Compare delta, theta, or gamma power for two selectable behaviors.
+% Defaults: gamma, Pounce/PounceI.
 %
 % The input is NOT averaged per session. In
 % GENERATE_PSTH_ALL_BEHAVIORS_BANDS.m, every row of
@@ -9,7 +10,7 @@
 %
 % This script therefore fits the event-level model separately at each time:
 %
-%   DeltaPower ~ 1 + Behavior + (1|Animal) + (1|Session)
+%   BandPower ~ 1 + Behavior + (1|Animal) + (1|Session)
 %
 % Behavior is the fixed effect. Animal and recording day are random effects,
 % with recording days uniquely nested in animals. Only sessions containing
@@ -30,6 +31,7 @@
 % paired session-mean difference trace, and the LME behavior contrast.
 
 %% Settings
+band_name = 'gamma';                % 'delta', 'theta', or 'gamma'
 behavior_names = {'Pounce', 'PounceI'};
 behavior_role = 'self';             % 'self' or 'other'
 electrode_to_use = 1;
@@ -38,17 +40,24 @@ alpha = 0.05;
 session_name_filters = {'B1D1', 'B1S3', 'B2S2', 'B3D2', 'B4S2', 'B4D4'};
 
 data_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
-structure_file = 'psth_structure_delta_all_behaviors_self_other_partner.mat';
-names_file = 'animal_names_delta_all_behaviors_self_other_partner.mat';
-output_folder = fullfile(data_folder, 'two behavior delta comparison');
+output_folder = fullfile(data_folder, 'two behavior band comparison');
 
 all_behaviors = {'Pounce', 'CC', 'Boxing', 'Evasion', 'Pin', 'Escape', ...
     'CB', 'CD', 'Grooming', 'Rearing', 'Sniffing', 'Scratching', ...
     'PounceI', 'Bite'};
 
 %% Validate settings and load the event-level PSTHs
+valid_bands = {'delta', 'theta', 'gamma'};
+if ~ismember(lower(band_name), valid_bands)
+    error('Analyze_band_two_behaviors:Band', ...
+        'band_name must be ''delta'', ''theta'', or ''gamma''.');
+end
+band_name = lower(band_name);
+structure_file = sprintf('psth_structure_%s_all_behaviors_self_other_partner.mat', band_name);
+names_file = sprintf('animal_names_%s_all_behaviors_self_other_partner.mat', band_name);
+
 if numel(behavior_names) ~= 2 || strcmpi(behavior_names{1}, behavior_names{2})
-    error('Analyze_delta_two_behaviors:Behaviors', ...
+    error('Analyze_band_two_behaviors:Behaviors', ...
         'behavior_names must contain two different behavior names.');
 end
 
@@ -56,7 +65,7 @@ behavior_idx = nan(1, 2);
 for b = 1:2
     this_idx = find(strcmpi(all_behaviors, behavior_names{b}), 1);
     if isempty(this_idx)
-        error('Analyze_delta_two_behaviors:BehaviorName', ...
+        error('Analyze_band_two_behaviors:BehaviorName', ...
             'Unknown behavior "%s". Choose from: %s.', ...
             behavior_names{b}, strjoin(all_behaviors, ', '));
     end
@@ -65,27 +74,27 @@ for b = 1:2
 end
 
 if ~ismember(lower(behavior_role), {'self', 'other'})
-    error('Analyze_delta_two_behaviors:Role', ...
+    error('Analyze_band_two_behaviors:Role', ...
         'behavior_role must be ''self'' or ''other''.');
 end
 if ~ismember(lower(normalization), {'zscore', 'none'})
-    error('Analyze_delta_two_behaviors:Normalization', ...
+    error('Analyze_band_two_behaviors:Normalization', ...
         'normalization must be ''zscore'' or ''none''.');
 end
 
-disp('Loading individual-event delta PSTHs')
+fprintf('Loading individual-event %s PSTHs\n', band_name)
 loaded_psth = load(fullfile(data_folder, structure_file), 'psth_structure');
 loaded_names = load(fullfile(data_folder, names_file), 'animal_names');
 psth_structure = loaded_psth.psth_structure;
 animal_names = loaded_names.animal_names;
 
 if numel(psth_structure) ~= size(animal_names, 1)
-    error('Analyze_delta_two_behaviors:Names', ...
+    error('Analyze_band_two_behaviors:Names', ...
         'animal_names has %d rows but psth_structure has %d entries.', ...
         size(animal_names, 1), numel(psth_structure));
 end
 if isempty(psth_structure)
-    error('Analyze_delta_two_behaviors:Empty', 'The loaded PSTH structure is empty.');
+    error('Analyze_band_two_behaviors:Empty', 'The loaded PSTH structure is empty.');
 end
 if exist(output_folder, 'dir') ~= 7
     mkdir(output_folder)
@@ -93,7 +102,7 @@ end
 
 bin_size = psth_structure(1).wind_length - psth_structure(1).wind_overlap;
 if ~(isfinite(bin_size) && bin_size > 0)
-    error('Analyze_delta_two_behaviors:BinSize', 'The saved spectrogram bin size is invalid.');
+    error('Analyze_band_two_behaviors:BinSize', 'The saved spectrogram bin size is invalid.');
 end
 
 alignments = struct( ...
@@ -103,12 +112,13 @@ alignments = struct( ...
     'analysis_range', {[-1 2], [-5 10]});
 
 results = struct;
+results.band_name = band_name;
 results.behavior_names = behavior_names;
 results.behavior_role = behavior_role;
 results.electrode = electrode_to_use;
 results.normalization = normalization;
 results.alpha = alpha;
-results.formula = 'DeltaPower ~ 1 + Behavior + (1|Animal) + (1|Session)';
+results.formula = 'BandPower ~ 1 + Behavior + (1|Animal) + (1|Session)';
 results.multiple_comparison = 'Benjamini-Hochberg FDR across time within alignment';
 results.input_level = 'one row per annotated behavior event; not session-averaged';
 
@@ -132,7 +142,7 @@ for a = 1:numel(alignments)
     % A repeated-measures contrast requires both behaviors in each session.
     paired_sessions = intersect(unique(session_ids{1}), unique(session_ids{2}));
     if numel(paired_sessions) < 2
-        error('Analyze_delta_two_behaviors:PairedSessions', ...
+        error('Analyze_band_two_behaviors:PairedSessions', ...
             ['%s has only %d session(s) containing both %s and %s. ' ...
              'At least two are required for the mixed model.'], ...
             alignment.name, numel(paired_sessions), ...
@@ -140,7 +150,7 @@ for a = 1:numel(alignments)
     end
     paired_animals = unique(animal_from_sessions(paired_sessions));
     if numel(paired_animals) < 2
-        error('Analyze_delta_two_behaviors:PairedAnimals', ...
+        error('Analyze_band_two_behaviors:PairedAnimals', ...
             '%s has fewer than two animals represented by the paired sessions.', ...
             alignment.name);
     end
@@ -179,9 +189,9 @@ for a = 1:numel(alignments)
     this_result.analysis_range = alignment.analysis_range;
     results.(alignment.name) = this_result;
 
-    fig = plot_alignment_result(this_result, alignment.name, behavior_names, ...
-        behavior_role, normalization, alpha);
-    file_stem = sprintf('delta_%s_vs_%s_%s_%s', ...
+    fig = plot_alignment_result(this_result, alignment.name, band_name, ...
+        behavior_names, behavior_role, normalization, alpha);
+    file_stem = sprintf('%s_%s_vs_%s_%s_%s', band_name, ...
         safe_name(behavior_names{1}), safe_name(behavior_names{2}), ...
         safe_name(behavior_role), alignment.name);
     print(fig, '-dpng', '-r300', fullfile(output_folder, [file_stem '.png']));
@@ -189,7 +199,7 @@ for a = 1:numel(alignments)
 end
 
 %% Save numerical results
-result_stem = sprintf('delta_%s_vs_%s_%s_lme', ...
+result_stem = sprintf('%s_%s_vs_%s_%s_lme', band_name, ...
     safe_name(behavior_names{1}), safe_name(behavior_names{2}), ...
     safe_name(behavior_role));
 save(fullfile(output_folder, [result_stem '.mat']), 'results', '-v7.3');
@@ -236,7 +246,7 @@ for j = 1:numel(psth_structure)
         continue
     end
     if size(event_matrix, 2) < expected_n
-        warning('Analyze_delta_two_behaviors:ShortPSTH', ...
+        warning('Analyze_band_two_behaviors:ShortPSTH', ...
             '%s has %d rather than %d time bins and was skipped.', ...
             session_name, size(event_matrix, 2), expected_n);
         continue
@@ -257,7 +267,7 @@ end
 if strcmpi(normalization, 'zscore')
     baseline_mask = time >= baseline_range(1) & time < baseline_range(2);
     if ~any(baseline_mask)
-        error('Analyze_delta_two_behaviors:Baseline', ...
+        error('Analyze_band_two_behaviors:Baseline', ...
             'No samples fall in baseline [%.2f, %.2f).', ...
             baseline_range(1), baseline_range(2));
     end
@@ -301,7 +311,7 @@ for t = 1:n_time
     end
 
     tbl = table;
-    tbl.DeltaPower = y(valid);
+    tbl.BandPower = y(valid);
     tbl.Animal = categorical(animal_column(valid));
     tbl.Session = categorical(session_column(valid));
     tbl.Behavior = categorical(behavior_column(valid), behavior_names, behavior_names);
@@ -320,10 +330,10 @@ for t = 1:n_time
 
     try
         lme = fitlme(tbl, ...
-            'DeltaPower ~ 1 + Behavior + (1|Animal) + (1|Session)', ...
+            'BandPower ~ 1 + Behavior + (1|Animal) + (1|Session)', ...
             'FitMethod', 'REML');
     catch fit_error
-        warning('Analyze_delta_two_behaviors:Fit', ...
+        warning('Analyze_band_two_behaviors:Fit', ...
             'Time %.4f s was not fit: %s', time(t), fit_error.message);
         continue
     end
@@ -397,7 +407,7 @@ for s = 1:numel(sessions)
 end
 end
 
-function fig = plot_alignment_result(result, alignment_name, ...
+function fig = plot_alignment_result(result, alignment_name, band_name, ...
     behavior_names, behavior_role, normalization, alpha)
 colors = [0.10 0.35 0.80; 0.85 0.20 0.15];
 light_colors = 0.78 + 0.22 * colors;
@@ -406,8 +416,8 @@ model = result.model;
 
 fig = figure('Color', 'w', 'Units', 'normalized', ...
     'OuterPosition', [0 0 1 1], 'NumberTitle', 'off', ...
-    'Name', sprintf('delta %s vs %s %s', ...
-    behavior_names{1}, behavior_names{2}, alignment_name));
+    'Name', sprintf('%s %s vs %s %s', ...
+    band_name, behavior_names{1}, behavior_names{2}, alignment_name));
 layout = tiledlayout(fig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
 
 ax1 = nexttile(layout);
@@ -429,7 +439,7 @@ end
 yline(ax1, 0, 'k:', 'HandleVisibility', 'off')
 xline(ax1, 0, 'k-', 'HandleVisibility', 'off')
 shade_significant(ax1, time, model.q < alpha, [0.35 0.35 0.35]);
-ylabel(ax1, delta_label(normalization))
+ylabel(ax1, power_label(band_name, normalization))
 title(ax1, sprintf(['All events and LME means (95%% CI): %s n=%d, ' ...
     '%s n=%d; %d sessions from %d animals'], ...
     behavior_names{1}, size(result.individual_traces{1}, 1), ...
@@ -459,8 +469,9 @@ legend(ax2, effect_line, 'Behavior contrast', 'Location', 'best', 'Box', 'off')
 set(ax2, 'TickDir', 'out', 'Layer', 'top')
 linkaxes([ax1 ax2], 'x')
 xlim(ax1, [time(1), time(end)])
-title(layout, sprintf('Delta, %s behaviors (%s), %s', ...
-    behavior_role, normalization, strrep(alignment_name, '_', ' ')))
+title(layout, sprintf('%s, %s behaviors (%s), %s', ...
+    upper_first(band_name), behavior_role, normalization, ...
+    strrep(alignment_name, '_', ' ')))
 end
 
 function fill_ci(ax, time, low, high, color)
@@ -500,12 +511,19 @@ stops = find(edges == -1) - 1;
 segments = [starts(:), stops(:)];
 end
 
-function label = delta_label(normalization)
+function label = power_label(band_name, normalization)
 if strcmpi(normalization, 'zscore')
-    label = 'Delta power (within-event baseline z score)';
+    label = sprintf('%s power (within-event baseline z score)', ...
+        upper_first(band_name));
 else
-    label = 'Delta power (saved log_{10} spectral amplitude)';
+    label = sprintf('%s power (saved log_{10} spectral amplitude)', ...
+        upper_first(band_name));
 end
+end
+
+function value = upper_first(value)
+value = char(value);
+value(1) = upper(value(1));
 end
 
 function label = alignment_xlabel(alignment_name)
