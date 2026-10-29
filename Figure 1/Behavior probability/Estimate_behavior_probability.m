@@ -27,11 +27,15 @@ target_behaviors = {'Pounce', 'PounceI'};
 % target_behaviors = {'PounceI', 'Bite'};
 time_window = [-5 5];
 bin_size = 0.01;
+% Gray analysis area used by both the window-average and bin-wise tests.
+% Time zero is displayed but excluded from inference.
+comparison_window = [0 2];
 
 analysis_parameters = behavior_probability_options(struct( ...
     'target_behaviors', {target_behaviors}, ...
     'time_window', time_window, ...
-    'bin_size', bin_size));
+    'bin_size', bin_size, ...
+    'comparison_window', comparison_window));
 
 % Leave animals_to_run empty to process every behavior file.
 animals_to_run = {};

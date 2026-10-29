@@ -117,34 +117,77 @@ if isempty(test_labels)
         'No play session contains both selected target behaviors.');
 end
 
-window_index = time >= settings.test_window(1) & ...
-    time <= settings.test_window(2) & time > 0;
+if numel(time) > 1
+    time_resolution = min(abs(diff(time)));
+else
+    time_resolution = 1;
+end
+time_tolerance = max(eps(max(1, max(abs(time)))) * 16, ...
+    time_resolution * 1e-9);
+window_index = time >= settings.test_window(1) - time_tolerance & ...
+    time <= settings.test_window(2) + time_tolerance & ...
+    time > time_tolerance;
 if ~any(window_index)
     error('compare_behavior_pair_probability:TestWindow', ...
         'test_window must contain at least one strictly post-offset time bin.');
 end
 event_score = reshape(mean(double( ...
     test_presence(:, :, window_index)), 3), [], n_groups);
-observed_difference = mean(event_score(test_labels == 1, :), 1) - ...
-    mean(event_score(test_labels == 2, :), 1);
+n_window_bins = sum(window_index);
+bin_score = reshape(double(test_presence(:, :, window_index)), ...
+    numel(test_labels), n_groups * n_window_bins);
+n_target_1 = sum(test_labels == 1);
+n_target_2 = sum(test_labels == 2);
+observed_weight = double(test_labels == 1) / n_target_1 - ...
+    double(test_labels == 2) / n_target_2;
+observed_difference = observed_weight.' * event_score;
+observed_difference_by_bin = reshape( ...
+    observed_weight.' * bin_score, n_groups, n_window_bins);
 
 previous_rng = rng;
 rng_cleanup = onCleanup(@() rng(previous_rng)); %#ok<NASGU>
 rng(settings.random_seed, 'twister');
 null_difference = nan(settings.n_permutations, n_groups);
+bin_exceedances = zeros(n_groups, n_window_bins);
+null_max_by_group = nan(settings.n_permutations, n_groups);
+null_max_all = nan(settings.n_permutations, 1);
 for permutation_n = 1:settings.n_permutations
     shuffled_labels = test_labels;
     for session_n = 1:numel(eligible_session_ids)
         rows = find(test_sessions == eligible_session_ids(session_n));
         shuffled_labels(rows) = shuffled_labels(rows(randperm(numel(rows))));
     end
+    shuffled_weight = double(shuffled_labels == 1) / n_target_1 - ...
+        double(shuffled_labels == 2) / n_target_2;
     null_difference(permutation_n, :) = ...
-        mean(event_score(shuffled_labels == 1, :), 1) - ...
-        mean(event_score(shuffled_labels == 2, :), 1);
+        shuffled_weight.' * event_score;
+    shuffled_bin_difference = reshape( ...
+        shuffled_weight.' * bin_score, n_groups, n_window_bins);
+    bin_exceedances = bin_exceedances + ...
+        (abs(shuffled_bin_difference) >= ...
+        abs(observed_difference_by_bin));
+    null_max_by_group(permutation_n, :) = ...
+        max(abs(shuffled_bin_difference), [], 2).';
+    null_max_all(permutation_n) = ...
+        max(abs(shuffled_bin_difference), [], 'all');
 end
 p_value = (1 + sum(abs(null_difference) >= ...
     abs(observed_difference), 1)) / (settings.n_permutations + 1);
 p_value_holm = holm_adjust(p_value);
+p_value_by_bin = (1 + bin_exceedances) / ...
+    (settings.n_permutations + 1);
+p_value_by_bin_fwer_group = nan(n_groups, n_window_bins);
+for group_n = 1:n_groups
+    p_value_by_bin_fwer_group(group_n, :) = (1 + sum(bsxfun(@ge, ...
+        null_max_by_group(:, group_n), ...
+        abs(observed_difference_by_bin(group_n, :))), 1)) / ...
+        (settings.n_permutations + 1);
+end
+p_value_by_bin_fwer_all = (1 + sum(bsxfun(@ge, null_max_all, ...
+    abs(observed_difference_by_bin(:).')), 1)) / ...
+    (settings.n_permutations + 1);
+p_value_by_bin_fwer_all = reshape( ...
+    p_value_by_bin_fwer_all, n_groups, n_window_bins);
 
 n_events_test = [sum(test_labels == 1), sum(test_labels == 2)];
 probability = nan(n_groups, 2, n_time);
@@ -176,9 +219,17 @@ comparison.observed_difference = observed_difference;
 comparison.p_value = p_value;
 comparison.p_value_holm = p_value_holm;
 comparison.null_difference = null_difference;
+comparison.observed_difference_by_bin = observed_difference_by_bin;
+comparison.p_value_by_bin = p_value_by_bin;
+comparison.p_value_by_bin_fwer_group = p_value_by_bin_fwer_group;
+comparison.p_value_by_bin_fwer_all = p_value_by_bin_fwer_all;
+comparison.bin_significance_alpha = 0.05;
 comparison.test_description = [ ...
     'Two-sided post-offset event-label permutation stratified by play ' ...
     'session; time zero excluded; three behavior-group p-values Holm corrected'];
+comparison.bin_test_description = [ ...
+    'Bin-wise two-sided stratified permutation; raw, within-group max-T, ' ...
+    'and all-group/all-bin max-T family-wise corrected p-values'];
 end
 
 function settings = comparison_settings(overrides)
