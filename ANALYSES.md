@@ -21,6 +21,7 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Analysis | Paper? | Rebuild (Estimate) | Plot / test (run this) |
 |----------|--------|--------------------|------------------------|
 | Play-bout intervals, duration, speed–call CCG | Fig 1g–h | — | `Figure 1/Figure 1 Play Bouts.m` |
+| Behavior probability around selected behavior offsets, split by target performer and partner | extra | `Figure 1/Behavior probability/Estimate_behavior_probability.m` | `Figure 1/Behavior probability/Analyze_behavior_probability.m` |
 | Motion–USV features for LDA / UMAP | Fig 1c–d, Supp 1 | `Figure 1/LDA analysis/Obtain_Feature_USV_space.m` | `Figure 1/Figure 1 LDA.m` |
 | CNN on locomotion features | extra | `Obtain_Feature_USV_space.m` (features) | `Figure 1/LDA analysis/Convolutional classification.ipynb` |
 | HMM inputs from speed + calls | Fig 1, Supp 2 | `Figure 1/HMM modeling/CreateHMMFIiles.m` (calls `Create_HMM_inputs.m`) | Python: `Figure 1/HMM modeling/python hmm estimate.txt` |
@@ -154,6 +155,7 @@ Both estimates use the same play-bout pairs (`synchronous_play_pairs.m`): good u
 | HMM fit | `Figure 1/HMM modeling/python hmm estimate.txt` (see `Figure 1/HMM modeling/README.md`) |
 | HMM post-processing | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` |
 | Manual video tracking | `manual traking/manual_traking.m` (run one section at a time; copy the final `.mat` into `Data/Traking backups/`) |
+| Binary self/partner behavior matrices around selected Type2 behavior offsets, with each Partners session retained separately | `Figure 1/Behavior probability/Estimate_behavior_probability.m`, then `Analyze_behavior_probability.m` |
 
 ---
 
