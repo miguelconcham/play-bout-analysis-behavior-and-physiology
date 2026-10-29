@@ -21,8 +21,9 @@ repo_root = fileparts(fileparts(fileparts(this_file)));
 run(fullfile(repo_root, 'add_repo_paths.m'));
 
 %% Parameters to select
-target_behaviors = {'Pounce'};
-% Example for a combined target class:
+% Include the two targets that will be compared in Analyze.
+target_behaviors = {'Pounce', 'PounceI'};
+% Another possible comparison:
 % target_behaviors = {'PounceI', 'Bite'};
 time_window = [-5 5];
 bin_size = 0.01;
