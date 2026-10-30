@@ -26,9 +26,11 @@
 % the same number of events from each class. Held-out events keep their
 % natural counts. behavior_class_2 is the positive class. Confusion values
 % are the percent of those single events, and the four percentages of one
-% band sum to 100. The last figure compares delta, theta, and gamma on that
-% same pooled scale. Leave-one-session-out is printed afterward as a later
-% check. It is not the first model.
+% band sum to 100. A later figure compares delta, theta, and gamma on
+% that same pooled scale. One further figure splits the same calls by the
+% true behavior: behavior A classified as A, A as B, B as B, and B as A.
+% Each behavior's two rates sum to 100. Leave-one-session-out is printed
+% afterward as a later check. It is not the first model.
 
 %% Choose the band, the two behavior groups, and the classifier
 band_name = 'gamma';
@@ -129,6 +131,8 @@ n_single_events = numel(scored_class);
 outcome_percent = 100 * outcome_count(:) / n_single_events;
 confusion_outcomes = table(outcome_name, outcome_count(:), outcome_percent, outcome_meaning, ...
     'VariableNames', {'outcome', 'count', 'percent_of_single_events', 'meaning'});
+% Percent of each true behavior. Order is A as A, A as B, B as A, B as B.
+within_behavior_percent = within_behavior_percent_from_counts(outcome_count);
 
 permutation_balanced_accuracy = nan(n_permutations, 1);
 for permutation_n = 1:n_permutations
@@ -182,6 +186,7 @@ classification_result.false_negative = false_negative;
 classification_result.true_positive = true_positive;
 classification_result.n_single_events = n_single_events;
 classification_result.outcome_percent = outcome_percent;
+classification_result.within_behavior_percent = within_behavior_percent;
 classification_result.permutation_balanced_accuracy = permutation_balanced_accuracy;
 classification_result.permutation_p = permutation_p;
 classification_result.session_balanced_accuracy = session_balanced_accuracy;
@@ -200,6 +205,11 @@ fprintf('Majority-class chance: %.1f%%\n', 100 * chance_accuracy)
 fprintf('Permutation p of balanced accuracy: %.4f (%d shuffles)\n', permutation_p, n_permutations)
 fprintf('Positive class is %s. Each training fold uses the pooled events, minus the held-out events, with equal class counts.\n', class_2_label)
 fprintf('Confusion percentages sum to 100 over held-out single events.\n')
+fprintf('Within each behavior, the two rates below sum to 100.\n')
+fprintf('  %s classified as %s: %.1f%%\n', class_1_label, class_1_label, within_behavior_percent(1))
+fprintf('  %s classified as %s: %.1f%%\n', class_1_label, class_2_label, within_behavior_percent(2))
+fprintf('  %s classified as %s: %.1f%%\n', class_2_label, class_2_label, within_behavior_percent(4))
+fprintf('  %s classified as %s: %.1f%%\n', class_2_label, class_1_label, within_behavior_percent(3))
 fprintf('Later check, not the first model: leave-one-session-out balanced accuracy %.1f%%\n', ...
     100 * session_balanced_accuracy)
 fprintf('%s baseline z-score: class 1 %.3f (n=%d), class 2 %.3f (n=%d)\n', ...
@@ -259,6 +269,7 @@ confusion_chart.Title = sprintf('Pooled events. Percent of %d single events. Bal
 bands_to_compare = {'delta', 'theta', 'gamma'};
 band_outcome_counts = nan(numel(bands_to_compare), 4);
 band_outcome_percent = nan(numel(bands_to_compare), 4);
+band_within_behavior_percent = nan(numel(bands_to_compare), 4);
 for band_n = 1:numel(bands_to_compare)
     this_band = bands_to_compare{band_n};
     if strcmp(this_band, band_name)
@@ -296,6 +307,7 @@ for band_n = 1:numel(bands_to_compare)
         mean(class_1_power), numel(class_1_power), mean(class_2_power), numel(class_2_power))
     band_outcome_counts(band_n, :) = this_counts;
     band_outcome_percent(band_n, :) = 100 * this_counts / sum(this_counts);
+    band_within_behavior_percent(band_n, :) = within_behavior_percent_from_counts(this_counts);
 end
 
 band_confusion_outcomes = array2table(band_outcome_percent, ...
@@ -318,6 +330,56 @@ legend(bands_to_compare, 'Location', 'best')
 title(sprintf('%s. Pooled across sessions and animals. Equal training counts. Positive class: %s', ...
     classifier_name, class_2_label))
 set(gca, 'TickDir', 'out')
+
+%% Confusion rates separated by the true behavior
+% Columns are A as A, A as B, B as A, B as B. Each behavior's two rates
+% sum to 100.
+classification_result.band_within_behavior_percent = band_within_behavior_percent;
+classification_result.bands_compared = bands_to_compare;
+fprintf('Percent of each true behavior. Class 1 is %s. Class 2 is %s.\n', ...
+    class_1_label, class_2_label)
+fprintf('Columns: class 1 as class 1, class 1 as class 2, class 2 as class 1, class 2 as class 2.\n')
+within_behavior_rates = array2table(band_within_behavior_percent, ...
+    'VariableNames', {'class_1_as_class_1', 'class_1_as_class_2', ...
+    'class_2_as_class_1', 'class_2_as_class_2'}, ...
+    'RowNames', bands_to_compare);
+disp(within_behavior_rates)
+
+by_behavior_figure_name = classification_figure_name('delta_theta_gamma', ...
+    behavior_class_1, behavior_class_2, [classifier_name '_by_behavior']);
+figure
+set(gcf, 'WindowState', 'maximized', 'NumberTitle', 'off', 'Name', by_behavior_figure_name)
+band_colors = [0.35 0.35 0.35; 0.20 0.55 0.35; 0.75 0.35 0.55];
+
+subplot(1, 2, 1)
+class_1_bars = bar(band_within_behavior_percent(:, 1:2).');
+color_classification_bars(class_1_bars, band_colors);
+xticklabels({
+    sprintf('%s as %s', class_1_label, class_1_label)
+    sprintf('%s as %s', class_1_label, class_2_label)
+    })
+xtickangle(20)
+ylabel('Percent of this behavior''s events')
+ylim([0 100])
+title(sprintf('True behavior: %s', class_1_label))
+legend(bands_to_compare, 'Location', 'best')
+set(gca, 'TickDir', 'out')
+
+subplot(1, 2, 2)
+class_2_bars = bar(band_within_behavior_percent(:, [4 3]).');
+color_classification_bars(class_2_bars, band_colors);
+xticklabels({
+    sprintf('%s as %s', class_2_label, class_2_label)
+    sprintf('%s as %s', class_2_label, class_1_label)
+    })
+xtickangle(20)
+ylabel('Percent of this behavior''s events')
+ylim([0 100])
+title(sprintf('True behavior: %s', class_2_label))
+legend(bands_to_compare, 'Location', 'best')
+set(gca, 'TickDir', 'out')
+sgtitle(sprintf('%s. Pooled across sessions and animals. For each band, the two bars in a panel sum to 100%% of that behavior.', ...
+    classifier_name))
 
 function [prediction, scored] = cross_validated_predictions(power, class_label, classifier_name, n_folds)
 prediction = nan(size(class_label));
@@ -421,6 +483,27 @@ function counts = confusion_outcome_counts(true_class, predicted_class)
 confusion_counts = confusionmat(true_class, predicted_class, 'Order', [1 2]);
 counts = [confusion_counts(1, 1), confusion_counts(1, 2), ...
     confusion_counts(2, 1), confusion_counts(2, 2)];
+end
+
+function percent = within_behavior_percent_from_counts(counts)
+% counts is [A as A, A as B, B as A, B as B].
+% percent is those four calls as a percent of the true behavior.
+counts = counts(:).';
+n_class_1 = counts(1) + counts(2);
+n_class_2 = counts(3) + counts(4);
+percent = nan(1, 4);
+if n_class_1 > 0
+    percent(1:2) = 100 * counts(1:2) / n_class_1;
+end
+if n_class_2 > 0
+    percent(3:4) = 100 * counts(3:4) / n_class_2;
+end
+end
+
+function color_classification_bars(bar_handles, band_colors)
+for band_n = 1:min(numel(bar_handles), size(band_colors, 1))
+    bar_handles(band_n).FaceColor = band_colors(band_n, :);
+end
 end
 
 function event_table = behavior_event_table(saving_folder, band_name, all_behaviors, ...
