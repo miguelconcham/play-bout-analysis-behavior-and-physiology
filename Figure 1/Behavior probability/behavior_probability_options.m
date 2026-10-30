@@ -25,6 +25,14 @@ options.time_window = [-5 5];
 options.bin_size = 0.01;
 options.time = [];
 options.comparison_window = [];
+% Real-time flanks around a time-wrapped bout. flank_seconds is T in
+% (-T, onset) and (offset, offset+T). wrapped_bins resamples onset to offset.
+options.flank_seconds = 2;
+options.wrapped_bins = 20;
+options.pre_lag = [];
+options.post_lag = [];
+options.wrap_fraction = [];
+options.wrapped_plot_time = [];
 options.data_root = data_root;
 options.behavior_folder = fullfile(data_root, 'Behavior backups');
 options.output_folder = fullfile(data_root, 'Analysis results', ...
@@ -113,6 +121,36 @@ if ~isempty(options.comparison_window) && ...
         ['comparison_window does not contain a strictly post-offset ' ...
         'sample at the selected bin_size.']);
 end
+
+if ~isscalar(options.flank_seconds) || ~isnumeric(options.flank_seconds) || ...
+        ~isfinite(options.flank_seconds) || options.flank_seconds <= 0
+    error('behavior_probability_options:Flank', ...
+        'flank_seconds must be a positive finite scalar.');
+end
+options.flank_seconds = double(options.flank_seconds);
+n_flank = options.flank_seconds / options.bin_size;
+if abs(n_flank - round(n_flank)) > 1e-9 * max(1, abs(n_flank)) || ...
+        round(n_flank) < 1
+    error('behavior_probability_options:FlankBins', ...
+        'flank_seconds must be a positive integer multiple of bin_size.');
+end
+n_flank = round(n_flank);
+if ~isscalar(options.wrapped_bins) || ~isnumeric(options.wrapped_bins) || ...
+        ~isfinite(options.wrapped_bins) || options.wrapped_bins < 2 || ...
+        options.wrapped_bins ~= round(options.wrapped_bins)
+    error('behavior_probability_options:WrappedBins', ...
+        'wrapped_bins must be an integer of at least 2.');
+end
+options.wrapped_bins = double(options.wrapped_bins);
+options.pre_lag = -options.flank_seconds + (0:n_flank - 1) * options.bin_size;
+options.pre_lag(1) = -options.flank_seconds;
+options.pre_lag(end) = -options.bin_size;
+options.post_lag = (1:n_flank) * options.bin_size;
+options.post_lag(end) = options.flank_seconds;
+options.wrap_fraction = linspace(0, 1, options.wrapped_bins);
+options.wrapped_plot_time = [options.pre_lag, ...
+    linspace(0, options.flank_seconds, options.wrapped_bins), ...
+    options.flank_seconds + options.post_lag];
 end
 
 function names = behavior_names(values)
