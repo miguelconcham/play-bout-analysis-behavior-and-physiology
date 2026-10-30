@@ -8,19 +8,21 @@ function result = compare_behavior_before_after_probability( ...
 %
 % For each requested target behavior and each behavior group, the
 % statistic is the mean across events of (mean post-flank occupancy minus
-% mean pre-flank occupancy). Under the null, the pre-onset and post-offset
-% flanks of each event are exchangeable, so event-level signs of that
-% paired difference are flipped. Flips are drawn independently inside each
-% play session. Events whose flanks are not entirely inside the Partners
-% session are excluded. The six target-by-group window p-values are
-% Holm-corrected. Lag-matched bins use the same sign flips, with max-T
-% correction across lags and groups within each target.
+% mean occupancy in pre_average_window). That window is in seconds
+% relative to onset. An empty window averages the whole stored pre flank,
+% (-T, onset). Under the null, before and after are exchangeable, so
+% event-level signs of that paired difference are flipped. Flips are drawn
+% independently inside each play session. Events whose flanks are not
+% entirely inside the Partners session are excluded. The six
+% target-by-group window p-values are Holm-corrected. Lag-matched bins use
+% the same sign flips, with max-T correction across lags and groups within
+% each target.
 %
 % A second, one-sided bin-wise test uses those same signs. Each post-offset
-% bin is compared with the mean occupancy over the whole pre-onset flank,
-% so "before" is the rate at any time in (-T, onset) rather than one
-% matched lag. The alternative is that the post bin is higher than that
-% pre-onset rate. Max-T correction is one-sided and within each target.
+% bin is compared with the mean occupancy in pre_average_window, so
+% "before" is the rate at any time in that window rather than one matched
+% lag. The alternative is that the post bin is higher than that before
+% rate. Max-T correction is one-sided and within each target.
 
 if nargin < 3
     settings = struct();
@@ -71,6 +73,8 @@ if numel(pre_index) ~= numel(post_index) || isempty(pre_index)
     error('compare_behavior_before_after_probability:Flanks', ...
         'The pre-onset and post-offset flanks must contain the same bins.');
 end
+[pre_average_window, pre_average_index] = resolve_pre_average_window( ...
+    settings.pre_average_window, pre_lag, pre_index);
 
 self_occupancy = false(0, n_behaviors, n_time);
 partner_occupancy = false(0, n_behaviors, n_time);
@@ -182,7 +186,7 @@ for target_n = 1:n_targets
     probability(:, target_n, :) = reshape(mean(target_groups, 1), ...
         n_groups, 1, n_time);
     pre_probability(:, target_n) = reshape(mean(mean( ...
-        target_groups(:, :, pre_index), 3), 1), n_groups, 1);
+        target_groups(:, :, pre_average_index), 3), 1), n_groups, 1);
     post_probability(:, target_n) = reshape(mean(mean( ...
         target_groups(:, :, post_index), 3), 1), n_groups, 1);
     behavior_probability(:, target_n, :) = reshape(mean( ...
@@ -192,12 +196,12 @@ for target_n = 1:n_targets
     behavior_probability_partner(:, target_n, :) = reshape(mean( ...
         partner_values(included, :, :), 1), n_behaviors, 1, n_time);
     behavior_pre_probability(:, target_n) = reshape(mean(mean( ...
-        actor_values(included, :, pre_index), 3), 1), n_behaviors, 1);
+        actor_values(included, :, pre_average_index), 3), 1), n_behaviors, 1);
     behavior_post_probability(:, target_n) = reshape(mean(mean( ...
         actor_values(included, :, post_index), 3), 1), n_behaviors, 1);
 
     score_diff = reshape(mean(target_groups(:, :, post_index), 3) - ...
-        mean(target_groups(:, :, pre_index), 3), [], n_groups);
+        mean(target_groups(:, :, pre_average_index), 3), [], n_groups);
     % Pair the sample T seconds before onset with the sample T seconds
     % after offset, and the last pre-onset sample with the first post sample.
     lag_diff = reshape(target_groups(:, :, post_index) - ...
@@ -206,7 +210,7 @@ for target_n = 1:n_targets
     observed_difference(:, target_n) = mean(score_diff, 1).';
     observed_difference_by_lag(:, :, target_n) = reshape( ...
         mean(lag_diff, 1), n_groups, n_lags);
-    pre_mean_event = mean(target_groups(:, :, pre_index), 3);
+    pre_mean_event = mean(target_groups(:, :, pre_average_index), 3);
     postbin_minus_pre = bsxfun(@minus, target_groups(:, :, post_index), ...
         reshape(pre_mean_event, size(pre_mean_event, 1), n_groups, 1));
     observed_postbin_minus_pre(:, :, target_n) = reshape( ...
@@ -287,6 +291,8 @@ result.group_behaviors = group_behaviors;
 result.behavior_types = behavior_types;
 result.wrapped_plot_time = plot_time;
 result.pre_index = pre_index;
+result.pre_average_window = pre_average_window;
+result.pre_average_index = pre_average_index;
 result.wrap_index = wrap_index;
 result.post_index = post_index;
 result.pre_lag = pre_lag;
@@ -323,17 +329,18 @@ result.n_permutations = settings.n_permutations;
 result.random_seed = settings.random_seed;
 result.significance_alpha = 0.05;
 result.test_description = [ ...
-    'Two-sided paired sign-flip of (post-offset minus pre-onset) mean ' ...
-    'occupancy. Signs flip independently for each event within a play ' ...
-    'session. Difference is post minus pre. Window p-values are Holm ' ...
-    'corrected across targets and behavior groups. Lag-wise p-values use ' ...
-    'the same signs, with max-T correction within each target.'];
+    'Two-sided paired sign-flip of (mean post-offset occupancy minus mean ' ...
+    'occupancy in pre_average_window). Signs flip independently for each ' ...
+    'event within a play session. Difference is post minus pre. Window ' ...
+    'p-values are Holm corrected across targets and behavior groups. ' ...
+    'Lag-wise p-values use the same signs, with max-T correction within ' ...
+    'each target.'];
 result.postbin_test_description = [ ...
     'One-sided paired sign-flip. Each post-offset bin is compared with ' ...
-    'the mean occupancy across the whole pre-onset flank. The counted ' ...
-    'tail is post higher than that before rate. The same event signs as ' ...
-    'the window test are reused. Max-T correction is within group across ' ...
-    'post bins, and across groups and post bins within each target.'];
+    'the mean occupancy in pre_average_window. The counted tail is post ' ...
+    'higher than that before rate. The same event signs as the window ' ...
+    'test are reused. Max-T correction is within group across post bins, ' ...
+    'and across groups and post bins within each target.'];
 end
 
 function values = group_occupancy(event_matrix, group_index, in_session)
@@ -370,7 +377,8 @@ end
 settings = struct( ...
     'actor_relation', 'either', ...
     'n_permutations', 10000, ...
-    'random_seed', 1);
+    'random_seed', 1, ...
+    'pre_average_window', []);
 names = fieldnames(overrides);
 for field_n = 1:numel(names)
     if ~isfield(settings, names{field_n})
@@ -398,6 +406,49 @@ if ~isnumeric(settings.random_seed) || ...
     error('compare_behavior_before_after_probability:Seed', ...
         'random_seed must be an integer from 0 through 2^32 - 1.');
 end
+window = settings.pre_average_window;
+if isempty(window)
+    settings.pre_average_window = [];
+    return
+end
+if ~isnumeric(window) || numel(window) ~= 2 || any(~isfinite(window(:))) || ...
+        window(1) >= window(2) || window(2) > 0
+    error('compare_behavior_before_after_probability:PreWindow', ...
+        ['pre_average_window must be an ascending [start end] pair in ' ...
+        'seconds relative to onset, with end at or before onset.']);
+end
+settings.pre_average_window = double(window(:).');
+end
+
+function [window, index] = resolve_pre_average_window( ...
+    requested, pre_lag, pre_index)
+if numel(pre_lag) > 1
+    bin_size = min(abs(diff(pre_lag)));
+else
+    bin_size = max(abs(pre_lag));
+end
+tolerance = max(eps(max(1, max(abs(pre_lag)))) * 16, bin_size * 1e-6);
+if isempty(requested)
+    window = [pre_lag(1), 0];
+    index = pre_index;
+    return
+end
+if requested(1) < pre_lag(1) - tolerance
+    error('compare_behavior_before_after_probability:PreWindow', ...
+        ['pre_average_window starts at %g s, before the stored pre flank ' ...
+        'of %g s. Increase flank_seconds in Estimate and rebuild.'], ...
+        requested(1), pre_lag(1));
+end
+selected = pre_lag >= requested(1) - tolerance & ...
+    pre_lag <= requested(2) + tolerance;
+if ~any(selected)
+    error('compare_behavior_before_after_probability:PreWindow', ...
+        ['pre_average_window [%g, %g] s contains no pre-onset sample. ' ...
+        'The stored samples run from %g s to %g s.'], ...
+        requested(1), requested(2), pre_lag(1), pre_lag(end));
+end
+window = requested;
+index = pre_index(selected);
 end
 
 function names = normalize_targets(values)
