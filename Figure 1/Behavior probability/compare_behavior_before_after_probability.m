@@ -15,6 +15,12 @@ function result = compare_behavior_before_after_probability( ...
 % session are excluded. The six target-by-group window p-values are
 % Holm-corrected. Lag-matched bins use the same sign flips, with max-T
 % correction across lags and groups within each target.
+%
+% A second, one-sided bin-wise test uses those same signs. Each post-offset
+% bin is compared with the mean occupancy over the whole pre-onset flank,
+% so "before" is the rate at any time in (-T, onset) rather than one
+% matched lag. The alternative is that the post bin is higher than that
+% pre-onset rate. Max-T correction is one-sided and within each target.
 
 if nargin < 3
     settings = struct();
@@ -140,7 +146,11 @@ behavior_pre_probability = nan(n_behaviors, n_targets);
 behavior_post_probability = nan(n_behaviors, n_targets);
 observed_difference = nan(n_groups, n_targets);
 observed_difference_by_lag = nan(n_groups, n_lags, n_targets);
+observed_postbin_minus_pre = nan(n_groups, n_lags, n_targets);
 p_value = nan(n_groups, n_targets);
+p_value_postbin_vs_pre = nan(n_groups, n_lags, n_targets);
+p_value_postbin_vs_pre_fwer_group = nan(n_groups, n_lags, n_targets);
+p_value_postbin_vs_pre_fwer_target = nan(n_groups, n_lags, n_targets);
 p_value_by_lag = nan(n_groups, n_lags, n_targets);
 p_value_by_lag_fwer_group = nan(n_groups, n_lags, n_targets);
 p_value_by_lag_fwer_target = nan(n_groups, n_lags, n_targets);
@@ -196,14 +206,25 @@ for target_n = 1:n_targets
     observed_difference(:, target_n) = mean(score_diff, 1).';
     observed_difference_by_lag(:, :, target_n) = reshape( ...
         mean(lag_diff, 1), n_groups, n_lags);
+    pre_mean_event = mean(target_groups(:, :, pre_index), 3);
+    postbin_minus_pre = bsxfun(@minus, target_groups(:, :, post_index), ...
+        reshape(pre_mean_event, size(pre_mean_event, 1), n_groups, 1));
+    observed_postbin_minus_pre(:, :, target_n) = reshape( ...
+        mean(postbin_minus_pre, 1), n_groups, n_lags);
 
     included_session_index = session_index(included);
     null_difference{target_n} = nan(settings.n_permutations, n_groups);
     lag_exceedances = zeros(n_groups, n_lags);
     null_max_by_group = nan(settings.n_permutations, n_groups);
     null_max_target = nan(settings.n_permutations, 1);
+    postbin_exceedances = zeros(n_groups, n_lags);
+    null_max_postbin_group = nan(settings.n_permutations, n_groups);
+    null_max_postbin_target = nan(settings.n_permutations, 1);
     lag_matrix = reshape(lag_diff, n_events_test(target_n), []);
     observed_lag = reshape(observed_difference_by_lag(:, :, target_n), 1, []);
+    postbin_matrix = reshape(postbin_minus_pre, n_events_test(target_n), []);
+    observed_postbin = reshape( ...
+        observed_postbin_minus_pre(:, :, target_n), 1, []);
     for permutation_n = 1:settings.n_permutations
         signs = ones(n_events_test(target_n), 1);
         for session_n = 1:numel(included_sessions)
@@ -218,6 +239,14 @@ for target_n = 1:n_targets
             (abs(shuffled_lag) >= abs(observed_difference_by_lag(:, :, target_n)));
         null_max_by_group(permutation_n, :) = max(abs(shuffled_lag), [], 2).';
         null_max_target(permutation_n) = max(abs(shuffled_lag), [], 'all');
+        shuffled_postbin = reshape((signs.' * postbin_matrix) / ...
+            n_events_test(target_n), n_groups, n_lags);
+        postbin_exceedances = postbin_exceedances + (shuffled_postbin >= ...
+            observed_postbin_minus_pre(:, :, target_n));
+        null_max_postbin_group(permutation_n, :) = ...
+            max(shuffled_postbin, [], 2).';
+        null_max_postbin_target(permutation_n) = ...
+            max(shuffled_postbin, [], 'all');
     end
     p_value(:, target_n) = (1 + sum(abs(null_difference{target_n}) >= ...
         abs(observed_difference(:, target_n).'), 1)).' / ...
@@ -234,6 +263,18 @@ for target_n = 1:n_targets
         abs(observed_lag)), 1)) / (settings.n_permutations + 1);
     p_value_by_lag_fwer_target(:, :, target_n) = reshape( ...
         target_fwer, n_groups, n_lags);
+    p_value_postbin_vs_pre(:, :, target_n) = ...
+        (1 + postbin_exceedances) / (settings.n_permutations + 1);
+    for group_n = 1:n_groups
+        p_value_postbin_vs_pre_fwer_group(group_n, :, target_n) = ...
+            (1 + sum(bsxfun(@ge, null_max_postbin_group(:, group_n), ...
+            observed_postbin_minus_pre(group_n, :, target_n)), 1)) / ...
+            (settings.n_permutations + 1);
+    end
+    postbin_fwer = (1 + sum(bsxfun(@ge, null_max_postbin_target, ...
+        observed_postbin), 1)) / (settings.n_permutations + 1);
+    p_value_postbin_vs_pre_fwer_target(:, :, target_n) = reshape( ...
+        postbin_fwer, n_groups, n_lags);
 end
 
 p_value_holm = reshape(holm_adjust(p_value(:)), size(p_value));
@@ -268,6 +309,11 @@ result.p_value_holm = p_value_holm;
 result.p_value_by_lag = p_value_by_lag;
 result.p_value_by_lag_fwer_group = p_value_by_lag_fwer_group;
 result.p_value_by_lag_fwer_target = p_value_by_lag_fwer_target;
+result.observed_postbin_minus_pre = observed_postbin_minus_pre;
+result.p_value_postbin_vs_pre = p_value_postbin_vs_pre;
+result.p_value_postbin_vs_pre_fwer_group = p_value_postbin_vs_pre_fwer_group;
+result.p_value_postbin_vs_pre_fwer_target = ...
+    p_value_postbin_vs_pre_fwer_target;
 result.null_difference = null_difference;
 result.n_events_test = n_events_test;
 result.n_events_available = n_events_available;
@@ -282,6 +328,12 @@ result.test_description = [ ...
     'session. Difference is post minus pre. Window p-values are Holm ' ...
     'corrected across targets and behavior groups. Lag-wise p-values use ' ...
     'the same signs, with max-T correction within each target.'];
+result.postbin_test_description = [ ...
+    'One-sided paired sign-flip. Each post-offset bin is compared with ' ...
+    'the mean occupancy across the whole pre-onset flank. The counted ' ...
+    'tail is post higher than that before rate. The same event signs as ' ...
+    'the window test are reused. Max-T correction is within group across ' ...
+    'post bins, and across groups and post bins within each target.'];
 end
 
 function values = group_occupancy(event_matrix, group_index, in_session)
