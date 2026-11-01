@@ -123,7 +123,11 @@ for i = 1:numel(psth_structure)
         end
     end
 
-    regressors.(partner_regressor{1}) =[ regressors.(partner_regressor{1}) ; S.regressors.play_bout_onset_regressor*partner_id];
+    % Partner identity applies to the entire peri-bout window. Samples
+    % outside the selected analysis interval are masked below by
+    % expanded_regressor, rather than encoding non-play samples as partner 0.
+    partner_number = repmat(partner_id, size(S.regressors.play_bout_onset_regressor));
+    regressors.(partner_regressor{1}) = [regressors.(partner_regressor{1}); partner_number];
     % Add metadata rows
     session_meta = [ ...
         repmat({animal_name}, nRows, 1), ...
