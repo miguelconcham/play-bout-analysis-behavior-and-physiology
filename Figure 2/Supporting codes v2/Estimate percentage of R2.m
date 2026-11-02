@@ -536,6 +536,7 @@ formula_full = ['Power ~ ' rhs ' + (1|Animal)'];
 formula_actor_contrast = ['Power ~ ' rhs ' + ActorContrast + (1|Animal)'];
 
 cvResults = struct();
+predictor_diagnostics = struct();
 mse_full_allfolds = nan(k,1);
 r2_full_allfolds = nan(k,1);
 bethas_fulls_allfolds = cell(k,1);
@@ -630,15 +631,15 @@ for i = 1:numel(predictors)
     cvResults.(toRemove).mse_reduced = mse_reduced_allfolds;
     cvResults.(toRemove).delta_mse = deltaMSE_folds;
     cvResults.(toRemove).avg_delta_mse = avgMSE_reduced - avgMSE_full;
-    cvResults.(toRemove).mse_increase_when_removed = deltaMSE_folds;
-    cvResults.(toRemove).avg_mse_increase_when_removed = ...
+    predictor_diagnostics.(toRemove).mse_increase_when_removed = deltaMSE_folds;
+    predictor_diagnostics.(toRemove).avg_mse_increase_when_removed = ...
         avgMSE_reduced - avgMSE_full;
     cvResults.(toRemove).r2_full = r2_full_allfolds;
     cvResults.(toRemove).r2_reduced = r2_reduced_allfolds;
     cvResults.(toRemove).delta_r2 = deltaR2_folds;
     cvResults.(toRemove).avg_delta_r2 = avgR2_reduced - avgR2_full;
-    cvResults.(toRemove).r2_loss_when_removed = -deltaR2_folds;
-    cvResults.(toRemove).avg_r2_loss_when_removed = ...
+    predictor_diagnostics.(toRemove).r2_loss_when_removed = -deltaR2_folds;
+    predictor_diagnostics.(toRemove).avg_r2_loss_when_removed = ...
         avgR2_full - avgR2_reduced;
 end
 
@@ -789,38 +790,44 @@ full_model_with_actor_contrast = fitlme(actor_table, formula_actor_contrast);
 full_actor_state_model = fitlme(regressor_table, formula_actor_full);
 
 cvResults.k = k;
-cvResults.k_requested = k_requested;
-cvResults.random_seed = random_seed;
-cvResults.fold_assignment = fold_assignment;
-cvResults.fold_group = 'BoutID';
 cvResults.mse_full_allfolds = mse_full_allfolds;
 cvResults.r2_full_allfolds = r2_full_allfolds;
-cvResults.avgMSE_full = avgMSE_full;
-cvResults.avgR2_full = avgR2_full;
 cvResults.predictors = predictors;
-cvResults.formula_full = formula_full;
-cvResults.predictor_delta_r2_definition = ...
-    'Legacy delta_r2 fields equal reduced R2 minus full R2; r2_loss_when_removed uses the positive full-minus-reduced direction.';
 cvResults.bethas_fulls_allfolds = bethas_fulls_allfolds;
-cvResults.full_model_coefficients_allfolds = full_model_coefficients_allfolds;
-cvResults.actor_contrast = actor_contrast;
-cvResults.actor_contrast.final_weights = final_contrast_info;
-cvResults.balanced_actor = balanced_actor;
-cvResults.full_model = full_model;
-cvResults.full_model_coefficients = full_model.Coefficients;
-cvResults.full_model_coefficient_ci = coefCI(full_model);
-cvResults.full_model_criterion = full_model.ModelCriterion;
-cvResults.full_model_with_actor_contrast = full_model_with_actor_contrast;
-cvResults.full_model_with_actor_contrast_coefficients = ...
+
+% Preserve cvResults exactly as expected by Figure 2 and legacy scripts.
+% All new diagnostics and fitted model objects live in a separate variable.
+extendedResults = struct();
+extendedResults.schema_version = 1;
+extendedResults.k_requested = k_requested;
+extendedResults.random_seed = random_seed;
+extendedResults.fold_assignment = fold_assignment;
+extendedResults.fold_group = 'BoutID';
+extendedResults.avgMSE_full = avgMSE_full;
+extendedResults.avgR2_full = avgR2_full;
+extendedResults.formula_full = formula_full;
+extendedResults.predictor_delta_r2_definition = ...
+    'cvResults delta_r2 fields equal reduced R2 minus full R2; predictor_diagnostics r2_loss_when_removed uses full minus reduced.';
+extendedResults.predictor_diagnostics = predictor_diagnostics;
+extendedResults.full_model_coefficients_allfolds = full_model_coefficients_allfolds;
+extendedResults.actor_contrast = actor_contrast;
+extendedResults.actor_contrast.final_weights = final_contrast_info;
+extendedResults.balanced_actor = balanced_actor;
+extendedResults.full_model = full_model;
+extendedResults.full_model_coefficients = full_model.Coefficients;
+extendedResults.full_model_coefficient_ci = coefCI(full_model);
+extendedResults.full_model_criterion = full_model.ModelCriterion;
+extendedResults.full_model_with_actor_contrast = full_model_with_actor_contrast;
+extendedResults.full_model_with_actor_contrast_coefficients = ...
     full_model_with_actor_contrast.Coefficients;
-cvResults.full_actor_state_model = full_actor_state_model;
-cvResults.full_actor_state_model_coefficients = ...
+extendedResults.full_actor_state_model = full_actor_state_model;
+extendedResults.full_actor_state_model_coefficients = ...
     full_actor_state_model.Coefficients;
-cvResults.full_actor_state_model_coefficient_ci = ...
+extendedResults.full_actor_state_model_coefficient_ci = ...
     coefCI(full_actor_state_model);
-cvResults.n_observations = height(regressor_table);
-cvResults.n_bouts = numel(unique(regressor_table.BoutID));
-cvResults.observation_index = table( ...
+extendedResults.n_observations = height(regressor_table);
+extendedResults.n_bouts = numel(unique(regressor_table.BoutID));
+extendedResults.observation_index = table( ...
     (1:height(regressor_table))', regressor_table.BoutID, ...
     regressor_table.Animal, regressor_table.ChannelNum, ...
     regressor_table.PlayBout, regressor_table.SelfBool, ...
@@ -828,22 +835,24 @@ cvResults.observation_index = table( ...
     'VariableNames', {'Row','BoutID','Animal','ChannelNum','PlayBout', ...
     'SelfBool','OtherBool','ActorState','Fold'});
 [lookup_bout_id, lookup_row] = unique(bout_id_per_row, 'stable');
-cvResults.bout_lookup = table( ...
+extendedResults.bout_lookup = table( ...
     lookup_bout_id, string(stacked_data.bout_group(lookup_row)), ...
     stacked_data.bout_start(lookup_row), stacked_data.bout_end(lookup_row), ...
     string(stacked_data.meta(lookup_row,1)), ...
     cell2mat(stacked_data.meta(lookup_row,2)), ...
     'VariableNames', {'BoutID','PhysicalBoutKey','Start','End','Animal','Partner'});
-cvResults.analysis_band = 'delta';
-cvResults.power_source = 'play_bout_onset_low_freq';
-cvResults.input_psth_file = 'psth_structure_all_regressors_delta_theta.mat';
-cvResults.input_animal_file = 'animal_names_all_regressors_delta.mat';
+extendedResults.analysis_band = 'delta';
+extendedResults.power_source = 'play_bout_onset_low_freq';
+extendedResults.input_psth_file = 'psth_structure_all_regressors_delta_theta.mat';
+extendedResults.input_animal_file = 'animal_names_all_regressors_delta.mat';
+
+validate_figure2_compatibility(cvResults)
 
 play_song([],[],[])
 
 %% 9 SAVE DATA
 disp(['Saving ', output_file])
-save(output_file, 'cvResults', '-v7.3')
+save(output_file, 'cvResults', 'extendedResults', '-v7.3')
 
 function [fold_assignment, k] = grouped_kfold(group_ids, k_requested)
 groups = unique(group_ids);
@@ -856,6 +865,31 @@ fold_assignment = zeros(size(group_ids));
 for fold = 1:k
     test_groups = groups(test(group_cv, fold));
     fold_assignment(ismember(group_ids, test_groups)) = fold;
+end
+end
+
+function validate_figure2_compatibility(results)
+required_top_level = [results.predictors, ...
+    {'k','mse_full_allfolds','r2_full_allfolds','predictors', ...
+     'bethas_fulls_allfolds'}];
+unexpected = setdiff(fieldnames(results)', required_top_level);
+if ~isempty(unexpected)
+    error('EstimateR2:IncompatibleCvResults', ...
+        'Unexpected top-level cvResults fields: %s', strjoin(unexpected, ', '));
+end
+for predictor_index = 1:numel(results.predictors)
+    predictor = results.predictors{predictor_index};
+    if ~isfield(results, predictor) || ...
+            ~isfield(results.(predictor), 'r2_full') || ...
+            ~isfield(results.(predictor), 'r2_reduced')
+        error('EstimateR2:IncompatibleCvResults', ...
+            'Predictor %s lacks Figure 2 R2 fields.', predictor);
+    end
+    if numel(results.(predictor).r2_full) ~= results.k || ...
+            numel(results.(predictor).r2_reduced) ~= results.k
+        error('EstimateR2:IncompatibleCvResults', ...
+            'Predictor %s does not contain one R2 value per fold.', predictor);
+    end
 end
 end
 
