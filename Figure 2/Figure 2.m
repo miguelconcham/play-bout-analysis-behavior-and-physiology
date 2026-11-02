@@ -451,7 +451,11 @@ predictors = cvResults.predictors;
 
 
 R2_full_allfolds =cvResults.Call.r2_full;
-avgR2_full = mean(R2_full_allfolds);
+avgR2_full = mean(R2_full_allfolds, 'omitnan');
+if ~isfinite(avgR2_full) || avgR2_full <= 0
+    error('Figure2:InvalidFullR2', ...
+        'The marginal-R2 percentage requires a positive finite mean full-model R2.');
+end
 
 % Reduced-model R² is preallocated to 0. Folds that were never fit stay
 % exactly 0 while the full-model R² does not, so full-minus-reduced equals
@@ -481,20 +485,19 @@ for j=1:numel(predictors)
     % Extract R² values for this predictor
     r2_full = cvResults.(predictors{re_order(j)}).r2_full;
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
-    valid = computed_reduced_folds(r2_full, r2_reduced);
-    mean_diff(j) = mean(r2_full(valid) - r2_reduced(valid)) / mean(r2_full); % difference per fold
+    valid = computed_reduced_folds(r2_full, r2_reduced) & ...
+        isfinite(r2_full) & isfinite(r2_reduced);
+    mean_diff(j) = mean(r2_full(valid) - r2_reduced(valid), 'omitnan') / ...
+        mean(r2_full(valid), 'omitnan'); % difference per fold
 end
 [~, re_order] =  sort(mean_diff, 'descend'); 
-
- re_order = [14 7 1 15 2 13 6 4 3 8 9 10 5 11 12]; % manual order,
- % comes from copying re_order values used during play
-% re_order =1:numel(re_order) % manual order
 
 for j=1:numel(re_order)
     % Extract R² values for this predictor
     r2_full = cvResults.(predictors{re_order(j)}).r2_full;
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
-    valid = computed_reduced_folds(r2_full, r2_reduced);
+    valid = computed_reduced_folds(r2_full, r2_reduced) & ...
+        isfinite(r2_full) & isfinite(r2_reduced);
     r2_diff = r2_full(valid) - r2_reduced(valid); % difference per computed fold
 
     % Plot swarm of differences, as a percentage of the full-model R²
@@ -526,7 +529,6 @@ end
 plot([0 2*numel(predictors)], [0 0], 'k')
 
 % Formatting
-xticks(1:2:2*numel(predictors))
 xticks(1:2:2*numel(predictors))
 xticklabels(predictors(re_order))
 ylabel('\DeltaR^2 / R^2_{full} (%)')

@@ -1,4 +1,4 @@
-%% 1 LOAD DATA
+%% 1.1 LOAD PREDICTOR LIST
 % Regressor PSTH structs live under Data\Analysis results\Theta psth.
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\Theta psth';
 results_folder = fullfile(fileparts(saving_folder), 'psth power by frequency and behavior');
@@ -19,6 +19,34 @@ if isempty(reference_predictors)
 end
 clear delta_reference
 
+predictors = reference_predictors;
+disp('Standard variable list')
+disp(predictors)
+
+%% 1.2 SET ANALYSIS OPTIONS
+% Keep the generic PlayBout regressor in the main model. SelfBool and
+% OtherBool are tested below as (1) an orthogonal actor contrast and
+% (2) separate overlap-aware contributions on balanced actor states.
+variables2remove = {'SelfBool','OtherBool'};
+variables2add = {};
+predictors(ismember(predictors, variables2remove)) = [];
+predictors = [predictors, variables2add];
+predictors = unique(predictors, 'stable');
+
+if ~ismember('PlayBout', predictors)
+    error('The actor analyses require PlayBout in the main predictor list.');
+end
+
+disp('Updated variable list')
+disp(predictors)
+
+random_seed = 1;
+rng(random_seed, 'twister');
+k_requested = 30;
+n_balance_repeats = 10;
+output_file = fullfile(saving_folder, 'cvResults_delta_nur_play_bout_redo_261101.mat');
+
+%% 1.3 LOAD STRUCTURE DATA
 disp('Loading')
 % load([saving_folder,'\psth_structure_all_regressors_beta_gamma.mat'],'psth_structure'); 
 % load([saving_folder,'\animal_names_all_regressors_beta_gamma.mat'],'animal_names');
@@ -30,9 +58,9 @@ disp('Loading done')
 
 
 % for DELTA AND THETA
-freq_range = {[1 5],[6 12]}; 
-wind_length = {1, .250};
-spect_bin_size = 0.005;
+freq_range = psth_structure(1).freq_range;
+wind_length = psth_structure(1).wind_length;
+spect_bin_size = psth_structure(1).spect_bin_size;
 
 % % for BETA AND GAMMA
 % freq_range = {[15 30],[40 90]}; 
@@ -76,6 +104,9 @@ for v = 1:numel(varNames)
     stacked_data.(varNames{v}) = [];
 end
 stacked_data.meta = {};  % {animal_name, partner_id, channel, play_length}
+stacked_data.bout_group = {};
+stacked_data.bout_start = [];
+stacked_data.bout_end = [];
 regressors = [];
 for v = 1:numel(regressors2stack)
     regressors.(regressors2stack{v}) = [];
@@ -136,6 +167,15 @@ for i = 1:numel(psth_structure)
         num2cell(play_lengths) ...
         ];
     stacked_data.meta = [stacked_data.meta; session_meta];
+    % The same physical bout can appear once per channel. Excluding the
+    % channel from this key keeps all copies in the same CV fold.
+    bout_group = repmat(string(animal_name), nRows, 1) + "|" + ...
+        repmat(string(partner_id), nRows, 1) + "|" + ...
+        compose('%.9f', S.play_bouts_table(:,1)) + "|" + ...
+        compose('%.9f', S.play_bouts_table(:,2));
+    stacked_data.bout_group = [stacked_data.bout_group; cellstr(bout_group)];
+    stacked_data.bout_start = [stacked_data.bout_start; S.play_bouts_table(:,1)];
+    stacked_data.bout_end = [stacked_data.bout_end; S.play_bouts_table(:,2)];
 end
 %% 3 defined periods in the baseline witoun othe rplaybouts
 
@@ -261,7 +301,8 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% frequency selection line %%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-array = pow_matrix_high_Freq;  
+% Delta is the low-frequency matrix in the active delta/theta input file.
+array = pow_matrix_low_Freq;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 array(expanded_regressor==0) = NaN;
@@ -451,6 +492,13 @@ array = detailed_playbout;
 array(expanded_regressor==0) = NaN;
 detailed_playbout_regressor = array(:);
 
+% Every matrix row is one play-bout-centred observation. The physical-bout
+% key groups duplicate channel copies before it is expanded over time bins.
+[bout_id_per_row, ~] = findgroups(string(stacked_data.bout_group));
+bout_id_matrix = repmat(bout_id_per_row, ...
+    1, size(regressors.play_bout_onset_regressor,2));
+bout_id = bout_id_matrix(:);
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%% Now create table %%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -461,140 +509,472 @@ regressor_table = table(call_regressor, other_speed_regressro,self_speed_regress
     self_regressor, other_regressor,other_angle_speed_regressor,other_angle_acc_regressor,relative_speed_regressor, ...
     self_angle_speed_regressor, self_angle_acc_regressor,PartnerNumber_regressor, ...
     detailed_play_other_regressor,detailed_play_self_regressor,detailed_playbout_regressor, ...
-    play_bout,animal_name(:),channel_num(:), animal_dist_regressor,pow_regressor, ...
+    play_bout,animal_name(:),channel_num(:), animal_dist_regressor,bout_id,pow_regressor, ...
     'VariableNames', {'Call', 'OtherSpeed','SelfSpeed','OtherAcc','SelfAcc', ...
     'SelfBool', 'OtherBool','OtherAngleSpeed','OtherAngleAccc','RelativeSpeed', ...
     'SelfAngleSpeed','SelfAngleAccc', 'PartnerNumber',...
      'OtherPlayRecipr', 'SelfPlayRecipr','PlayboutRecipr',...
-      'PlayBout','Animal','ChannelNum','AnimalDist','Power'});
+      'PlayBout','Animal','ChannelNum','AnimalDist','BoutID','Power'});
 
 
-predictors = reference_predictors;
 missing_predictors = predictors(~ismember(predictors, regressor_table.Properties.VariableNames));
 if ~isempty(missing_predictors)
     error('Delta-reference predictors missing from regressor_table: %s', ...
         strjoin(missing_predictors, ', '));
 end
 
-regressor_table(any(isnan(regressor_table{:,predictors}),2),:) = [];
+required_variables = unique([predictors, {'Power','SelfBool','OtherBool','PlayBout'}], 'stable');
+regressor_table(any(ismissing(regressor_table(:,required_variables)),2),:) = [];
 
-%%
+%% 6 ESTIMATE CROSS-VALIDATED R2 CONTRIBUTIONS
+% Assign folds by bout, not by individual time bin. This prevents adjacent
+% and autocorrelated bins from the same bout appearing in train and test.
+[fold_assignment, k] = grouped_kfold(regressor_table.BoutID, k_requested);
 
-%%
-%% ESTIMATE R2 contribution of each variable
-% Parameters
-k = 30; % number of folds
-cv = cvpartition(height(regressor_table), 'KFold', k);
-
-% Full model formula
-% formula_full = 'Power ~ Call + SelfSpeed + OtherSpeed + OtherAcc + SelfAcc + PlayBout + AnimalDist + (1|Animal)';
-% Join predictor names with ' + '
 rhs = strjoin(predictors, ' + ');
+formula_full = ['Power ~ ' rhs ' + (1|Animal)'];
+formula_actor_contrast = ['Power ~ ' rhs ' + ActorContrast + (1|Animal)'];
 
-% Build formula string
-formula_full = ['Power ~ ' rhs, ' +  (1|Animal)'];
-
-% Prepare structure to store fold errors
 cvResults = struct();
-
-% Compute full model MSEs & R² once
-mse_full_allfolds = zeros(k,1);
-r2_full_allfolds = zeros(k,1);
+mse_full_allfolds = nan(k,1);
+r2_full_allfolds = nan(k,1);
 bethas_fulls_allfolds = cell(k,1);
+full_model_coefficients_allfolds = cell(k,1);
+
+actor_contrast = struct();
+actor_contrast.mse = nan(k,1);
+actor_contrast.r2 = nan(k,1);
+actor_contrast.n_self_only_train = nan(k,1);
+actor_contrast.n_other_only_train = nan(k,1);
+actor_contrast.self_weight = nan(k,1);
+actor_contrast.other_weight = nan(k,1);
+actor_contrast.playbout_dot_train = nan(k,1);
+
 for fold = 1:k
-    trainIdx = training(cv, fold);
-    testIdx = test(cv, fold);
+    trainIdx = fold_assignment ~= fold;
+    testIdx = fold_assignment == fold;
     trainData = regressor_table(trainIdx,:);
     testData = regressor_table(testIdx,:);
+
     fullModel = fitlme(trainData, formula_full);
-   bethas_fulls_allfolds{fold} = fullModel.Coefficients.Estimate;
-    % Predictions
-    yPred = predict(fullModel, testData);
-    yTrue = testData.Power;
+    bethas_fulls_allfolds{fold} = fullModel.Coefficients.Estimate;
+    full_model_coefficients_allfolds{fold} = fullModel.Coefficients;
+    [mse_full_allfolds(fold), r2_full_allfolds(fold)] = ...
+        score_lme(fullModel, testData);
 
-    % MSE
-    mse_full_allfolds(fold) = mean((yTrue - yPred).^2,'omitmissing');
-
-    % R² (manual)
-    ss_res = nansum((yTrue - yPred).^2);
-    ss_tot = nansum((yTrue - mean(yTrue,'omitnan')).^2);
-    r2_full_allfolds(fold) = 1 - ss_res/ss_tot;
+    % The contrast is estimated from exclusive self-only and other-only
+    % bins. Simultaneous and neither-active play bins receive contrast 0
+    % and remain in the model.
+    [trainData, testData, contrast_info] = add_actor_contrast(trainData, testData);
+    actor_contrast.n_self_only_train(fold) = contrast_info.n_self;
+    actor_contrast.n_other_only_train(fold) = contrast_info.n_other;
+    actor_contrast.self_weight(fold) = contrast_info.self_weight;
+    actor_contrast.other_weight(fold) = contrast_info.other_weight;
+    if contrast_info.valid
+        actor_contrast.playbout_dot_train(fold) = ...
+            trainData.PlayBout' * trainData.ActorContrast;
+        actorModel = fitlme(trainData, formula_actor_contrast);
+        [actor_contrast.mse(fold), actor_contrast.r2(fold)] = ...
+            score_lme(actorModel, testData);
+    end
 end
-avgMSE_full = mean(mse_full_allfolds);
-avgR2_full = mean(r2_full_allfolds);
 
-fprintf('Full model average CV MSE: %.6f\n', avgMSE_full);
-fprintf('Full model average CV R²: %.6f\n\n', avgR2_full);
+avgMSE_full = mean(mse_full_allfolds, 'omitnan');
+avgR2_full = mean(r2_full_allfolds, 'omitnan');
+actor_contrast.delta_mse = mse_full_allfolds - actor_contrast.mse;
+actor_contrast.delta_r2 = actor_contrast.r2 - r2_full_allfolds;
+actor_contrast.mse_improvement = actor_contrast.delta_mse;
+actor_contrast.r2_gain = actor_contrast.delta_r2;
+actor_contrast.avg_delta_mse = mean(actor_contrast.delta_mse, 'omitnan');
+actor_contrast.avg_delta_r2 = mean(actor_contrast.delta_r2, 'omitnan');
+actor_contrast.formula = formula_actor_contrast;
+actor_contrast.definition = ...
+    'Self-only=nOther/(nSelf+nOther), other-only=-nSelf/(nSelf+nOther), both/neither/non-play=0; weights estimated in each training fold.';
 
-% Loop over predictors to remove one at a time
+fprintf('Full model average grouped-CV MSE: %.6f\n', avgMSE_full);
+fprintf('Full model average grouped-CV R²: %.6f\n', avgR2_full);
+fprintf('Actor contrast average added CV R²: %.6f\n\n', actor_contrast.avg_delta_r2);
+
+% Drop one predictor at a time using the exact same grouped folds.
 for i = 1:numel(predictors)
     toRemove = predictors{i};
     fprintf('Testing predictor removal: %s\n', toRemove);
 
-    % Drop the predictor by name. Building the formula from the kept names
-    % avoids a partial match on the formula string.
     kept = predictors(~strcmp(predictors, toRemove));
     if numel(kept) ~= numel(predictors) - 1
         error('Failed to drop %s from the reduced model.', toRemove);
     end
     formula_reduced = ['Power ~ ' strjoin(kept, ' + ') ' + (1|Animal)'];
 
-    mse_reduced_allfolds = zeros(k,1);
-    r2_reduced_allfolds = zeros(k,1);
-    % Fit every fold. Stopping early leaves the preallocated zeros in place,
-    % and Figure 2 then treats those folds as ΔR² = R²_full.
+    mse_reduced_allfolds = nan(k,1);
+    r2_reduced_allfolds = nan(k,1);
     for fold = 1:k
-        trainIdx = training(cv, fold);
-        testIdx = test(cv, fold);
-        trainData = regressor_table(trainIdx,:);
-        testData = regressor_table(testIdx,:);
-
+        trainData = regressor_table(fold_assignment ~= fold,:);
+        testData = regressor_table(fold_assignment == fold,:);
         reducedModel = fitlme(trainData, formula_reduced);
-        yPred = predict(reducedModel, testData);
-        yTrue = testData.Power;
-
-        % MSE
-        mse_reduced_allfolds(fold) = mean((yTrue - yPred).^2,'omitmissing');
-
-        % R² (manual)
-        ss_res = nansum((yTrue - yPred).^2);
-        ss_tot = nansum((yTrue - mean(yTrue,'omitnan')).^2);
-        r2_reduced_allfolds(fold) = 1 - ss_res/ss_tot;
+        [mse_reduced_allfolds(fold), r2_reduced_allfolds(fold)] = ...
+            score_lme(reducedModel, testData);
     end
 
-    avgMSE_reduced = mean(mse_reduced_allfolds);
-    avgR2_reduced = mean(r2_reduced_allfolds);
-
+    avgMSE_reduced = mean(mse_reduced_allfolds, 'omitnan');
+    avgR2_reduced = mean(r2_reduced_allfolds, 'omitnan');
     deltaMSE_folds = mse_reduced_allfolds - mse_full_allfolds;
     deltaR2_folds = r2_reduced_allfolds - r2_full_allfolds;
 
-    fprintf('  Avg MSE increase when removing %s: %.6f\n', toRemove, avgMSE_reduced - avgMSE_full);
-    fprintf('  Avg R² decrease when removing %s: %.6f\n\n', toRemove, avgR2_reduced - avgR2_full);
+    fprintf('  Avg MSE increase when removing %s: %.6f\n', ...
+        toRemove, avgMSE_reduced - avgMSE_full);
+    fprintf('  Avg R² change when removing %s: %.6f\n\n', ...
+        toRemove, avgR2_reduced - avgR2_full);
 
-    % Store results for visualization
     cvResults.(toRemove).mse_full = mse_full_allfolds;
     cvResults.(toRemove).mse_reduced = mse_reduced_allfolds;
     cvResults.(toRemove).delta_mse = deltaMSE_folds;
     cvResults.(toRemove).avg_delta_mse = avgMSE_reduced - avgMSE_full;
-
+    cvResults.(toRemove).mse_increase_when_removed = deltaMSE_folds;
+    cvResults.(toRemove).avg_mse_increase_when_removed = ...
+        avgMSE_reduced - avgMSE_full;
     cvResults.(toRemove).r2_full = r2_full_allfolds;
     cvResults.(toRemove).r2_reduced = r2_reduced_allfolds;
     cvResults.(toRemove).delta_r2 = deltaR2_folds;
     cvResults.(toRemove).avg_delta_r2 = avgR2_reduced - avgR2_full;
+    cvResults.(toRemove).r2_loss_when_removed = -deltaR2_folds;
+    cvResults.(toRemove).avg_r2_loss_when_removed = ...
+        avgR2_full - avgR2_reduced;
 end
+
+%% 7 BALANCED SELF-VERSUS-OTHER CONTRIBUTIONS, INCLUDING SIMULTANEOUS PLAY
+% Balance the observed members of five possible states: non-play, play with
+% neither actor active, self-only, other-only, and both active. ActorState
+% is categorical, so simultaneous play has its own freely estimated level.
+% Reduced models merge levels according to whether SelfBool or OtherBool
+% was removed. At most one bin per physical bout and state is sampled, so
+% long bouts cannot dominate merely because they contain more bins.
+actor_state_names = {'NonPlay','PlayNeither','SelfOnly','OtherOnly','Both'};
+actor_state = actor_state_code(regressor_table);
+states_present = unique(actor_state)';
+regressor_table.ActorState = categorical( ...
+    actor_state, states_present, actor_state_names(states_present));
+
+actor_nuisance_predictors = predictors(~strcmp(predictors, 'PlayBout'));
+actor_nuisance_rhs = strjoin(actor_nuisance_predictors, ' + ');
+formula_actor_full = ['Power ~ ' actor_nuisance_rhs ' + ActorState + (1|Animal)'];
+formula_actor_base = formula_full;
+formula_without_self = ['Power ~ ' rhs ' + OtherBool + (1|Animal)'];
+formula_without_other = ['Power ~ ' rhs ' + SelfBool + (1|Animal)'];
+
+balanced_actor = struct();
+balanced_actor.r2_full = nan(k,n_balance_repeats);
+balanced_actor.r2_base = nan(k,n_balance_repeats);
+balanced_actor.r2_without_self = nan(k,n_balance_repeats);
+balanced_actor.r2_without_other = nan(k,n_balance_repeats);
+balanced_actor.mse_full = nan(k,n_balance_repeats);
+balanced_actor.mse_base = nan(k,n_balance_repeats);
+balanced_actor.mse_without_self = nan(k,n_balance_repeats);
+balanced_actor.mse_without_other = nan(k,n_balance_repeats);
+balanced_actor.n_per_state_train = nan(k,n_balance_repeats);
+balanced_actor.n_per_state_test = nan(k,n_balance_repeats);
+balanced_actor.n_bouts_train = nan(k,n_balance_repeats);
+balanced_actor.n_bouts_test = nan(k,n_balance_repeats);
+balanced_actor.train_indices = cell(k,n_balance_repeats);
+balanced_actor.test_indices = cell(k,n_balance_repeats);
+balanced_actor.n_repeats = n_balance_repeats;
+
+for fold = 1:k
+    trainCandidates = find(fold_assignment ~= fold);
+    testCandidates = find(fold_assignment == fold);
+    for repeat = 1:n_balance_repeats
+        [trainBalanced, nTrain] = balanced_state_sample( ...
+            trainCandidates, actor_state, states_present, regressor_table.BoutID);
+        [testBalanced, nTest] = balanced_state_sample( ...
+            testCandidates, actor_state, states_present, regressor_table.BoutID);
+        balanced_actor.n_per_state_train(fold,repeat) = nTrain;
+        balanced_actor.n_per_state_test(fold,repeat) = nTest;
+        balanced_actor.train_indices{fold,repeat} = trainBalanced;
+        balanced_actor.test_indices{fold,repeat} = testBalanced;
+
+        if isempty(trainBalanced) || isempty(testBalanced)
+            continue
+        end
+        balanced_actor.n_bouts_train(fold,repeat) = ...
+            numel(unique(regressor_table.BoutID(trainBalanced)));
+        balanced_actor.n_bouts_test(fold,repeat) = ...
+            numel(unique(regressor_table.BoutID(testBalanced)));
+
+        trainData = regressor_table(trainBalanced,:);
+        testData = regressor_table(testBalanced,:);
+        actorFullModel = fitlme(trainData, formula_actor_full);
+        actorBaseModel = fitlme(trainData, formula_actor_base);
+        actorWithoutSelfModel = fitlme(trainData, formula_without_self);
+        actorWithoutOtherModel = fitlme(trainData, formula_without_other);
+
+        [balanced_actor.mse_full(fold,repeat), balanced_actor.r2_full(fold,repeat)] = ...
+            score_lme(actorFullModel, testData);
+        [balanced_actor.mse_base(fold,repeat), balanced_actor.r2_base(fold,repeat)] = ...
+            score_lme(actorBaseModel, testData);
+        [balanced_actor.mse_without_self(fold,repeat), ...
+            balanced_actor.r2_without_self(fold,repeat)] = ...
+            score_lme(actorWithoutSelfModel, testData);
+        [balanced_actor.mse_without_other(fold,repeat), ...
+            balanced_actor.r2_without_other(fold,repeat)] = ...
+            score_lme(actorWithoutOtherModel, testData);
+    end
+end
+
+balanced_actor.delta_r2_joint = balanced_actor.r2_full - balanced_actor.r2_base;
+balanced_actor.delta_r2_self = balanced_actor.r2_full - balanced_actor.r2_without_self;
+balanced_actor.delta_r2_other = balanced_actor.r2_full - balanced_actor.r2_without_other;
+balanced_actor.r2_gain_joint = balanced_actor.delta_r2_joint;
+balanced_actor.r2_gain_self = balanced_actor.delta_r2_self;
+balanced_actor.r2_gain_other = balanced_actor.delta_r2_other;
+balanced_actor.delta_mse_joint = balanced_actor.mse_base - balanced_actor.mse_full;
+balanced_actor.delta_mse_self = balanced_actor.mse_without_self - balanced_actor.mse_full;
+balanced_actor.delta_mse_other = balanced_actor.mse_without_other - balanced_actor.mse_full;
+balanced_actor.avg_delta_r2_joint = mean(balanced_actor.delta_r2_joint(:), 'omitnan');
+balanced_actor.avg_delta_r2_self = mean(balanced_actor.delta_r2_self(:), 'omitnan');
+balanced_actor.avg_delta_r2_other = mean(balanced_actor.delta_r2_other(:), 'omitnan');
+balanced_actor.avg_delta_mse_joint = mean(balanced_actor.delta_mse_joint(:), 'omitnan');
+balanced_actor.avg_delta_mse_self = mean(balanced_actor.delta_mse_self(:), 'omitnan');
+balanced_actor.avg_delta_mse_other = mean(balanced_actor.delta_mse_other(:), 'omitnan');
+balanced_actor.formula_full = formula_actor_full;
+balanced_actor.formula_base = formula_actor_base;
+balanced_actor.formula_without_self = formula_without_self;
+balanced_actor.formula_without_other = formula_without_other;
+balanced_actor.state_names = actor_state_names(states_present);
+balanced_actor.state_codes = states_present;
+balanced_actor.state_counts = arrayfun(@(state) nnz(actor_state == state), states_present);
+balanced_actor.delta_r2_self_fold_mean = ...
+    mean(balanced_actor.delta_r2_self, 2, 'omitnan');
+balanced_actor.delta_r2_other_fold_mean = ...
+    mean(balanced_actor.delta_r2_other, 2, 'omitnan');
+balanced_actor.n_bouts_train_fold_mean = ...
+    mean(balanced_actor.n_bouts_train, 2, 'omitnan');
+balanced_actor.n_bouts_test_fold_mean = ...
+    mean(balanced_actor.n_bouts_test, 2, 'omitnan');
+valid_actor_folds = isfinite(balanced_actor.delta_r2_self_fold_mean) & ...
+    isfinite(balanced_actor.delta_r2_other_fold_mean);
+balanced_actor.n_valid_folds = nnz(valid_actor_folds);
+if nnz(valid_actor_folds) >= 5
+    contribution_difference = ...
+        balanced_actor.delta_r2_self_fold_mean(valid_actor_folds) - ...
+        balanced_actor.delta_r2_other_fold_mean(valid_actor_folds);
+    test_train_ratio = mean( ...
+        balanced_actor.n_bouts_test_fold_mean(valid_actor_folds) ./ ...
+        balanced_actor.n_bouts_train_fold_mean(valid_actor_folds), 'omitnan');
+    [balanced_actor.p_self_vs_other, balanced_actor.t_self_vs_other, ...
+        balanced_actor.mean_self_minus_other] = corrected_cv_ttest( ...
+        contribution_difference, test_train_ratio);
+else
+    balanced_actor.p_self_vs_other = NaN;
+    balanced_actor.t_self_vs_other = NaN;
+    balanced_actor.mean_self_minus_other = NaN;
+    warning('EstimateR2:InsufficientActorFolds', ...
+        ['Only %d grouped folds contained enough examples of every actor state. ' ...
+         'At least 5 are required for the corrected self-vs-other comparison.'], ...
+        nnz(valid_actor_folds));
+end
+balanced_actor.comparison_test = ...
+    ['Nadeau-Bengio corrected paired t-test on fold-wise self-minus-other ' ...
+     'delta R2; train/test ratio uses physical-bout counts. Predictive CV evidence, not a causal test.'];
+
+fprintf('Balanced added CV R², self: %.6f\n', balanced_actor.avg_delta_r2_self);
+fprintf('Balanced added CV R², other: %.6f\n', balanced_actor.avg_delta_r2_other);
+fprintf('Paired self-vs-other p-value across folds: %.6g\n\n', ...
+    balanced_actor.p_self_vs_other);
+
+%% 8 FIT AND SAVE THE REPORTABLE FULL-DATA MODELS
+full_model = fitlme(regressor_table, formula_full);
+[actor_table, ~, final_contrast_info] = add_actor_contrast( ...
+    regressor_table, regressor_table);
+full_model_with_actor_contrast = fitlme(actor_table, formula_actor_contrast);
+full_actor_state_model = fitlme(regressor_table, formula_actor_full);
+
 cvResults.k = k;
+cvResults.k_requested = k_requested;
+cvResults.random_seed = random_seed;
+cvResults.fold_assignment = fold_assignment;
+cvResults.fold_group = 'BoutID';
 cvResults.mse_full_allfolds = mse_full_allfolds;
 cvResults.r2_full_allfolds = r2_full_allfolds;
+cvResults.avgMSE_full = avgMSE_full;
+cvResults.avgR2_full = avgR2_full;
 cvResults.predictors = predictors;
-
+cvResults.formula_full = formula_full;
+cvResults.predictor_delta_r2_definition = ...
+    'Legacy delta_r2 fields equal reduced R2 minus full R2; r2_loss_when_removed uses the positive full-minus-reduced direction.';
 cvResults.bethas_fulls_allfolds = bethas_fulls_allfolds;
+cvResults.full_model_coefficients_allfolds = full_model_coefficients_allfolds;
+cvResults.actor_contrast = actor_contrast;
+cvResults.actor_contrast.final_weights = final_contrast_info;
+cvResults.balanced_actor = balanced_actor;
+cvResults.full_model = full_model;
+cvResults.full_model_coefficients = full_model.Coefficients;
+cvResults.full_model_coefficient_ci = coefCI(full_model);
+cvResults.full_model_criterion = full_model.ModelCriterion;
+cvResults.full_model_with_actor_contrast = full_model_with_actor_contrast;
+cvResults.full_model_with_actor_contrast_coefficients = ...
+    full_model_with_actor_contrast.Coefficients;
+cvResults.full_actor_state_model = full_actor_state_model;
+cvResults.full_actor_state_model_coefficients = ...
+    full_actor_state_model.Coefficients;
+cvResults.full_actor_state_model_coefficient_ci = ...
+    coefCI(full_actor_state_model);
+cvResults.n_observations = height(regressor_table);
+cvResults.n_bouts = numel(unique(regressor_table.BoutID));
+cvResults.observation_index = table( ...
+    (1:height(regressor_table))', regressor_table.BoutID, ...
+    regressor_table.Animal, regressor_table.ChannelNum, ...
+    regressor_table.PlayBout, regressor_table.SelfBool, ...
+    regressor_table.OtherBool, regressor_table.ActorState, fold_assignment, ...
+    'VariableNames', {'Row','BoutID','Animal','ChannelNum','PlayBout', ...
+    'SelfBool','OtherBool','ActorState','Fold'});
+[lookup_bout_id, lookup_row] = unique(bout_id_per_row, 'stable');
+cvResults.bout_lookup = table( ...
+    lookup_bout_id, string(stacked_data.bout_group(lookup_row)), ...
+    stacked_data.bout_start(lookup_row), stacked_data.bout_end(lookup_row), ...
+    string(stacked_data.meta(lookup_row,1)), ...
+    cell2mat(stacked_data.meta(lookup_row,2)), ...
+    'VariableNames', {'BoutID','PhysicalBoutKey','Start','End','Animal','Partner'});
+cvResults.analysis_band = 'delta';
+cvResults.power_source = 'play_bout_onset_low_freq';
+cvResults.input_psth_file = 'psth_structure_all_regressors_delta_theta.mat';
+cvResults.input_animal_file = 'animal_names_all_regressors_delta.mat';
 
 play_song([],[],[])
 
+%% 9 SAVE DATA
+disp(['Saving ', output_file])
+save(output_file, 'cvResults', '-v7.3')
 
-%%  save data
+function [fold_assignment, k] = grouped_kfold(group_ids, k_requested)
+groups = unique(group_ids);
+k = min(k_requested, numel(groups));
+if k < 2
+    error('At least two unique bouts are required for cross-validation.');
+end
+group_cv = cvpartition(numel(groups), 'KFold', k);
+fold_assignment = zeros(size(group_ids));
+for fold = 1:k
+    test_groups = groups(test(group_cv, fold));
+    fold_assignment(ismember(group_ids, test_groups)) = fold;
+end
+end
 
-% save([saving_folder,'\cvResults_mean_calls_gamma_AlllVar_play_baut.mat'],'cvResults')
+function [mse, r2] = score_lme(model, test_data)
+y_true = test_data.Power;
+y_pred = predict(model, test_data);
+valid = isfinite(y_true) & isfinite(y_pred);
+if nnz(valid) < 2
+    mse = NaN;
+    r2 = NaN;
+    return
+end
+y_true = y_true(valid);
+y_pred = y_pred(valid);
+mse = mean((y_true - y_pred).^2);
+ss_res = sum((y_true - y_pred).^2);
+ss_tot = sum((y_true - mean(y_true)).^2);
+if ss_tot == 0
+    r2 = NaN;
+else
+    r2 = 1 - ss_res/ss_tot;
+end
+end
 
+function [train_data, test_data, info] = add_actor_contrast(train_data, test_data)
+self_only = train_data.PlayBout == 1 & ...
+    train_data.SelfBool == 1 & train_data.OtherBool == 0;
+other_only = train_data.PlayBout == 1 & ...
+    train_data.SelfBool == 0 & train_data.OtherBool == 1;
+info.n_self = nnz(self_only);
+info.n_other = nnz(other_only);
+info.valid = info.n_self > 0 && info.n_other > 0;
+if info.valid
+    denominator = info.n_self + info.n_other;
+    info.self_weight = info.n_other / denominator;
+    info.other_weight = -info.n_self / denominator;
+else
+    info.self_weight = NaN;
+    info.other_weight = NaN;
+end
+train_data.ActorContrast = actor_contrast_values( ...
+    train_data, info.self_weight, info.other_weight);
+test_data.ActorContrast = actor_contrast_values( ...
+    test_data, info.self_weight, info.other_weight);
+end
 
+function contrast = actor_contrast_values(data, self_weight, other_weight)
+contrast = zeros(height(data),1);
+if ~isfinite(self_weight) || ~isfinite(other_weight)
+    contrast(:) = NaN;
+    return
+end
+self_only = data.PlayBout == 1 & data.SelfBool == 1 & data.OtherBool == 0;
+other_only = data.PlayBout == 1 & data.SelfBool == 0 & data.OtherBool == 1;
+contrast(self_only) = self_weight;
+contrast(other_only) = other_weight;
+end
+
+function state = actor_state_code(data)
+state = ones(height(data),1); % 1: non-play
+in_play = data.PlayBout == 1;
+self_active = data.SelfBool == 1;
+other_active = data.OtherBool == 1;
+state(in_play & ~self_active & ~other_active) = 2; % play, neither active
+state(in_play & self_active & ~other_active) = 3;  % self only
+state(in_play & ~self_active & other_active) = 4;  % other only
+state(in_play & self_active & other_active) = 5;   % simultaneous
+end
+
+function [sampled_indices, n_per_state] = balanced_state_sample( ...
+    candidate_indices, state, states_required, group_ids)
+state_representatives = cell(numel(states_required),1);
+for state_index = 1:numel(states_required)
+    value = states_required(state_index);
+    state_pool = candidate_indices(state(candidate_indices) == value);
+    state_groups = unique(group_ids(state_pool));
+    representatives = nan(numel(state_groups),1);
+    for group_index = 1:numel(state_groups)
+        group_pool = state_pool(group_ids(state_pool) == state_groups(group_index));
+        representatives(group_index) = group_pool(randi(numel(group_pool)));
+    end
+    state_representatives{state_index} = representatives;
+end
+n_per_state = min(cellfun(@numel, state_representatives));
+if isempty(n_per_state) || n_per_state < 2
+    sampled_indices = [];
+    n_per_state = 0;
+    return
+end
+sampled_indices = [];
+for state_index = 1:numel(states_required)
+    pool = state_representatives{state_index};
+    selected = pool(randperm(numel(pool), n_per_state));
+    sampled_indices = [sampled_indices; selected(:)]; %#ok<AGROW>
+end
+sampled_indices = sampled_indices(randperm(numel(sampled_indices)));
+end
+
+function [p_value, t_stat, mean_difference] = corrected_cv_ttest( ...
+    differences, test_train_ratio)
+differences = differences(isfinite(differences));
+n = numel(differences);
+mean_difference = mean(differences);
+if n < 2 || ~isfinite(test_train_ratio)
+    p_value = NaN;
+    t_stat = NaN;
+    return
+end
+corrected_variance = (1/n + test_train_ratio) * var(differences, 0);
+if corrected_variance == 0
+    if mean_difference == 0
+        t_stat = 0;
+        p_value = 1;
+        return
+    end
+    t_stat = sign(mean_difference) * Inf;
+else
+    t_stat = mean_difference / sqrt(corrected_variance);
+end
+p_value = 2 * tcdf(-abs(t_stat), n - 1);
+end
 
