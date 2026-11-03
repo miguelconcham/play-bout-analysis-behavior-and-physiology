@@ -47,11 +47,15 @@ It produces:
   are permuted only within the same target actor and session.
 - Post-offset versus pre-onset baseline tests separately for self and other.
   Sign flips are clustered by target actor and session.
+- Additional post-offset figures with pointwise confidence ribbons from an
+  actor-session cluster bootstrap. These do not replace the wrapped baseline
+  figures or the permutation tests.
 - Window-level and bin-wise CSV tables. Bin-wise tables include max-T
   family-wise corrected p-values.
 
 The analysis output and figures are written only to the separate actor-pipeline
-folder above.
+folder above. Figures are created with visibility on and remain open after the
+script finishes so they can be inspected directly in MATLAB.
 
 ## Check
 

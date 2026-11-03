@@ -99,6 +99,8 @@ p_value = nan(n_groups, n_targets);
 p_value_by_bin = nan(n_groups, n_post, n_targets);
 p_value_by_bin_fwer_group = nan(n_groups, n_post, n_targets);
 p_value_by_bin_fwer_target = nan(n_groups, n_post, n_targets);
+post_probability_ci_lower = nan(n_groups, n_post, n_targets);
+post_probability_ci_upper = nan(n_groups, n_post, n_targets);
 null_difference = cell(1, n_targets);
 n_events_available = zeros(1, n_targets);
 n_events_test = zeros(1, n_targets);
@@ -176,6 +178,36 @@ for target_n = 1:n_targets
         (1 + sum(bsxfun(@ge, null_max_target, ...
         abs(reshape(observed_by_bin(:, :, target_n), 1, []))), 1)) / ...
         (settings.n_permutations + 1), n_groups, n_post);
+
+    % Resample complete actor-session clusters while retaining every event
+    % in a sampled cluster. The resulting pointwise interval describes
+    % uncertainty in the observed post-offset mean, not the permutation null.
+    rng_after_permutations = rng;
+    bootstrap_seed = mod(settings.bootstrap_seed + target_n - 1, 2^32);
+    rng(bootstrap_seed, 'twister');
+    [~, event_stratum] = ismember( ...
+        included_stratum_index, included_strata);
+    post_matrix = reshape(target_groups(:, :, post_index), ...
+        n_events_test(target_n), n_groups * n_post);
+    bootstrap_probability = nan(settings.n_bootstraps, ...
+        n_groups * n_post);
+    for bootstrap_n = 1:settings.n_bootstraps
+        sampled_strata = randi(numel(included_strata), ...
+            numel(included_strata), 1);
+        stratum_counts = accumarray(sampled_strata, 1, ...
+            [numel(included_strata), 1]);
+        event_weights = stratum_counts(event_stratum);
+        bootstrap_probability(bootstrap_n, :) = ...
+            (event_weights.' * post_matrix) / sum(event_weights);
+    end
+    tail_probability = (1 - settings.confidence_level) / 2;
+    post_probability_ci_lower(:, :, target_n) = reshape( ...
+        empirical_quantile(bootstrap_probability, tail_probability), ...
+        n_groups, n_post);
+    post_probability_ci_upper(:, :, target_n) = reshape( ...
+        empirical_quantile(bootstrap_probability, 1 - tail_probability), ...
+        n_groups, n_post);
+    rng(rng_after_permutations);
 end
 
 result = struct();
@@ -202,6 +234,11 @@ result.observed_difference_by_bin = observed_by_bin;
 result.p_value_by_bin = p_value_by_bin;
 result.p_value_by_bin_fwer_group = p_value_by_bin_fwer_group;
 result.p_value_by_bin_fwer_target = p_value_by_bin_fwer_target;
+result.post_probability_ci_lower = post_probability_ci_lower;
+result.post_probability_ci_upper = post_probability_ci_upper;
+result.confidence_level = settings.confidence_level;
+result.n_bootstraps = settings.n_bootstraps;
+result.bootstrap_seed = settings.bootstrap_seed;
 result.null_difference = null_difference;
 result.n_events_available = n_events_available;
 result.n_events_test = n_events_test;
@@ -212,11 +249,15 @@ result.random_seed = settings.random_seed;
 result.bin_significance_alpha = 0.05;
 result.test_description = [ ...
     'Two-sided actor-session-cluster sign-flip test of post-offset minus baseline'];
+result.confidence_interval_description = [ ...
+    'Pointwise percentile interval from actor-session cluster bootstrap'];
 end
 
 function settings = baseline_settings(overrides)
 settings = struct('relation', 'self', 'pre_average_window', [], ...
-    'n_permutations', 10000, 'random_seed', 1);
+    'n_permutations', 10000, 'random_seed', 1, ...
+    'n_bootstraps', 1000, 'bootstrap_seed', 2, ...
+    'confidence_level', 0.95);
 names = fieldnames(overrides);
 for field_n = 1:numel(names)
     if ~isfield(settings, names{field_n})
@@ -250,6 +291,39 @@ if ~isnumeric(settings.random_seed) || ...
     error('compare_actor_behavior_baseline_probability:Seed', ...
         'random_seed must be an integer from 0 through 2^32 - 1.');
 end
+if ~isnumeric(settings.n_bootstraps) || ...
+        ~isscalar(settings.n_bootstraps) || ...
+        ~isfinite(settings.n_bootstraps) || settings.n_bootstraps < 1 || ...
+        settings.n_bootstraps ~= round(settings.n_bootstraps)
+    error('compare_actor_behavior_baseline_probability:Bootstraps', ...
+        'n_bootstraps must be a positive integer.');
+end
+if ~isnumeric(settings.bootstrap_seed) || ...
+        ~isscalar(settings.bootstrap_seed) || ...
+        ~isfinite(settings.bootstrap_seed) || settings.bootstrap_seed < 0 || ...
+        settings.bootstrap_seed > 2^32 - 1 || ...
+        settings.bootstrap_seed ~= round(settings.bootstrap_seed)
+    error('compare_actor_behavior_baseline_probability:BootstrapSeed', ...
+        'bootstrap_seed must be an integer from 0 through 2^32 - 1.');
+end
+if ~isnumeric(settings.confidence_level) || ...
+        ~isscalar(settings.confidence_level) || ...
+        ~isfinite(settings.confidence_level) || ...
+        settings.confidence_level <= 0 || settings.confidence_level >= 1
+    error('compare_actor_behavior_baseline_probability:ConfidenceLevel', ...
+        'confidence_level must be strictly between zero and one.');
+end
+end
+
+function output = empirical_quantile(values, probability)
+values = sort(values, 1);
+n = size(values, 1);
+position = 1 + (n - 1) * probability;
+lower_index = floor(position);
+upper_index = ceil(position);
+fraction = position - lower_index;
+output = (1 - fraction) * values(lower_index, :) + ...
+    fraction * values(upper_index, :);
 end
 
 function [window, index] = resolve_pre_window(requested, pre_lag, pre_index)

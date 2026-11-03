@@ -32,7 +32,7 @@ save(analysis_file, 'analysis', '-v7.3');
 
 %% Equal actor-session-weight heatmaps
 for target_n = 1:numel(analysis.target_behaviors)
-    figure_handle = figure('Visible', 'off', 'Color', 'w', ...
+    figure_handle = figure('Visible', 'on', 'Color', 'w', ...
         'Position', [100 100 1200 700]);
     maps = { ...
         reshape(analysis.mean_stratum_self(:, target_n, :), ...
@@ -64,7 +64,6 @@ for target_n = 1:numel(analysis.target_behaviors)
         ['actor_behavior_probability_', target_tag]);
     savefig(figure_handle, [figure_base, '.fig']);
     saveas(figure_handle, [figure_base, '.png']);
-    close(figure_handle);
 end
 
 %% Compare two target behaviors separately for self and other
@@ -104,7 +103,9 @@ for relation_n = 1:numel(relations)
     relation = relations{relation_n};
     settings = struct('relation', relation, ...
         'pre_average_window', [], ...
-        'n_permutations', 10000, 'random_seed', 1);
+        'n_permutations', 10000, 'random_seed', 1, ...
+        'n_bootstraps', 1000, 'bootstrap_seed', 2, ...
+        'confidence_level', 0.95);
     baseline = compare_actor_behavior_baseline_probability( ...
         loaded.recordings, parameters.target_behaviors, settings);
     baseline_comparisons.(relation) = baseline;
@@ -118,6 +119,15 @@ writetable(baseline_summary_table_all, fullfile(parameters.output_folder, ...
     'actor_baseline_comparison.csv'));
 writetable(baseline_bin_table_all, fullfile(parameters.output_folder, ...
     'actor_baseline_comparison_binwise.csv'));
+
+%% Post-offset means with pointwise cluster-bootstrap confidence intervals
+% These are additional figures. The original wrapped before/after figures
+% above are retained unchanged.
+for relation_n = 1:numel(relations)
+    plot_baseline_confidence_intervals( ...
+        baseline_comparisons.(relations{relation_n}), ...
+        parameters.output_folder);
+end
 
 save(analysis_file, 'pair_comparisons', 'pair_summary_table_all', ...
     'pair_bin_table_all', 'baseline_comparisons', ...
@@ -154,7 +164,7 @@ output = table(repmat({comparison.relation}, n_groups * n_bins, 1), ...
 end
 
 function plot_pair_comparison(comparison, output_folder)
-figure_handle = figure('Visible', 'off', 'Color', 'w', ...
+figure_handle = figure('Visible', 'on', 'Color', 'w', ...
     'Position', [100 100 900 1000]);
 colors = lines(2);
 for group_n = 1:numel(comparison.group_names)
@@ -192,7 +202,6 @@ base = fullfile(output_folder, sprintf( ...
     'actor_target_pair_%s_%s', pair_tag, comparison.relation));
 savefig(figure_handle, [base, '.fig']);
 saveas(figure_handle, [base, '.png']);
-close(figure_handle);
 end
 
 function output = baseline_summary_table(result)
@@ -262,7 +271,7 @@ end
 function plot_baseline_comparison(result, output_folder)
 n_groups = numel(result.group_names);
 n_targets = numel(result.target_names);
-figure_handle = figure('Visible', 'off', 'Color', 'w', ...
+figure_handle = figure('Visible', 'on', 'Color', 'w', ...
     'Position', [80 80 1100 900]);
 offset_x = result.wrapped_plot_time(result.wrap_index(end));
 [tick_positions, tick_labels] = wrapped_axis_ticks( ...
@@ -308,7 +317,59 @@ base = fullfile(output_folder, ...
     ['actor_baseline_probability_', result.relation]);
 savefig(figure_handle, [base, '.fig']);
 saveas(figure_handle, [base, '.png']);
-close(figure_handle);
+end
+
+function plot_baseline_confidence_intervals(result, output_folder)
+n_groups = numel(result.group_names);
+n_targets = numel(result.target_names);
+confidence_percent = 100 * result.confidence_level;
+line_color = [0 0.4470 0.7410];
+shade_color = 0.75 + 0.25 * line_color;
+figure_handle = figure('Visible', 'on', 'Color', 'w', ...
+    'Position', [80 80 1100 900]);
+for group_n = 1:n_groups
+    for target_n = 1:n_targets
+        subplot(n_groups, n_targets, ...
+            (group_n - 1) * n_targets + target_n);
+        hold on
+        time = result.post_time;
+        curve = reshape(result.probability( ...
+            group_n, target_n, result.post_index), 1, []);
+        lower = reshape(result.post_probability_ci_lower( ...
+            group_n, :, target_n), 1, []);
+        upper = reshape(result.post_probability_ci_upper( ...
+            group_n, :, target_n), 1, []);
+        fill([time, fliplr(time)], [lower, fliplr(upper)], ...
+            shade_color, 'EdgeColor', 'none', 'FaceAlpha', 0.45, ...
+            'HandleVisibility', 'off');
+        plot(time, curve, 'Color', line_color, 'LineWidth', 1.5);
+        yline(result.pre_probability(group_n, target_n), ':', ...
+            'Baseline');
+        significant = result.p_value_by_bin_fwer_target( ...
+            group_n, :, target_n) < 0.05;
+        if any(significant)
+            plot(time(significant), 0.97 * ones(1, sum(significant)), ...
+                'k.', 'MarkerSize', 8);
+        end
+        xlim(time([1 end]));
+        ylim([0 1]);
+        title(sprintf('%s / %s', ...
+            result.target_names{target_n}, result.group_names{group_n}));
+        if target_n == 1
+            ylabel('Probability');
+        end
+        if group_n == n_groups
+            xlabel('Time after target offset (s)');
+        end
+    end
+end
+sgtitle(sprintf(['%s behavior: post-offset mean and %.0f%% pointwise ' ...
+    'actor-session bootstrap CI (N=%d)'], ...
+    result.relation, confidence_percent, result.n_bootstraps));
+base = fullfile(output_folder, ...
+    ['actor_baseline_probability_ci_', result.relation]);
+savefig(figure_handle, [base, '.fig']);
+saveas(figure_handle, [base, '.png']);
 end
 
 function [positions, labels] = wrapped_axis_ticks( ...
