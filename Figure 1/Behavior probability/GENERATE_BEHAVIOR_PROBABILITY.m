@@ -6,6 +6,12 @@ function recording = GENERATE_BEHAVIOR_PROBABILITY( ...
 % offset. self_behavior describes the target performer; partner_behavior
 % describes the other animal(s) in that Partners session. Both arrays are
 % N target events x N behavior types x N time bins.
+%
+% self_behavior_wrapped and partner_behavior_wrapped use a second axis:
+% real-time samples from -T to just before onset, then wrapped_bins
+% samples evenly spaced from onset through offset, then real-time samples
+% from just after offset through offset+T. wrapped_in_session marks which
+% of those samples fall inside the Partners session.
 
 if nargin < 2
     focal_animal = '';
@@ -65,6 +71,9 @@ valid_event = ~ismember(behavior.Animal, ...
     ismember(behavior.Type2, options.all_behaviors);
 n_behaviors = numel(options.all_behaviors);
 n_time = numel(options.time);
+n_pre = numel(options.pre_lag);
+n_post = numel(options.post_lag);
+n_wrapped = n_pre + options.wrapped_bins + n_post;
 
 empty_session = struct( ...
     'play_session_number', [], ...
@@ -73,6 +82,9 @@ empty_session = struct( ...
     'participant_animals', {{}}, ...
     'self_behavior', false(0, n_behaviors, n_time), ...
     'partner_behavior', false(0, n_behaviors, n_time), ...
+    'self_behavior_wrapped', false(0, n_behaviors, n_wrapped), ...
+    'partner_behavior_wrapped', false(0, n_behaviors, n_wrapped), ...
+    'wrapped_in_session', false(0, n_wrapped), ...
     'target_behavior', {{}}, ...
     'target_actor', {{}}, ...
     'target_actor_is_focal', false(0, 1), ...
@@ -106,6 +118,9 @@ for session_n = 1:size(session_ranges, 1)
     n_targets = numel(target_rows);
     self_behavior = false(n_targets, n_behaviors, n_time);
     partner_behavior = false(n_targets, n_behaviors, n_time);
+    self_behavior_wrapped = false(n_targets, n_behaviors, n_wrapped);
+    partner_behavior_wrapped = false(n_targets, n_behaviors, n_wrapped);
+    wrapped_in_session = false(n_targets, n_wrapped);
     partner_actors = cell(n_targets, 1);
 
     for target_n = 1:n_targets
@@ -113,9 +128,16 @@ for session_n = 1:size(session_ranges, 1)
         target_actor = behavior.Animal{target_row};
         other_actors = participants(~ismember(participants, target_actor));
         partner_actors{target_n} = other_actors(:).';
-        absolute_time = behavior.End(target_row) + options.time;
+        onset = behavior.Start(target_row);
+        offset = behavior.End(target_row);
+        absolute_time = offset + options.time;
         sampled_in_session = absolute_time >= session_start & ...
             absolute_time <= session_end;
+        wrapped_time = [onset + options.pre_lag, ...
+            onset + (offset - onset) * options.wrap_fraction, ...
+            offset + options.post_lag];
+        wrapped_in_session(target_n, :) = ...
+            wrapped_time >= session_start & wrapped_time <= session_end;
 
         for behavior_n = 1:n_behaviors
             type_mask = ismember(behavior.Type2, ...
@@ -132,6 +154,14 @@ for session_n = 1:size(session_ranges, 1)
                 reshape(self_occupancy, 1, 1, n_time);
             partner_behavior(target_n, behavior_n, :) = ...
                 reshape(partner_occupancy, 1, 1, n_time);
+            self_wrapped = interval_occupancy( ...
+                wrapped_time, behavior, self_rows);
+            partner_wrapped = interval_occupancy( ...
+                wrapped_time, behavior, other_rows);
+            self_behavior_wrapped(target_n, behavior_n, :) = ...
+                reshape(self_wrapped, 1, 1, n_wrapped);
+            partner_behavior_wrapped(target_n, behavior_n, :) = ...
+                reshape(partner_wrapped, 1, 1, n_wrapped);
         end
     end
 
@@ -141,6 +171,9 @@ for session_n = 1:size(session_ranges, 1)
     sessions(session_n).participant_animals = participants(:).';
     sessions(session_n).self_behavior = self_behavior;
     sessions(session_n).partner_behavior = partner_behavior;
+    sessions(session_n).self_behavior_wrapped = self_behavior_wrapped;
+    sessions(session_n).partner_behavior_wrapped = partner_behavior_wrapped;
+    sessions(session_n).wrapped_in_session = wrapped_in_session;
     sessions(session_n).target_behavior = behavior.Type2(target_rows);
     sessions(session_n).target_actor = behavior.Animal(target_rows);
     sessions(session_n).target_actor_is_focal = ...
@@ -158,6 +191,15 @@ recording.behavior_types = options.all_behaviors;
 recording.time = options.time;
 recording.time_window = options.time_window;
 recording.bin_size = options.bin_size;
+recording.flank_seconds = options.flank_seconds;
+recording.wrapped_bins = options.wrapped_bins;
+recording.pre_lag = options.pre_lag;
+recording.post_lag = options.post_lag;
+recording.wrap_fraction = options.wrap_fraction;
+recording.wrapped_plot_time = options.wrapped_plot_time;
+recording.pre_index = 1:n_pre;
+recording.wrap_index = n_pre + (1:options.wrapped_bins);
+recording.post_index = n_pre + options.wrapped_bins + (1:n_post);
 recording.alignment = options.alignment;
 recording.self_definition = options.self_definition;
 recording.partner_definition = options.partner_definition;

@@ -6,6 +6,9 @@
 % session:
 %   self_behavior    = target events x behavior types x time bins
 %   partner_behavior = target events x behavior types x time bins
+% The same events are also saved on a time-wrapped axis: T seconds of real
+% time before onset, wrapped_bins samples from onset through offset, and
+% T seconds of real time after offset.
 %
 % "Self" is the animal that performed that row's target behavior, even
 % when the target performer is the partner rather than the focal animal.
@@ -30,12 +33,18 @@ bin_size = 0.01;
 % Gray analysis area used by both the window-average and bin-wise tests.
 % Time zero is displayed but excluded from inference.
 comparison_window = [0 2];
+% Before-versus-after test. T is real time before onset and after offset.
+% The bout itself is resampled into wrapped_bins from onset through offset.
+flank_seconds = 2;
+wrapped_bins = 20;
 
 analysis_parameters = behavior_probability_options(struct( ...
     'target_behaviors', {target_behaviors}, ...
     'time_window', time_window, ...
     'bin_size', bin_size, ...
-    'comparison_window', comparison_window));
+    'comparison_window', comparison_window, ...
+    'flank_seconds', flank_seconds, ...
+    'wrapped_bins', wrapped_bins));
 
 % Leave animals_to_run empty to process every behavior file.
 animals_to_run = {};
