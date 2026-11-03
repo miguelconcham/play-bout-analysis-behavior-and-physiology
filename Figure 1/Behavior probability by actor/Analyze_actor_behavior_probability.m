@@ -264,16 +264,23 @@ n_groups = numel(result.group_names);
 n_targets = numel(result.target_names);
 figure_handle = figure('Visible', 'off', 'Color', 'w', ...
     'Position', [80 80 1100 900]);
+offset_x = result.wrapped_plot_time(result.wrap_index(end));
+[tick_positions, tick_labels] = wrapped_axis_ticks( ...
+    result.wrapped_plot_time, result.pre_index, result.wrap_index, ...
+    result.post_index);
 for group_n = 1:n_groups
     for target_n = 1:n_targets
         subplot(n_groups, n_targets, ...
             (group_n - 1) * n_targets + target_n);
         hold on
+        baseline_window = result.pre_average_window;
+        patch(baseline_window([1 2 2 1]), [0 0 1 1], ...
+            [0.85 0.90 0.95], 'EdgeColor', 'none', ...
+            'FaceAlpha', 0.35, 'HandleVisibility', 'off');
         curve = reshape(result.probability(group_n, target_n, :), 1, []);
         plot(result.wrapped_plot_time, curve, 'LineWidth', 1.5);
         yline(result.pre_probability(group_n, target_n), ':', ...
             'Baseline');
-        offset_x = result.wrapped_plot_time(result.wrap_index(end));
         plot([0 0], [0 1], 'k--');
         plot([offset_x offset_x], [0 1], 'k--');
         significant = result.p_value_by_bin_fwer_target( ...
@@ -283,6 +290,9 @@ for group_n = 1:n_groups
                 0.97 * ones(1, sum(significant)), 'k.', 'MarkerSize', 8);
         end
         ylim([0 1]);
+        xlim(result.wrapped_plot_time([1 end]));
+        xticks(tick_positions);
+        xticklabels(tick_labels);
         title(sprintf('%s / %s; Holm p=%.4g', ...
             result.target_names{target_n}, result.group_names{group_n}, ...
             result.p_value_holm(group_n, target_n)));
@@ -291,7 +301,7 @@ for group_n = 1:n_groups
         end
     end
 end
-xlabel('Wrapped time (dashed lines mark target onset and offset)');
+xlabel('Time before onset / after offset (s)');
 sgtitle(sprintf('%s behavior: post-offset versus pre-onset baseline', ...
     result.relation));
 base = fullfile(output_folder, ...
@@ -299,4 +309,31 @@ base = fullfile(output_folder, ...
 savefig(figure_handle, [base, '.fig']);
 saveas(figure_handle, [base, '.png']);
 close(figure_handle);
+end
+
+function [positions, labels] = wrapped_axis_ticks( ...
+    plot_time, pre_index, wrap_index, post_index)
+% Label only real-time flanks; the time-wrapped target has boundary labels.
+offset_x = plot_time(wrap_index(end));
+pre_seconds = plot_time(pre_index);
+post_seconds = plot_time(post_index) - offset_x;
+flank_seconds = max(abs([pre_seconds(:); post_seconds(:)]));
+if flank_seconds >= 1
+    flank_ticks = 1:floor(flank_seconds);
+else
+    flank_ticks = flank_seconds;
+end
+pre_ticks = -flank_ticks(end:-1:1);
+post_ticks = flank_ticks;
+positions = [pre_ticks, 0, offset_x, offset_x + post_ticks];
+labels = cell(1, numel(positions));
+for tick_n = 1:numel(pre_ticks)
+    labels{tick_n} = sprintf('%g s', pre_ticks(tick_n));
+end
+labels{numel(pre_ticks) + 1} = 'Onset';
+labels{numel(pre_ticks) + 2} = 'Offset';
+for tick_n = 1:numel(post_ticks)
+    labels{numel(pre_ticks) + 2 + tick_n} = ...
+        sprintf('+%g s', post_ticks(tick_n));
+end
 end
