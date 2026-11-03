@@ -680,10 +680,17 @@ balanced_actor.train_indices = cell(k,n_balance_repeats);
 balanced_actor.test_indices = cell(k,n_balance_repeats);
 balanced_actor.n_repeats = n_balance_repeats;
 
+total_balance_iterations = k * n_balance_repeats;
+fprintf('\nStarting balanced actor analysis: %d folds x %d repeats = %d iterations.\n', ...
+    k, n_balance_repeats, total_balance_iterations);
 for fold = 1:k
     trainCandidates = find(fold_assignment ~= fold);
     testCandidates = find(fold_assignment == fold);
     for repeat = 1:n_balance_repeats
+        completed_iterations = (fold - 1) * n_balance_repeats + repeat;
+        fprintf('Balanced actor analysis: fold %d/%d, repeat %d/%d (%d/%d, %.1f%%)\n', ...
+            fold, k, repeat, n_balance_repeats, completed_iterations, ...
+            total_balance_iterations, 100 * completed_iterations / total_balance_iterations);
         [trainBalanced, nTrain] = balanced_state_sample( ...
             trainCandidates, actor_state, states_present, regressor_table.BoutID);
         [testBalanced, nTest] = balanced_state_sample( ...
@@ -720,6 +727,8 @@ for fold = 1:k
             score_lme(actorWithoutOtherModel, testData);
     end
 end
+fprintf('Balanced actor analysis complete: %d/%d iterations (100%%).\n\n', ...
+    total_balance_iterations, total_balance_iterations);
 
 balanced_actor.delta_r2_joint = balanced_actor.r2_full - balanced_actor.r2_base;
 balanced_actor.delta_r2_self = balanced_actor.r2_full - balanced_actor.r2_without_self;
