@@ -4,9 +4,9 @@
 % %% Session spectrum and coherence
 %     opens the envelope-power figure and the envelope-LFP coherence figure
 % %% Play onset
-%     opens four figures: Hilbert envelope and spectrogram power, each for
-%     the implanted animal and for the playing partner. Every behavior is
-%     its own panel.
+%     opens, for the envelope and for spectrogram power, and for the
+%     implanted animal and the partner: one figure with a panel per
+%     behavior, and one figure that stacks those behaviors above their mean.
 %
 % The two sections below only call the other section scripts. Open
 % Analyze_theta_envelope_session.m or Analyze_theta_envelope_onset.m to run

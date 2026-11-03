@@ -2,16 +2,19 @@
 % Theta amplitude aligned to each behavior, not to a play bout.
 %
 % Run Estimate_theta_envelope_delta.m first. Then run this file from the top,
-% or run the sections in order. Each plotting section opens one figure, with
-% one panel per behavior.
+% or run the sections in order. Each plotting section opens two figures.
+% The first has one panel per behavior. The second stacks those behaviors in
+% one image, with the mean and its 95% confidence interval underneath.
 %
-% Play and non-play behaviors are separate panels. The implanted animal and
-% the playing partner are separate figures. Hilbert envelope and spectrogram
-% power are separate figures.
+% Play and non-play behaviors stay apart. The implanted animal and the
+% playing partner are separate sections. Hilbert envelope and spectrogram
+% power are separate sections.
 %
-% Gray line: one animal. Black line: mean of animals with at least 15 onsets
-% of that behavior. Blue band: -2 to 0 s. Red line: behavior onset.
-% The p-value in each panel is the 2-3 Hz onset-shift test for that panel.
+% In the panels, gray is one animal and black is the mean of animals with at
+% least 15 onsets of that behavior. The blue band is -2 to 0 s and the red
+% line is behavior onset. The p-value is the 2-3 Hz onset-shift test.
+% In the stack, each row is that black line. Below it, play and other are
+% averaged across behaviors.
 
 %% Paths
 this_file = mfilename('fullpath');
@@ -63,15 +66,19 @@ end
 
 %% Hilbert envelope, implanted animal
 theta_envelope_plot_aligned(grouped, 'self', 'envelope')
+theta_envelope_plot_stack(grouped, 'self', 'envelope')
 
 %% Hilbert envelope, playing partner
 theta_envelope_plot_aligned(grouped, 'partner', 'envelope')
+theta_envelope_plot_stack(grouped, 'partner', 'envelope')
 
 %% Spectrogram power, implanted animal
 theta_envelope_plot_aligned(grouped, 'self', 'power')
+theta_envelope_plot_stack(grouped, 'self', 'power')
 
 %% Spectrogram power, playing partner
 theta_envelope_plot_aligned(grouped, 'partner', 'power')
+theta_envelope_plot_stack(grouped, 'partner', 'power')
 
 %% Save animal table
 rows = cell(0, 8);
