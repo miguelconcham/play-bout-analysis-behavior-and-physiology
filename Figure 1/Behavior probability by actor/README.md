@@ -55,7 +55,9 @@ It produces:
 
 The analysis output and figures are written only to the separate actor-pipeline
 folder above. Figures are created with visibility on and remain open after the
-script finishes so they can be inspected directly in MATLAB.
+script finishes so they can be inspected directly in MATLAB. Every figure
+handle has a unique, filesystem-safe `Name`; the automatic `.fig` and `.png`
+filenames use that same name.
 
 ## Check
 

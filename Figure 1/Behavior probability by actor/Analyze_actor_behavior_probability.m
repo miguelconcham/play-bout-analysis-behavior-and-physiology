@@ -32,7 +32,11 @@ save(analysis_file, 'analysis', '-v7.3');
 
 %% Equal actor-session-weight heatmaps
 for target_n = 1:numel(analysis.target_behaviors)
+    target_tag = safe_figure_tag(analysis.target_behaviors{target_n});
+    figure_name = sprintf('actor_probability_target_%02d_%s', ...
+        target_n, target_tag);
     figure_handle = figure('Visible', 'on', 'Color', 'w', ...
+        'Name', figure_name, 'NumberTitle', 'off', ...
         'Position', [100 100 1200 700]);
     maps = { ...
         reshape(analysis.mean_stratum_self(:, target_n, :), ...
@@ -58,10 +62,7 @@ for target_n = 1:numel(analysis.target_behaviors)
     sgtitle(sprintf('%s: %d events in %d actor-session strata', ...
         analysis.target_behaviors{target_n}, analysis.n_events(target_n), ...
         analysis.n_strata_with_target(target_n)));
-    target_tag = lower(regexprep(analysis.target_behaviors{target_n}, ...
-        '[^A-Za-z0-9]+', '_'));
-    figure_base = fullfile(parameters.output_folder, ...
-        ['actor_behavior_probability_', target_tag]);
+    figure_base = fullfile(parameters.output_folder, figure_name);
     savefig(figure_handle, [figure_base, '.fig']);
     saveas(figure_handle, [figure_base, '.png']);
 end
@@ -164,7 +165,13 @@ output = table(repmat({comparison.relation}, n_groups * n_bins, 1), ...
 end
 
 function plot_pair_comparison(comparison, output_folder)
+pair_tag = sprintf('%s_vs_%s', ...
+    safe_figure_tag(comparison.behavior_pair{1}), ...
+    safe_figure_tag(comparison.behavior_pair{2}));
+figure_name = sprintf('actor_target_pair_%s_%s', ...
+    pair_tag, safe_figure_tag(comparison.relation));
 figure_handle = figure('Visible', 'on', 'Color', 'w', ...
+    'Name', figure_name, 'NumberTitle', 'off', ...
     'Position', [100 100 900 1000]);
 colors = lines(2);
 for group_n = 1:numel(comparison.group_names)
@@ -197,9 +204,7 @@ end
 xlabel('Time from target behavior offset (s)');
 sgtitle(sprintf('%s behavior; %d paired actor-session strata', ...
     comparison.relation, comparison.n_eligible_strata));
-pair_tag = sprintf('%s_vs_%s', comparison.behavior_pair{:});
-base = fullfile(output_folder, sprintf( ...
-    'actor_target_pair_%s_%s', pair_tag, comparison.relation));
+base = fullfile(output_folder, figure_name);
 savefig(figure_handle, [base, '.fig']);
 saveas(figure_handle, [base, '.png']);
 end
@@ -271,7 +276,10 @@ end
 function plot_baseline_comparison(result, output_folder)
 n_groups = numel(result.group_names);
 n_targets = numel(result.target_names);
+figure_name = ['actor_baseline_wrapped_', ...
+    safe_figure_tag(result.relation)];
 figure_handle = figure('Visible', 'on', 'Color', 'w', ...
+    'Name', figure_name, 'NumberTitle', 'off', ...
     'Position', [80 80 1100 900]);
 offset_x = result.wrapped_plot_time(result.wrap_index(end));
 [tick_positions, tick_labels] = wrapped_axis_ticks( ...
@@ -313,8 +321,7 @@ end
 xlabel('Time before onset / after offset (s)');
 sgtitle(sprintf('%s behavior: post-offset versus pre-onset baseline', ...
     result.relation));
-base = fullfile(output_folder, ...
-    ['actor_baseline_probability_', result.relation]);
+base = fullfile(output_folder, figure_name);
 savefig(figure_handle, [base, '.fig']);
 saveas(figure_handle, [base, '.png']);
 end
@@ -325,7 +332,10 @@ n_targets = numel(result.target_names);
 confidence_percent = 100 * result.confidence_level;
 line_color = [0 0.4470 0.7410];
 shade_color = 0.75 + 0.25 * line_color;
+figure_name = ['actor_postoffset_ci_', ...
+    safe_figure_tag(result.relation)];
 figure_handle = figure('Visible', 'on', 'Color', 'w', ...
+    'Name', figure_name, 'NumberTitle', 'off', ...
     'Position', [80 80 1100 900]);
 for group_n = 1:n_groups
     for target_n = 1:n_targets
@@ -366,10 +376,17 @@ end
 sgtitle(sprintf(['%s behavior: post-offset mean and %.0f%% pointwise ' ...
     'actor-session bootstrap CI (N=%d)'], ...
     result.relation, confidence_percent, result.n_bootstraps));
-base = fullfile(output_folder, ...
-    ['actor_baseline_probability_ci_', result.relation]);
+base = fullfile(output_folder, figure_name);
 savefig(figure_handle, [base, '.fig']);
 saveas(figure_handle, [base, '.png']);
+end
+
+function tag = safe_figure_tag(value)
+tag = lower(regexprep(char(string(value)), '[^A-Za-z0-9]+', '_'));
+tag = regexprep(tag, '^_+|_+$', '');
+if isempty(tag)
+    tag = 'unnamed';
+end
 end
 
 function [positions, labels] = wrapped_axis_ticks( ...
