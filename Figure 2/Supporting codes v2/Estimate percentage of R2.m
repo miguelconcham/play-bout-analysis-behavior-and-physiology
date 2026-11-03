@@ -45,6 +45,7 @@ rng(random_seed, 'twister');
 k_requested = 30;
 n_balance_repeats = 10;
 low_freq_bool = true;
+use_bout_grouped_folds = false; % false reproduces the previous observation-level CV.
 frequency_band_names = {'delta','theta'}; % Active input contains delta/theta.
 model_code = 'play_bout_actor_contrast'; % Short description used in output filename.
 run_started_at = datetime('now', 'TimeZone', 'Europe/Berlin', ...
@@ -552,9 +553,24 @@ required_variables = unique([predictors, {'Power','SelfBool','OtherBool','PlayBo
 regressor_table(any(ismissing(regressor_table(:,required_variables)),2),:) = [];
 
 %% 6 ESTIMATE CROSS-VALIDATED R2 CONTRIBUTIONS
-% Assign folds by bout, not by individual time bin. This prevents adjacent
-% and autocorrelated bins from the same bout appearing in train and test.
-[fold_assignment, k] = grouped_kfold(regressor_table.BoutID, k_requested);
+if use_bout_grouped_folds
+    % Optional stricter split: all bins and channel copies from one physical
+    % bout stay together. Keep this off while reproducing previous results.
+    [fold_assignment, k] = grouped_kfold(regressor_table.BoutID, k_requested);
+    fold_group = 'BoutID';
+    fprintf('Using physical-bout-grouped %d-fold cross-validation.\n', k);
+else
+    % Legacy split used by the previous scripts, intentionally reproduced:
+    % cvpartition is applied directly to all rows of regressor_table.
+    k = k_requested;
+    cv = cvpartition(height(regressor_table), 'KFold', k);
+    fold_assignment = zeros(height(regressor_table),1);
+    for fold = 1:k
+        fold_assignment(test(cv, fold)) = fold;
+    end
+    fold_group = 'ObservationRow';
+    fprintf('Using legacy observation-level %d-fold cross-validation.\n', k);
+end
 
 rhs = strjoin(predictors, ' + ');
 formula_full = ['Power ~ ' rhs ' + (1|Animal)'];
@@ -617,11 +633,11 @@ actor_contrast.formula = formula_actor_contrast;
 actor_contrast.definition = ...
     'Self-only=nOther/(nSelf+nOther), other-only=-nSelf/(nSelf+nOther), both/neither/non-play=0; weights estimated in each training fold.';
 
-fprintf('Full model average grouped-CV MSE: %.6f\n', avgMSE_full);
-fprintf('Full model average grouped-CV R²: %.6f\n', avgR2_full);
+fprintf('Full model average CV MSE: %.6f\n', avgMSE_full);
+fprintf('Full model average CV R²: %.6f\n', avgR2_full);
 fprintf('Actor contrast average added CV R²: %.6f\n\n', actor_contrast.avg_delta_r2);
 
-% Drop one predictor at a time using the exact same grouped folds.
+% Drop one predictor at a time using the exact same folds.
 for i = 1:numel(predictors)
     toRemove = predictors{i};
     fprintf('Testing predictor removal: %s\n', toRemove);
@@ -785,6 +801,10 @@ balanced_actor.n_bouts_train_fold_mean = ...
     mean(balanced_actor.n_bouts_train, 2, 'omitnan');
 balanced_actor.n_bouts_test_fold_mean = ...
     mean(balanced_actor.n_bouts_test, 2, 'omitnan');
+balanced_actor.n_per_state_train_fold_mean = ...
+    mean(balanced_actor.n_per_state_train, 2, 'omitnan');
+balanced_actor.n_per_state_test_fold_mean = ...
+    mean(balanced_actor.n_per_state_test, 2, 'omitnan');
 valid_actor_folds = isfinite(balanced_actor.delta_r2_self_fold_mean) & ...
     isfinite(balanced_actor.delta_r2_other_fold_mean);
 balanced_actor.n_valid_folds = nnz(valid_actor_folds);
@@ -792,9 +812,17 @@ if nnz(valid_actor_folds) >= 5
     contribution_difference = ...
         balanced_actor.delta_r2_self_fold_mean(valid_actor_folds) - ...
         balanced_actor.delta_r2_other_fold_mean(valid_actor_folds);
-    test_train_ratio = mean( ...
-        balanced_actor.n_bouts_test_fold_mean(valid_actor_folds) ./ ...
-        balanced_actor.n_bouts_train_fold_mean(valid_actor_folds), 'omitnan');
+    if use_bout_grouped_folds
+        test_train_ratio = mean( ...
+            balanced_actor.n_bouts_test_fold_mean(valid_actor_folds) ./ ...
+            balanced_actor.n_bouts_train_fold_mean(valid_actor_folds), 'omitnan');
+        comparison_unit = 'physical-bout counts';
+    else
+        test_train_ratio = mean( ...
+            balanced_actor.n_per_state_test_fold_mean(valid_actor_folds) ./ ...
+            balanced_actor.n_per_state_train_fold_mean(valid_actor_folds), 'omitnan');
+        comparison_unit = 'legacy observation-fold sample counts';
+    end
     [balanced_actor.p_self_vs_other, balanced_actor.t_self_vs_other, ...
         balanced_actor.mean_self_minus_other] = corrected_cv_ttest( ...
         contribution_difference, test_train_ratio);
@@ -803,13 +831,15 @@ else
     balanced_actor.t_self_vs_other = NaN;
     balanced_actor.mean_self_minus_other = NaN;
     warning('EstimateR2:InsufficientActorFolds', ...
-        ['Only %d grouped folds contained enough examples of every actor state. ' ...
+        ['Only %d folds contained enough examples of every actor state. ' ...
          'At least 5 are required for the corrected self-vs-other comparison.'], ...
         nnz(valid_actor_folds));
+    comparison_unit = 'not estimated';
 end
-balanced_actor.comparison_test = ...
+balanced_actor.comparison_test = sprintf( ...
     ['Nadeau-Bengio corrected paired t-test on fold-wise self-minus-other ' ...
-     'delta R2; train/test ratio uses physical-bout counts. Predictive CV evidence, not a causal test.'];
+     'delta R2; train/test ratio uses %s. Predictive CV evidence, not a causal test.'], ...
+    comparison_unit);
 
 fprintf('Balanced added CV R², self: %.6f\n', balanced_actor.avg_delta_r2_self);
 fprintf('Balanced added CV R², other: %.6f\n', balanced_actor.avg_delta_r2_other);
@@ -836,7 +866,8 @@ extendedResults.schema_version = 1;
 extendedResults.k_requested = k_requested;
 extendedResults.random_seed = random_seed;
 extendedResults.fold_assignment = fold_assignment;
-extendedResults.fold_group = 'BoutID';
+extendedResults.fold_group = fold_group;
+extendedResults.use_bout_grouped_folds = use_bout_grouped_folds;
 extendedResults.avgMSE_full = avgMSE_full;
 extendedResults.avgR2_full = avgR2_full;
 extendedResults.formula_full = formula_full;
