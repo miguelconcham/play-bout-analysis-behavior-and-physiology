@@ -55,6 +55,18 @@ model_code = regexprep(model_code, '^_+|_+$', '');
 if isempty(model_code)
     error('Model code must contain at least one letter or number.');
 end
+if low_freq_bool
+    selected_frequency_index = 1;
+    power_source = 'play_bout_onset_low_freq';
+else
+    selected_frequency_index = 2;
+    power_source = 'play_bout_onset_high_freq';
+end
+analysis_band = frequency_band_names{selected_frequency_index};
+output_file = fullfile(saving_folder, ...
+    sprintf('cvResults_%s_%s_%s.mat', analysis_band, model_code, ...
+    char(run_started_at)));
+fprintf('\nPlanned output file:\n%s\n\n', output_file);
 
 %% 1.3 LOAD STRUCTURE DATA
 disp('Loading')
@@ -71,18 +83,7 @@ disp('Loading done')
 freq_range = psth_structure(1).freq_range;
 wind_length = psth_structure(1).wind_length;
 spect_bin_size = psth_structure(1).spect_bin_size;
-if low_freq_bool
-    selected_frequency_index = 1;
-    power_source = 'play_bout_onset_low_freq';
-else
-    selected_frequency_index = 2;
-    power_source = 'play_bout_onset_high_freq';
-end
-analysis_band = frequency_band_names{selected_frequency_index};
 selected_frequency_range = freq_range{selected_frequency_index};
-output_file = fullfile(saving_folder, ...
-    sprintf('cvResults_%s_%s_%s.mat', analysis_band, model_code, ...
-    char(run_started_at)));
 
 % % for BETA AND GAMMA
 % freq_range = {[15 30],[40 90]}; 
