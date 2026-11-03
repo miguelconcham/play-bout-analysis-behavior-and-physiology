@@ -156,6 +156,7 @@ Both estimates use the same play-bout pairs (`synchronous_play_pairs.m`): good u
 | HMM post-processing | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` |
 | Manual video tracking | `manual traking/manual_traking.m` (run one section at a time; copy the final `.mat` into `Data/Traking backups/`) |
 | Binary self/partner behavior matrices around selected Type2 behavior offsets, plus a time-wrapped axis (real-time flanks around a fixed number of onset-to-offset bins), with each Partners session retained separately | `Figure 1/Behavior probability/Estimate_behavior_probability.m`, then `Analyze_behavior_probability.m` |
+| Independent target-actor behavior matrices, split into behavior by the target performer and the logical OR across every other session animal | `Figure 1/Behavior probability by actor/Estimate_actor_behavior_probability.m`, then `Analyze_actor_behavior_probability.m` |
 
 ---
 
