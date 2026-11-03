@@ -40,7 +40,8 @@ end
 disp('Updated variable list')
 disp(predictors)
 
-balance_random_seed = 1; % Applied only before Section 7 resampling.
+random_seed = 1;
+rng(random_seed, 'twister');
 k_requested = 30;
 n_balance_repeats = 10;
 low_freq_bool = true;
@@ -555,15 +556,15 @@ regressor_table(any(ismissing(regressor_table(:,required_variables)),2),:) = [];
 if use_bout_grouped_folds
     % Optional stricter split: all bins and channel copies from one physical
     % bout stay together. Keep this off while reproducing previous results.
-    rng(balance_random_seed, 'twister');
+    rng(random_seed, 'twister');
     fold_rng_state = rng;
     [fold_assignment, k] = grouped_kfold(regressor_table.BoutID, k_requested);
     fold_group = 'BoutID';
     fprintf('Using physical-bout-grouped %d-fold cross-validation.\n', k);
 else
     % Legacy split used by the previous scripts, intentionally reproduced:
-    % cvpartition is applied directly to all rows of regressor_table without
-    % resetting MATLAB's RNG, exactly as before.
+    % cvpartition is applied directly to all rows of regressor_table, as in
+    % the previous scripts. The initialized RNG makes the split repeatable.
     k = k_requested;
     fold_rng_state = rng;
     cv = cvpartition(height(regressor_table), 'KFold', k);
@@ -724,7 +725,7 @@ balanced_actor.train_indices = cell(k,n_balance_repeats);
 balanced_actor.test_indices = cell(k,n_balance_repeats);
 balanced_actor.n_repeats = n_balance_repeats;
 
-rng(balance_random_seed, 'twister');
+rng(random_seed, 'twister');
 total_balance_iterations = k * n_balance_repeats;
 fprintf('\nStarting balanced actor analysis: %d folds x %d repeats = %d iterations.\n', ...
     k, n_balance_repeats, total_balance_iterations);
@@ -868,7 +869,7 @@ cvResults.bethas_fulls_allfolds = bethas_fulls_allfolds;
 extendedResults = struct();
 extendedResults.schema_version = 1;
 extendedResults.k_requested = k_requested;
-extendedResults.balance_random_seed = balance_random_seed;
+extendedResults.random_seed = random_seed;
 extendedResults.fold_rng_state = fold_rng_state;
 extendedResults.fold_assignment = fold_assignment;
 extendedResults.fold_group = fold_group;
