@@ -5,9 +5,9 @@
 % GENERATE_THETA_ENVELOPE_DELTA once per Neuropixels folder and saves
 % Data/Analysis results/theta envelope delta/theta_envelope_delta.mat.
 %
-% Then run Analyze_theta_envelope_delta.m. That calls
-% Analyze_theta_envelope_session.m for the session spectrum and coherence,
-% and Analyze_theta_envelope_onset.m for the play-aligned 2-3 Hz test.
+% Then run Analyze_theta_envelope_delta.m from the top, or open
+% Analyze_theta_envelope_session.m and Analyze_theta_envelope_onset.m
+% and run one %% section at a time. Each plotting section opens one figure.
 %
 % Knobs live in theta_envelope_delta_options.m.
 %   theta_freq, theta_transition_hz
