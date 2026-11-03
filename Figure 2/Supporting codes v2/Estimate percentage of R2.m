@@ -830,12 +830,16 @@ if nnz(valid_actor_folds) >= 5
         comparison_unit = 'legacy observation-fold sample counts';
     end
     [balanced_actor.p_self_vs_other, balanced_actor.t_self_vs_other, ...
-        balanced_actor.mean_self_minus_other] = corrected_cv_ttest( ...
+        balanced_actor.mean_self_minus_other, ...
+        balanced_actor.se_self_minus_other, ...
+        balanced_actor.ci95_self_minus_other] = corrected_cv_ttest( ...
         contribution_difference, test_train_ratio);
 else
     balanced_actor.p_self_vs_other = NaN;
     balanced_actor.t_self_vs_other = NaN;
     balanced_actor.mean_self_minus_other = NaN;
+    balanced_actor.se_self_minus_other = NaN;
+    balanced_actor.ci95_self_minus_other = [NaN NaN];
     warning('EstimateR2:InsufficientActorFolds', ...
         ['Only %d folds contained enough examples of every actor state. ' ...
          'At least 5 are required for the corrected self-vs-other comparison.'], ...
@@ -1064,7 +1068,7 @@ end
 sampled_indices = sampled_indices(randperm(numel(sampled_indices)));
 end
 
-function [p_value, t_stat, mean_difference] = corrected_cv_ttest( ...
+function [p_value, t_stat, mean_difference, standard_error, confidence_interval] = corrected_cv_ttest( ...
     differences, test_train_ratio)
 differences = differences(isfinite(differences));
 n = numel(differences);
@@ -1072,19 +1076,25 @@ mean_difference = mean(differences);
 if n < 2 || ~isfinite(test_train_ratio)
     p_value = NaN;
     t_stat = NaN;
+    standard_error = NaN;
+    confidence_interval = [NaN NaN];
     return
 end
 corrected_variance = (1/n + test_train_ratio) * var(differences, 0);
+standard_error = sqrt(corrected_variance);
 if corrected_variance == 0
     if mean_difference == 0
         t_stat = 0;
         p_value = 1;
+        confidence_interval = [0 0];
         return
     end
     t_stat = sign(mean_difference) * Inf;
 else
-    t_stat = mean_difference / sqrt(corrected_variance);
+    t_stat = mean_difference / standard_error;
 end
 p_value = 2 * tcdf(-abs(t_stat), n - 1);
+critical_value = tinv(0.975, n - 1);
+confidence_interval = mean_difference + [-1 1] * critical_value * standard_error;
 end
 
