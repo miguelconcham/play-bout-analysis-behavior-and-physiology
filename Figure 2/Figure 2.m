@@ -441,7 +441,15 @@ ylim(lfp_ylim_right)
 % load(fullfile(saving_folder, 'cvResults_single_calls.mat'), 'cvResults')
 % load(fullfile(saving_folder, 'cvResults_mean_calls_delta_v2_AlllVar.mat'), 'cvResults')
 % load(fullfile(saving_folder, 'cvResults_mean_calls_delta_v2_AlllVar.mat'), 'cvResults')
-load(fullfile(saving_folder, 'cvResults_mean_calls_gamma_AlllVar_play_baut.mat'), 'cvResults')
+results_file = fullfile(saving_folder, 'cvResults_mean_calls_gamma_AlllVar_play_baut.mat');
+% For the new analysis, replace the filename above with the generated
+% cvResults_<band>_<model-code>_<timestamp>.mat filename.
+load(results_file, 'cvResults')
+clear extendedResults
+saved_variables = who('-file', results_file);
+if ismember('extendedResults', saved_variables)
+    load(results_file, 'extendedResults')
+end
 
 
 
@@ -451,7 +459,11 @@ predictors = cvResults.predictors;
 
 
 R2_full_allfolds =cvResults.Call.r2_full;
-avgR2_full = mean(R2_full_allfolds);
+avgR2_full = mean(R2_full_allfolds, 'omitnan');
+if ~isfinite(avgR2_full) || avgR2_full <= 0
+    error('Figure2:InvalidFullR2', ...
+        'The marginal-R2 percentage requires a positive finite mean full-model R2.');
+end
 
 % Reduced-model R² is preallocated to 0. Folds that were never fit stay
 % exactly 0 while the full-model R² does not, so full-minus-reduced equals
@@ -481,20 +493,19 @@ for j=1:numel(predictors)
     % Extract R² values for this predictor
     r2_full = cvResults.(predictors{re_order(j)}).r2_full;
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
-    valid = computed_reduced_folds(r2_full, r2_reduced);
-    mean_diff(j) = mean(r2_full(valid) - r2_reduced(valid)) / mean(r2_full); % difference per fold
+    valid = computed_reduced_folds(r2_full, r2_reduced) & ...
+        isfinite(r2_full) & isfinite(r2_reduced);
+    mean_diff(j) = mean(r2_full(valid) - r2_reduced(valid), 'omitnan') / ...
+        mean(r2_full(valid), 'omitnan'); % difference per fold
 end
 [~, re_order] =  sort(mean_diff, 'descend'); 
-
- re_order = [14 7 1 15 2 13 6 4 3 8 9 10 5 11 12]; % manual order,
- % comes from copying re_order values used during play
-% re_order =1:numel(re_order) % manual order
 
 for j=1:numel(re_order)
     % Extract R² values for this predictor
     r2_full = cvResults.(predictors{re_order(j)}).r2_full;
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
-    valid = computed_reduced_folds(r2_full, r2_reduced);
+    valid = computed_reduced_folds(r2_full, r2_reduced) & ...
+        isfinite(r2_full) & isfinite(r2_reduced);
     r2_diff = r2_full(valid) - r2_reduced(valid); % difference per computed fold
 
     % Plot swarm of differences, as a percentage of the full-model R²
@@ -527,12 +538,68 @@ plot([0 2*numel(predictors)], [0 0], 'k')
 
 % Formatting
 xticks(1:2:2*numel(predictors))
-xticks(1:2:2*numel(predictors))
 xticklabels(predictors(re_order))
 ylabel('\DeltaR^2 / R^2_{full} (%)')
 ylim([-1 y_for_sig+10])
 title('Cross-validated \DeltaR^2 when removing each predictor')
 set(gca, 'FontSize', 24)
+
+%% 7.1 Plot the corrected Self-minus-Other test from extendedResults
+if exist('extendedResults', 'var')
+    actor_results = extendedResults.balanced_actor;
+    self_gain = actor_results.delta_r2_self_fold_mean;
+    other_gain = actor_results.delta_r2_other_fold_mean;
+    valid_actor_folds = isfinite(self_gain) & isfinite(other_gain);
+    difference = self_gain(valid_actor_folds) - other_gain(valid_actor_folds);
+
+    difference_percent = 100 * difference / extendedResults.avgR2_full;
+    if isfield(actor_results, 'ci95_self_minus_other')
+        corrected_mean = actor_results.mean_self_minus_other;
+        corrected_ci = actor_results.ci95_self_minus_other;
+    else
+        % Backward-compatible reconstruction for result files saved before
+        % the corrected confidence interval was stored explicitly.
+        n_valid = numel(difference);
+        if extendedResults.use_bout_grouped_folds
+            test_train_ratio = mean( ...
+                actor_results.n_bouts_test_fold_mean(valid_actor_folds) ./ ...
+                actor_results.n_bouts_train_fold_mean(valid_actor_folds), ...
+                'omitnan');
+        else
+            test_train_ratio = mean( ...
+                actor_results.n_per_state_test_fold_mean(valid_actor_folds) ./ ...
+                actor_results.n_per_state_train_fold_mean(valid_actor_folds), ...
+                'omitnan');
+        end
+        corrected_mean = mean(difference, 'omitnan');
+        corrected_se = sqrt((1/n_valid + test_train_ratio) * ...
+            var(difference, 0, 'omitnan'));
+        corrected_ci = corrected_mean + [-1 1] * ...
+            tinv(.975, n_valid-1) * corrected_se;
+    end
+    mean_percent = 100 * corrected_mean / extendedResults.avgR2_full;
+    ci_percent = 100 * corrected_ci / extendedResults.avgR2_full;
+
+    figure('units','normalized','outerposition',[.25 .25 .35 .55])
+    swarmchart(ones(size(difference_percent)), difference_percent, ...
+        55, 'filled', 'MarkerFaceAlpha', .45)
+    hold on
+    errorbar(1, mean_percent, mean_percent-ci_percent(1), ...
+        ci_percent(2)-mean_percent, 'k', 'LineWidth', 2.5, ...
+        'CapSize', 18)
+    plot(1, mean_percent, 'or', 'MarkerFaceColor', 'r', 'MarkerSize', 8)
+    yline(0, 'k--')
+    xlim([.5 1.5])
+    xticks(1)
+    xticklabels({'Self - Other'})
+    ylabel('Difference in \DeltaR^2 / R^2_{full} (%)')
+    title(sprintf('Corrected 95%% CI; p = %.4g', ...
+        actor_results.p_self_vs_other))
+    set(gca, 'FontSize', 18)
+else
+    warning('Figure2:NoExtendedResults', ...
+        'The selected results file has no extendedResults actor analysis.');
+end
 
 %% 8 Load PSTH for LFP power panels — example: DELTA play bout (combo file DELTA #1)
 disp('Loading')
