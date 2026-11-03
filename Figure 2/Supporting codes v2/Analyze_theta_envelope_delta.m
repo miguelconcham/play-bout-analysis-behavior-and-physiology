@@ -4,8 +4,9 @@
 % %% Session spectrum and coherence
 %     opens the envelope-power figure and the envelope-LFP coherence figure
 % %% Play onset
-%     opens the play-aligned waveform, its 0.2 Hz spectrum, phase consistency,
-%     and the single-behavior correlation histogram
+%     opens four figures: Hilbert envelope and spectrogram power, each for
+%     the implanted animal and for the playing partner. Every behavior is
+%     its own panel.
 %
 % The two sections below only call the other section scripts. Open
 % Analyze_theta_envelope_session.m or Analyze_theta_envelope_onset.m to run

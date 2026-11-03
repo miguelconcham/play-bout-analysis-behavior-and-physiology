@@ -2,7 +2,7 @@ function test_theta_envelope_delta()
 %TEST_THETA_ENVELOPE_DELTA  Synthetic checks that do not need experiment files.
 %
 % Run this file by name after add_repo_paths. It checks the frequency grid,
-% the surrogate spectrum, play-onset selection, the pre-onset Fourier
+% the surrogate spectrum, per-behavior onset selection, the pre-onset Fourier
 % measures, and a theta carrier whose amplitude oscillates at 2.5 Hz.
 
 this_dir = fileparts(mfilename('fullpath'));
@@ -19,7 +19,9 @@ rng(1, 'twister');
 
 test_options_and_grid();
 test_phase_randomize();
-test_play_events();
+test_behavior_events();
+test_band_power_tracks_amplitude();
+test_behaviors_stay_separate();
 test_fourier_and_consistency();
 test_signflip_and_cluster();
 test_group_summaries();
@@ -69,19 +71,71 @@ assert(max(abs(abs(fft(x)) - abs(fft(y)))) / scale < 1e-6, ...
 assert(max(abs(imag(y))) < 1e-8, 'The surrogate is not real.');
 end
 
-function test_play_events()
+function test_behavior_events()
 behavior = struct();
-behavior.Animal = {'Dual'; 'Dual'; 'Partner'; 'Dual'; 'Session_structure'; 'Dual'};
-behavior.Start = [10; 12; 10.5; 30; 0; 11];
+behavior.Animal = {'Dual'; 'Dual'; 'Partner'; 'Dual'; 'Session_structure'; 'Dual'; 'Partner'};
+behavior.Start = [10; 12; 10.5; 30; 0; 11; 40];
 behavior.End = behavior.Start + 0.4;
-behavior.Type = {'Pounce_A'; 'Sniffing'; 'Pounce'; 'Boxing'; 'Partners session'; 'Pin'};
-events = theta_envelope_play_events(behavior, 'Dual', ...
-    {'Pounce', 'CC', 'Boxing', 'Evasion', 'Pin', 'Escape', 'CB', 'CD'}, 2);
-assert(numel(events.onsets) == 3, 'Expected three recorded-animal play onsets.');
-assert(strcmp(events.behavior_type{1}, 'Pounce'), 'Pounce_A was not renamed.');
-assert(events.clean_pre(1), 'The first onset should have a clean pre-window.');
-assert(~events.clean_pre(3), 'An onset 1 s after play should not be clean.');
-assert(events.clean_pre(2), 'The isolated boxing onset should be clean.');
+behavior.Type = {'Pounce_A'; 'Sniffing'; 'Pounce'; 'Boxing'; ...
+    'Partners session'; 'Pin'; 'Grooming'};
+play = {'Pounce', 'CC', 'Boxing', 'Evasion', 'Pin', 'Escape', 'CB', 'CD'};
+other = {'Grooming', 'Rearing', 'Sniffing', 'Scratching', 'PounceI', 'Bite'};
+catalog = theta_envelope_behavior_events(behavior, 'Dual', play, other);
+assert(numel(catalog) == numel(play) + numel(other), ...
+    'Behaviors were pooled or dropped.');
+pounce = catalog(strcmp({catalog.name}, 'Pounce'));
+boxing = catalog(strcmp({catalog.name}, 'Boxing'));
+pin = catalog(strcmp({catalog.name}, 'Pin'));
+sniffing = catalog(strcmp({catalog.name}, 'Sniffing'));
+grooming = catalog(strcmp({catalog.name}, 'Grooming'));
+assert(pounce.is_play && ~sniffing.is_play, 'Play and non-play were mixed.');
+assert(isequal(pounce.self_onsets, 10), 'Pounce_A was not kept as its own implanted onset.');
+assert(isequal(pounce.partner_onsets, 10.5), 'The partner pounce was dropped or merged.');
+assert(isequal(boxing.self_onsets, 30), 'Boxing was merged with another play type.');
+assert(isequal(pin.self_onsets, 11), 'Pin was merged with another play type.');
+assert(isequal(sniffing.self_onsets, 12), 'Sniffing was dropped.');
+assert(isempty(sniffing.partner_onsets), 'A partner behavior landed on the wrong type.');
+assert(isequal(grooming.partner_onsets, 40), 'The partner grooming onset was dropped.');
+assert(isempty(grooming.self_onsets), 'Partner grooming was assigned to the implanted animal.');
+session_names = {catalog.name};
+assert(~any(strcmp(session_names, 'Partners session')), ...
+    'Session structure was treated as a behavior.');
+end
+
+function test_band_power_tracks_amplitude()
+rate = 50;
+time = (0:rate * 8 - 1).' / rate;
+modulator = sin(2 * pi * 2.5 * time);
+signal = (1 + 0.8 * modulator) .* sin(2 * pi * 9 * time);
+power = theta_envelope_band_power(signal, rate, [6 12], 0.5);
+finite = isfinite(power);
+centered_power = power(finite) - mean(power(finite));
+centered_modulator = modulator(finite) - mean(modulator(finite));
+correlation = sum(centered_power .* centered_modulator) / ...
+    sqrt(sum(centered_power .^ 2) * sum(centered_modulator .^ 2));
+assert(correlation > 0.3, ...
+    'Spectrogram theta power did not follow the amplitude modulation.');
+end
+
+function test_behaviors_stay_separate()
+frequencies = [2.1 2.6 3.1];
+mask = [true true true];
+recording = blank_behavior_recording('Batch1Dual1', ...
+    {'Pounce', 'Sniffing'}, [true false], frequencies, mask);
+recording = set_measure(recording, 'Pounce', 'self', 'envelope', 1, 20);
+recording = set_measure(recording, 'Sniffing', 'self', 'envelope', 0, 20);
+recording = set_measure(recording, 'Pounce', 'self', 'power', 0, 20);
+grouped = theta_envelope_group_behaviors(recording, 15);
+pounce = select_grouped(grouped, 'Pounce', 'self', 'envelope');
+sniffing = select_grouped(grouped, 'Sniffing', 'self', 'envelope');
+power = select_grouped(grouped, 'Pounce', 'self', 'power');
+partner = select_grouped(grouped, 'Pounce', 'partner', 'envelope');
+assert(pounce.included && pounce.locked_p == 0, ...
+    'A locked pounce was not detected on its own.');
+assert(sniffing.included && sniffing.locked_p == 1, ...
+    'Sniffing inherited the pounce alignment.');
+assert(power.locked_p == 1, 'Spectrogram power inherited the envelope alignment.');
+assert(~partner.included, 'An empty partner list was treated as enough onsets.');
 end
 
 function test_fourier_and_consistency()
@@ -260,4 +314,55 @@ end
 
 function ready = signal_ready()
 ready = exist('filtfilt', 'file') == 2 && exist('hilbert', 'file') == 2;
+end
+
+function recording = blank_behavior_recording(animal, names, is_play, frequencies, mask)
+recording.animal_area_table_name = animal;
+recording.frequencies_test = frequencies;
+recording.frequencies_fine = frequencies;
+recording.confirmatory_mask = mask;
+recording.behavior = struct('name', {}, 'is_play', {}, 'self', {}, 'partner', {});
+for behavior_n = 1:numel(names)
+    recording.behavior(behavior_n).name = names{behavior_n};
+    recording.behavior(behavior_n).is_play = is_play(behavior_n);
+    recording.behavior(behavior_n).self = blank_actor(frequencies);
+    recording.behavior(behavior_n).partner = blank_actor(frequencies);
+end
+end
+
+function actor = blank_actor(frequencies)
+actor.onsets = zeros(0, 1);
+actor.envelope = blank_measure(frequencies, 0, 0);
+actor.power = blank_measure(frequencies, 0, 0);
+end
+
+function block = blank_measure(frequencies, coefficient, n_valid)
+block.epoch_time = -1:0.5:1;
+block.mean_epoch = coefficient * sin(2 * pi * 2.5 * block.epoch_time);
+pre = struct();
+pre.n_valid = n_valid;
+pre.mean_coefficient = coefficient * ones(1, numel(frequencies));
+pre.ppc = ones(1, numel(frequencies));
+pre.loo_r = zeros(0, 1);
+pre.loo_mean_r = coefficient;
+pre.phase_fraction = double(coefficient > 0);
+pre.null_mean_coefficient = zeros(5, numel(frequencies));
+pre.null_ppc = zeros(5, numel(frequencies));
+pre.null_loo_mean_r = zeros(5, 1);
+pre.null_phase_fraction = zeros(5, 1);
+block.pre = pre;
+end
+
+function recording = set_measure(recording, behavior_name, actor, measure, coefficient, n_valid)
+behavior_n = find(strcmp({recording.behavior.name}, behavior_name), 1);
+frequencies = recording.frequencies_test;
+recording.behavior(behavior_n).(actor).(measure) = ...
+    blank_measure(frequencies, coefficient, n_valid);
+recording.behavior(behavior_n).(actor).onsets = zeros(n_valid, 1);
+end
+
+function item = select_grouped(grouped, behavior_name, actor, measure)
+keep = strcmp({grouped.behavior}, behavior_name) & ...
+    strcmp({grouped.actor}, actor) & strcmp({grouped.measure}, measure);
+item = grouped(find(keep, 1));
 end

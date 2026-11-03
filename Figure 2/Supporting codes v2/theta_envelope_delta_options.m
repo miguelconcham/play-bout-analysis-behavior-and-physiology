@@ -3,9 +3,11 @@ function options = theta_envelope_delta_options(options)
 %
 % The pipeline asks two questions. The session question is whether the
 % Hilbert amplitude of 6-12 Hz LPAG activity oscillates between 0.1 and 6 Hz,
-% and whether that oscillation is coherent with the LFP. The onset question
-% is whether a 2-3 Hz rise and fall of that amplitude, visible in the average
-% aligned to play onset, is present in each animal and in single behaviors.
+% and whether that oscillation is coherent with the LFP. The behavior question
+% aligns that amplitude to each behavior separately. Play and non-play
+% behaviors stay apart, and so do the implanted animal and the partner.
+% Amplitude is estimated twice: the Hilbert envelope, and the 6-12 Hz mean of
+% a short-time spectrum.
 %
 % Frequency grid: centers run from modulation_band(1) to modulation_band(2).
 % Each center is an average over bandwidth_hz. test_step_hz is the grid used
@@ -45,6 +47,9 @@ options = fill_option(options, 'pre_windows', [-2 0; -1 0]);
 options = fill_option(options, 'epoch_window', [-3 1]);
 options = fill_option(options, 'play_behaviors', {'Pounce', 'CC', 'Boxing', ...
     'Evasion', 'Pin', 'Escape', 'CB', 'CD'});
+options = fill_option(options, 'other_behaviors', {'Grooming', 'Rearing', ...
+    'Sniffing', 'Scratching', 'PounceI', 'Bite'});
+options = fill_option(options, 'power_window_seconds', 0.5);
 options = fill_option(options, 'interval_mode', 'partners_session');
 options = fill_option(options, 'random_seed', NaN);
 options = fill_option(options, 'output_folder', fullfile(data_root, ...
@@ -58,8 +63,9 @@ options = fill_option(options, 'interpretation', [ ...
     'is descriptive. Coherence nulls circularly shift each Welch segment of ' ...
     'the LFP, because one lag of the whole recording leaves magnitude-squared ' ...
     'coherence unchanged. The envelope-spectrum null phase-randomizes the LFP ' ...
-    'and recomputes the theta envelope. Onset nulls shift play times inside ' ...
-    'each partner session.']);
+    'and recomputes the theta envelope. Behavior nulls shift that behavior''s ' ...
+    'onsets inside each partner session. Each behavior, actor, and amplitude ' ...
+    'measure has its own null.']);
 
 if numel(options.theta_freq) ~= 2 || options.theta_freq(1) >= options.theta_freq(2)
     error('theta_envelope_delta_options:theta', ...
@@ -112,6 +118,18 @@ end
 if options.theta_filter_order < 8 || mod(options.theta_filter_order, 2) ~= 0
     error('theta_envelope_delta_options:filter', ...
         'theta_filter_order must be an even integer of at least 8.');
+end
+if ~iscell(options.play_behaviors) || ~iscell(options.other_behaviors)
+    error('theta_envelope_delta_options:behavior', ...
+        'play_behaviors and other_behaviors must be cell arrays of names.');
+end
+if any(ismember(options.play_behaviors, options.other_behaviors))
+    error('theta_envelope_delta_options:behavior', ...
+        'A behavior is listed as both play and non-play.');
+end
+if options.power_window_seconds <= 0
+    error('theta_envelope_delta_options:power', ...
+        'power_window_seconds must be positive.');
 end
 end
 

@@ -1,5 +1,5 @@
 %% Estimate_theta_envelope_delta
-% Theta-envelope modulation from 0.1 to 6 Hz, and its alignment to play onset.
+% Theta-envelope modulation from 0.1 to 6 Hz, and its alignment to each behavior.
 %
 % Run add_repo_paths, then run this script. It calls
 % GENERATE_THETA_ENVELOPE_DELTA once per Neuropixels folder and saves
@@ -21,10 +21,11 @@
 % null shifts each Welch segment of the LFP by its own lag. A single lag of
 % the whole recording would leave magnitude-squared coherence unchanged.
 %
-% The onset test uses the recorded animal's play behaviors. The primary
-% window is -2 to 0 s. A shift of those onsets is the null. The -1 to 0 s
-% window is saved beside it. clean_pre marks onsets whose preceding 2 s
-% contain no other play onset.
+% Each behavior is aligned on its own, for the implanted animal and for the
+% partner. Play types are not pooled into a bout. Non-play behaviors are
+% included. Theta amplitude is the Hilbert envelope and the 6-12 Hz
+% spectrogram power. The primary window is -2 to 0 s. A shift of that
+% behavior's onsets is the null. The -1 to 0 s window is saved beside it.
 
 %% Paths
 this_file = mfilename('fullpath');
@@ -92,13 +93,21 @@ for recording_n = 1:numel(animal_list)
         animal_names(end + 1, :) = {animal_name, ...
             new_recordings(channel_n).lpag_probe_number, ...
             new_recordings(channel_n).lpag_channel}; %#ok<AGROW>
+        n_self = 0;
+        n_partner = 0;
+        catalog = new_recordings(channel_n).behavior;
+        for behavior_n = 1:numel(catalog)
+            n_self = n_self + catalog(behavior_n).self.envelope.pre(1).n_valid;
+            n_partner = n_partner + catalog(behavior_n).partner.envelope.pre(1).n_valid;
+        end
         fprintf(['  probe %g channel %g: envelope peak %.2f Hz, ' ...
-            'coherence peak %.2f Hz, %d valid play onsets\n'], ...
+            'coherence peak %.2f Hz, %d implanted-animal onsets, ' ...
+            '%d partner onsets\n'], ...
             new_recordings(channel_n).lpag_probe_number, ...
             new_recordings(channel_n).lpag_channel, ...
             new_recordings(channel_n).session.peak_power_hz, ...
             new_recordings(channel_n).session.peak_coherence_hz, ...
-            new_recordings(channel_n).onset.pre(1).n_valid);
+            n_self, n_partner);
     end
 end
 

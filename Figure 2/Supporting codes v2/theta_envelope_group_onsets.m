@@ -111,8 +111,7 @@ summary.locked_amplitude = abs(weighted_mean(observed, weights));
 summary.ppc = weighted_mean(ppc, pair_weights);
 summary.loo_mean_r = weighted_mean(loo, weights);
 summary.phase_fraction = weighted_mean(phase, weights);
-summary.mean_epoch = pooled_epoch(rows, false);
-summary.clean_mean_epoch = pooled_epoch(rows, true);
+[summary.mean_epoch, summary.clean_mean_epoch] = animal_epochs(rows);
 summary.confirmatory_locked = mean_mask(summary.locked_amplitude, mask);
 summary.confirmatory_ppc = mean_mask(summary.ppc, mask);
 
@@ -143,6 +142,38 @@ for perm = 1:n_perm
     nulls.loo(perm) = weighted_mean(null_loo_rows, weights);
     nulls.phase(perm) = weighted_mean(null_phase_rows, weights);
 end
+end
+
+function [mean_epoch, clean_epoch] = animal_epochs(rows)
+% A single stored row is the recording mean and is weighted by n_valid.
+% Several rows are the individual behaviors and are averaged as trials.
+single_row = true;
+for row_n = 1:numel(rows)
+    if size(rows(row_n).onset.epochs, 1) > 1
+        single_row = false;
+    end
+end
+if ~single_row
+    mean_epoch = pooled_epoch(rows, false);
+    clean_epoch = pooled_epoch(rows, true);
+    return
+end
+means = zeros(0, numel(rows(1).onset.epoch_time));
+weights = zeros(0, 1);
+for row_n = 1:numel(rows)
+    epochs = rows(row_n).onset.epochs;
+    if isempty(epochs) || ~any(all(isfinite(epochs), 2))
+        continue
+    end
+    means = [means; epochs(1, :)]; %#ok<AGROW>
+    weights(end + 1, 1) = rows(row_n).onset.pre(1).n_valid; %#ok<AGROW>
+end
+if isempty(means)
+    mean_epoch = nan(1, numel(rows(1).onset.epoch_time));
+else
+    mean_epoch = weighted_mean(means, weights);
+end
+clean_epoch = mean_epoch;
 end
 
 function value = pooled_epoch(rows, clean_only)
