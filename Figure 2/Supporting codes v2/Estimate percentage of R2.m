@@ -46,6 +46,14 @@ k_requested = 30;
 n_balance_repeats = 10;
 low_freq_bool = true;
 frequency_band_names = {'delta','theta'}; % Active input contains delta/theta.
+model_code = 'play_bout_actor_contrast'; % Short description used in output filename.
+run_started_at = datetime('now', 'TimeZone', 'Europe/Berlin', ...
+    'Format', 'yyyyMMdd_HHmmss');
+model_code = regexprep(lower(strtrim(model_code)), '[^a-z0-9]+', '_');
+model_code = regexprep(model_code, '^_+|_+$', '');
+if isempty(model_code)
+    error('Model code must contain at least one letter or number.');
+end
 
 %% 1.3 LOAD STRUCTURE DATA
 disp('Loading')
@@ -72,7 +80,8 @@ end
 analysis_band = frequency_band_names{selected_frequency_index};
 selected_frequency_range = freq_range{selected_frequency_index};
 output_file = fullfile(saving_folder, ...
-    sprintf('cvResults_%s_nur_play_bout_redo_261101.mat', analysis_band));
+    sprintf('cvResults_%s_%s_%s.mat', analysis_band, model_code, ...
+    char(run_started_at)));
 
 % % for BETA AND GAMMA
 % freq_range = {[15 30],[40 90]}; 
@@ -870,6 +879,8 @@ extendedResults.analysis_band = analysis_band;
 extendedResults.frequency_range_hz = selected_frequency_range;
 extendedResults.low_freq_bool = low_freq_bool;
 extendedResults.power_source = power_source;
+extendedResults.model_code = model_code;
+extendedResults.run_started_at = run_started_at;
 extendedResults.input_psth_file = 'psth_structure_all_regressors_delta_theta.mat';
 extendedResults.input_animal_file = 'animal_names_all_regressors_delta.mat';
 
