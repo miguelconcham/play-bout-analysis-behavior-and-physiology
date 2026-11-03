@@ -66,7 +66,31 @@ play bout analysis behavior and physiology/
 │   ├── Analyze_acute_phase_locking.m
 │   ├── GENERATE_STIM_CALL_RESPONSES.m
 │   └── Estimate_stim_call_responses.m
+├── Synchronous spike artifacts/       # Synchronous-spike waveform and raw-LFP power checks
+│   ├── GENERATE_SYNC_SPIKE_WAVEFORMS.m
+│   ├── Estimate_sync_spike_waveforms.m
+│   ├── Analyze_sync_spike_waveforms.m
+│   ├── Plot_sync_spike_acg_and_waveforms.m  # Profile, autocorrelogram, spatial range
+│   ├── sync_waveform_spatial_range.m   # Peak-to-peak versus distance from the peak channel
+│   ├── pair_channel_distance.m         # Euclidean separation of two neurons on the probe
+│   ├── normalized_acg_stack.m          # Normalized autocorrelograms and their mean CI
+│   ├── spatial_range_stack.m           # Normalized inverted-U profiles and their mean CI
+│   ├── template_spike_samples.m        # Caps spike samples inside play-bout windows
+│   ├── read_npx_channel_geometry.m     # x,y in um from chann_map_PAG.mat
+│   ├── GENERATE_SYNC_SPIKE_LFP_POWER.m
+│   ├── compare_phase_matched_lfp.m    # Null: same-window LFP at the same delta phase
+│   ├── lfp_phase_pool.m               # Bout-window samples, excluding +/- 10 ms of the event
+│   ├── Estimate_sync_spike_lfp_power.m
+│   ├── Analyze_sync_spike_lfp_power.m
+│   ├── synchronous_play_pairs.m       # Shared play-bout pairs, 90% of each area
+│   ├── summarize_sync_coverage.m      # How many neurons in each area were observed
+│   ├── load_waveforms_from_continuous.m
+│   ├── test_load_waveforms_from_continuous.m
+│   ├── test_sync_event_statistics.m
+│   └── Check_NPX_folders_and_load_waveforms.m
 ├── Custom functions/                  # Shared helpers (play_bout, kernel_rate, ppc, …)
+├── manual traking/
+│   └── manual_traking.m               # Click tracking for focal animal and partner
 ├── Figure 1/
 │   ├── Figure 1 Play Bouts.m
 │   ├── Figure 1 LDA.m
@@ -131,6 +155,9 @@ Panel letters below match the uploaded files in `Paper figures/` where previews 
 | Build HMM inputs | `Figure 1/HMM modeling/CreateHMMFIiles.m` |
 | Train CNN autoencoder (PyTorch) | `Figure 1/LDA analysis/Convolutional classification.ipynb` |
 | Fit HMMs in Python | `Figure 1/HMM modeling/python hmm estimate.txt` |
+| Manual tracking of both animals | `manual traking/manual_traking.m` |
+
+`manual traking/manual_traking.m` writes the `traking_structure` `.mat` files. That output goes in `Data/Traking backups/`. Figure 1 and Figure 2 load those files from that folder.
 
 HMM pipeline order: `Figure 1/HMM modeling/README.md`.
 
@@ -173,6 +200,8 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 |----------|----------|----------------------|
 | Play-bout band-power PSTH | `Estimate_psth_band_power.m` | `Figure 2.m` |
 | PSTH per behavior | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
+| PSTH per behavior, theta and gamma (same alignments; LFP loaded once per animal) | `Estimate_psth_all_behaviors_theta_gamma.m` | `Analyze_psth_all_behaviors_theta_gamma.m` |
+| Classify two Type2 groups from time-wrapped band power, pooled across sessions and animals | (uses the per-behavior PSTH) | `Analyze_behavior_class_from_timewrap_power.m` |
 | Area maps | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Call-locked PSTH | `Estimate_psth_calls_all_animals.m` | `Figure 2.m` `%% 13`–`%% 17` |
 | GLM / unique $R^2$ | `Estimate_psth_all_regressors.m` | `Figure 2.m` `%% 7` |
@@ -204,6 +233,39 @@ The original (pre-v2) Figure 2 pipeline lives outside this repository, in the pa
 | k | Between-area coincidence change around play | `Figure 3/Figure 3k Coincident events.m` | `%% Fig 3k` |
 
 `Figure 3/Supporting codes/` holds GENERATE / Estimate / ANALYZE pipelines that build the `.mat` files those plots load. `Estiamte_activation_index_and_other_variables.m` section 8 writes the example-plot checkpoint used by `SuppFig4 ActivationIndex Example.m`.
+
+### Figure 3e delta-power control
+
+Both pipelines use `\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\...`.
+The earlier one is unchanged and keeps writing
+`Data/Analysis results/phase locking power control/`:
+
+```
+Estimate_phase_locking_power_control.m
+  → GENERATE_PHASE_LOCKING_POWER_CONTROL.m
+  → Analyze_play_ppc_amplitude_matched.m
+```
+
+It matches one-second play and pre-play epochs by log-delta power. Its null
+uses pre-play epochs only. Existing session files are skipped.
+
+The power-contrast pipeline is separate and writes
+`Data/Analysis results/phase locking power contrast/`:
+
+```
+Estimate_phase_locking_power_contrast.m
+  → GENERATE_PHASE_LOCKING_POWER_CONTRAST.m
+  → Analyze_play_ppc_power_contrast.m
+```
+
+Its null uses every non-play second inside each Partners session: before the
+first play bout, between bouts, and after the last bout. Three tail widths
+stay within twice the group size, spaced so the power gap changes in equal
+steps, and each width that can supply distinct groups receives the same
+number of draws. The rows entered in the model are saved as
+`neuron_model_table`. Trough-locked cells come from the existing Figure 3
+labels (`EntireSession.PPCPval < 0.01` and preferred angle outside ±π/2).
+The overall result averages residual PPC change within animal.
 
 ---
 
@@ -400,6 +462,7 @@ Phase of coincident events (not a numbered paper panel here): `Figure 3/Former S
 ### Figure 1
 
 - `Behavior backups/` — manual annotations (`.txt`)
+- `Traking backups/` — output of `manual traking/manual_traking.m` (`traking_structure` `.mat` files). On disk this is `Data/Traking backups/`.
 - `Analysis results/locomotive behaviors 2 partners/`
 - `Analysis results/Behavior classification/` — trained LDA models
 - `Analysis results/HMM 2 and 3 states 2 partners/`

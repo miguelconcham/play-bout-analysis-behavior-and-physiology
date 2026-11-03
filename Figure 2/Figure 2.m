@@ -4,6 +4,7 @@
 
 this_file       = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Figure 2.m';
 repo_root       = fileparts(this_file);
+addpath(fullfile(repo_root, 'Supporting codes v2'));
 combo_file      = fullfile(repo_root, 'Figure 2 Psth animal names and result combinations.txt');
 data_root       = fullfile(repo_root, '..', 'Data');
 saving_folder   = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
@@ -111,7 +112,18 @@ for j=1:numel(psth_structure)
             this_psth_ab(trial,:) = movmean(this_psth_ab(trial,:), smooth_wind);
         end
        
-        all_psth_onset_behavior = [all_psth_onset_behavior; this_psth_ab(:, 1:4000)];
+        % `time` is the figure axis. On the paper range it has 4001 bins.
+        % Keep that range when this PSTH is at least that wide. A shorter
+        % grid (801 bins) stays at its own width; column 4000 is not read.
+        n_axis = numel(time);
+        this_psth_ab = figure_psth_columns(this_psth_ab, n_axis);
+        if ~isempty(all_psth_onset_behavior) && size(this_psth_ab, 2) ~= size(all_psth_onset_behavior, 2)
+            error('Figure2:PsthWidth', ...
+                ['Session %s has %d behavior-onset bins and the pooled rows have %d. ' ...
+                 'The figure time axis has %d bins (4001 on the paper range).'], ...
+                animal_names{j, 1}, size(this_psth_ab, 2), size(all_psth_onset_behavior, 2), n_axis);
+        end
+        all_psth_onset_behavior = [all_psth_onset_behavior; this_psth_ab];
 
         all_play_bouts = [all_play_bouts;this_animal_playbouts];
     end
@@ -130,7 +142,9 @@ stacked_mean_onset = [];
 what2plot = all_psth_onset;
 % what2plot = all_psth_tw_3points;
 zscore_limit = Inf;
-time2use = time;
+% Paper range: time2use is `time` (4001 bins). A shorter PSTH gets one
+% sample per column, so this index matches size(what2plot, 2).
+time2use = psth_plot_time(time, size(what2plot, 2), psth_ranges, bin_size);
 % time2use = time_wrap_3_points;
 
 artifcat_removal = max(abs(what2plot(:,time2use>X_lim(1))),[],2,'omitmissing')<4;
@@ -439,6 +453,19 @@ predictors = cvResults.predictors;
 R2_full_allfolds =cvResults.Call.r2_full;
 avgR2_full = mean(R2_full_allfolds);
 
+% Reduced-model R² is preallocated to 0. Folds that were never fit stay
+% exactly 0 while the full-model R² does not, so full-minus-reduced equals
+% the full-model R² for those folds.
+r2_reduced_probe = cvResults.(predictors{1}).r2_reduced;
+uncomputed_probe = r2_reduced_probe == 0 & R2_full_allfolds ~= 0;
+if nnz(uncomputed_probe) >= 5
+    warning('Figure2:IncompleteCVFolds', ...
+        ['%d of %d CV folds still have reduced-model R^2 exactly 0. ' ...
+         'Those folds were never fit, so they plot at the full-model R^2 and pull every predictor mean toward (uncomputed/k)*100%%. ' ...
+         'They are omitted here. Re-run Estimate percentage of R2.m to fit all %d folds.'], ...
+        nnz(uncomputed_probe), k, k);
+end
+
 y_for_sig = 20;
 figure('units','normalized','outerposition',[.5 0 .5 1]);
 hold on
@@ -454,7 +481,8 @@ for j=1:numel(predictors)
     % Extract R² values for this predictor
     r2_full = cvResults.(predictors{re_order(j)}).r2_full;
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
-    mean_diff(j) =mean( r2_full - r2_reduced)/mean(r2_full); % difference per fold
+    valid = computed_reduced_folds(r2_full, r2_reduced);
+    mean_diff(j) = mean(r2_full(valid) - r2_reduced(valid)) / mean(r2_full); % difference per fold
 end
 [~, re_order] =  sort(mean_diff, 'descend'); 
 
@@ -466,10 +494,11 @@ for j=1:numel(re_order)
     % Extract R² values for this predictor
     r2_full = cvResults.(predictors{re_order(j)}).r2_full;
     r2_reduced = cvResults.(predictors{re_order(j)}).r2_reduced;
-    r2_diff = r2_full - r2_reduced; % difference per fold
+    valid = computed_reduced_folds(r2_full, r2_reduced);
+    r2_diff = r2_full(valid) - r2_reduced(valid); % difference per computed fold
 
-    % Plot swarm of differences
-    swarmchart((2*j-1)*ones(k,1), 100*r2_diff/avgR2_full, 'o', 'MarkerFaceColor','flat', 'MarkerFaceAlpha',.25);
+    % Plot swarm of differences, as a percentage of the full-model R²
+    swarmchart((2*j-1)*ones(numel(r2_diff),1), 100*r2_diff/avgR2_full, 'o', 'MarkerFaceColor','flat', 'MarkerFaceAlpha',.25);
     plot((2*j-1), 100*mean(r2_diff/avgR2_full), '_r','MarkerSize',10,'LineWidth',2);
 
     % Paired t-test (full vs reduced)
@@ -500,7 +529,7 @@ plot([0 2*numel(predictors)], [0 0], 'k')
 xticks(1:2:2*numel(predictors))
 xticks(1:2:2*numel(predictors))
 xticklabels(predictors(re_order))
-ylabel('\Delta R^2 (Full - Reduced)')
+ylabel('\DeltaR^2 / R^2_{full} (%)')
 ylim([-1 y_for_sig+10])
 title('Cross-validated \DeltaR^2 when removing each predictor')
 set(gca, 'FontSize', 24)
@@ -589,6 +618,7 @@ min_length = .0;
 stacked_mean_onset = [];
 % what2plot = all_psth_onset_behavior; %Select what to plot
 what2plot = all_psth_onset_only_playobut;
+time2use = psth_plot_time(time, size(what2plot, 2), psth_ranges, bin_size);
 for an= 1:numel(animal_label)
     animal_bool = animal_index==an;
     length_bool = play_bout_length>min_length;
@@ -597,7 +627,7 @@ for an= 1:numel(animal_label)
     subplot(5,numel(animal_label),(1:numel(animal_label):2*numel(animal_label)) + an-1)
 
     array = what2plot(animal_bool & length_bool & electrode_bool,:);
-    imagesc(time,1:numel(sorted_play_bout_length),array(order,:) )
+    imagesc(time2use,1:numel(sorted_play_bout_length),array(order,:) )
     xlim(X_lim)
     clim([-2 2])
     axis xy
@@ -610,19 +640,21 @@ for an= 1:numel(animal_label)
 
     [~, ~, ci]  = ttest(array);
     no_nan = ~any(isnan(ci));
-    fill([time(no_nan) fliplr(time(no_nan))], [ci(1,no_nan) fliplr(ci(2,no_nan))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
+    fill([time2use(no_nan) fliplr(time2use(no_nan))], [ci(1,no_nan) fliplr(ci(2,no_nan))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
     hold on
-    plot(time,mean(array, 'omitmissing'), 'k')
+    plot(time2use,mean(array, 'omitmissing'), 'k')
     xlim(X_lim)
     stacked_mean_onset = [stacked_mean_onset;mean(array, 'omitmissing')];
 end
 
 %% 11 Load mixed-model results — example: DELTA play bout (combo file DELTA #1)
+% Estimate_psth_play_bout_lme.m writes this file from day-mean PSTHs:
+% Power ~ 1 + Partner + (1|Session). results.est is the Partner1 level.
 % load(fullfile(saving_folder, 'results_play_bout.mat'), 'results'); % all time points
 load(fullfile(saving_folder, 'results_play_bout_PBonly_zscore4_updated.mat'), 'results'); % play-bout-only bins
-est = results.est;
+est = results.est(:);
 ci = results.ci;
-pvals_fdr = results.pvals;
+pvals_fdr = results.pvals(:);
 %% 12 (Fig 2e,f and Supp Fig 4a,d) plot all together
 
 X_lim = [-1 3];
@@ -634,10 +666,11 @@ fill_lim = [.35 .4];
 length_bool = play_bout_length>min_length;
 electrode_bool = electrode_index==1;
 [sorted_play_bout_length, order] = sort(play_bout_length( length_bool & electrode_bool,:));
+time2use = psth_plot_time(time, size(what2plot, 2), psth_ranges, bin_size);
 
 subplot(2,1,1)
 array = what2plot( length_bool & electrode_bool,:);
-imagesc(time,1:numel(sorted_play_bout_length),array(order,:) )
+imagesc(time2use,1:numel(sorted_play_bout_length),array(order,:) )
 
 xlim(X_lim)
 clim([-1 2])
@@ -649,19 +682,22 @@ title('All data')
 
 subplot(2,1,2)
 
-[~, ~, ci]  = ttest(array);
-fill([time fliplr(time)], [ci(1,:) fliplr(ci(2,:))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
+limited_time = results.time(:);
+ci = results.ci;
+ci_valid = isfinite(limited_time) & all(isfinite(ci), 2);
+fill([limited_time(ci_valid); flipud(limited_time(ci_valid))], ...
+    [ci(ci_valid,1); flipud(ci(ci_valid,2))], ...
+    'k', 'FaceAlpha',.25, 'EdgeColor','none')
 hold on
-plot(time,mean(array, 'omitmissing'), 'k')
+plot(time2use,mean(array, 'omitmissing'), 'k')
 xlim(X_lim)
 
-plot(time,stacked_mean_onset, 'k:')
+plot(time2use,stacked_mean_onset, 'k:')
 hold on
-plot(time,mean(stacked_mean_onset), 'k:')
+plot(time2use,mean(stacked_mean_onset), 'k:')
 xlim(X_lim)
 
 sig_idx = pvals_fdr < alpha;
-limited_time = results.time;
 
 borders = [ 0 sig_idx' 0];
 beg_index = find(diff(borders)==1);
@@ -782,10 +818,10 @@ end
 %% 16 Load call mixed-model results — example: GAMMA calls (combo file GAMMA #2)
 load(fullfile(saving_folder, 'results_call_updated_gamma.mat'), 'results');
 
-limited_time = results.time;
-est = results.est;
+limited_time = results.time(:);
+est = results.est(:);
 ci = results.ci;
-pvals_fdr = results.pvals;
+pvals_fdr = results.pvals(:);
 %% 17 (Supp Fig 4e) now plot all together
 figure
 an=2;
@@ -811,11 +847,13 @@ title(animal_label{an})
 
 subplot(2,1,2)
 
-[~, ~, ci]  = ttest(array);
-no_nan = ~any(isnan(ci));
-fill([time(no_nan) fliplr(time(no_nan))], [ci(1,no_nan) fliplr(ci(2,no_nan))], 'k', 'FaceAlpha',.25, 'EdgeColor','none')
+ci_valid = isfinite(limited_time) & all(isfinite(ci), 2);
+fill([limited_time(ci_valid); flipud(limited_time(ci_valid))], ...
+    [ci(ci_valid,1); flipud(ci(ci_valid,2))], ...
+    'k', 'FaceAlpha',.25, 'EdgeColor','none')
 hold on
 plot(time,mean(array, 'omitmissing'), 'k')
+plot(limited_time, est, 'k', 'LineWidth', 2)
 
 
 
@@ -824,7 +862,6 @@ hold on
 plot(time,mean(stacked_mean), 'k:')
 
 sig_idx = pvals_fdr < alpha;
-limited_time = results.time;
 
 borders = [ 0 sig_idx' 0];
 beg_index = find(diff(borders)==1);
@@ -952,3 +989,14 @@ end
 
 plot(data_together(indexes2plot,1), data_together(indexes2plot,2), '.k', 'MarkerSize',    .1)
 axis xy
+
+function valid = computed_reduced_folds(r2_full, r2_reduced)
+% Folds left at the preallocated 0 were not fit. A computed R² is not
+% exactly 0, so exact zeros mark those missing reduced-model fits.
+uncomputed = r2_reduced == 0 & r2_full ~= 0;
+if nnz(uncomputed) >= 5
+    valid = ~uncomputed;
+else
+    valid = true(size(r2_full));
+end
+end

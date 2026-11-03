@@ -3,6 +3,7 @@
 % Saved .mat pairs are listed in:
 %   Figure 2/Figure 2 Psth animal names and result combinations.txt
 % Calls GENERATE_PSTH_PLAY_BOUT (modify GENERATE for behavior type).
+% Estimate_psth_play_bout_lme.m fits the day-mean mixed model on a saved PSTH.
 
 %% Paths and animal selection
 npx_Raw_Data = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';

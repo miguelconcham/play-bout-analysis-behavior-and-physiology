@@ -145,7 +145,7 @@ for ch_n = 1:numel(mid_PAG_channel)
     animal_dist_spect_time = interp1(full_traking_time, animal_dist, spect_time');
     animal_dist_spect_time = (animal_dist_spect_time - mean(animal_dist_spect_time, 'omitmissing')) / std(animal_dist_spect_time, 'omitmissing');
     animal_rel_speed_spect_time = interp1(full_traking_time(1:end - 1)', animal_rel_speed, spect_time');
-    animal_rel_speed_spect_time = (animal_dist_spect_time - mean(animal_rel_speed_spect_time, 'omitmissing')) / std(animal_rel_speed_spect_time, 'omitmissing');
+    animal_rel_speed_spect_time = (animal_rel_speed_spect_time - mean(animal_rel_speed_spect_time, 'omitmissing')) / std(animal_rel_speed_spect_time, 'omitmissing');
 
     play_bout_index = any(spect_time >= play_bouts_table(:, 1) & spect_time <= play_bouts_table(:, 2));
     pow_spectrogram = abs(pow_spectrogram);

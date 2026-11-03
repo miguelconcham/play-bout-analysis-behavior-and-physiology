@@ -21,26 +21,35 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Analysis | Paper? | Rebuild (Estimate) | Plot / test (run this) |
 |----------|--------|--------------------|------------------------|
 | Play-bout intervals, duration, speed–call CCG | Fig 1g–h | — | `Figure 1/Figure 1 Play Bouts.m` |
+| Behavior probability around selected behavior offsets, split by target performer and partner; paired-target play/aggressive/exploratory curves with pooled, session-stratified gray-window and bin-wise max-T permutation tests; time-wrapped before-onset versus after-offset test for the same three groups, separately for each target, plus a two-sided bin-wise test of each post-offset bin against the mean rate in a selectable pre-onset window | extra | `Figure 1/Behavior probability/Estimate_behavior_probability.m` | `Figure 1/Behavior probability/Analyze_behavior_probability.m` |
 | Motion–USV features for LDA / UMAP | Fig 1c–d, Supp 1 | `Figure 1/LDA analysis/Obtain_Feature_USV_space.m` | `Figure 1/Figure 1 LDA.m` |
 | CNN on locomotion features | extra | `Obtain_Feature_USV_space.m` (features) | `Figure 1/LDA analysis/Convolutional classification.ipynb` |
 | HMM inputs from speed + calls | Fig 1, Supp 2 | `Figure 1/HMM modeling/CreateHMMFIiles.m` (calls `Create_HMM_inputs.m`) | Python: `Figure 1/HMM modeling/python hmm estimate.txt` |
 | HMM states, play score, engaged vs unengaged | Fig 1e–f, Supp 2 | after Python HMM | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` then `Figure 1/Figure 1 HMM.m` |
+| Manual click tracking (focal animal, partner, arena) | extra (feeds Fig 1) | — | `manual traking/manual_traking.m` |
 | Play-bout LFP band-power PSTH (delta / theta / gamma) | Fig 2c–f, Supp 4a,d | `Figure 2/Supporting codes v2/Estimate_psth_band_power.m` | `Figure 2/Figure 2.m` |
 | Unique \(R^2\) / GLM of band power | Fig 2g, Supp 4c,f | `Figure 2/Supporting codes v2/Estimate_psth_all_regressors.m` | `Figure 2/Figure 2.m` (`%% 7`) |
 | Reciprocal vs non-reciprocal play vs delta | Fig 2h, Supp 3a–f | `Estimate_psth_all_regressors.m` | `Figure 2/Reciprocity.m` |
 | First vs second play partner vs delta | Supp 3g–i | play-bout PSTH (`Estimate_psth_band_power.m`) | `Figure 2/Play partner.m` |
 | Delta PSTH per annotated behavior | extra (feeds Supp 3) | `Figure 2/Supporting codes v2/Estimate_psth_all_behaviors.m` | `Figure 2/Supporting codes v2/Analyze_psth_all_behaviors.m` |
+| Behavior/play-bout onset–offset raw LFP + paired-baseline kCSD | extra | `CSD analysis/Estimate_behavior_aligned_csd.m` | Python: `CSD analysis/behavior_aligned_kcsd.py`, then `CSD analysis/area_csd_consistency.py` |
 | Call-locked LFP power PSTH | Supp 4e | `Figure 2/Supporting codes v2/Estimate_psth_calls_all_animals.m` | `Figure 2/Figure 2.m` (`%% 13`–`%% 17`); plots also inside Estimate |
 | Speed vs LFP band power | Supp 4b; extra | `Figure 2/Supporting codes v2/Estimate_speed_freq_relation.m` | `Figure 2/Supporting codes v2/Analyze_speed_freq_relation.m`; also `Figure 2.m` `%% 18`–`%% 21` |
+| Speed-binned delta and theta peak frequency (FOOOF, per session) | extra | `Figure 2/Supporting codes v2/Estimate_speed_peak_frequency.m` | `Figure 2/Supporting codes v2/Analyze_speed_peak_frequency.m` |
 | Cross-frequency coupling (mid-PAG) | extra / CFC panel | `Figure 2/Supporting codes v2/Estimate_freq_coupling.m` | `Figure 2/Supporting codes v2/Analyze_freq_coupling.m`; `Figure 2/CrossFreq coupling.m` |
 | CFC maps along the probe | extra | `Figure 2/Supporting codes v2/Estimate_freq_coupling_maps.m` | `Figure 2/Supporting codes v2/Analyze_freq_coupling_maps.m` |
-| Inter-area PLI / wPLI / coherence maps | extra | `Figure 2/Supporting codes v2/Estimate_coherence_maps.m` | same script (Estimate also plots) |
+| Inter-area PLI / wPLI / coherence maps | extra | `Figure 2/Supporting codes v2/Estimate_coherence_maps.m` | `Figure 2/Supporting codes v2/Analyze_coherence_maps.m` (loads newest pairwise `coherence_pli_struct_2026.mat` / merged save) |
+| Coherence / phase lag vs mid-LPAG only | extra | `Figure 2/Supporting codes v2/Estimate_coherence_maps_lpag_ref.m` | `Figure 2/Supporting codes v2/Analyze_coherence_maps_lpag_ref.m` |
 | LFP phase reset at bout onset | extra / phase-reset panels | `Figure 2/Supporting codes v2/Estimate_phase_psth.m` | `Figure 2/Supporting codes v2/Analyze_phase_psth.m` |
 | Phase reset (supplementary layout) | extra | `Estimate_phase_psth.m` | `Figure 2/Supporting codes v2/Analyze_phase_psth_SuppFig.m` |
 | Play-bout PSTH maps by channel / area | extra | `Figure 2/Supporting codes v2/Estimate_psth_area_maps.m` | `Figure 2/Supporting codes v2/Analyze_psth_area_maps.m` |
 | Full-spectrum spectrogram at play onset | extra | `Figure 2/Supporting codes v2/Estimate_psth_full_spectrogram.m` | `Figure 2/Supporting codes v2/Analyze_psth_full_spectrogram.m` |
 | Partner-session mid-LPAG Welch/Fourier spectra and periodic/aperiodic fits | extra | `Figure 2/Supporting codes v2/Estimate_play_session_lpag_spectra.m` | `Figure 2/Supporting codes v2/Analyse_play_session_lpag_spectra.m` |
+| Candidate sustained 1–5 Hz episodes on the continuous mid-LPAG LFP, with Cole & Voytek cycle-by-cycle measures | extra | `Figure 2/Supporting codes v2/Estimate_delta_oscillatory_episodes.m` | `Figure 2/Supporting codes v2/Analyze_delta_oscillatory_episodes.m` |
+| Partner-session periodic/aperiodic spectra on every probe channel, stacked on mid-LPAG and on SC / DLPAG / LPAG / VLPAG / DR | extra | `Figure 2/Supporting codes v2/Estimate_play_session_probe_spectra.m` | `Figure 2/Supporting codes v2/Analyse_play_session_probe_spectra.m` |
 | Neuron–LFP phase locking (PPC, preferred phase, PSTH) | Fig 3a–e | `Figure 3/Supporting codes/Estiamte_phase_copuling.m` | `Figure 3/Figure 3a-e.m` |
+| Fig 3e PPC delta-power controls (1-s amplitude matching, pre-play null) | referee control | `Figure 3/Supporting codes/Estimate_phase_locking_power_control.m` | `Figure 3/Supporting codes/Analyze_play_ppc_amplitude_matched.m` |
+| Fig 3e PPC power-contrast null (session non-play tails) | referee control | `Figure 3/Supporting codes/Estimate_phase_locking_power_contrast.m` | `Figure 3/Supporting codes/Analyze_play_ppc_power_contrast.m` |
 | Play vs non-play delta peak/trough PSTH | extra | after phase-coupling Estimate | `Figure 3/Supporting codes/LOAD_AND_PLOT_psth_deltapeak_play_noplay.m` |
 | Activation index and bout-aligned rates | Fig 3f–h, Supp 5a–d | `Figure 3/Supporting codes/Estiamte_activation_index_and_other_variables.m` | `Figure 3/Figure 3g-h Activation Index.m`; example: `Figure 3/SuppFig4 ActivationIndex Example.m` |
 | Behavior-resolved rate modulation (A1–A7) | extra / extended | `Estiamte_activation_index_and_other_variables.m` | `Figure 3/Fig A1-A7 behavior modulation.m` |
@@ -63,6 +72,10 @@ Figure 2 supporting code: use **`Figure 2/Supporting codes v2/`**. The older `Fi
 | Delta peak/trough raw LFP snippets for CSD (LPAG center, Partners session) | extra | `CSD analysis/Estimate_delta_peak_trough_csd.m` (calls `GENERATE_DELTA_PEAK_TROUGH_CSD_LFP.m`) | writes `Data/Analysis results/delta peak trough CSD/{peak,trough}/...` |
 | Plot delta peak/trough evoked LFP (before CSD) | extra | — | `CSD analysis/Plot_delta_peak_trough_evoked.m` |
 | 1D CSD (kCSD / finite-difference) on LFP stacks | extra | `CSD analysis/CSD_1D_general.ipynb` or `python csd_1d_pipeline.py <delta-root>` | same (saves `csd_1d_*.npy` + plots) |
+| Waveforms around a neuron channel, for synchronous-spike artifact checks | extra | — | `Synchronous spike artifacts/load_waveforms_from_continuous.m` (check: `test_load_waveforms_from_continuous.m`) |
+| Four best-sampled good units per NPX session: waveforms from the continuous file in `NPX_raw_data_folders.xlsx`, plus autocorrelograms | extra | — | `Synchronous spike artifacts/Check_NPX_folders_and_load_waveforms.m` |
+| Synchronous-spike waveforms versus non-synchronous spikes inside the same play-bout windows | extra | `Synchronous spike artifacts/Estimate_sync_spike_waveforms.m` (calls `GENERATE_SYNC_SPIKE_WAVEFORMS.m`) | `Synchronous spike artifacts/Analyze_sync_spike_waveforms.m` |
+| Raw-LFP power at synchronous play-bout spikes versus phase-matched LFP in the same windows | extra | `Synchronous spike artifacts/Estimate_sync_spike_lfp_power.m` (calls `GENERATE_SYNC_SPIKE_LFP_POWER.m`) | `Synchronous spike artifacts/Analyze_sync_spike_lfp_power.m` |
 
 ---
 
@@ -78,19 +91,25 @@ These are the supporting / complementary pipelines. Rebuild with Estimate, then 
 | Channel-wise play-bout maps (LPAG vs VLPAG, etc.) | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Full spectrogram at play onset | `Estimate_psth_full_spectrogram.m` | `Analyze_psth_full_spectrogram.m` |
 | Partner-session mid-LPAG Welch/Fourier spectra + FOOOF | `Estimate_play_session_lpag_spectra.m` | `Analyse_play_session_lpag_spectra.m` |
+| Candidate sustained 1–5 Hz episodes in the continuous mid-LPAG LFP (Hilbert amplitude runs, peak-to-peak periods, plus Cole & Voytek 2019 trough-to-trough cycle shape and consistency). Not a play-bout average. `test_detect_delta_episodes.m` checks detection without the experiment files. | `Estimate_delta_oscillatory_episodes.m` | `Analyze_delta_oscillatory_episodes.m` |
+| Partner-session spectra + FOOOF on every probe channel; mid-LPAG stack and ventral/dorsal distance to SC, DLPAG, LPAG, VLPAG, DR | `Estimate_play_session_probe_spectra.m` | `Analyse_play_session_probe_spectra.m` |
 | Speed vs band-limited power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m` |
+| Speed-binned spectra: delta (1–5 Hz) and theta (6–12 Hz) FOOOF peak frequency versus speed, each Partners session kept separate. Speed bins are equal-count 5–10% of that session. Welch and Fourier spectra and the FOOOF fit are stored per bin. Analyze fits `PeakHz ~ Speed`, `log(PeakHz) ~ Speed`, and `PeakHz ~ log(Speed)` per session, then one ML mixed model across sessions with repeated measures `(1|Animal) + (1|Session)`. Pooled linear speed is a within-animal z-score of unique session bins; log speed stays in pixels/s because a pixel scale is an animal intercept. Four-panel figures show the delta- and theta-speed correlation distributions and their log10 p-value distributions for Welch and Fourier. Correlation panels report the mean and significant count; p-value panels mark p = 0.05 and 0.01. Histogram bins, significance, and the displayed log-speed range are grouped near the top of Analyze. `test_speed_peak_frequency.m` checks the binning, peak selection, regressions, and session table without the experiment files. | `Estimate_speed_peak_frequency.m` | `Analyze_speed_peak_frequency.m` |
 | Delta–gamma (or other) phase–amplitude coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m` or `Figure 2/CrossFreq coupling.m` |
 | CFC as depth maps | `Estimate_freq_coupling_maps.m` | `Analyze_freq_coupling_maps.m` |
-| PLI / wPLI coherence maps | `Estimate_coherence_maps.m` | same file |
+| PLI / wPLI coherence maps (full pairwise) | `Estimate_coherence_maps.m` | `Analyze_coherence_maps.m` (loads newest `coherence_pli_struct_2026.mat` / merged / all-together save; ignores `*lpag_ref*`) |
+| PLI / phase lag vs mid-LPAG only | `Estimate_coherence_maps_lpag_ref.m` | `Analyze_coherence_maps_lpag_ref.m` (loads `coherence_pli_struct_lpag_ref_2026.mat`) |
 | Hilbert phase at exploratory / play onset | `Estimate_phase_psth.m` | `Analyze_phase_psth.m` or `Analyze_phase_psth_SuppFig.m` |
 
-GENERATE functions live next to those Estimates (`GENERATE_PSTH_PLAY_BOUT.m`, `GENERATE_PSTH_ALL_BEHAVIORS.m`, `GENERATE_PSTH_CALLS.m`, `GENERATE_PSTH_CALL_LOC_REGRESSORS.m`, `GENERATE_SPEED_FREQ_RELATION.m`, `GENERATE_FREQ_COUPLING_STRUCT.m`, `GENERATE_FREQ_COUPLING_MAPS_STRUCT.m`, `GENERATE_COHERNECE_MAPS_STRUCT.m`, `GENERATE_PHASE_EXPLORATORY_ONSET.m`, `GENERATE_PSTH_AREA_MAPS.m`, `GENERATE_PSTH_SPECTROGRAM.m`).
+GENERATE functions live next to those Estimates (`GENERATE_PSTH_PLAY_BOUT.m`, `GENERATE_PSTH_ALL_BEHAVIORS.m`, `GENERATE_PSTH_CALLS.m`, `GENERATE_PSTH_CALL_LOC_REGRESSORS.m`, `GENERATE_SPEED_FREQ_RELATION.m`, `GENERATE_FREQ_COUPLING_STRUCT.m`, `GENERATE_FREQ_COUPLING_MAPS_STRUCT.m`, `GENERATE_COHERNECE_MAPS_STRUCT.m`, `GENERATE_COHERENCE_MAPS_LPAG_REF.m`, `GENERATE_PHASE_EXPLORATORY_ONSET.m`, `GENERATE_PSTH_AREA_MAPS.m`, `GENERATE_PSTH_SPECTROGRAM.m`, `GENERATE_DELTA_OSCILLATORY_EPISODES.m`, `GENERATE_PLAY_SESSION_PROBE_SPECTRA.m`, `GENERATE_SPEED_PEAK_FREQUENCY.m`).
 
 ### Spikes and locking (Figure 3 supporting)
 
 | What | Estimate | Analyze |
 |------|----------|---------|
 | Play vs pre-play delta-aligned PSTHs | `Estiamte_phase_copuling.m` | `LOAD_AND_PLOT_psth_deltapeak_play_noplay.m` |
+| PPC change after 1-s delta-power matching | `Estimate_phase_locking_power_control.m` (calls `GENERATE_PHASE_LOCKING_POWER_CONTROL.m`) | `Analyze_play_ppc_amplitude_matched.m` |
+| PPC power-contrast null from session non-play | `Estimate_phase_locking_power_contrast.m` (calls `GENERATE_PHASE_LOCKING_POWER_CONTRAST.m`) | `Analyze_play_ppc_power_contrast.m` |
 | A1–A7 behavior modulation of rates | `Estiamte_activation_index_and_other_variables.m` | `Figure 3/Fig A1-A7 behavior modulation.m` |
 | Activation index vs LFP power | same Estimate | `Former Supplementary Figure Correlation between power and activation index.m` |
 | Population CCGs by area and lock type | `Estimate cross correlogram all aniamls.m` | `ANALYZE cross correlogram all aniamls.m` |
@@ -113,6 +132,19 @@ Older one-file versions (do not start here unless you need the original session 
 
 ---
 
+### Synchronous spike artifacts
+
+Both estimates use the same play-bout pairs (`synchronous_play_pairs.m`): good units in DLPAG, LPAG, VLPAG, DR, and SupCol, 5 ms coincidence inside [−1.5, 1] s of bout onset, at least 1000 spikes in the session, every coincident spike kept. For waveforms, the null pool is the other spikes inside those same windows, across every play bout, and it must be at least as large as the synchronous set. A spike that is synchronous only with a different partner can still be drawn. The LFP null is different: random samples of the unfiltered LFP inside those same windows, restricted to the same 1–5 Hz delta-phase bin as each synchronous event. Pairs are added until each of those areas has an observation for at least 90% of its neurons with 1000 spikes. A pair is kept only when it includes a neuron that is not yet in the sample, so already-observed neurons are reused only to bring a new one in. Results go to `Data/Analysis results/synchronous spike waveforms/`. Run Estimate, then Analyze. `test_sync_event_statistics.m` checks the mask, the coverage target, distances, time-by-time percentiles, and the phase-matched power percentile without the experiment files.
+
+| What | Estimate | Analyze |
+|------|----------|---------|
+| For each neuron in a pair: the synchronous mean, the mean of non-synchronous spikes in the bout windows, and the percentile of that synchronous mean against 500 null means at every channel and time. The scalar distance from the non-synchronous mean is kept, with the 500 scalar null distances, the pointwise 2.5% and 97.5% null waveforms, and the time of the strongest absolute departure on the neuron channel. The 500 waveform tensors are not saved. Only the in-window snippets are read from the continuous file named in `NPX_raw_data_folders.xlsx`. Each neuron is read once. Both neurons of a pair are stored together. Each neuron row also stores the partner that formed that synchronous event: cluster id, area, and channel. | `Estimate_sync_spike_waveforms.m` (`GENERATE_SYNC_SPIKE_WAVEFORMS.m`) | `Analyze_sync_spike_waveforms.m`. Channel profile, autocorrelogram, and spatial range. The autocorrelogram stack uses only synchronous-event spikes. The spatial-range stack uses the saved synchronous mean of those same neurons, with distance 0 on the channel that has the largest peak-to-peak range. Detailed example panels are limited by `max_example_neurons` (default 3), and each example waveform shows ±3 channels around its largest-range channel. Every other synchronous-event neuron stays in the stacks. The same autocorrelogram and spatial-range stacks are drawn again for pairs whose channels are at least `min_pair_distance_um` apart (default 500 micrometers). Both stacks keep neurons in DLPAG, LPAG, VLPAG, DR, and SupCol that participated in a synchronous event. Neither repeats the 500 null draws: `Plot_sync_spike_acg_and_waveforms.m` |
+| Mean raw-LFP power at the synchronous spikes versus random LFP samples in the same play-bout windows that share the synchronous 1–5 Hz delta phase (36 bins of 10 degrees). Power is the nearest sample of `abs(hilbert(unfiltered LFP_PAG)).^2` on the neuron channel (`ch + 1`). Samples within 10 ms of that pair's synchronous spikes are left out of the null. Each LFP channel is read once. | `Estimate_sync_spike_lfp_power.m` (`GENERATE_SYNC_SPIKE_LFP_POWER.m`, `compare_phase_matched_lfp.m`) | `Analyze_sync_spike_lfp_power.m` |
+| Cut multi-channel waveforms from a continuous int16 file. The channel window is `neuron_channel ± channel_range`, capped at channel 1 and at 384. | — | `load_waveforms_from_continuous.m` (check: `test_load_waveforms_from_continuous.m`) |
+| Four good units with the most spikes in each session: waveforms from that session's continuous file and autocorrelograms. The waveform axis follows the mean spike after the pre-spike baseline is removed. | — | `Check_NPX_folders_and_load_waveforms.m` |
+
+---
+
 ## Figure 1 supporting (not a panel by itself)
 
 | What | Run |
@@ -122,6 +154,8 @@ Older one-file versions (do not start here unless you need the original session 
 | HMM input files | `Figure 1/HMM modeling/CreateHMMFIiles.m` |
 | HMM fit | `Figure 1/HMM modeling/python hmm estimate.txt` (see `Figure 1/HMM modeling/README.md`) |
 | HMM post-processing | `Figure 1/HMM modeling/Load_HMM_outputs_and_analyze.m` |
+| Manual video tracking | `manual traking/manual_traking.m` (run one section at a time; copy the final `.mat` into `Data/Traking backups/`) |
+| Binary self/partner behavior matrices around selected Type2 behavior offsets, plus a time-wrapped axis (real-time flanks around a fixed number of onset-to-offset bins), with each Partners session retained separately | `Figure 1/Behavior probability/Estimate_behavior_probability.m`, then `Analyze_behavior_probability.m` |
 
 ---
 

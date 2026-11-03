@@ -54,9 +54,10 @@ header_dict = sprintf( ...
     dtype, shape_str);
 header_dict = char(header_dict);
 
-% npy v1.0: magic(6) + ver(2) + header_len(uint16) + header, 16-byte aligned
-header_len_pos = 10;
-pad_len = 64 - mod(header_len_pos + 2 + numel(header_dict) + 1, 64);
+% npy v1.0: magic(6) + ver(2) + header_len(uint16) = 10-byte prefix.
+% Header + prefix must be aligned; use 64 bytes (stricter than required 16).
+prefix_len = 10;
+pad_len = 64 - mod(prefix_len + numel(header_dict) + 1, 64);
 if pad_len == 64
     pad_len = 0;
 end
