@@ -44,7 +44,8 @@ random_seed = 1;
 rng(random_seed, 'twister');
 k_requested = 30;
 n_balance_repeats = 10;
-output_file = fullfile(saving_folder, 'cvResults_delta_nur_play_bout_redo_261101.mat');
+low_freq_bool = true;
+frequency_band_names = {'delta','theta'}; % Active input contains delta/theta.
 
 %% 1.3 LOAD STRUCTURE DATA
 disp('Loading')
@@ -61,6 +62,17 @@ disp('Loading done')
 freq_range = psth_structure(1).freq_range;
 wind_length = psth_structure(1).wind_length;
 spect_bin_size = psth_structure(1).spect_bin_size;
+if low_freq_bool
+    selected_frequency_index = 1;
+    power_source = 'play_bout_onset_low_freq';
+else
+    selected_frequency_index = 2;
+    power_source = 'play_bout_onset_high_freq';
+end
+analysis_band = frequency_band_names{selected_frequency_index};
+selected_frequency_range = freq_range{selected_frequency_index};
+output_file = fullfile(saving_folder, ...
+    sprintf('cvResults_%s_nur_play_bout_redo_261101.mat', analysis_band));
 
 % % for BETA AND GAMMA
 % freq_range = {[15 30],[40 90]}; 
@@ -289,20 +301,24 @@ play_bout_lengths       = [stacked_data.meta{:,4}]';
 pow_matrix_high_Freq = stacked_data.play_bout_onset_high_freq;
 for j=1:size(pow_matrix_high_Freq,1)
     pow_matrix_high_Freq(j,:) = (pow_matrix_high_Freq(j,:) - mean(pow_matrix_high_Freq(j, baseline_index), 'omitmissing'))/std(pow_matrix_high_Freq(j, baseline_index), 'omitmissing');
-    pow_matrix_high_Freq(j,:)  = movmean( pow_matrix_high_Freq(j,:),.125/bin_size, 'omitmissing');
 end
 
 pow_matrix_low_Freq = stacked_data.play_bout_onset_low_freq;
 for j=1:size(pow_matrix_low_Freq,1)
     pow_matrix_low_Freq(j,:) = (pow_matrix_low_Freq(j,:) - mean(pow_matrix_low_Freq(j, baseline_index), 'omitmissing'))/std(pow_matrix_low_Freq(j, baseline_index), 'omitmissing');
-    pow_matrix_low_Freq(j,:)  = movmean( pow_matrix_low_Freq(j,:),1/bin_size, 'omitmissing');
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% frequency selection line %%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Delta is the low-frequency matrix in the active delta/theta input file.
-array = pow_matrix_low_Freq;
+fprintf('\nFrequency selection: %s band (%.3g-%.3g Hz)\n', ...
+    upper(analysis_band), selected_frequency_range(1), selected_frequency_range(end));
+fprintf('Power source: %s; output: %s\n\n', power_source, output_file);
+if low_freq_bool
+    array = pow_matrix_low_Freq;
+else
+    array = pow_matrix_high_Freq;
+end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 array(expanded_regressor==0) = NaN;
@@ -850,8 +866,10 @@ extendedResults.bout_lookup = table( ...
     string(stacked_data.meta(lookup_row,1)), ...
     cell2mat(stacked_data.meta(lookup_row,2)), ...
     'VariableNames', {'BoutID','PhysicalBoutKey','Start','End','Animal','Partner'});
-extendedResults.analysis_band = 'delta';
-extendedResults.power_source = 'play_bout_onset_low_freq';
+extendedResults.analysis_band = analysis_band;
+extendedResults.frequency_range_hz = selected_frequency_range;
+extendedResults.low_freq_bool = low_freq_bool;
+extendedResults.power_source = power_source;
 extendedResults.input_psth_file = 'psth_structure_all_regressors_delta_theta.mat';
 extendedResults.input_animal_file = 'animal_names_all_regressors_delta.mat';
 
