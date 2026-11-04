@@ -200,7 +200,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 |----------|----------|----------------------|
 | Play-bout band-power PSTH | `Estimate_psth_band_power.m` | `Figure 2.m` |
 | PSTH per behavior | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
-| PSTH per behavior, theta and gamma (same alignments; LFP loaded once per animal) | `Estimate_psth_all_behaviors_theta_gamma.m` | `Analyze_psth_all_behaviors_theta_gamma.m` |
+| PSTH per behavior, delta / theta / gamma (same alignments; LFP loaded once per animal) | `Estimate_psth_all_behaviors_theta_gamma.m` | `Analyze_psth_all_behaviors_theta_gamma.m` (grand averages and condition differences); `Analyze_psth_preonset_spectrum.m` (pre-onset spectrum and the per-animal check) |
 | Classify two Type2 groups from time-wrapped band power, pooled across sessions and animals | (uses the per-behavior PSTH) | `Analyze_behavior_class_from_timewrap_power.m` |
 | Area maps | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Call-locked PSTH | `Estimate_psth_calls_all_animals.m` | `Figure 2.m` `%% 13`–`%% 17` |
