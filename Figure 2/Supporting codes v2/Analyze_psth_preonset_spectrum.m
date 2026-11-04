@@ -38,9 +38,12 @@
 % %% Trial-level circular-shift null
 %     Each -5-to-0 s trial is independently circularly rotated. This keeps
 %     that trial's spectrum exactly and removes common phase relative to
-%     onset. Behaviors are averaged within animal, then animals are averaged.
-%     The spectrum control uses raw Fourier power because applying FOOOF in
-%     every permutation would change the null and make it prohibitively slow.
+%     onset. Behaviors are averaged within animal. Each animal gets a target
+%     2-3 Hz p-value and a max-frequency-corrected peak p-value. Animal
+%     effects are standardized against their own nulls before equal-animal
+%     group inference and leave-one-animal-out checks. The spectrum control
+%     uses raw Fourier power because applying FOOOF in every permutation
+%     would change the null and make it prohibitively slow.
 % %% Raw mean versus per-trial z-score
 %     The preview mean, and the mean after each trial is z-scored on its own
 %     -2 to 0 s window.
@@ -86,8 +89,13 @@ fooof_fit_max_hz = 20;
 plot_max_hz = fooof_fit_max_hz;
 fooof_peak_widths = [0.5 12];
 fooof_aperiodic_mode = 'fixed';
-circular_null_n_perm = 500;
+% Circular-shift inference. The target band is predefined above. Peak
+% searches are corrected by the permutation maximum inside search_band.
+circular_null_n_perm = 1000;
 circular_null_seed = 29;
+circular_null_min_trials_per_unit = 5;
+circular_null_min_units_per_animal = 2;
+circular_null_search_band = [0.4 8];
 animal_colors = [0.12 0.47 0.71; 0.89 0.10 0.11; 0.20 0.63 0.17; ...
     0.60 0.31 0.64; 1.00 0.50 0.05; 0.09 0.75 0.81];
 
@@ -377,16 +385,18 @@ play_null = circular_trial_null(all_psth_onset_self, all_psth_onset_other, ...
     all_electrode_index_self, all_electrode_index_other, ...
     all_session_index_self, all_session_index_other, ...
     play_behaviors, numel(animal_label), pre_mask, sample_rate, freq_hz, ...
-    effect_band, circular_null_n_perm);
+    effect_band, circular_null_search_band, circular_null_n_perm, ...
+    circular_null_min_trials_per_unit, circular_null_min_units_per_animal);
 nonplay_null = circular_trial_null(all_psth_onset_self, all_psth_onset_other, ...
     all_electrode_index_self, all_electrode_index_other, ...
     all_session_index_self, all_session_index_other, ...
     other_behaviors, numel(animal_label), pre_mask, sample_rate, freq_hz, ...
-    effect_band, circular_null_n_perm);
+    effect_band, circular_null_search_band, circular_null_n_perm, ...
+    circular_null_min_trials_per_unit, circular_null_min_units_per_animal);
 rng(previous_rng);
 
-fprintf('%s circular null: play 2-3 Hz p = %.4g; non-play p = %.4g\n', ...
-    band_name, play_null.p_effect, nonplay_null.p_effect);
+print_circular_results([band_name ' play'], play_null, animal_label, effect_band);
+print_circular_results([band_name ' non-play'], nonplay_null, animal_label, effect_band);
 
 figure
 name_psth_figure(band_name, 'onset_pre_waveform_circular_null')
@@ -397,30 +407,37 @@ plot_circular_null(time_pre, play_null.animal_wave, play_null.group_wave, ...
 
 figure
 name_psth_figure(band_name, 'onset_pre_spectrum_circular_null')
-plot_circular_null(freq_hz, play_null.animal_spec, play_null.group_spec, ...
-    play_null.null_spec, animal_label, 'Frequency (Hz)', 'Raw power of mean', ...
-    'Play', effect_band, play_null.p_effect, nonplay_null.animal_spec, ...
-    nonplay_null.group_spec, nonplay_null.null_spec, 'Non-play', nonplay_null.p_effect);
+plot_circular_spectrum_hierarchy(freq_hz, play_null, nonplay_null, ...
+    animal_label, effect_band);
 end
 
 function result = circular_trial_null(psth_self, psth_other, elec_self, elec_other, ...
         animal_self, animal_other, behavior_index, n_animals, pre_mask, fs, ...
-        freq, effect_band, n_perm)
+        freq, effect_band, search_band, n_perm, min_trials_per_unit, ...
+        min_units_per_animal)
 % Trial-level phase null. Every unit is one behavior and actor in one animal.
 units = cell(n_animals, 1);
+n_units = zeros(n_animals, 1);
+n_trials = zeros(n_animals, 1);
 for animal_n = 1:n_animals
     units{animal_n} = {};
     for behavior_n = behavior_index
         self_seg = trial_pre_segments(psth_self{1, behavior_n}, ...
             elec_self{behavior_n}, animal_self{behavior_n}, animal_n, pre_mask);
-        if ~isempty(self_seg)
+        if size(self_seg, 1) >= min_trials_per_unit
             units{animal_n}{end + 1} = self_seg; %#ok<AGROW>
+            n_trials(animal_n) = n_trials(animal_n) + size(self_seg, 1);
         end
         other_seg = trial_pre_segments(psth_other{1, behavior_n}, ...
             elec_other{behavior_n}, animal_other{behavior_n}, animal_n, pre_mask);
-        if ~isempty(other_seg)
+        if size(other_seg, 1) >= min_trials_per_unit
             units{animal_n}{end + 1} = other_seg; %#ok<AGROW>
+            n_trials(animal_n) = n_trials(animal_n) + size(other_seg, 1);
         end
+    end
+    n_units(animal_n) = numel(units{animal_n});
+    if n_units(animal_n) < min_units_per_animal
+        units{animal_n} = {};
     end
 end
 
@@ -434,12 +451,14 @@ for animal_n = 1:n_animals
             mean_units(units{animal_n}, fs, freq, false);
     end
 end
-included = any(isfinite(animal_wave), 2);
+included = n_units >= min_units_per_animal & any(isfinite(animal_wave), 2);
 group_wave = mean(animal_wave(included, :), 1, 'omitnan');
 group_spec = mean(animal_spec(included, :), 1, 'omitnan');
 
 null_wave = nan(n_perm, n_pre);
 null_spec = nan(n_perm, n_freq);
+animal_null_wave = nan(n_animals, n_perm, n_pre);
+animal_null_spec = nan(n_animals, n_perm, n_freq);
 for permutation = 1:n_perm
     perm_animal_wave = nan(n_animals, n_pre);
     perm_animal_spec = nan(n_animals, n_freq);
@@ -449,6 +468,10 @@ for permutation = 1:n_perm
                 mean_units(units{animal_n}, fs, freq, true);
         end
     end
+    animal_null_wave(:, permutation, :) = ...
+        reshape(perm_animal_wave, n_animals, 1, n_pre);
+    animal_null_spec(:, permutation, :) = ...
+        reshape(perm_animal_spec, n_animals, 1, n_freq);
     null_wave(permutation, :) = mean(perm_animal_wave(included, :), 1, 'omitnan');
     null_spec(permutation, :) = mean(perm_animal_spec(included, :), 1, 'omitnan');
     if mod(permutation, 50) == 0 || permutation == n_perm
@@ -456,19 +479,48 @@ for permutation = 1:n_perm
     end
 end
 
-observed_effect = band_mean(freq, group_spec, effect_band);
-null_effect = nan(n_perm, 1);
-for permutation = 1:n_perm
-    null_effect(permutation) = band_mean(freq, null_spec(permutation, :), effect_band);
+[animal_z_spec, animal_null_z_spec] = standardize_animal_spectra( ...
+    animal_spec, animal_null_spec, included);
+[animal_effect_z, animal_null_effect_z, animal_p_effect] = ...
+    animal_target_inference(freq, animal_spec, animal_null_spec, effect_band, included);
+[animal_peak_hz, animal_peak_p] = animal_peak_inference( ...
+    freq, animal_z_spec, animal_null_z_spec, search_band, included);
+
+group_z_spec = nan(1, n_freq);
+group_null_z_spec = nan(n_perm, n_freq);
+group_effect_z = NaN;
+group_null_effect_z = nan(n_perm, 1);
+p_effect = NaN;
+group_peak_hz = NaN;
+group_peak_p = NaN;
+group_max_threshold = NaN;
+significant_frequency = false(size(freq));
+if nnz(included) >= 2
+    group_z_spec = mean(animal_z_spec(included, :), 1, 'omitnan');
+    group_null_z_spec = squeeze(mean( ...
+        animal_null_z_spec(included, :, :), 1, 'omitnan'));
+    if size(group_null_z_spec, 1) ~= n_perm
+        group_null_z_spec = reshape(group_null_z_spec, n_perm, n_freq);
+    end
+    group_effect_z = mean(animal_effect_z(included), 'omitnan');
+    group_null_effect_z = mean( ...
+        animal_null_effect_z(included, :), 1, 'omitnan').';
+    p_effect = empirical_upper_p(group_effect_z, group_null_effect_z);
+    [group_peak_hz, group_peak_p, group_max_threshold, significant_frequency] = ...
+        group_peak_inference(freq, group_z_spec, group_null_z_spec, search_band);
 end
-valid_null = isfinite(null_effect);
-if isfinite(observed_effect) && any(valid_null)
-    comparison_tolerance = max(1e-12, abs(observed_effect) * 1e-12);
-    p_effect = (1 + sum(null_effect(valid_null) >= ...
-        observed_effect - comparison_tolerance)) / ...
-        (1 + nnz(valid_null));
-else
-    p_effect = NaN;
+
+loo_effect_z = nan(n_animals, 1);
+loo_p_effect = nan(n_animals, 1);
+for animal_n = 1:n_animals
+    keep = included;
+    keep(animal_n) = false;
+    if nnz(keep) < 2
+        continue
+    end
+    loo_effect_z(animal_n) = mean(animal_effect_z(keep), 'omitnan');
+    loo_null = mean(animal_null_effect_z(keep, :), 1, 'omitnan').';
+    loo_p_effect(animal_n) = empirical_upper_p(loo_effect_z(animal_n), loo_null);
 end
 
 result.animal_wave = animal_wave;
@@ -477,9 +529,159 @@ result.group_wave = group_wave;
 result.group_spec = group_spec;
 result.null_wave = null_wave;
 result.null_spec = null_spec;
-result.observed_effect = observed_effect;
-result.null_effect = null_effect;
+result.animal_null_wave = animal_null_wave;
+result.animal_null_spec = animal_null_spec;
+result.animal_z_spec = animal_z_spec;
+result.animal_null_z_spec = animal_null_z_spec;
+result.animal_effect_z = animal_effect_z;
+result.animal_null_effect_z = animal_null_effect_z;
+result.animal_p_effect = animal_p_effect;
+result.animal_peak_hz = animal_peak_hz;
+result.animal_peak_p = animal_peak_p;
+result.group_z_spec = group_z_spec;
+result.group_null_z_spec = group_null_z_spec;
+result.group_effect_z = group_effect_z;
+result.group_null_effect_z = group_null_effect_z;
 result.p_effect = p_effect;
+result.group_peak_hz = group_peak_hz;
+result.group_peak_p = group_peak_p;
+result.group_max_threshold = group_max_threshold;
+result.significant_frequency = significant_frequency;
+result.loo_effect_z = loo_effect_z;
+result.loo_p_effect = loo_p_effect;
+result.included = included;
+result.n_units = n_units;
+result.n_trials = n_trials;
+result.effect_band = effect_band;
+result.search_band = search_band;
+end
+
+function [animal_z, null_z] = standardize_animal_spectra(animal_spec, animal_null_spec, included)
+[n_animals, n_freq] = size(animal_spec);
+n_perm = size(animal_null_spec, 2);
+animal_z = nan(n_animals, n_freq);
+null_z = nan(n_animals, n_perm, n_freq);
+for animal_n = 1:n_animals
+    if ~included(animal_n)
+        continue
+    end
+    null_curves = reshape(animal_null_spec(animal_n, :, :), n_perm, n_freq);
+    center = mean(null_curves, 1);
+    scale = std(null_curves, 0, 1);
+    tolerance = max(1e-12, abs(center) * 1e-12);
+    usable = isfinite(scale) & scale > tolerance;
+    animal_z(animal_n, usable) = ...
+        (animal_spec(animal_n, usable) - center(usable)) ./ scale(usable);
+    standardized = nan(size(null_curves));
+    standardized(:, usable) = ...
+        (null_curves(:, usable) - center(usable)) ./ scale(usable);
+    null_z(animal_n, :, :) = reshape(standardized, 1, n_perm, n_freq);
+end
+end
+
+function [effect_z, null_effect_z, p_effect] = animal_target_inference( ...
+        freq, animal_spec, animal_null_spec, effect_band, included)
+n_animals = size(animal_spec, 1);
+n_perm = size(animal_null_spec, 2);
+effect_z = nan(n_animals, 1);
+null_effect_z = nan(n_animals, n_perm);
+p_effect = nan(n_animals, 1);
+for animal_n = 1:n_animals
+    if ~included(animal_n)
+        continue
+    end
+    observed = band_mean(freq, animal_spec(animal_n, :), effect_band);
+    null_values = nan(n_perm, 1);
+    for permutation = 1:n_perm
+        curve = reshape(animal_null_spec(animal_n, permutation, :), 1, []);
+        null_values(permutation) = band_mean(freq, curve, effect_band);
+    end
+    center = mean(null_values);
+    scale = std(null_values, 0);
+    tolerance = max(1e-12, abs(center) * 1e-12);
+    if isfinite(scale) && scale > tolerance
+        effect_z(animal_n) = (observed - center) / scale;
+        null_effect_z(animal_n, :) = ((null_values - center) / scale).';
+    end
+    p_effect(animal_n) = empirical_upper_p(observed, null_values);
+end
+end
+
+function [peak_hz, peak_p] = animal_peak_inference( ...
+        freq, animal_z, animal_null_z, search_band, included)
+n_animals = size(animal_z, 1);
+n_perm = size(animal_null_z, 2);
+search = freq >= search_band(1) & freq <= search_band(2);
+freq_search = freq(search);
+peak_hz = nan(n_animals, 1);
+peak_p = nan(n_animals, 1);
+for animal_n = 1:n_animals
+    if ~included(animal_n) || ~any(search)
+        continue
+    end
+    observed_curve = animal_z(animal_n, search);
+    [observed_max, index] = finite_max(observed_curve);
+    if isfinite(observed_max)
+        peak_hz(animal_n) = freq_search(index);
+    end
+    null_curves = reshape(animal_null_z(animal_n, :, search), n_perm, []);
+    null_max = finite_row_max(null_curves);
+    peak_p(animal_n) = empirical_upper_p(observed_max, null_max);
+end
+end
+
+function [peak_hz, peak_p, max_threshold, significant_frequency] = ...
+        group_peak_inference(freq, group_z, group_null_z, search_band)
+search = freq >= search_band(1) & freq <= search_band(2);
+significant_frequency = false(size(freq));
+peak_hz = NaN;
+peak_p = NaN;
+max_threshold = NaN;
+if ~any(search)
+    return
+end
+freq_search = freq(search);
+[observed_max, index] = finite_max(group_z(search));
+if isfinite(observed_max)
+    peak_hz = freq_search(index);
+end
+null_max = finite_row_max(group_null_z(:, search));
+peak_p = empirical_upper_p(observed_max, null_max);
+valid = null_max(isfinite(null_max));
+if ~isempty(valid)
+    max_threshold = prctile(valid, 95);
+    significant_frequency(search) = group_z(search) > max_threshold;
+end
+end
+
+function p = empirical_upper_p(observed, null_values)
+valid = null_values(isfinite(null_values));
+if ~isfinite(observed) || isempty(valid)
+    p = NaN;
+    return
+end
+tolerance = max(1e-12, abs(observed) * 1e-12);
+p = (1 + sum(valid >= observed - tolerance)) / (1 + numel(valid));
+end
+
+function [value, index] = finite_max(values)
+values = values(:).';
+valid = isfinite(values);
+value = NaN;
+index = NaN;
+if ~any(valid)
+    return
+end
+valid_index = find(valid);
+[value, local_index] = max(values(valid));
+index = valid_index(local_index);
+end
+
+function values = finite_row_max(matrix)
+values = nan(size(matrix, 1), 1);
+for row = 1:size(matrix, 1)
+    values(row) = finite_max(matrix(row, :));
+end
 end
 
 function segments = trial_pre_segments(psth, electrode, animal_id, selected_animal, pre_mask)
@@ -616,6 +818,137 @@ for column = 1:2
         title(line_axis, sprintf('2-3 Hz circular-shift p = %.4g', p_values(column)));
     end
     legend(line_axis, 'Location', 'best');
+end
+end
+
+function print_circular_results(name, result, animal_names, effect_band)
+fprintf('\n%s hierarchical circular-shift result\n', name);
+fprintf('  group %.1f-%.1f Hz z = %.2f, p = %.4g\n', ...
+    effect_band(1), effect_band(2), result.group_effect_z, result.p_effect);
+fprintf('  group peak %.2f Hz, max-frequency corrected p = %.4g\n', ...
+    result.group_peak_hz, result.group_peak_p);
+fprintf('  animal   units  trials   target_z  target_p  peak_hz  peak_p   LOO_z  LOO_p\n');
+for animal_n = 1:numel(animal_names)
+    if ~result.included(animal_n)
+        fprintf('  %-7s %5d %7d   excluded\n', animal_names{animal_n}, ...
+            result.n_units(animal_n), result.n_trials(animal_n));
+        continue
+    end
+    fprintf('  %-7s %5d %7d   %8.2f  %8.4g  %7.2f  %7.4g  %6.2f  %7.4g\n', ...
+        animal_names{animal_n}, result.n_units(animal_n), ...
+        result.n_trials(animal_n), result.animal_effect_z(animal_n), ...
+        result.animal_p_effect(animal_n), result.animal_peak_hz(animal_n), ...
+        result.animal_peak_p(animal_n), result.loo_effect_z(animal_n), ...
+        result.loo_p_effect(animal_n));
+end
+end
+
+function plot_circular_spectrum_hierarchy(freq, play_result, nonplay_result, ...
+        animal_names, effect_band)
+results = {play_result, nonplay_result};
+names = {'Play', 'Non-play'};
+all_z = [play_result.animal_z_spec(:); nonplay_result.animal_z_spec(:)];
+all_z = all_z(isfinite(all_z));
+color_limit = 1;
+if ~isempty(all_z)
+    color_limit = max(1, prctile(abs(all_z), 98));
+end
+cmap = diverging_colormap(256);
+tiledlayout(3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+for column = 1:2
+    result = results{column};
+    labels = circular_animal_labels(animal_names, result);
+    image_axis = nexttile(column, [2 1]);
+    shown = imagesc(freq, 1:numel(animal_names), result.animal_z_spec);
+    set(shown, 'AlphaData', isfinite(result.animal_z_spec));
+    set(image_axis, 'YDir', 'reverse', 'TickDir', 'out', ...
+        'YLim', [0.5 numel(animal_names) + 0.5]);
+    clim(image_axis, [-color_limit color_limit]);
+    colormap(image_axis, cmap);
+    yticks(image_axis, 1:numel(animal_names));
+    yticklabels(image_axis, labels);
+    if column == 1
+        ylabel(image_axis, 'Animal (* target p<.05; ^ corrected peak p<.05)');
+    end
+    title(image_axis, [names{column} ' animal z-spectra']);
+    xlim(image_axis, [freq(1) freq(end)]);
+    hold(image_axis, 'on');
+    plot(image_axis, effect_band(1) * [1 1], ...
+        [0.5 numel(animal_names) + 0.5], 'k:', 'LineWidth', 0.8);
+    plot(image_axis, effect_band(2) * [1 1], ...
+        [0.5 numel(animal_names) + 0.5], 'k:', 'LineWidth', 0.8);
+    hold(image_axis, 'off');
+    colorbar(image_axis);
+
+    line_axis = nexttile(4 + column);
+    hold(line_axis, 'on');
+    for animal_n = 1:numel(animal_names)
+        if result.included(animal_n)
+            plot(line_axis, freq, result.animal_z_spec(animal_n, :), ...
+                'Color', [0.82 0.82 0.82], 'LineWidth', 0.8, ...
+                'HandleVisibility', 'off');
+        end
+    end
+    null_lo = prctile(result.group_null_z_spec, 2.5, 1);
+    null_hi = prctile(result.group_null_z_spec, 97.5, 1);
+    null_center = median(result.group_null_z_spec, 1, 'omitnan');
+    valid = isfinite(null_lo) & isfinite(null_hi);
+    if any(valid)
+        x_band = freq(valid);
+        fill(line_axis, [x_band fliplr(x_band)], ...
+            [null_lo(valid) fliplr(null_hi(valid))], [0.25 0.45 0.85], ...
+            'FaceAlpha', 0.38, 'EdgeColor', 'none', ...
+            'DisplayName', 'Group null 95%');
+    end
+    plot(line_axis, freq, null_center, '--', 'Color', [0.15 0.35 0.75], ...
+        'LineWidth', 1.1, 'DisplayName', 'Null median');
+    plot(line_axis, freq, result.group_z_spec, 'k', 'LineWidth', 2.4, ...
+        'DisplayName', 'Equal-animal z mean');
+    if isfinite(result.group_max_threshold)
+        yline(line_axis, result.group_max_threshold, 'r--', ...
+            'Max-frequency 5% threshold', 'HandleVisibility', 'off');
+    end
+    significant = result.significant_frequency & isfinite(result.group_z_spec);
+    if any(significant)
+        plot(line_axis, freq(significant), result.group_z_spec(significant), ...
+            'r.', 'MarkerSize', 12, 'DisplayName', 'Max-T significant');
+    end
+    yl = ylim(line_axis);
+    target = patch(line_axis, ...
+        [effect_band(1) effect_band(2) effect_band(2) effect_band(1)], ...
+        [yl(1) yl(1) yl(2) yl(2)], [0.65 0.65 0.65], ...
+        'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    uistack(target, 'bottom');
+    hold(line_axis, 'off');
+    xlabel(line_axis, 'Frequency (Hz)');
+    if column == 1
+        ylabel(line_axis, 'Circular-null z');
+    end
+    xlim(line_axis, [freq(1) freq(end)]);
+    set(line_axis, 'TickDir', 'out', 'Box', 'off');
+    title(line_axis, sprintf(['target p=%.4g; peak %.2f Hz, ' ...
+        'corrected p=%.4g'], result.p_effect, result.group_peak_hz, ...
+        result.group_peak_p));
+    legend(line_axis, 'Location', 'best');
+end
+end
+
+function labels = circular_animal_labels(animal_names, result)
+labels = animal_names;
+for animal_n = 1:numel(labels)
+    if ~result.included(animal_n)
+        labels{animal_n} = [labels{animal_n} ' excluded'];
+        continue
+    end
+    marker = '';
+    if result.animal_p_effect(animal_n) < 0.05
+        marker = [marker '*']; %#ok<AGROW>
+    end
+    if result.animal_peak_p(animal_n) < 0.05
+        marker = [marker '^']; %#ok<AGROW>
+    end
+    labels{animal_n} = [labels{animal_n} marker];
 end
 end
 
