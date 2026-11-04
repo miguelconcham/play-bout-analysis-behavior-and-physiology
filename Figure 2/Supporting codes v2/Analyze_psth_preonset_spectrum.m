@@ -17,18 +17,16 @@
 %     to onset. Same figures previously drawn at the end of
 %     Analyze_psth_all_behaviors_theta_gamma.m.
 % %% Per-animal waveforms
-%     One colored line per animal. The black line pools every trial, so an
-%     animal with more trials pulls it harder. The gray line gives every
-%     animal with at least one trial the same weight. The dashed line is
-%     the pooled waveform after the animal with the most trials is removed.
-%     If that animal is the only one, there is no dashed line.
-%     Behaviors are split across figures: play 1-4, play 5-8, then the six
-%     non-play behaviors.
+%     One column per behavior, four or six columns per figure (play 1-4,
+%     play 5-8, then the six non-play behaviors). The upper image spans two
+%     rows and has one row per animal. The bottom panel draws each animal
+%     as a thin line, the trial-weighted mean as a thick black line, and
+%     the equal-animal mean as a thick gray line.
 % %% Per-animal spectra
-%     FOOOF periodic component of each of those waveforms. The fit and the
-%     panels use 0-20 Hz. The Command Window reports the mean periodic
-%     component from 2 to 3 Hz. 20 Hz is below the Nyquist frequency of the
-%     10 ms power step.
+%     Same columns. The image and the lines are the FOOOF periodic component.
+%     The fit and the panels use 0-20 Hz. The Command Window reports the
+%     mean periodic component from 2 to 3 Hz. 20 Hz is below the Nyquist
+%     frequency of the 10 ms power step.
 % %% Raw mean versus per-trial z-score
 %     The preview mean, and the mean after each trial is z-scored on its own
 %     -2 to 0 s window.
@@ -247,15 +245,11 @@ for b = 1:numel(all_behaviors)
     end
 end
 
-[equal_wave_self, loo_wave_self] = reference_waves(animal_wave_self, trial_wave_self, n_self);
-[equal_wave_other, loo_wave_other] = reference_waves(animal_wave_other, trial_wave_other, n_other);
+[equal_wave_self, ~] = reference_waves(animal_wave_self, trial_wave_self, n_self);
+[equal_wave_other, ~] = reference_waves(animal_wave_other, trial_wave_other, n_other);
 equal_spec_self = periodic_spectra_of_rows(equal_wave_self, sample_rate, ...
     freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
 equal_spec_other = periodic_spectra_of_rows(equal_wave_other, sample_rate, ...
-    freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
-loo_spec_self = periodic_spectra_of_rows(loo_wave_self, sample_rate, ...
-    freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
-loo_spec_other = periodic_spectra_of_rows(loo_wave_other, sample_rate, ...
     freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
 
 fprintf('\n%s pre-onset, electrode 1. Scores are the mean FOOOF periodic component from %.0f to %.0f Hz.\n', ...
@@ -269,25 +263,25 @@ print_actor_table('partner', all_behaviors, animal_label, n_other, ...
 
 %% Per-animal pre-onset waveforms, implanted animal
 open_animal_pages(band_name, 'onset_pre_waveform_animals_self', time_pre, ...
-    animal_wave_self, trial_wave_self, equal_wave_self, loo_wave_self, n_self, ...
+    animal_wave_self, trial_wave_self, equal_wave_self, n_self, ...
     animal_label, animal_colors, all_behaviors, behavior_pages, behavior_page_names, ...
     'Time from onset (s)', 'Log power', 'Implanted animal', []);
 
 %% Per-animal pre-onset waveforms, partner
 open_animal_pages(band_name, 'onset_pre_waveform_animals_other', time_pre, ...
-    animal_wave_other, trial_wave_other, equal_wave_other, loo_wave_other, n_other, ...
+    animal_wave_other, trial_wave_other, equal_wave_other, n_other, ...
     animal_label, animal_colors, all_behaviors, behavior_pages, behavior_page_names, ...
     'Time from onset (s)', 'Log power', 'Partner', []);
 
 %% Per-animal pre-onset spectra, implanted animal
 open_animal_pages(band_name, 'onset_pre_spectrum_animals_self', freq_hz, ...
-    animal_spec_self, trial_spec_self, equal_spec_self, loo_spec_self, n_self, ...
+    animal_spec_self, trial_spec_self, equal_spec_self, n_self, ...
     animal_label, animal_colors, all_behaviors, behavior_pages, behavior_page_names, ...
     'Frequency (Hz)', 'Periodic power (log10)', 'Implanted animal', [1 5]);
 
 %% Per-animal pre-onset spectra, partner
 open_animal_pages(band_name, 'onset_pre_spectrum_animals_other', freq_hz, ...
-    animal_spec_other, trial_spec_other, equal_spec_other, loo_spec_other, n_other, ...
+    animal_spec_other, trial_spec_other, equal_spec_other, n_other, ...
     animal_label, animal_colors, all_behaviors, behavior_pages, behavior_page_names, ...
     'Frequency (Hz)', 'Periodic power (log10)', 'Partner', [1 5]);
 
@@ -489,14 +483,14 @@ end
 end
 
 function open_animal_pages(band_name, plot_prefix, x, animal_curves, trial_curve, ...
-        equal_curve, loo_curve, n_trials, animal_names, colors, behavior_names, ...
+        equal_curve, n_trials, animal_names, colors, behavior_names, ...
         pages, page_names, x_label, y_label, actor_title, shade_band)
 for page_n = 1:numel(pages)
     idx = pages{page_n};
     figure
     name_psth_figure(band_name, [plot_prefix '_' page_names{page_n}])
     plot_animal_panels(x, animal_curves(idx, :, :), trial_curve(idx, :), ...
-        equal_curve(idx, :), loo_curve(idx, :), n_trials(idx, :), ...
+        equal_curve(idx, :), n_trials(idx, :), ...
         animal_names, colors, behavior_names(idx), x_label, y_label, ...
         actor_title, shade_band);
 end
@@ -523,72 +517,133 @@ else
 end
 end
 
-function plot_animal_panels(x, animal_curves, trial_curve, equal_curve, loo_curve, n_trials, ...
+function plot_animal_panels(x, animal_curves, trial_curve, equal_curve, n_trials, ...
         animal_names, colors, behavior_names, x_label, y_label, actor_title, shade_band)
+% One column per behavior. The image occupies the top two rows, one row per
+% animal. The bottom row is thin animal lines and thick means.
 n_animals = numel(animal_names);
 n_behaviors = numel(behavior_names);
-[n_row, n_col] = panel_grid(n_behaviors);
-handles = gobjects(n_animals + 3, 1);
+if n_behaviors == 0
+    return
+end
+is_spectrum = ~isempty(shade_band);
+[c_lim, cmap] = page_color_scale(animal_curves, is_spectrum);
+handles = gobjects(n_animals + 2, 1);
+image_axes = gobjects(n_behaviors, 1);
+line_axes = gobjects(n_behaviors, 1);
+tiledlayout(3, n_behaviors, 'TileSpacing', 'compact', 'Padding', 'compact');
 for behavior_n = 1:n_behaviors
-    subplot(n_row, n_col, behavior_n)
+    block = reshape(animal_curves(behavior_n, :, :), n_animals, []);
+    image_axes(behavior_n) = nexttile(behavior_n, [2 1]);
+    shown = imagesc(x, 1:n_animals, block);
+    set(shown, 'AlphaData', isfinite(block));
+    set(gca, 'YDir', 'reverse', 'TickDir', 'out', 'YLim', [0.5, n_animals + 0.5]);
+    if ~isempty(c_lim)
+        clim(c_lim);
+    end
+    colormap(gca, cmap);
+    yticks(1:n_animals);
+    if behavior_n == 1
+        yticklabels(animal_names);
+        ylabel('Animal');
+    else
+        yticklabels({});
+    end
+    title(behavior_names{behavior_n}, 'Interpreter', 'none');
+    if numel(x) > 1
+        xlim([x(1), x(end)]);
+    end
+    if is_spectrum && numel(shade_band) == 2
+        hold on
+        plot(shade_band(1) * [1 1], [0.5, n_animals + 0.5], 'w-', 'LineWidth', 0.8);
+        plot(shade_band(2) * [1 1], [0.5, n_animals + 0.5], 'w-', 'LineWidth', 0.8);
+        hold off
+        ylim([0.5, n_animals + 0.5]);
+    end
+
+    line_axes(behavior_n) = nexttile(2 * n_behaviors + behavior_n);
     hold on
     for animal_n = 1:n_animals
-        if n_trials(behavior_n, animal_n) == 0
+        if n_trials(behavior_n, animal_n) == 0 || ~any(isfinite(block(animal_n, :)))
             continue
         end
-        y = squeeze(animal_curves(behavior_n, animal_n, :));
-        h = plot(x, y(:).', 'Color', colors(animal_n, :));
+        h = plot(x, block(animal_n, :), 'Color', colors(animal_n, :), 'LineWidth', 0.8);
         if ~isgraphics(handles(animal_n))
-            set(h, 'DisplayName', animal_names{animal_n})
+            set(h, 'DisplayName', animal_names{animal_n});
             handles(animal_n) = h;
         end
     end
     if any(isfinite(trial_curve(behavior_n, :)))
-        h = plot(x, trial_curve(behavior_n, :), 'k', 'LineWidth', 1.6);
+        h = plot(x, trial_curve(behavior_n, :), 'k', 'LineWidth', 2.2);
         if ~isgraphics(handles(n_animals + 1))
-            set(h, 'DisplayName', 'All trials')
+            set(h, 'DisplayName', 'All trials');
             handles(n_animals + 1) = h;
         end
     end
     if any(isfinite(equal_curve(behavior_n, :)))
-        h = plot(x, equal_curve(behavior_n, :), 'Color', [0.45 0.45 0.45], 'LineWidth', 1.6);
+        h = plot(x, equal_curve(behavior_n, :), 'Color', [0.35 0.35 0.35], 'LineWidth', 2.2);
         if ~isgraphics(handles(n_animals + 2))
-            set(h, 'DisplayName', 'Mean of animals')
+            set(h, 'DisplayName', 'Mean of animals');
             handles(n_animals + 2) = h;
         end
     end
-    if any(isfinite(loo_curve(behavior_n, :)))
-        h = plot(x, loo_curve(behavior_n, :), 'k--', 'LineWidth', 1.2);
-        if ~isgraphics(handles(n_animals + 3))
-            set(h, 'DisplayName', 'Without largest')
-            handles(n_animals + 3) = h;
-        end
-    end
-    if ~isempty(shade_band) && numel(x) > 1
+    if is_spectrum && numel(x) > 1 && numel(shade_band) == 2
         yl = ylim;
         shade = patch([shade_band(1) shade_band(2) shade_band(2) shade_band(1)], ...
             [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
             'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-        uistack(shade, 'bottom')
+        uistack(shade, 'bottom');
     end
     hold off
-    title(behavior_names{behavior_n}, 'Interpreter', 'none')
+    xlabel(x_label);
     if behavior_n == 1
-        xlabel(x_label)
-        ylabel(y_label)
+        ylabel(y_label);
     end
     if numel(x) > 1
-        xlim([x(1), x(end)])
+        xlim([x(1), x(end)]);
     end
-    set(gca, 'TickDir', 'out')
+    set(gca, 'TickDir', 'out', 'Box', 'off');
 end
-subplot(n_row, n_col, n_behaviors + 1)
-axis off
+if isgraphics(image_axes(end))
+    scale_bar = colorbar(image_axes(end));
+    scale_bar.Layout.Tile = 'east';
+end
 present = handles(isgraphics(handles));
-if ~isempty(present)
-    legend(present, 'Location', 'northwest')
+if ~isempty(present) && isgraphics(line_axes(1))
+    line_legend = legend(line_axes(1), present, 'Orientation', 'horizontal');
+    line_legend.Layout.Tile = 'south';
 end
-title(actor_title)
+sgtitle(actor_title);
+end
+
+function [c_lim, cmap] = page_color_scale(animal_curves, is_spectrum)
+vals = animal_curves(isfinite(animal_curves));
+c_lim = [];
+if is_spectrum
+    cmap = jet(256);
+    if numel(vals) >= 8
+        lo = prctile(vals, 5);
+        hi = prctile(vals, 95);
+        if hi > lo
+            c_lim = [lo hi];
+        end
+    end
+else
+    cmap = diverging_colormap(256);
+    if ~isempty(vals)
+        lim = prctile(abs(vals), 98);
+        if lim > 0
+            c_lim = [-lim lim];
+        end
+    end
+end
+end
+
+function cmap = diverging_colormap(n)
+n_half = floor(n / 2);
+blue = [linspace(0.12, 1, n_half)', linspace(0.25, 1, n_half)', ones(n_half, 1)];
+red = [ones(n_half, 1), linspace(1, 0.15, n_half)', linspace(1, 0.12, n_half)'];
+cmap = [blue; red];
 end
 
 function trace = raw_pre_mean(psth, elec, pre_mask)
