@@ -35,6 +35,12 @@
 %     measure and does not narrow the interval by itself. The same figure
 %     is drawn for the log-power traces and for the periodic spectra.
 %     Scratching stays out of non-play.
+% %% Trial-level circular-shift null
+%     Each -5-to-0 s trial is independently circularly rotated. This keeps
+%     that trial's spectrum exactly and removes common phase relative to
+%     onset. Behaviors are averaged within animal, then animals are averaged.
+%     The spectrum control uses raw Fourier power because applying FOOOF in
+%     every permutation would change the null and make it prohibitively slow.
 % %% Raw mean versus per-trial z-score
 %     The preview mean, and the mean after each trial is z-scored on its own
 %     -2 to 0 s window.
@@ -50,9 +56,9 @@
 % with the pool. Remaining is 0 when that animal is the only one with
 % trials. "animals-equal" is the gray line. A much smaller animals-equal
 % value than pooled means animals with more trials inflated the peak.
-% A whole-session z-score is not in these files. The last section is only
-% the per-trial baseline z-score. Scratching is left out of the non-play
-% spectrum stack, as in the grand-average script.
+% A whole-session z-score is not in these files. The scale comparison is
+% only the per-trial baseline z-score. Scratching is left out of the
+% non-play spectrum stack and pooled controls, as in the grand-average script.
 
 %% Paths
 this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_preonset_spectrum.m';
@@ -80,6 +86,8 @@ fooof_fit_max_hz = 20;
 plot_max_hz = fooof_fit_max_hz;
 fooof_peak_widths = [0.5 12];
 fooof_aperiodic_mode = 'fixed';
+circular_null_n_perm = 500;
+circular_null_seed = 29;
 animal_colors = [0.12 0.47 0.71; 0.89 0.10 0.11; 0.20 0.63 0.17; ...
     0.60 0.31 0.64; 1.00 0.50 0.05; 0.09 0.75 0.81];
 
@@ -355,6 +363,260 @@ name_psth_figure(band_name, 'onset_pre_spectrum_nonplay_pooled')
 plot_pooled_repeated(freq_hz, nonplay_spec, nonplay_spec_ids, animal_label, ...
     nonplay_spec_mu, nonplay_spec_lo, nonplay_spec_hi, 'Frequency (Hz)', ...
     'Periodic power (log10)', 'Non-play, self and partner', [1 5]);
+
+%% Trial-level circular-shift null for onset locking
+% Each complete -5-to-0 s trial is demeaned, then independently circularly
+% shifted. Thus every trial keeps exactly the same Fourier magnitude while
+% its phase relative to onset is randomized. The hierarchy is unchanged:
+% self/partner behavior means -> mean within animal -> mean across animals.
+% This tests onset locking, not whether a 2-3 Hz rhythm exists in single trials.
+previous_rng = rng;
+rng(circular_null_seed, 'twister');
+disp(['trial-level circular-shift null, ' num2str(circular_null_n_perm) ' permutations'])
+play_null = circular_trial_null(all_psth_onset_self, all_psth_onset_other, ...
+    all_electrode_index_self, all_electrode_index_other, ...
+    all_session_index_self, all_session_index_other, ...
+    play_behaviors, numel(animal_label), pre_mask, sample_rate, freq_hz, ...
+    effect_band, circular_null_n_perm);
+nonplay_null = circular_trial_null(all_psth_onset_self, all_psth_onset_other, ...
+    all_electrode_index_self, all_electrode_index_other, ...
+    all_session_index_self, all_session_index_other, ...
+    other_behaviors, numel(animal_label), pre_mask, sample_rate, freq_hz, ...
+    effect_band, circular_null_n_perm);
+rng(previous_rng);
+
+fprintf('%s circular null: play 2-3 Hz p = %.4g; non-play p = %.4g\n', ...
+    band_name, play_null.p_effect, nonplay_null.p_effect);
+
+figure
+name_psth_figure(band_name, 'onset_pre_waveform_circular_null')
+plot_circular_null(time_pre, play_null.animal_wave, play_null.group_wave, ...
+    play_null.null_wave, animal_label, 'Time from onset (s)', 'Log power', ...
+    'Play', [], NaN, nonplay_null.animal_wave, nonplay_null.group_wave, ...
+    nonplay_null.null_wave, 'Non-play', NaN);
+
+figure
+name_psth_figure(band_name, 'onset_pre_spectrum_circular_null')
+plot_circular_null(freq_hz, play_null.animal_spec, play_null.group_spec, ...
+    play_null.null_spec, animal_label, 'Frequency (Hz)', 'Raw power of mean', ...
+    'Play', effect_band, play_null.p_effect, nonplay_null.animal_spec, ...
+    nonplay_null.group_spec, nonplay_null.null_spec, 'Non-play', nonplay_null.p_effect);
+end
+
+function result = circular_trial_null(psth_self, psth_other, elec_self, elec_other, ...
+        animal_self, animal_other, behavior_index, n_animals, pre_mask, fs, ...
+        freq, effect_band, n_perm)
+% Trial-level phase null. Every unit is one behavior and actor in one animal.
+units = cell(n_animals, 1);
+for animal_n = 1:n_animals
+    units{animal_n} = {};
+    for behavior_n = behavior_index
+        self_seg = trial_pre_segments(psth_self{1, behavior_n}, ...
+            elec_self{behavior_n}, animal_self{behavior_n}, animal_n, pre_mask);
+        if ~isempty(self_seg)
+            units{animal_n}{end + 1} = self_seg; %#ok<AGROW>
+        end
+        other_seg = trial_pre_segments(psth_other{1, behavior_n}, ...
+            elec_other{behavior_n}, animal_other{behavior_n}, animal_n, pre_mask);
+        if ~isempty(other_seg)
+            units{animal_n}{end + 1} = other_seg; %#ok<AGROW>
+        end
+    end
+end
+
+n_pre = nnz(pre_mask);
+n_freq = numel(freq);
+animal_wave = nan(n_animals, n_pre);
+animal_spec = nan(n_animals, n_freq);
+for animal_n = 1:n_animals
+    if ~isempty(units{animal_n})
+        [animal_wave(animal_n, :), animal_spec(animal_n, :)] = ...
+            mean_units(units{animal_n}, fs, freq, false);
+    end
+end
+included = any(isfinite(animal_wave), 2);
+group_wave = mean(animal_wave(included, :), 1, 'omitnan');
+group_spec = mean(animal_spec(included, :), 1, 'omitnan');
+
+null_wave = nan(n_perm, n_pre);
+null_spec = nan(n_perm, n_freq);
+for permutation = 1:n_perm
+    perm_animal_wave = nan(n_animals, n_pre);
+    perm_animal_spec = nan(n_animals, n_freq);
+    for animal_n = 1:n_animals
+        if ~isempty(units{animal_n})
+            [perm_animal_wave(animal_n, :), perm_animal_spec(animal_n, :)] = ...
+                mean_units(units{animal_n}, fs, freq, true);
+        end
+    end
+    null_wave(permutation, :) = mean(perm_animal_wave(included, :), 1, 'omitnan');
+    null_spec(permutation, :) = mean(perm_animal_spec(included, :), 1, 'omitnan');
+    if mod(permutation, 50) == 0 || permutation == n_perm
+        fprintf('  circular null %d/%d\n', permutation, n_perm);
+    end
+end
+
+observed_effect = band_mean(freq, group_spec, effect_band);
+null_effect = nan(n_perm, 1);
+for permutation = 1:n_perm
+    null_effect(permutation) = band_mean(freq, null_spec(permutation, :), effect_band);
+end
+valid_null = isfinite(null_effect);
+if isfinite(observed_effect) && any(valid_null)
+    comparison_tolerance = max(1e-12, abs(observed_effect) * 1e-12);
+    p_effect = (1 + sum(null_effect(valid_null) >= ...
+        observed_effect - comparison_tolerance)) / ...
+        (1 + nnz(valid_null));
+else
+    p_effect = NaN;
+end
+
+result.animal_wave = animal_wave;
+result.animal_spec = animal_spec;
+result.group_wave = group_wave;
+result.group_spec = group_spec;
+result.null_wave = null_wave;
+result.null_spec = null_spec;
+result.observed_effect = observed_effect;
+result.null_effect = null_effect;
+result.p_effect = p_effect;
+end
+
+function segments = trial_pre_segments(psth, electrode, animal_id, selected_animal, pre_mask)
+segments = zeros(0, nnz(pre_mask));
+if isempty(psth) || isempty(electrode) || isempty(animal_id) || ...
+        size(psth, 2) ~= numel(pre_mask)
+    return
+end
+n_use = min([size(psth, 1), numel(electrode), numel(animal_id)]);
+electrode = electrode(1:n_use);
+animal_id = animal_id(1:n_use);
+keep = electrode(:) == 1 & animal_id(:) == selected_animal;
+segments = double(psth(keep, pre_mask));
+segments = segments(all(isfinite(segments), 2), :);
+if isempty(segments)
+    return
+end
+segments = segments - mean(segments, 2);
+end
+
+function [wave, spec] = mean_units(units, fs, freq, circularize)
+n_pre = 0;
+if ~isempty(units)
+    n_pre = size(units{1}, 2);
+end
+wave = nan(1, n_pre);
+spec = nan(1, numel(freq));
+if isempty(units)
+    return
+end
+unit_wave = nan(numel(units), n_pre);
+unit_spec = nan(numel(units), numel(freq));
+for unit_n = 1:numel(units)
+    if circularize
+        unit_wave(unit_n, :) = circular_shift_mean(units{unit_n});
+    else
+        unit_wave(unit_n, :) = mean(units{unit_n}, 1);
+    end
+    unit_spec(unit_n, :) = spectrum_of_trace(unit_wave(unit_n, :), fs, freq);
+end
+wave = mean(unit_wave, 1, 'omitnan');
+spec = mean(unit_spec, 1, 'omitnan');
+end
+
+function trace = circular_shift_mean(segments)
+% Independent circular rotation of every trial. The periodogram of each
+% row is unchanged; only phase alignment between trials is removed.
+[n_trials, n_time] = size(segments);
+shifts = randi(n_time, n_trials, 1) - 1;
+indices = mod(bsxfun(@minus, 0:n_time - 1, shifts), n_time) + 1;
+rows = repmat((1:n_trials)', 1, n_time);
+shifted = segments(sub2ind([n_trials, n_time], rows, indices));
+trace = mean(shifted, 1);
+end
+
+function plot_circular_null(x, animal_a, observed_a, null_a, animal_names, ...
+        x_label, y_label, name_a, shade_band, p_a, animal_b, observed_b, ...
+        null_b, name_b, p_b)
+is_spectrum = ~isempty(shade_band);
+[c_lim, cmap] = page_color_scale(cat(1, animal_a, animal_b), is_spectrum);
+animal_sets = {animal_a, animal_b};
+observed_sets = {observed_a, observed_b};
+null_sets = {null_a, null_b};
+names = {name_a, name_b};
+p_values = [p_a, p_b];
+tiledlayout(3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+for column = 1:2
+    curves = animal_sets{column};
+    image_axis = nexttile(column, [2 1]);
+    shown = imagesc(x, 1:size(curves, 1), curves);
+    set(shown, 'AlphaData', isfinite(curves));
+    set(image_axis, 'YDir', 'reverse', 'TickDir', 'out', ...
+        'YLim', [0.5 size(curves, 1) + 0.5]);
+    if ~isempty(c_lim)
+        clim(image_axis, c_lim);
+    end
+    colormap(image_axis, cmap);
+    yticks(image_axis, 1:size(curves, 1));
+    if column == 1
+        yticklabels(image_axis, animal_names);
+        ylabel(image_axis, 'Animal');
+    else
+        yticklabels(image_axis, {});
+    end
+    title(image_axis, names{column}, 'Interpreter', 'none');
+    if numel(x) > 1
+        xlim(image_axis, [x(1) x(end)]);
+    end
+    colorbar(image_axis);
+
+    line_axis = nexttile(4 + column);
+    hold(line_axis, 'on');
+    for animal_n = 1:size(curves, 1)
+        if any(isfinite(curves(animal_n, :)))
+            plot(line_axis, x, curves(animal_n, :), 'Color', [0.84 0.84 0.84], ...
+                'LineWidth', 0.7, 'HandleVisibility', 'off');
+        end
+    end
+    null_curves = null_sets{column};
+    null_lo = prctile(null_curves, 2.5, 1);
+    null_hi = prctile(null_curves, 97.5, 1);
+    null_center = median(null_curves, 1, 'omitnan');
+    valid = isfinite(null_lo) & isfinite(null_hi);
+    if any(valid)
+        x_band = x(valid);
+        fill(line_axis, [x_band fliplr(x_band)], ...
+            [null_lo(valid) fliplr(null_hi(valid))], [0.25 0.45 0.85], ...
+            'FaceAlpha', 0.38, 'EdgeColor', 'none', ...
+            'DisplayName', 'Circular null 95%');
+    end
+    plot(line_axis, x, null_center, '--', 'Color', [0.15 0.35 0.75], ...
+        'LineWidth', 1.2, 'DisplayName', 'Null median');
+    plot(line_axis, x, observed_sets{column}, 'k', 'LineWidth', 2.4, ...
+        'DisplayName', 'Observed animal mean');
+    if is_spectrum && numel(shade_band) == 2
+        yl = ylim(line_axis);
+        target = patch(line_axis, ...
+            [shade_band(1) shade_band(2) shade_band(2) shade_band(1)], ...
+            [yl(1) yl(1) yl(2) yl(2)], [0.65 0.65 0.65], ...
+            'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+        uistack(target, 'bottom');
+    end
+    hold(line_axis, 'off');
+    xlabel(line_axis, x_label);
+    if column == 1
+        ylabel(line_axis, y_label);
+    end
+    if numel(x) > 1
+        xlim(line_axis, [x(1) x(end)]);
+    end
+    set(line_axis, 'TickDir', 'out', 'Box', 'off');
+    if isfinite(p_values(column))
+        title(line_axis, sprintf('2-3 Hz circular-shift p = %.4g', p_values(column)));
+    end
+    legend(line_axis, 'Location', 'best');
+end
 end
 
 function name_psth_figure(band_name, plot_id)
