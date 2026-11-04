@@ -1,13 +1,16 @@
 %% Analyze_psth_preonset_spectrum
-% Spectrum of the pre-onset theta (and delta, gamma) power trace.
+% Spectrum of the pre-onset theta power trace.
 %
 % Run Estimate_psth_all_behaviors_theta_gamma.m first. This script loads the
 % same psth_structure_*_all_behaviors_self_other_partner.mat files as
 % Analyze_psth_all_behaviors_theta_gamma.m. Grand-average condition plots
 % stay in that script.
 %
+% band_list is theta only. To run the other saved bands as well, set
+% band_list = {'delta', 'theta', 'gamma'} in the Paths section.
+%
 % Run this file from the top, or run the sections in order inside the band
-% loop. Each band (delta, theta, gamma) reloads its own file.
+% loop. Each band reloads its own file.
 %
 % %% Pre-onset periodic spectrum
 %     FOOOF periodic component of the electrode-1 trial average, from -5 s
@@ -19,24 +22,27 @@
 %     animal with at least one trial the same weight. The dashed line is
 %     the pooled waveform after the animal with the most trials is removed.
 %     If that animal is the only one, there is no dashed line.
+%     Behaviors are split across figures: play 1-4, play 5-8, then the six
+%     non-play behaviors.
 % %% Per-animal spectra
-%     Spectrum of each of those waveforms, with no FOOOF subtraction. The
-%     Command Window reports mean power from 2 to 3 Hz.
+%     FOOOF periodic component of each of those waveforms. The fit uses
+%     0-20 Hz and the panel shows it up to 8 Hz. The Command Window reports
+%     the mean periodic component from 2 to 3 Hz.
 % %% Raw mean versus per-trial z-score
 %     The preview mean, and the mean after each trial is z-scored on its own
 %     -2 to 0 s window.
 %
 % Read the Command Window this way. "share" is that animal's fraction of
 % electrode-1 trials. "r" is the correlation of its waveform with the
-% pooled-trial waveform. "remaining" is the 2-3 Hz power of the pooled
-% waveform after that animal is removed, divided by the power with everyone
-% included. Remaining near 1 means the peak survives without that animal.
-% Remaining near 0 means that animal carries the peak. Remaining above 1
-% means that animal was out of phase with the pool. Remaining is 0 when
-% that animal is the only one with trials. "animals-equal" is the 2-3 Hz
-% power of the gray line. Compare it with "pooled": a much smaller
-% animals-equal value means the trial-weighted line was inflated by animals
-% that contributed more trials.
+% pooled-trial waveform. "pooled", "own", "animals-equal", and "remaining"
+% use the mean FOOOF periodic component from 2 to 3 Hz, the same curves as
+% the spectrum panels. "remaining" divides that value after the animal is
+% removed by the value with everyone included. Remaining near 1 means the
+% peak survives without that animal. Remaining near 0 means that animal
+% carries the peak. Remaining above 1 means that animal was out of phase
+% with the pool. Remaining is 0 when that animal is the only one with
+% trials. "animals-equal" is the gray line. A much smaller animals-equal
+% value than pooled means animals with more trials inflated the peak.
 % A whole-session z-score is not in these files. The last section is only
 % the per-trial baseline z-score. Scratching is left out of the non-play
 % spectrum stack, as in the grand-average script.
@@ -53,7 +59,11 @@ all_behaviors = {'Pounce', 'CC', 'Boxing', 'Evasion', 'Pin', 'Escape', 'CB', 'CD
 animal_label = {'B1D1', 'B1S3', 'B2S2', 'B3D2', 'B4S2', 'B4D4'};
 play_behaviors = 1:8;
 other_behaviors = [9 10 11 13 14];
-band_list = {'delta', 'theta', 'gamma'};
+behavior_pages = {1:4, 5:8, 9:14};
+behavior_page_names = {'play_1', 'play_2', 'nonplay'};
+% Theta only. Uncomment the next line to also plot delta and gamma.
+band_list = {'theta'};
+% band_list = {'delta', 'theta', 'gamma'};
 pre_window = [-5 0];
 effect_band = [2 3];
 fooof_fit_max_hz = 20;
@@ -186,8 +196,8 @@ end
 
 %% Per-animal waveforms and spectra
 % Each animal mean uses only that animal's electrode-1 trials. The pooled
-% line uses every electrode-1 trial. Spectra are of those mean waveforms,
-% with no FOOOF subtraction.
+% line uses every electrode-1 trial. Every spectrum below is the FOOOF
+% periodic component of that waveform, the same peak_fit as the stack above.
 n_animals = numel(animal_label);
 n_freq = numel(freq_hz);
 animal_wave_self = nan(numel(all_behaviors), n_animals, n_pre);
@@ -207,8 +217,10 @@ for b = 1:numel(all_behaviors)
         all_electrode_index_self{b}, [], [], pre_mask);
     [trial_wave_other(b, :), ~] = preonset_mean_trace(all_psth_onset_other{1, b}, ...
         all_electrode_index_other{b}, [], [], pre_mask);
-    trial_spec_self(b, :) = spectrum_of_trace(trial_wave_self(b, :), sample_rate, freq_hz);
-    trial_spec_other(b, :) = spectrum_of_trace(trial_wave_other(b, :), sample_rate, freq_hz);
+    trial_spec_self(b, :) = periodic_spectrum(trial_wave_self(b, :), sample_rate, ...
+        freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
+    trial_spec_other(b, :) = periodic_spectrum(trial_wave_other(b, :), sample_rate, ...
+        freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
     for animal_n = 1:n_animals
         [animal_wave_self(b, animal_n, :), n_self(b, animal_n)] = preonset_mean_trace( ...
             all_psth_onset_self{1, b}, all_electrode_index_self{b}, ...
@@ -216,60 +228,58 @@ for b = 1:numel(all_behaviors)
         [animal_wave_other(b, animal_n, :), n_other(b, animal_n)] = preonset_mean_trace( ...
             all_psth_onset_other{1, b}, all_electrode_index_other{b}, ...
             all_session_index_other{b}, animal_n, pre_mask);
-        animal_spec_self(b, animal_n, :) = spectrum_of_trace( ...
-            squeeze(animal_wave_self(b, animal_n, :)).', sample_rate, freq_hz);
-        animal_spec_other(b, animal_n, :) = spectrum_of_trace( ...
-            squeeze(animal_wave_other(b, animal_n, :)).', sample_rate, freq_hz);
+        animal_spec_self(b, animal_n, :) = periodic_spectrum( ...
+            squeeze(animal_wave_self(b, animal_n, :)).', sample_rate, ...
+            freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
+        animal_spec_other(b, animal_n, :) = periodic_spectrum( ...
+            squeeze(animal_wave_other(b, animal_n, :)).', sample_rate, ...
+            freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
     end
 end
 
 [equal_wave_self, loo_wave_self] = reference_waves(animal_wave_self, trial_wave_self, n_self);
 [equal_wave_other, loo_wave_other] = reference_waves(animal_wave_other, trial_wave_other, n_other);
-equal_spec_self = spectra_of_rows(equal_wave_self, sample_rate, freq_hz);
-equal_spec_other = spectra_of_rows(equal_wave_other, sample_rate, freq_hz);
-loo_spec_self = spectra_of_rows(loo_wave_self, sample_rate, freq_hz);
-loo_spec_other = spectra_of_rows(loo_wave_other, sample_rate, freq_hz);
+equal_spec_self = periodic_spectra_of_rows(equal_wave_self, sample_rate, ...
+    freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
+equal_spec_other = periodic_spectra_of_rows(equal_wave_other, sample_rate, ...
+    freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
+loo_spec_self = periodic_spectra_of_rows(loo_wave_self, sample_rate, ...
+    freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
+loo_spec_other = periodic_spectra_of_rows(loo_wave_other, sample_rate, ...
+    freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
 
-fprintf('\n%s pre-onset, electrode 1. Power is the mean spectrum from %.0f to %.0f Hz.\n', ...
+fprintf('\n%s pre-onset, electrode 1. Scores are the mean FOOOF periodic component from %.0f to %.0f Hz.\n', ...
     band_name, effect_band(1), effect_band(2));
 print_actor_table('implanted', all_behaviors, animal_label, n_self, ...
-    animal_wave_self, animal_spec_self, trial_wave_self, trial_spec_self, ...
-    freq_hz, effect_band, sample_rate);
+    animal_wave_self, animal_spec_self, trial_wave_self, trial_spec_self, equal_spec_self, ...
+    freq_hz, effect_band, sample_rate, freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
 print_actor_table('partner', all_behaviors, animal_label, n_other, ...
-    animal_wave_other, animal_spec_other, trial_wave_other, trial_spec_other, ...
-    freq_hz, effect_band, sample_rate);
+    animal_wave_other, animal_spec_other, trial_wave_other, trial_spec_other, equal_spec_other, ...
+    freq_hz, effect_band, sample_rate, freq_fit, fooof_aperiodic_mode, fooof_peak_widths, plot_max_hz);
 
 %% Per-animal pre-onset waveforms, implanted animal
-figure
-name_psth_figure(band_name, 'onset_pre_waveform_animals_self')
-plot_animal_panels(time_pre, animal_wave_self, trial_wave_self, ...
-    equal_wave_self, loo_wave_self, n_self, ...
-    animal_label, animal_colors, all_behaviors, 'Time from onset (s)', ...
-    'Log power', 'Implanted animal');
+open_animal_pages(band_name, 'onset_pre_waveform_animals_self', time_pre, ...
+    animal_wave_self, trial_wave_self, equal_wave_self, loo_wave_self, n_self, ...
+    animal_label, animal_colors, all_behaviors, behavior_pages, behavior_page_names, ...
+    'Time from onset (s)', 'Log power', 'Implanted animal', []);
 
 %% Per-animal pre-onset waveforms, partner
-figure
-name_psth_figure(band_name, 'onset_pre_waveform_animals_other')
-plot_animal_panels(time_pre, animal_wave_other, trial_wave_other, ...
-    equal_wave_other, loo_wave_other, n_other, ...
-    animal_label, animal_colors, all_behaviors, 'Time from onset (s)', ...
-    'Log power', 'Partner');
+open_animal_pages(band_name, 'onset_pre_waveform_animals_other', time_pre, ...
+    animal_wave_other, trial_wave_other, equal_wave_other, loo_wave_other, n_other, ...
+    animal_label, animal_colors, all_behaviors, behavior_pages, behavior_page_names, ...
+    'Time from onset (s)', 'Log power', 'Partner', []);
 
 %% Per-animal pre-onset spectra, implanted animal
-figure
-name_psth_figure(band_name, 'onset_pre_spectrum_animals_self')
-plot_animal_panels(freq_hz, animal_spec_self, trial_spec_self, ...
-    equal_spec_self, loo_spec_self, n_self, ...
-    animal_label, animal_colors, all_behaviors, 'Frequency (Hz)', ...
-    'Power of the mean', 'Implanted animal');
+open_animal_pages(band_name, 'onset_pre_spectrum_animals_self', freq_hz, ...
+    animal_spec_self, trial_spec_self, equal_spec_self, loo_spec_self, n_self, ...
+    animal_label, animal_colors, all_behaviors, behavior_pages, behavior_page_names, ...
+    'Frequency (Hz)', 'Periodic power (log10)', 'Implanted animal', [1 5]);
 
 %% Per-animal pre-onset spectra, partner
-figure
-name_psth_figure(band_name, 'onset_pre_spectrum_animals_other')
-plot_animal_panels(freq_hz, animal_spec_other, trial_spec_other, ...
-    equal_spec_other, loo_spec_other, n_other, ...
-    animal_label, animal_colors, all_behaviors, 'Frequency (Hz)', ...
-    'Power of the mean', 'Partner');
+open_animal_pages(band_name, 'onset_pre_spectrum_animals_other', freq_hz, ...
+    animal_spec_other, trial_spec_other, equal_spec_other, loo_spec_other, n_other, ...
+    animal_label, animal_colors, all_behaviors, behavior_pages, behavior_page_names, ...
+    'Frequency (Hz)', 'Periodic power (log10)', 'Partner', [1 5]);
 
 %% Raw mean versus per-trial z-score
 % Left axis: mean of the raw log power. Right axis: mean after each trial
@@ -290,12 +300,10 @@ for b = 1:numel(all_behaviors)
         all_electrode_index_other{b}, baseline_mask, pre_mask);
 end
 
-figure
-name_psth_figure(band_name, 'onset_pre_raw_vs_trial_zscore_self')
-plot_scale_panels(time_pre, raw_self, z_self, all_behaviors, 'Implanted animal');
-figure
-name_psth_figure(band_name, 'onset_pre_raw_vs_trial_zscore_other')
-plot_scale_panels(time_pre, raw_other, z_other, all_behaviors, 'Partner');
+open_scale_pages(band_name, 'onset_pre_raw_vs_trial_zscore_self', time_pre, ...
+    raw_self, z_self, all_behaviors, behavior_pages, behavior_page_names, 'Implanted animal');
+open_scale_pages(band_name, 'onset_pre_raw_vs_trial_zscore_other', time_pre, ...
+    raw_other, z_other, all_behaviors, behavior_pages, behavior_page_names, 'Partner');
 end
 
 function name_psth_figure(band_name, plot_id)
@@ -381,19 +389,15 @@ end
 end
 
 function print_actor_table(actor_name, behavior_names, animal_names, n_trials, ...
-        animal_wave, animal_spec, trial_wave, trial_spec, freq, band, fs)
+        animal_wave, animal_spec, trial_wave, trial_spec, equal_spec, ...
+        freq, band, fs, freq_fit, aperiodic_mode, peak_widths, plot_max_hz)
 fprintf('\n%s\n', actor_name);
 n_animals = numel(animal_names);
 for behavior_n = 1:numel(behavior_names)
     total = sum(n_trials(behavior_n, :));
     pooled_power = band_mean(freq, trial_spec(behavior_n, :), band);
     block = reshape(animal_wave(behavior_n, :, :), n_animals, []);
-    present = n_trials(behavior_n, :) > 0;
-    equal_power = NaN;
-    if any(present)
-        equal_power = band_mean(freq, spectrum_of_trace( ...
-            mean(block(present, :), 1, 'omitnan'), fs, freq), band);
-    end
+    equal_power = band_mean(freq, equal_spec(behavior_n, :), band);
     fprintf('  %s   trials %d   pooled %.4g   animals-equal %.4g\n', ...
         behavior_names{behavior_n}, total, pooled_power, equal_power);
     if total == 0
@@ -413,7 +417,9 @@ for behavior_n = 1:numel(behavior_names)
         elseif total > n_animal
             left_out = (total * trial_wave(behavior_n, :) - ...
                 n_animal * block(animal_n, :)) / (total - n_animal);
-            left_power = band_mean(freq, spectrum_of_trace(left_out, fs, freq), band);
+            left_periodic = periodic_spectrum(left_out, fs, freq_fit, ...
+                aperiodic_mode, peak_widths, plot_max_hz);
+            left_power = band_mean(freq, left_periodic, band);
             if pooled_power > 0 && isfinite(left_power)
                 remaining = left_power / pooled_power;
             end
@@ -450,20 +456,71 @@ for behavior_n = 1:n_behaviors
 end
 end
 
-function specs = spectra_of_rows(waves, fs, freq)
-specs = nan(size(waves, 1), numel(freq));
+function periodic = periodic_spectrum(trace, fs, freq_fit, aperiodic_mode, peak_widths, plot_max_hz)
+keep = freq_fit <= plot_max_hz;
+periodic = nan(1, nnz(keep));
+if isempty(freq_fit)
+    return
+end
+linear = spectrum_of_trace(trace, fs, freq_fit);
+full = periodic_component_fooof(freq_fit, linear, aperiodic_mode, peak_widths);
+if numel(full) == numel(freq_fit)
+    periodic = full(keep);
+end
+end
+
+function specs = periodic_spectra_of_rows(waves, fs, freq_fit, aperiodic_mode, peak_widths, plot_max_hz)
+n_plot = nnz(freq_fit <= plot_max_hz);
+specs = nan(size(waves, 1), n_plot);
 for row = 1:size(waves, 1)
-    specs(row, :) = spectrum_of_trace(waves(row, :), fs, freq);
+    specs(row, :) = periodic_spectrum(waves(row, :), fs, freq_fit, ...
+        aperiodic_mode, peak_widths, plot_max_hz);
+end
+end
+
+function open_animal_pages(band_name, plot_prefix, x, animal_curves, trial_curve, ...
+        equal_curve, loo_curve, n_trials, animal_names, colors, behavior_names, ...
+        pages, page_names, x_label, y_label, actor_title, shade_band)
+for page_n = 1:numel(pages)
+    idx = pages{page_n};
+    figure
+    name_psth_figure(band_name, [plot_prefix '_' page_names{page_n}])
+    plot_animal_panels(x, animal_curves(idx, :, :), trial_curve(idx, :), ...
+        equal_curve(idx, :), loo_curve(idx, :), n_trials(idx, :), ...
+        animal_names, colors, behavior_names(idx), x_label, y_label, ...
+        actor_title, shade_band);
+end
+end
+
+function open_scale_pages(band_name, plot_prefix, time_pre, raw_mean, z_mean, ...
+        behavior_names, pages, page_names, actor_title)
+for page_n = 1:numel(pages)
+    idx = pages{page_n};
+    figure
+    name_psth_figure(band_name, [plot_prefix '_' page_names{page_n}])
+    plot_scale_panels(time_pre, raw_mean(idx, :), z_mean(idx, :), ...
+        behavior_names(idx), actor_title);
+end
+end
+
+function [n_row, n_col] = panel_grid(n_panels)
+if n_panels <= 4
+    n_row = 2;
+    n_col = 3;
+else
+    n_row = 2;
+    n_col = 4;
 end
 end
 
 function plot_animal_panels(x, animal_curves, trial_curve, equal_curve, loo_curve, n_trials, ...
-        animal_names, colors, behavior_names, x_label, y_label, actor_title)
+        animal_names, colors, behavior_names, x_label, y_label, actor_title, shade_band)
 n_animals = numel(animal_names);
 n_behaviors = numel(behavior_names);
+[n_row, n_col] = panel_grid(n_behaviors);
 handles = gobjects(n_animals + 3, 1);
 for behavior_n = 1:n_behaviors
-    subplot(4, 4, behavior_n)
+    subplot(n_row, n_col, behavior_n)
     hold on
     for animal_n = 1:n_animals
         if n_trials(behavior_n, animal_n) == 0
@@ -497,6 +554,13 @@ for behavior_n = 1:n_behaviors
             handles(n_animals + 3) = h;
         end
     end
+    if ~isempty(shade_band) && numel(x) > 1
+        yl = ylim;
+        shade = patch([shade_band(1) shade_band(2) shade_band(2) shade_band(1)], ...
+            [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
+            'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+        uistack(shade, 'bottom')
+    end
     hold off
     title(behavior_names{behavior_n}, 'Interpreter', 'none')
     if behavior_n == 1
@@ -508,7 +572,7 @@ for behavior_n = 1:n_behaviors
     end
     set(gca, 'TickDir', 'out')
 end
-subplot(4, 4, 16)
+subplot(n_row, n_col, n_behaviors + 1)
 axis off
 present = handles(isgraphics(handles));
 if ~isempty(present)
@@ -557,8 +621,10 @@ trace = mean(z(:, pre_mask), 1, 'omitnan');
 end
 
 function plot_scale_panels(time_pre, raw_mean, z_mean, behavior_names, actor_title)
-for behavior_n = 1:numel(behavior_names)
-    subplot(4, 4, behavior_n)
+n_behaviors = numel(behavior_names);
+[n_row, n_col] = panel_grid(n_behaviors);
+for behavior_n = 1:n_behaviors
+    subplot(n_row, n_col, behavior_n)
     yyaxis left
     plot(time_pre, raw_mean(behavior_n, :), 'k', 'LineWidth', 1.2)
     ylabel('Raw log power')
@@ -574,7 +640,7 @@ for behavior_n = 1:numel(behavior_names)
     end
     set(gca, 'TickDir', 'out')
 end
-subplot(4, 4, 16)
+subplot(n_row, n_col, n_behaviors + 1)
 axis off
 text(0, 0.6, actor_title, 'FontWeight', 'bold')
 text(0, 0.35, {'Black: raw mean', 'Blue: each trial z-scored', 'on its own -2 to 0 s'})
