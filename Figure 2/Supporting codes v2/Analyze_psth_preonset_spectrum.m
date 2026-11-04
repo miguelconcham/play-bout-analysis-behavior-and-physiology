@@ -25,9 +25,10 @@
 %     Behaviors are split across figures: play 1-4, play 5-8, then the six
 %     non-play behaviors.
 % %% Per-animal spectra
-%     FOOOF periodic component of each of those waveforms. The fit uses
-%     0-20 Hz and the panel shows it up to 8 Hz. The Command Window reports
-%     the mean periodic component from 2 to 3 Hz.
+%     FOOOF periodic component of each of those waveforms. The fit and the
+%     panels use 0-20 Hz. The Command Window reports the mean periodic
+%     component from 2 to 3 Hz. 20 Hz is below the Nyquist frequency of the
+%     10 ms power step.
 % %% Raw mean versus per-trial z-score
 %     The preview mean, and the mean after each trial is z-scored on its own
 %     -2 to 0 s window.
@@ -66,8 +67,11 @@ band_list = {'theta'};
 % band_list = {'delta', 'theta', 'gamma'};
 pre_window = [-5 0];
 effect_band = [2 3];
+% 20 Hz is the top of the fit and of the figures. The power trace is
+% sampled every 10 ms, so the pre-onset FFT can reach 50 Hz. The loop
+% prints that Nyquist frequency and will not draw past it.
 fooof_fit_max_hz = 20;
-plot_max_hz = 8;
+plot_max_hz = fooof_fit_max_hz;
 fooof_peak_widths = [0.5 12];
 fooof_aperiodic_mode = 'fixed';
 animal_colors = [0.12 0.47 0.71; 0.89 0.10 0.11; 0.20 0.63 0.17; ...
@@ -134,8 +138,8 @@ end
 
 %% Pre-onset periodic spectrum
 % Electrode 1. Trials are demeaned on -5 to 0 s, averaged, then Fourier
-% transformed. FOOOF keeps the periodic part. The fit uses 0-20 Hz and the
-% figure shows it up to 8 Hz. The gray band is 1-5 Hz.
+% transformed. FOOOF keeps the periodic part. The fit and the figures use
+% 0-20 Hz, or the Nyquist frequency when that is lower. The gray band is 1-5 Hz.
 n_col = 4000;
 for b = 1:numel(all_behaviors)
     if ~isempty(all_psth_onset_self{1, b})
@@ -148,6 +152,12 @@ time_psth = bin_offsets * bin_size;
 pre_mask = time_psth >= pre_window(1) & time_psth < pre_window(2);
 time_pre = time_psth(pre_mask);
 n_pre = nnz(pre_mask);
+nyquist_hz = 1 / (2 * bin_size);
+freq_step_hz = (1 / bin_size) / n_pre;
+plot_max_hz = min(fooof_fit_max_hz, nyquist_hz);
+fprintf(['Pre-onset FFT: step %.0f ms, %d samples, %.2f Hz resolution, ' ...
+    'Nyquist %.0f Hz. Figures show the fit to %.0f Hz.\n'], ...
+    bin_size * 1000, n_pre, freq_step_hz, nyquist_hz, plot_max_hz);
 freq_fit = (1:floor(n_pre / 2)) * ((1 / bin_size) / n_pre);
 freq_fit = freq_fit(freq_fit <= fooof_fit_max_hz);
 freq_hz = freq_fit(freq_fit <= plot_max_hz);
