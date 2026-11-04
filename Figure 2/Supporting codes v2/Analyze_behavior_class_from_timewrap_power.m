@@ -1,7 +1,8 @@
 %% Analyze_behavior_class_from_timewrap_power
 % Can band power tell two Type2 behavior groups apart?
 % Uses the time-wrapped PSTHs already saved by
-% Estimate_psth_all_behaviors_theta_gamma.m. It does not reload LFP.
+% Theta power coupling/Estimate_psth_all_behaviors_theta_gamma.m.
+% It does not reload LFP.
 %
 % First approach: one model, trained on events pooled from every kept
 % animal and every session. Events are not split into a separate model

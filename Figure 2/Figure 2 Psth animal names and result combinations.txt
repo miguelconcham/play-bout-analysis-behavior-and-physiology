@@ -17,6 +17,9 @@ For scripts in Supporting codes v2/ (three fileparts: script -> v2 -> Figure 2 -
   data_root = fullfile(repo_root, 'Data');
   saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
+For scripts in Supporting codes v2/Theta power coupling/ use four fileparts.
+The theta/gamma PSTH estimator and pre-onset spectrum analyzer are there.
+
 Each row lists variable names inside the .mat files (psth_structure, animal_names, results, cvResults)
 and which script loads them.
 
