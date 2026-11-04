@@ -105,8 +105,10 @@ end
 %% Paths and checkpoint
 script_path = mfilename('fullpath');
 script_dir = fileparts(script_path);
-repo_root = fileparts(fileparts(fileparts(script_path)));
+supporting_code_dir = fileparts(script_dir);
+repo_root = fileparts(fileparts(supporting_code_dir));
 addpath(script_dir);
+addpath(supporting_code_dir);
 addpath(fullfile(repo_root, 'Custom functions'));
 
 raw_data_dir = fullfile(options.data_root, 'NPX data', 'NPX raw data');

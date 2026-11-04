@@ -193,6 +193,9 @@ when they were not already present.
    Each event is a baseline z-score. Training folds use equal class counts.
    Loaded by      : Analyze_behavior_class_from_timewrap_power.m
 
+Theta-power coupling scripts below are in:
+Figure 2\Supporting codes v2\Theta power coupling\
+
 2) Analyze_freq_coupling.m
    Cross-frequency coupling (delta phase vs gamma amplitude).
    psth_structure : couplig_structure_delta_gamma.mat
