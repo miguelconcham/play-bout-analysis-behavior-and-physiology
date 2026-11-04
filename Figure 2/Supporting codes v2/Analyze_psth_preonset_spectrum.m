@@ -27,6 +27,14 @@
 %     The fit and the panels use 0-20 Hz. The Command Window reports the
 %     mean periodic component from 2 to 3 Hz. 20 Hz is below the Nyquist
 %     frequency of the 10 ms power step.
+% %% Pooled play and non-play
+%     Self and partner are pooled. Each row is one behavior from one animal.
+%     Within each animal those behaviors are averaged, then the thick line
+%     is the mean across animals. The band is the 95% t interval across
+%     animals, so a second behavior from the same animal is a repeated
+%     measure and does not narrow the interval by itself. The same figure
+%     is drawn for the log-power traces and for the periodic spectra.
+%     Scratching stays out of non-play.
 % %% Raw mean versus per-trial z-score
 %     The preview mean, and the mean after each trial is z-scored on its own
 %     -2 to 0 s window.
@@ -308,6 +316,45 @@ open_scale_pages(band_name, 'onset_pre_raw_vs_trial_zscore_self', time_pre, ...
     raw_self, z_self, all_behaviors, behavior_pages, behavior_page_names, 'Implanted animal');
 open_scale_pages(band_name, 'onset_pre_raw_vs_trial_zscore_other', time_pre, ...
     raw_other, z_other, all_behaviors, behavior_pages, behavior_page_names, 'Partner');
+
+%% Pooled play and non-play, repeated measures
+% One row per animal and behavior, self and partner together. Behaviors are
+% averaged within the animal. The line and the band are the mean and the
+% 95% t interval across animals.
+[play_wave, play_ids] = stack_actor_behaviors(animal_wave_self, animal_wave_other, ...
+    n_self, n_other, play_behaviors);
+[nonplay_wave, nonplay_ids] = stack_actor_behaviors(animal_wave_self, animal_wave_other, ...
+    n_self, n_other, other_behaviors);
+[play_spec, play_spec_ids] = stack_actor_behaviors(animal_spec_self, animal_spec_other, ...
+    n_self, n_other, play_behaviors);
+[nonplay_spec, nonplay_spec_ids] = stack_actor_behaviors(animal_spec_self, animal_spec_other, ...
+    n_self, n_other, other_behaviors);
+
+[play_mu, play_lo, play_hi] = repeated_animal_mean(play_wave, play_ids);
+[nonplay_mu, nonplay_lo, nonplay_hi] = repeated_animal_mean(nonplay_wave, nonplay_ids);
+[play_spec_mu, play_spec_lo, play_spec_hi] = repeated_animal_mean(play_spec, play_spec_ids);
+[nonplay_spec_mu, nonplay_spec_lo, nonplay_spec_hi] = repeated_animal_mean(nonplay_spec, nonplay_spec_ids);
+
+figure
+name_psth_figure(band_name, 'onset_pre_waveform_play_pooled')
+plot_pooled_repeated(time_pre, play_wave, play_ids, animal_label, ...
+    play_mu, play_lo, play_hi, 'Time from onset (s)', 'Log power', ...
+    'Play, self and partner', []);
+figure
+name_psth_figure(band_name, 'onset_pre_waveform_nonplay_pooled')
+plot_pooled_repeated(time_pre, nonplay_wave, nonplay_ids, animal_label, ...
+    nonplay_mu, nonplay_lo, nonplay_hi, 'Time from onset (s)', 'Log power', ...
+    'Non-play, self and partner', []);
+figure
+name_psth_figure(band_name, 'onset_pre_spectrum_play_pooled')
+plot_pooled_repeated(freq_hz, play_spec, play_spec_ids, animal_label, ...
+    play_spec_mu, play_spec_lo, play_spec_hi, 'Frequency (Hz)', ...
+    'Periodic power (log10)', 'Play, self and partner', [1 5]);
+figure
+name_psth_figure(band_name, 'onset_pre_spectrum_nonplay_pooled')
+plot_pooled_repeated(freq_hz, nonplay_spec, nonplay_spec_ids, animal_label, ...
+    nonplay_spec_mu, nonplay_spec_lo, nonplay_spec_hi, 'Frequency (Hz)', ...
+    'Periodic power (log10)', 'Non-play, self and partner', [1 5]);
 end
 
 function name_psth_figure(band_name, plot_id)
@@ -644,6 +691,156 @@ n_half = floor(n / 2);
 blue = [linspace(0.12, 1, n_half)', linspace(0.25, 1, n_half)', ones(n_half, 1)];
 red = [ones(n_half, 1), linspace(1, 0.15, n_half)', linspace(1, 0.12, n_half)'];
 cmap = [blue; red];
+end
+
+function [curves, animal_ids] = stack_actor_behaviors(curves_self, curves_other, ...
+        n_self, n_other, behavior_index)
+n_animals = size(n_self, 2);
+n_x = size(curves_self, 3);
+curves = zeros(0, n_x);
+animal_ids = zeros(0, 1);
+for animal_n = 1:n_animals
+    for behavior_n = behavior_index
+        if n_self(behavior_n, animal_n) > 0
+            row = reshape(curves_self(behavior_n, animal_n, :), 1, []);
+            if any(isfinite(row))
+                curves(end + 1, :) = row; %#ok<AGROW>
+                animal_ids(end + 1, 1) = animal_n; %#ok<AGROW>
+            end
+        end
+        if n_other(behavior_n, animal_n) > 0
+            row = reshape(curves_other(behavior_n, animal_n, :), 1, []);
+            if any(isfinite(row))
+                curves(end + 1, :) = row; %#ok<AGROW>
+                animal_ids(end + 1, 1) = animal_n; %#ok<AGROW>
+            end
+        end
+    end
+end
+end
+
+function [mu, lo, hi] = repeated_animal_mean(curves, animal_ids)
+% Average behaviors within each animal, then take the mean and the 95% t
+% interval across animals. Extra behaviors from the same animal do not add
+% degrees of freedom.
+n_x = size(curves, 2);
+mu = nan(1, n_x);
+lo = nan(1, n_x);
+hi = nan(1, n_x);
+if isempty(curves)
+    return
+end
+for t = 1:n_x
+    y = curves(:, t);
+    valid = isfinite(y);
+    if ~any(valid)
+        continue
+    end
+    [estimate, se, df] = animal_level_mean(y(valid), animal_ids(valid));
+    mu(t) = estimate;
+    if isfinite(se) && df > 0
+        crit = tinv(0.975, df);
+        lo(t) = estimate - crit * se;
+        hi(t) = estimate + crit * se;
+    end
+end
+end
+
+function [estimate, se, df] = animal_level_mean(y, ids)
+y = y(:);
+ids = ids(:);
+animals = unique(ids, 'stable');
+a = numel(animals);
+m = zeros(a, 1);
+for animal_n = 1:a
+    m(animal_n) = mean(y(ids == animals(animal_n)));
+end
+estimate = mean(m);
+df = a - 1;
+if a < 2
+    se = NaN;
+    return
+end
+se = std(m, 0) / sqrt(a);
+end
+
+function plot_pooled_repeated(x, curves, animal_ids, animal_names, mu, lo, hi, ...
+        x_label, y_label, figure_title, shade_band)
+if isempty(curves)
+    axis off
+    title(figure_title, 'Interpreter', 'none')
+    return
+end
+is_spectrum = ~isempty(shade_band);
+[c_lim, cmap] = page_color_scale(curves, is_spectrum);
+n_rows = size(curves, 1);
+animals = unique(animal_ids, 'stable');
+tiledlayout(3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+nexttile(1, [2 1])
+shown = imagesc(x, 1:n_rows, curves);
+set(shown, 'AlphaData', isfinite(curves));
+set(gca, 'YDir', 'reverse', 'TickDir', 'out', 'YLim', [0.5, n_rows + 0.5]);
+if ~isempty(c_lim)
+    clim(c_lim);
+end
+colormap(gca, cmap);
+hold on
+tick_at = zeros(1, numel(animals));
+for animal_n = 1:numel(animals)
+    rows = find(animal_ids == animals(animal_n));
+    tick_at(animal_n) = mean(rows);
+    if animal_n > 1
+        boundary = rows(1) - 0.5;
+        plot([x(1) x(end)], boundary * [1 1], 'w-', 'LineWidth', 1.2);
+    end
+end
+hold off
+yticks(tick_at);
+yticklabels(animal_names(animals));
+ylabel('Animal');
+title(figure_title, 'Interpreter', 'none');
+if numel(x) > 1
+    xlim([x(1), x(end)]);
+end
+if is_spectrum && numel(shade_band) == 2
+    hold on
+    plot(shade_band(1) * [1 1], [0.5, n_rows + 0.5], 'w-', 'LineWidth', 0.8);
+    plot(shade_band(2) * [1 1], [0.5, n_rows + 0.5], 'w-', 'LineWidth', 0.8);
+    hold off
+    ylim([0.5, n_rows + 0.5]);
+end
+colorbar
+
+nexttile(3)
+hold on
+for row = 1:n_rows
+    plot(x, curves(row, :), 'Color', [0.82 0.82 0.82], 'LineWidth', 0.6, ...
+        'HandleVisibility', 'off');
+end
+finite_band = isfinite(lo) & isfinite(hi);
+if any(finite_band)
+    x_band = x(finite_band);
+    fill([x_band, fliplr(x_band)], [lo(finite_band), fliplr(hi(finite_band))], ...
+        [0.20 0.35 0.70], 'FaceAlpha', 0.45, 'EdgeColor', 'none', ...
+        'DisplayName', '95% CI');
+end
+plot(x, mu, 'k', 'LineWidth', 2.4, 'DisplayName', 'Grand mean');
+if is_spectrum && numel(x) > 1 && numel(shade_band) == 2
+    yl = ylim;
+    shade = patch([shade_band(1) shade_band(2) shade_band(2) shade_band(1)], ...
+        [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
+        'FaceAlpha', 0.25, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    uistack(shade, 'bottom');
+end
+hold off
+xlabel(x_label);
+ylabel(y_label);
+if numel(x) > 1
+    xlim([x(1), x(end)]);
+end
+set(gca, 'TickDir', 'out', 'Box', 'off');
+legend('Location', 'best');
 end
 
 function trace = raw_pre_mean(psth, elec, pre_mask)
