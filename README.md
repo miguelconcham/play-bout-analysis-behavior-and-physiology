@@ -209,6 +209,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | Partner identity | (uses play-bout PSTH) | `Play partner.m` |
 | Speed vs band power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m`; `Figure 2.m` `%% 18`–`%% 21` |
 | Cross-frequency coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m`; `Freq coupling.m` |
+| Frequency-resolved slow-phase/theta-power coupling, harmonic control, and direct play vs non-play interaction | `Estimate_frequency_resolved_theta_pac.m` (resumable overnight estimate, hierarchical inference, CSVs, and figures) | same script |
 
 The original (pre-v2) Figure 2 pipeline lives outside this repository, in the parent folder `PlayBout Analysis/Figure 2 Supporting codes/`.
 
