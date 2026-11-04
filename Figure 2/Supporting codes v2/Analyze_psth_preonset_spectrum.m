@@ -38,13 +38,12 @@
 % %% Trial-level circular-shift null
 %     Each -5-to-0 s trial is independently circularly rotated. This keeps
 %     that trial's spectrum exactly and removes common phase relative to
-%     onset. Behaviors are averaged within animal. Each animal gets a target
-%     2-3 Hz p-value and a max-frequency-corrected peak p-value. Animal
-%     effects are standardized against their own nulls before equal-animal
-%     group inference and leave-one-animal-out checks. Raw spectra are
-%     averaged across repeated behaviors inside each animal, then FOOOF is
-%     fitted once to that animal spectrum in the observation and in every
-%     permutation. All inferential statistics use FOOOF peak_fit.
+%     onset. For every animal x behavior x actor unit, the trial mean is
+%     transformed to a spectrum and FOOOF. The log10 spectrum minus the
+%     fitted aperiodic component is ranked from 0 to 1 at every frequency
+%     against 1,000 circular null fits. Unit percentiles are then averaged
+%     within animal and animals are averaged equally. Target-band,
+%     corrected-peak, and leave-one-animal-out summaries use the same hierarchy.
 % %% Raw mean versus per-trial z-score
 %     The preview mean, and the mean after each trial is z-scored on its own
 %     -2 to 0 s window.
@@ -376,11 +375,11 @@ plot_pooled_repeated(freq_hz, nonplay_spec, nonplay_spec_ids, animal_label, ...
 %% Trial-level circular-shift FOOOF null for onset locking
 % Each complete -5-to-0 s trial is demeaned, then independently circularly
 % shifted. Thus every trial keeps exactly the same Fourier magnitude while
-% its phase relative to onset is randomized. The hierarchy is unchanged:
-% self/partner behavior means -> mean within animal -> mean across animals.
-% Raw behavior spectra are averaged inside animal, then FOOOF is fitted to
-% that animal spectrum. Statistics use only its periodic component. There
-% is no inferential test on the mean theta-power waveform.
+% its phase relative to onset is randomized. FOOOF is fitted separately to
+% every observed and permuted animal x behavior x actor mean. The statistic
+% is log10(real spectrum) minus the final fitted aperiodic component, ranked
+% against that unit's null before pooling. There is no inferential test on
+% the mean theta-power waveform.
 previous_rng = rng;
 rng(circular_null_seed, 'twister');
 disp(['trial-level circular-shift FOOOF null, ' ...
@@ -401,8 +400,10 @@ nonplay_null = circular_trial_null(all_psth_onset_self, all_psth_onset_other, ..
     fooof_aperiodic_mode, fooof_peak_widths);
 rng(previous_rng);
 
-print_circular_results([band_name ' play'], play_null, animal_label, effect_band);
-print_circular_results([band_name ' non-play'], nonplay_null, animal_label, effect_band);
+print_circular_results([band_name ' play'], play_null, animal_label, ...
+    all_behaviors, effect_band);
+print_circular_results([band_name ' non-play'], nonplay_null, animal_label, ...
+    all_behaviors, effect_band);
 
 figure
 name_psth_figure(band_name, 'onset_pre_spectrum_circular_null')
@@ -414,97 +415,150 @@ function result = circular_trial_null(psth_self, psth_other, elec_self, elec_oth
         animal_self, animal_other, behavior_index, n_animals, pre_mask, fs, ...
         freq, effect_band, search_band, n_perm, min_trials_per_unit, ...
         min_units_per_animal, aperiodic_mode, peak_widths)
-% Trial-level phase null. Every unit is one behavior and actor in one animal.
-units = cell(n_animals, 1);
+% One unit is one animal x behavior x actor. FOOOF is fitted before pooling.
+units = struct('segments', {}, 'animal', {}, 'behavior', {}, ...
+    'actor', {}, 'n_trials', {});
 n_units = zeros(n_animals, 1);
 n_trials = zeros(n_animals, 1);
 for animal_n = 1:n_animals
-    units{animal_n} = {};
     for behavior_n = behavior_index
         self_seg = trial_pre_segments(psth_self{1, behavior_n}, ...
             elec_self{behavior_n}, animal_self{behavior_n}, animal_n, pre_mask);
         if size(self_seg, 1) >= min_trials_per_unit
-            units{animal_n}{end + 1} = self_seg; %#ok<AGROW>
+            unit_n = numel(units) + 1;
+            units(unit_n).segments = self_seg;
+            units(unit_n).animal = animal_n;
+            units(unit_n).behavior = behavior_n;
+            units(unit_n).actor = 'self';
+            units(unit_n).n_trials = size(self_seg, 1);
             n_trials(animal_n) = n_trials(animal_n) + size(self_seg, 1);
         end
         other_seg = trial_pre_segments(psth_other{1, behavior_n}, ...
             elec_other{behavior_n}, animal_other{behavior_n}, animal_n, pre_mask);
         if size(other_seg, 1) >= min_trials_per_unit
-            units{animal_n}{end + 1} = other_seg; %#ok<AGROW>
+            unit_n = numel(units) + 1;
+            units(unit_n).segments = other_seg;
+            units(unit_n).animal = animal_n;
+            units(unit_n).behavior = behavior_n;
+            units(unit_n).actor = 'other';
+            units(unit_n).n_trials = size(other_seg, 1);
             n_trials(animal_n) = n_trials(animal_n) + size(other_seg, 1);
         end
     end
-    n_units(animal_n) = numel(units{animal_n});
-    if n_units(animal_n) < min_units_per_animal
-        units{animal_n} = {};
-    end
+    n_units(animal_n) = sum([units.animal] == animal_n);
 end
 
+n_total_units = numel(units);
 n_freq = numel(freq);
-animal_spec = nan(n_animals, n_freq);
-for animal_n = 1:n_animals
-    if ~isempty(units{animal_n})
-        [~, raw_spectrum] = ...
-            mean_units(units{animal_n}, fs, freq, false);
-        animal_spec(animal_n, :) = periodic_component_fooof( ...
-            freq, raw_spectrum, aperiodic_mode, peak_widths);
-    end
-end
-included = n_units >= min_units_per_animal & any(isfinite(animal_spec), 2);
-group_spec = mean(animal_spec(included, :), 1, 'omitnan');
+unit_periodic = nan(n_total_units, n_freq);
+unit_percentile = nan(n_total_units, n_freq);
+unit_null_percentile = nan(n_total_units, n_perm, n_freq);
+unit_target_percentile = nan(n_total_units, 1);
+unit_null_target_percentile = nan(n_total_units, n_perm);
+unit_peak_hz = nan(n_total_units, 1);
+unit_peak_p = nan(n_total_units, 1);
 
-null_spec = nan(n_perm, n_freq);
-animal_null_spec = nan(n_animals, n_perm, n_freq);
-for permutation = 1:n_perm
-    perm_animal_spec = nan(n_animals, n_freq);
-    for animal_n = 1:n_animals
-        if ~isempty(units{animal_n})
-            [~, raw_spectrum] = ...
-                mean_units(units{animal_n}, fs, freq, true);
-            perm_animal_spec(animal_n, :) = periodic_component_fooof( ...
-                freq, raw_spectrum, aperiodic_mode, peak_widths);
+for unit_n = 1:n_total_units
+    observed_wave = mean(units(unit_n).segments, 1);
+    observed_raw = spectrum_of_trace(observed_wave, fs, freq);
+    observed_periodic = periodic_residual_fooof( ...
+        freq, observed_raw, aperiodic_mode, peak_widths);
+    null_periodic = nan(n_perm, n_freq);
+    for permutation = 1:n_perm
+        null_wave = circular_shift_mean(units(unit_n).segments);
+        null_raw = spectrum_of_trace(null_wave, fs, freq);
+        null_periodic(permutation, :) = periodic_residual_fooof( ...
+            freq, null_raw, aperiodic_mode, peak_widths);
+        if mod(permutation, 100) == 0 || permutation == n_perm
+            fprintf('  unit %d/%d FOOOF null %d/%d\n', ...
+                unit_n, n_total_units, permutation, n_perm);
         end
     end
-    animal_null_spec(:, permutation, :) = ...
-        reshape(perm_animal_spec, n_animals, 1, n_freq);
-    null_spec(permutation, :) = mean(perm_animal_spec(included, :), 1, 'omitnan');
-    if mod(permutation, 10) == 0 || permutation == n_perm
-        fprintf('  circular FOOOF null %d/%d\n', permutation, n_perm);
-    end
+    unit_periodic(unit_n, :) = observed_periodic;
+    unit_percentile(unit_n, :) = percentile_spectrum( ...
+        observed_periodic, null_periodic);
+    null_percentiles = null_rank_percentiles(null_periodic);
+    unit_null_percentile(unit_n, :, :) = ...
+        reshape(null_percentiles, 1, n_perm, n_freq);
+    observed_target = band_mean(freq, observed_periodic, effect_band);
+    null_target = band_rows(freq, null_periodic, effect_band);
+    unit_target_percentile(unit_n) = empirical_percentile( ...
+        observed_target, null_target);
+    unit_null_target_percentile(unit_n, :) = ...
+        null_rank_percentiles(null_target).';
+    [unit_peak_hz(unit_n), unit_peak_p(unit_n)] = score_peak_inference( ...
+        freq, unit_percentile(unit_n, :), null_percentiles, search_band);
 end
 
-[animal_z_spec, animal_null_z_spec] = standardize_animal_spectra( ...
-    animal_spec, animal_null_spec, included);
-[animal_effect_z, animal_null_effect_z, animal_p_effect] = ...
-    animal_target_inference(freq, animal_spec, animal_null_spec, effect_band, included);
-[animal_peak_hz, animal_peak_p] = animal_peak_inference( ...
-    freq, animal_z_spec, animal_null_z_spec, search_band, included);
+unit_animal = reshape([units.animal], [], 1);
+unit_behavior = reshape([units.behavior], [], 1);
+unit_actor = {units.actor}.';
+unit_trials = reshape([units.n_trials], [], 1);
+included = n_units >= min_units_per_animal;
 
-group_z_spec = nan(1, n_freq);
-group_null_z_spec = nan(n_perm, n_freq);
-group_effect_z = NaN;
-group_null_effect_z = nan(n_perm, 1);
+animal_score = nan(n_animals, n_freq);
+animal_percentile = nan(n_animals, n_freq);
+animal_null_score = nan(n_animals, n_perm, n_freq);
+animal_target_score = nan(n_animals, 1);
+animal_target_percentile = nan(n_animals, 1);
+animal_null_target_score = nan(n_animals, n_perm);
+animal_p_effect = nan(n_animals, 1);
+animal_peak_hz = nan(n_animals, 1);
+animal_peak_p = nan(n_animals, 1);
+for animal_n = 1:n_animals
+    selected = unit_animal == animal_n;
+    if ~any(selected)
+        continue
+    end
+    animal_score(animal_n, :) = mean(unit_percentile(selected, :), 1, 'omitnan');
+    null_scores = squeeze(mean(unit_null_percentile(selected, :, :), 1, 'omitnan'));
+    null_scores = reshape(null_scores, n_perm, n_freq);
+    animal_null_score(animal_n, :, :) = ...
+        reshape(null_scores, 1, n_perm, n_freq);
+    animal_percentile(animal_n, :) = percentile_spectrum( ...
+        animal_score(animal_n, :), null_scores);
+    animal_target_score(animal_n) = ...
+        mean(unit_target_percentile(selected), 'omitnan');
+    null_target_scores = mean( ...
+        unit_null_target_percentile(selected, :), 1, 'omitnan').';
+    animal_null_target_score(animal_n, :) = null_target_scores.';
+    animal_target_percentile(animal_n) = empirical_percentile( ...
+        animal_target_score(animal_n), null_target_scores);
+    animal_p_effect(animal_n) = empirical_upper_p( ...
+        animal_target_score(animal_n), null_target_scores);
+    [animal_peak_hz(animal_n), animal_peak_p(animal_n)] = ...
+        score_peak_inference(freq, animal_score(animal_n, :), ...
+        null_scores, search_band);
+end
+
+group_score = nan(1, n_freq);
+group_percentile = nan(1, n_freq);
+group_null_score = nan(n_perm, n_freq);
+group_target_score = NaN;
+group_target_percentile = NaN;
+group_null_target_score = nan(n_perm, 1);
 p_effect = NaN;
 group_peak_hz = NaN;
 group_peak_p = NaN;
 group_max_threshold = NaN;
 significant_frequency = false(size(freq));
 if nnz(included) >= 2
-    group_z_spec = mean(animal_z_spec(included, :), 1, 'omitnan');
-    group_null_z_spec = squeeze(mean( ...
-        animal_null_z_spec(included, :, :), 1, 'omitnan'));
-    if size(group_null_z_spec, 1) ~= n_perm
-        group_null_z_spec = reshape(group_null_z_spec, n_perm, n_freq);
-    end
-    group_effect_z = mean(animal_effect_z(included), 'omitnan');
-    group_null_effect_z = mean( ...
-        animal_null_effect_z(included, :), 1, 'omitnan').';
-    p_effect = empirical_upper_p(group_effect_z, group_null_effect_z);
+    group_score = mean(animal_score(included, :), 1, 'omitnan');
+    group_null_score = squeeze(mean( ...
+        animal_null_score(included, :, :), 1, 'omitnan'));
+    group_null_score = reshape(group_null_score, n_perm, n_freq);
+    group_percentile = percentile_spectrum(group_score, group_null_score);
+    group_target_score = mean(animal_target_score(included), 'omitnan');
+    group_null_target_score = mean( ...
+        animal_null_target_score(included, :), 1, 'omitnan').';
+    group_target_percentile = empirical_percentile( ...
+        group_target_score, group_null_target_score);
+    p_effect = empirical_upper_p(group_target_score, group_null_target_score);
     [group_peak_hz, group_peak_p, group_max_threshold, significant_frequency] = ...
-        group_peak_inference(freq, group_z_spec, group_null_z_spec, search_band);
+        score_peak_inference(freq, group_score, group_null_score, search_band);
 end
 
-loo_effect_z = nan(n_animals, 1);
+loo_target_score = nan(n_animals, 1);
 loo_p_effect = nan(n_animals, 1);
 for animal_n = 1:n_animals
     keep = included;
@@ -512,32 +566,42 @@ for animal_n = 1:n_animals
     if nnz(keep) < 2
         continue
     end
-    loo_effect_z(animal_n) = mean(animal_effect_z(keep), 'omitnan');
-    loo_null = mean(animal_null_effect_z(keep, :), 1, 'omitnan').';
-    loo_p_effect(animal_n) = empirical_upper_p(loo_effect_z(animal_n), loo_null);
+    loo_target_score(animal_n) = mean(animal_target_score(keep), 'omitnan');
+    loo_null = mean(animal_null_target_score(keep, :), 1, 'omitnan').';
+    loo_p_effect(animal_n) = empirical_upper_p(loo_target_score(animal_n), loo_null);
 end
 
-result.animal_spec = animal_spec;
-result.group_spec = group_spec;
-result.null_spec = null_spec;
-result.animal_null_spec = animal_null_spec;
-result.animal_z_spec = animal_z_spec;
-result.animal_null_z_spec = animal_null_z_spec;
-result.animal_effect_z = animal_effect_z;
-result.animal_null_effect_z = animal_null_effect_z;
+result.unit_periodic = unit_periodic;
+result.unit_percentile = unit_percentile;
+result.unit_null_percentile = unit_null_percentile;
+result.unit_target_percentile = unit_target_percentile;
+result.unit_peak_hz = unit_peak_hz;
+result.unit_peak_p = unit_peak_p;
+result.unit_animal = unit_animal;
+result.unit_behavior = unit_behavior;
+result.unit_actor = unit_actor;
+result.unit_trials = unit_trials;
+result.animal_score = animal_score;
+result.animal_percentile = animal_percentile;
+result.animal_null_score = animal_null_score;
+result.animal_target_score = animal_target_score;
+result.animal_target_percentile = animal_target_percentile;
+result.animal_null_target_score = animal_null_target_score;
 result.animal_p_effect = animal_p_effect;
 result.animal_peak_hz = animal_peak_hz;
 result.animal_peak_p = animal_peak_p;
-result.group_z_spec = group_z_spec;
-result.group_null_z_spec = group_null_z_spec;
-result.group_effect_z = group_effect_z;
-result.group_null_effect_z = group_null_effect_z;
+result.group_score = group_score;
+result.group_percentile = group_percentile;
+result.group_null_score = group_null_score;
+result.group_target_score = group_target_score;
+result.group_target_percentile = group_target_percentile;
+result.group_null_target_score = group_null_target_score;
 result.p_effect = p_effect;
 result.group_peak_hz = group_peak_hz;
 result.group_peak_p = group_peak_p;
 result.group_max_threshold = group_max_threshold;
 result.significant_frequency = significant_frequency;
-result.loo_effect_z = loo_effect_z;
+result.loo_target_score = loo_target_score;
 result.loo_p_effect = loo_p_effect;
 result.included = included;
 result.n_units = n_units;
@@ -546,82 +610,8 @@ result.effect_band = effect_band;
 result.search_band = search_band;
 end
 
-function [animal_z, null_z] = standardize_animal_spectra(animal_spec, animal_null_spec, included)
-[n_animals, n_freq] = size(animal_spec);
-n_perm = size(animal_null_spec, 2);
-animal_z = nan(n_animals, n_freq);
-null_z = nan(n_animals, n_perm, n_freq);
-for animal_n = 1:n_animals
-    if ~included(animal_n)
-        continue
-    end
-    null_curves = reshape(animal_null_spec(animal_n, :, :), n_perm, n_freq);
-    center = mean(null_curves, 1);
-    scale = std(null_curves, 0, 1);
-    tolerance = max(1e-12, abs(center) * 1e-12);
-    usable = isfinite(scale) & scale > tolerance;
-    animal_z(animal_n, usable) = ...
-        (animal_spec(animal_n, usable) - center(usable)) ./ scale(usable);
-    standardized = nan(size(null_curves));
-    standardized(:, usable) = ...
-        (null_curves(:, usable) - center(usable)) ./ scale(usable);
-    null_z(animal_n, :, :) = reshape(standardized, 1, n_perm, n_freq);
-end
-end
-
-function [effect_z, null_effect_z, p_effect] = animal_target_inference( ...
-        freq, animal_spec, animal_null_spec, effect_band, included)
-n_animals = size(animal_spec, 1);
-n_perm = size(animal_null_spec, 2);
-effect_z = nan(n_animals, 1);
-null_effect_z = nan(n_animals, n_perm);
-p_effect = nan(n_animals, 1);
-for animal_n = 1:n_animals
-    if ~included(animal_n)
-        continue
-    end
-    observed = band_mean(freq, animal_spec(animal_n, :), effect_band);
-    null_values = nan(n_perm, 1);
-    for permutation = 1:n_perm
-        curve = reshape(animal_null_spec(animal_n, permutation, :), 1, []);
-        null_values(permutation) = band_mean(freq, curve, effect_band);
-    end
-    center = mean(null_values);
-    scale = std(null_values, 0);
-    tolerance = max(1e-12, abs(center) * 1e-12);
-    if isfinite(scale) && scale > tolerance
-        effect_z(animal_n) = (observed - center) / scale;
-        null_effect_z(animal_n, :) = ((null_values - center) / scale).';
-    end
-    p_effect(animal_n) = empirical_upper_p(observed, null_values);
-end
-end
-
-function [peak_hz, peak_p] = animal_peak_inference( ...
-        freq, animal_z, animal_null_z, search_band, included)
-n_animals = size(animal_z, 1);
-n_perm = size(animal_null_z, 2);
-search = freq >= search_band(1) & freq <= search_band(2);
-freq_search = freq(search);
-peak_hz = nan(n_animals, 1);
-peak_p = nan(n_animals, 1);
-for animal_n = 1:n_animals
-    if ~included(animal_n) || ~any(search)
-        continue
-    end
-    observed_curve = animal_z(animal_n, search);
-    [observed_max, index] = finite_max(observed_curve);
-    if isfinite(observed_max)
-        peak_hz(animal_n) = freq_search(index);
-    end
-    null_curves = reshape(animal_null_z(animal_n, :, search), n_perm, []);
-    null_max = finite_row_max(null_curves);
-    peak_p(animal_n) = empirical_upper_p(observed_max, null_max);
-end
-end
-
 function [peak_hz, peak_p, max_threshold, significant_frequency] = ...
-        group_peak_inference(freq, group_z, group_null_z, search_band)
+        score_peak_inference(freq, observed_score, null_score, search_band)
 search = freq >= search_band(1) & freq <= search_band(2);
 significant_frequency = false(size(freq));
 peak_hz = NaN;
@@ -631,16 +621,77 @@ if ~any(search)
     return
 end
 freq_search = freq(search);
-[observed_max, index] = finite_max(group_z(search));
+[observed_max, index] = finite_max(observed_score(search));
 if isfinite(observed_max)
     peak_hz = freq_search(index);
 end
-null_max = finite_row_max(group_null_z(:, search));
+null_max = finite_row_max(null_score(:, search));
 peak_p = empirical_upper_p(observed_max, null_max);
 valid = null_max(isfinite(null_max));
 if ~isempty(valid)
     max_threshold = prctile(valid, 95);
-    significant_frequency(search) = group_z(search) > max_threshold;
+    significant_frequency(search) = observed_score(search) > max_threshold;
+end
+end
+
+function percentiles = percentile_spectrum(observed, null_curves)
+percentiles = nan(size(observed));
+for frequency = 1:numel(observed)
+    percentiles(frequency) = empirical_percentile( ...
+        observed(frequency), null_curves(:, frequency));
+end
+end
+
+function percentile = empirical_percentile(observed, null_values)
+valid = null_values(isfinite(null_values));
+if ~isfinite(observed) || isempty(valid)
+    percentile = NaN;
+    return
+end
+less = sum(valid < observed);
+equal = sum(valid == observed);
+percentile = (less + 0.5 * equal + 0.5) / (numel(valid) + 1);
+end
+
+function percentiles = null_rank_percentiles(values)
+was_vector = isvector(values);
+if was_vector
+    values = values(:);
+end
+percentiles = nan(size(values));
+for column = 1:size(values, 2)
+    x = values(:, column);
+    valid_index = find(isfinite(x));
+    if isempty(valid_index)
+        continue
+    end
+    [sorted, order] = sort(x(valid_index));
+    rank_value = nan(size(sorted));
+    first = 1;
+    while first <= numel(sorted)
+        last = first;
+        while last < numel(sorted) && sorted(last + 1) == sorted(first)
+            last = last + 1;
+        end
+        midrank = (first + last) / 2;
+        rank_value(first:last) = (midrank - 0.5) / numel(sorted);
+        first = last + 1;
+    end
+    restored = nan(size(sorted));
+    restored(order) = rank_value;
+    percentiles(valid_index, column) = restored;
+end
+if was_vector
+    percentiles = percentiles(:);
+end
+end
+
+function values = band_rows(freq, spectra, band)
+keep = freq >= band(1) & freq <= band(2);
+if ~any(keep)
+    values = nan(size(spectra, 1), 1);
+else
+    values = mean(spectra(:, keep), 2, 'omitnan');
 end
 end
 
@@ -692,30 +743,6 @@ end
 segments = segments - mean(segments, 2);
 end
 
-function [wave, spec] = mean_units(units, fs, freq, circularize)
-n_pre = 0;
-if ~isempty(units)
-    n_pre = size(units{1}, 2);
-end
-wave = nan(1, n_pre);
-spec = nan(1, numel(freq));
-if isempty(units)
-    return
-end
-unit_wave = nan(numel(units), n_pre);
-unit_spec = nan(numel(units), numel(freq));
-for unit_n = 1:numel(units)
-    if circularize
-        unit_wave(unit_n, :) = circular_shift_mean(units{unit_n});
-    else
-        unit_wave(unit_n, :) = mean(units{unit_n}, 1);
-    end
-    unit_spec(unit_n, :) = spectrum_of_trace(unit_wave(unit_n, :), fs, freq);
-end
-wave = mean(unit_wave, 1, 'omitnan');
-spec = mean(unit_spec, 1, 'omitnan');
-end
-
 function trace = circular_shift_mean(segments)
 % Independent circular rotation of every trial. The periodogram of each
 % row is unchanged; only phase alignment between trials is removed.
@@ -727,24 +754,35 @@ shifted = segments(sub2ind([n_trials, n_time], rows, indices));
 trace = mean(shifted, 1);
 end
 
-function print_circular_results(name, result, animal_names, effect_band)
+function print_circular_results(name, result, animal_names, behavior_names, effect_band)
 fprintf('\n%s hierarchical circular-shift FOOOF result\n', name);
-fprintf('  group %.1f-%.1f Hz z = %.2f, p = %.4g\n', ...
-    effect_band(1), effect_band(2), result.group_effect_z, result.p_effect);
+fprintf('  group %.1f-%.1f Hz percentile = %.3f, p = %.4g\n', ...
+    effect_band(1), effect_band(2), result.group_target_percentile, result.p_effect);
 fprintf('  group peak %.2f Hz, max-frequency corrected p = %.4g\n', ...
     result.group_peak_hz, result.group_peak_p);
-fprintf('  animal   units  trials   target_z  target_p  peak_hz  peak_p   LOO_z  LOO_p\n');
+fprintf('  unit results (periodic power ranked against that unit''s null)\n');
+fprintf('  animal   behavior     actor   trials  target_pct  peak_hz  peak_p\n');
+for unit_n = 1:numel(result.unit_animal)
+    fprintf('  %-7s  %-11s  %-6s  %6d     %.3f    %7.2f  %.4g\n', ...
+        animal_names{result.unit_animal(unit_n)}, ...
+        behavior_names{result.unit_behavior(unit_n)}, ...
+        result.unit_actor{unit_n}, result.unit_trials(unit_n), ...
+        result.unit_target_percentile(unit_n), result.unit_peak_hz(unit_n), ...
+        result.unit_peak_p(unit_n));
+end
+fprintf('  animal summaries (equal behavior/actor weight)\n');
+fprintf('  animal   units  trials  target_pct  target_p  peak_hz  peak_p  LOO_score  LOO_p\n');
 for animal_n = 1:numel(animal_names)
     if ~result.included(animal_n)
         fprintf('  %-7s %5d %7d   excluded\n', animal_names{animal_n}, ...
             result.n_units(animal_n), result.n_trials(animal_n));
         continue
     end
-    fprintf('  %-7s %5d %7d   %8.2f  %8.4g  %7.2f  %7.4g  %6.2f  %7.4g\n', ...
+    fprintf('  %-7s %5d %7d      %.3f   %8.4g  %7.2f  %7.4g      %.3f  %7.4g\n', ...
         animal_names{animal_n}, result.n_units(animal_n), ...
-        result.n_trials(animal_n), result.animal_effect_z(animal_n), ...
+        result.n_trials(animal_n), result.animal_target_percentile(animal_n), ...
         result.animal_p_effect(animal_n), result.animal_peak_hz(animal_n), ...
-        result.animal_peak_p(animal_n), result.loo_effect_z(animal_n), ...
+        result.animal_peak_p(animal_n), result.loo_target_score(animal_n), ...
         result.loo_p_effect(animal_n));
 end
 end
@@ -753,52 +791,57 @@ function plot_circular_spectrum_hierarchy(freq, play_result, nonplay_result, ...
         animal_names, effect_band)
 results = {play_result, nonplay_result};
 names = {'Play', 'Non-play'};
-all_z = [play_result.animal_z_spec(:); nonplay_result.animal_z_spec(:)];
-all_z = all_z(isfinite(all_z));
-color_limit = 1;
-if ~isempty(all_z)
-    color_limit = max(1, prctile(abs(all_z), 98));
-end
-cmap = diverging_colormap(256);
+cmap = jet(256);
 tiledlayout(3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
 for column = 1:2
     result = results{column};
-    labels = circular_animal_labels(animal_names, result);
+    n_rows = size(result.unit_percentile, 1);
     image_axis = nexttile(column, [2 1]);
-    shown = imagesc(freq, 1:numel(animal_names), result.animal_z_spec);
-    set(shown, 'AlphaData', isfinite(result.animal_z_spec));
+    shown = imagesc(freq, 1:n_rows, result.unit_percentile);
+    set(shown, 'AlphaData', isfinite(result.unit_percentile));
     set(image_axis, 'YDir', 'reverse', 'TickDir', 'out', ...
-        'YLim', [0.5 numel(animal_names) + 0.5]);
-    clim(image_axis, [-color_limit color_limit]);
+        'YLim', [0.5 n_rows + 0.5]);
+    clim(image_axis, [0 1]);
     colormap(image_axis, cmap);
-    yticks(image_axis, 1:numel(animal_names));
-    yticklabels(image_axis, labels);
-    if column == 1
-        ylabel(image_axis, 'Animal (* target p<.05; ^ corrected peak p<.05)');
-    end
-    title(image_axis, [names{column} ' animal FOOOF z-spectra']);
-    xlim(image_axis, [freq(1) freq(end)]);
+    animals = unique(result.unit_animal, 'stable');
+    tick_at = nan(size(animals));
     hold(image_axis, 'on');
-    plot(image_axis, effect_band(1) * [1 1], ...
-        [0.5 numel(animal_names) + 0.5], 'k:', 'LineWidth', 0.8);
-    plot(image_axis, effect_band(2) * [1 1], ...
-        [0.5 numel(animal_names) + 0.5], 'k:', 'LineWidth', 0.8);
+    for animal_index = 1:numel(animals)
+        rows = find(result.unit_animal == animals(animal_index));
+        tick_at(animal_index) = mean(rows);
+        if animal_index > 1
+            boundary = rows(1) - 0.5;
+            plot(image_axis, [freq(1) freq(end)], boundary * [1 1], ...
+                'w-', 'LineWidth', 1.2);
+        end
+    end
+    plot(image_axis, effect_band(1) * [1 1], [0.5 n_rows + 0.5], ...
+        'k:', 'LineWidth', 0.8);
+    plot(image_axis, effect_band(2) * [1 1], [0.5 n_rows + 0.5], ...
+        'k:', 'LineWidth', 0.8);
     hold(image_axis, 'off');
+    yticks(image_axis, tick_at);
+    yticklabels(image_axis, animal_names(animals));
+    if column == 1
+        ylabel(image_axis, 'Animal (rows are behavior x actor units)');
+    end
+    title(image_axis, [names{column} ' unit FOOOF percentiles']);
+    xlim(image_axis, [freq(1) freq(end)]);
     colorbar(image_axis);
 
     line_axis = nexttile(4 + column);
     hold(line_axis, 'on');
     for animal_n = 1:numel(animal_names)
         if result.included(animal_n)
-            plot(line_axis, freq, result.animal_z_spec(animal_n, :), ...
+            plot(line_axis, freq, result.animal_score(animal_n, :), ...
                 'Color', [0.82 0.82 0.82], 'LineWidth', 0.8, ...
                 'HandleVisibility', 'off');
         end
     end
-    null_lo = prctile(result.group_null_z_spec, 2.5, 1);
-    null_hi = prctile(result.group_null_z_spec, 97.5, 1);
-    null_center = median(result.group_null_z_spec, 1, 'omitnan');
+    null_lo = prctile(result.group_null_score, 2.5, 1);
+    null_hi = prctile(result.group_null_score, 97.5, 1);
+    null_center = median(result.group_null_score, 1, 'omitnan');
     valid = isfinite(null_lo) & isfinite(null_hi);
     if any(valid)
         x_band = freq(valid);
@@ -809,15 +852,15 @@ for column = 1:2
     end
     plot(line_axis, freq, null_center, '--', 'Color', [0.15 0.35 0.75], ...
         'LineWidth', 1.1, 'DisplayName', 'Null median');
-    plot(line_axis, freq, result.group_z_spec, 'k', 'LineWidth', 2.4, ...
-        'DisplayName', 'Equal-animal z mean');
+    plot(line_axis, freq, result.group_score, 'k', 'LineWidth', 2.4, ...
+        'DisplayName', 'Equal-animal mean percentile');
     if isfinite(result.group_max_threshold)
         yline(line_axis, result.group_max_threshold, 'r--', ...
             'Max-frequency 5% threshold', 'HandleVisibility', 'off');
     end
-    significant = result.significant_frequency & isfinite(result.group_z_spec);
+    significant = result.significant_frequency & isfinite(result.group_score);
     if any(significant)
-        plot(line_axis, freq(significant), result.group_z_spec(significant), ...
+        plot(line_axis, freq(significant), result.group_score(significant), ...
             'r.', 'MarkerSize', 12, 'DisplayName', 'Max-T significant');
     end
     yl = ylim(line_axis);
@@ -829,32 +872,15 @@ for column = 1:2
     hold(line_axis, 'off');
     xlabel(line_axis, 'Frequency (Hz)');
     if column == 1
-        ylabel(line_axis, 'FOOOF periodic-component z');
+        ylabel(line_axis, 'Mean FOOOF percentile');
     end
     xlim(line_axis, [freq(1) freq(end)]);
+    ylim(line_axis, [0 1]);
     set(line_axis, 'TickDir', 'out', 'Box', 'off');
-    title(line_axis, sprintf(['target p=%.4g; peak %.2f Hz, ' ...
-        'corrected p=%.4g'], result.p_effect, result.group_peak_hz, ...
-        result.group_peak_p));
+    title(line_axis, sprintf(['target pct=%.3f, p=%.4g; peak %.2f Hz, ' ...
+        'corrected p=%.4g'], result.group_target_percentile, ...
+        result.p_effect, result.group_peak_hz, result.group_peak_p));
     legend(line_axis, 'Location', 'best');
-end
-end
-
-function labels = circular_animal_labels(animal_names, result)
-labels = animal_names;
-for animal_n = 1:numel(labels)
-    if ~result.included(animal_n)
-        labels{animal_n} = [labels{animal_n} ' excluded'];
-        continue
-    end
-    marker = '';
-    if result.animal_p_effect(animal_n) < 0.05
-        marker = [marker '*']; %#ok<AGROW>
-    end
-    if result.animal_peak_p(animal_n) < 0.05
-        marker = [marker '^']; %#ok<AGROW>
-    end
-    labels{animal_n} = [labels{animal_n} marker];
 end
 end
 
@@ -1480,4 +1506,23 @@ out = fooof_matlab(freq(:), linear_power(:), ...
     'AperiodicMode', aperiodic_mode, ...
     'PeakWidthLimits', peak_widths);
 periodic = out.peak_fit(:).';
+end
+
+function periodic = periodic_residual_fooof(freq, linear_power, aperiodic_mode, peak_widths)
+% Observed log10 spectrum minus FOOOF's final aperiodic fit. This is the
+% inferential periodic residual requested for the circular null.
+periodic = nan(1, numel(freq));
+freq = freq(:).';
+linear_power = linear_power(:).';
+if numel(freq) < 8 || numel(linear_power) ~= numel(freq)
+    return
+end
+if any(~isfinite(freq)) || any(~isfinite(linear_power)) || all(linear_power <= 0)
+    return
+end
+linear_power = max(linear_power, realmin('double'));
+out = fooof_matlab(freq(:), linear_power(:), ...
+    'AperiodicMode', aperiodic_mode, ...
+    'PeakWidthLimits', peak_widths);
+periodic = (out.log_power(:) - out.aperiodic_fit(:)).';
 end
