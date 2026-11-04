@@ -17,6 +17,9 @@ For scripts in Supporting codes v2/ (three fileparts: script -> v2 -> Figure 2 -
   data_root = fullfile(repo_root, 'Data');
   saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
+For scripts in Supporting codes v2/Theta power coupling/ use four fileparts.
+The theta/gamma PSTH estimator and pre-onset spectrum analyzer are there.
+
 Each row lists variable names inside the .mat files (psth_structure, animal_names, results, cvResults)
 and which script loads them.
 
@@ -192,6 +195,9 @@ when they were not already present.
    Default classes are Pounce (1) and PounceI (2), default model is LDA.
    Each event is a baseline z-score. Training folds use equal class counts.
    Loaded by      : Analyze_behavior_class_from_timewrap_power.m
+
+Theta-power coupling scripts below are in:
+Figure 2\Supporting codes v2\Theta power coupling\
 
 2) Analyze_freq_coupling.m
    Cross-frequency coupling (delta phase vs gamma amplitude).
