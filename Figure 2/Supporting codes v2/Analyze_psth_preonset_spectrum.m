@@ -96,6 +96,11 @@ circular_null_seed = 29;
 circular_null_min_trials_per_unit = 5;
 circular_null_min_units_per_animal = 2;
 circular_null_search_band = [0.4 8];
+% 'demean_pre' matches the original spectrum plots: subtract each trial's
+% -5-to-0 s mean. Use 'trial_zscore' to match the LME normalization: each
+% trial is centered and scaled from its own -2-to-0 s baseline. The same
+% normalized trials are used for the observation and every circular null.
+circular_null_normalization = 'demean_pre';
 animal_colors = [0.12 0.47 0.71; 0.89 0.10 0.11; 0.20 0.63 0.17; ...
     0.60 0.31 0.64; 1.00 0.50 0.05; 0.09 0.75 0.81];
 
@@ -384,17 +389,20 @@ previous_rng = rng;
 rng(circular_null_seed, 'twister');
 disp(['trial-level circular-shift FOOOF null, ' ...
     num2str(circular_null_n_perm) ' permutations'])
+disp(['circular-null trial normalization: ' circular_null_normalization])
 play_null = circular_trial_null(all_psth_onset_self, all_psth_onset_other, ...
     all_electrode_index_self, all_electrode_index_other, ...
     all_session_index_self, all_session_index_other, ...
-    play_behaviors, animal_label, pre_mask, sample_rate, freq_hz, ...
+    play_behaviors, animal_label, pre_mask, baseline_mask, ...
+    circular_null_normalization, sample_rate, freq_hz, ...
     effect_band, circular_null_search_band, circular_null_n_perm, ...
     circular_null_min_trials_per_unit, circular_null_min_units_per_animal, ...
     fooof_aperiodic_mode, fooof_peak_widths);
 nonplay_null = circular_trial_null(all_psth_onset_self, all_psth_onset_other, ...
     all_electrode_index_self, all_electrode_index_other, ...
     all_session_index_self, all_session_index_other, ...
-    other_behaviors, animal_label, pre_mask, sample_rate, freq_hz, ...
+    other_behaviors, animal_label, pre_mask, baseline_mask, ...
+    circular_null_normalization, sample_rate, freq_hz, ...
     effect_band, circular_null_search_band, circular_null_n_perm, ...
     circular_null_min_trials_per_unit, circular_null_min_units_per_animal, ...
     fooof_aperiodic_mode, fooof_peak_widths);
@@ -412,8 +420,9 @@ plot_circular_spectrum_hierarchy(freq_hz, play_null, nonplay_null, ...
 end
 
 function result = circular_trial_null(psth_self, psth_other, elec_self, elec_other, ...
-        animal_self, animal_other, behavior_index, animal_names, pre_mask, fs, ...
-        freq, effect_band, search_band, n_perm, min_trials_per_unit, ...
+        animal_self, animal_other, behavior_index, animal_names, pre_mask, ...
+        baseline_mask, normalization, fs, freq, effect_band, search_band, ...
+        n_perm, min_trials_per_unit, ...
         min_units_per_animal, aperiodic_mode, peak_widths)
 % One unit is one animal x behavior x actor. FOOOF is fitted before pooling.
 n_animals = numel(animal_names);
@@ -424,7 +433,8 @@ n_trials = zeros(n_animals, 1);
 for animal_n = 1:n_animals
     for behavior_n = behavior_index
         self_seg = trial_pre_segments(psth_self{1, behavior_n}, ...
-            elec_self{behavior_n}, animal_self{behavior_n}, animal_n, pre_mask);
+            elec_self{behavior_n}, animal_self{behavior_n}, animal_n, ...
+            pre_mask, baseline_mask, normalization);
         if size(self_seg, 1) >= min_trials_per_unit
             unit_n = numel(units) + 1;
             units(unit_n).segments = self_seg;
@@ -435,7 +445,8 @@ for animal_n = 1:n_animals
             n_trials(animal_n) = n_trials(animal_n) + size(self_seg, 1);
         end
         other_seg = trial_pre_segments(psth_other{1, behavior_n}, ...
-            elec_other{behavior_n}, animal_other{behavior_n}, animal_n, pre_mask);
+            elec_other{behavior_n}, animal_other{behavior_n}, animal_n, ...
+            pre_mask, baseline_mask, normalization);
         if size(other_seg, 1) >= min_trials_per_unit
             unit_n = numel(units) + 1;
             units(unit_n).segments = other_seg;
@@ -621,6 +632,7 @@ result.n_units = n_units;
 result.n_trials = n_trials;
 result.effect_band = effect_band;
 result.search_band = search_band;
+result.normalization = normalization;
 end
 
 function [peak_hz, peak_p, max_threshold, significant_frequency] = ...
@@ -738,22 +750,39 @@ for row = 1:size(matrix, 1)
 end
 end
 
-function segments = trial_pre_segments(psth, electrode, animal_id, selected_animal, pre_mask)
+function segments = trial_pre_segments(psth, electrode, animal_id, selected_animal, ...
+        pre_mask, baseline_mask, normalization)
 segments = zeros(0, nnz(pre_mask));
 if isempty(psth) || isempty(electrode) || isempty(animal_id) || ...
-        size(psth, 2) ~= numel(pre_mask)
+        size(psth, 2) ~= numel(pre_mask) || numel(baseline_mask) ~= size(psth, 2)
     return
 end
 n_use = min([size(psth, 1), numel(electrode), numel(animal_id)]);
 electrode = electrode(1:n_use);
 animal_id = animal_id(1:n_use);
 keep = electrode(:) == 1 & animal_id(:) == selected_animal;
-segments = double(psth(keep, pre_mask));
-segments = segments(all(isfinite(segments), 2), :);
-if isempty(segments)
-    return
+selected = double(psth(keep, :));
+switch normalization
+    case 'demean_pre'
+        segments = selected(:, pre_mask);
+        segments = segments(all(isfinite(segments), 2), :);
+        if ~isempty(segments)
+            segments = segments - mean(segments, 2);
+        end
+    case 'trial_zscore'
+        baseline = selected(:, baseline_mask);
+        center = mean(baseline, 2);
+        scale = std(baseline, 0, 2);
+        valid = all(isfinite(selected(:, pre_mask)), 2) & ...
+            all(isfinite(baseline), 2) & isfinite(center) & ...
+            isfinite(scale) & scale > 0;
+        selected = selected(valid, :);
+        center = center(valid);
+        scale = scale(valid);
+        segments = (selected(:, pre_mask) - center) ./ scale;
+    otherwise
+        error('Unknown circular_null_normalization: %s', normalization)
 end
-segments = segments - mean(segments, 2);
 end
 
 function trace = circular_shift_mean(segments)
@@ -769,6 +798,7 @@ end
 
 function print_circular_results(name, result, animal_names, behavior_names, effect_band)
 fprintf('\n%s hierarchical circular-shift FOOOF result\n', name);
+fprintf('  trial normalization: %s\n', result.normalization);
 fprintf('  group %.1f-%.1f Hz percentile = %.3f, p = %.4g\n', ...
     effect_band(1), effect_band(2), result.group_target_percentile, result.p_effect);
 fprintf('  group peak %.2f Hz, max-frequency corrected p = %.4g\n', ...
