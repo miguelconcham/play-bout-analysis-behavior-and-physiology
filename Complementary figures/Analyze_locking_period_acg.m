@@ -19,6 +19,7 @@
 % lag-0 bins are blanked, and each neuron is scaled to sum to 1 so a cell
 % with more spikes does not dominate the mean. One figure per lock group
 % for the locking split, and one figure per lock group for the power split.
+% Each split also has a figure of all plotted neurons together.
 % Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz peak sits outside the
 % +/-0.5 s window saved with the runs.
 
@@ -313,33 +314,84 @@ for g = 1:numel(group_order)
     summary.(name).n_low = acg_raw.(name).n_low(keep);
     summary.(name).n_high = acg_raw.(name).n_high(keep);
     summary.(name).n_all = acg_raw.(name).n_all(keep);
-
-    figure('Name', [group_title{g}, ', ', split_name], 'Color', 'w', ...
-        'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
-    hold on
-    shade = shade_delta_lags(delta_lag);
-    plotted = gobjects(1, numel(curve_names));
-    for c = 1:numel(curve_names)
-        shown = smooth_acg_away_from_zero( ...
-            summary.(name).(curve_names{c}), centers, skip_abs_lag, smooth_n);
-        plotted(c) = plot_mean_sem(centers, shown, curve_colors(c, :));
-        mass = delta_side_mass(summary.(name).(curve_names{c}), centers, delta_lag);
-        disp(sprintf('  %s  %s   mean ACG in [%g %g] s = %.4g   n = %d', ...
-            [group_title{g}, ', ', split_name], curve_labels{c}, delta_lag(1), delta_lag(2), ...
-            mean(mass, 'omitnan'), sum(isfinite(mass))))
-        summary.(name).([curve_names{c}, '_delta_mass']) = mass;
-    end
-    report_split_contrast(summary.(name), [group_title{g}, ', ', split_name], split_name);
-    xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
-    xlim([centers(1) centers(end)])
-    xlabel('Lag (s)')
-    ylabel('Mean normalized autocorrelogram')
-    title({[group_title{g}, ', ', split_name], ...
-        sprintf('n = %d    shaded: 2-5 Hz', n)})
-    legend(plotted, curve_labels, 'Location', 'best')
-    place_delta_shade(shade)
-    box off
+    summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
+        [group_title{g}, ', ', split_name], centers, delta_lag, skip_abs_lag, ...
+        smooth_n, curve_colors, split_name);
 end
+
+summary.all_neurons = stack_plotted_neurons(summary, group_order);
+if summary.all_neurons.n < 1
+    warning('Analyze_locking_period_acg:all', ...
+        'No neurons to pool for the %s figure.', split_name);
+    return
+end
+n_all = summary.all_neurons.n;
+disp(['All neurons, ', split_name, ': ', num2str(n_all), ' plotted'])
+summary.all_neurons = plot_acg_curves(summary.all_neurons, curve_names, curve_labels, ...
+    ['All neurons, ', split_name], centers, delta_lag, skip_abs_lag, ...
+    smooth_n, curve_colors, split_name);
+end
+
+
+function combined = stack_plotted_neurons(summary, group_order)
+curve_names = {'low', 'high', 'all'};
+combined = struct('n', 0);
+for c = 1:numel(curve_names)
+    combined.(curve_names{c}) = [];
+end
+combined.session = cell(0, 1);
+combined.cluster_id = zeros(0, 1);
+combined.area = cell(0, 1);
+combined.lock_group = cell(0, 1);
+combined.n_low = zeros(0, 1);
+combined.n_high = zeros(0, 1);
+combined.n_all = zeros(0, 1);
+for g = 1:numel(group_order)
+    name = group_order{g};
+    if ~isfield(summary, name) || ~isfield(summary.(name), 'low')
+        continue
+    end
+    n = size(summary.(name).low, 1);
+    for c = 1:numel(curve_names)
+        combined.(curve_names{c}) = [combined.(curve_names{c}); summary.(name).(curve_names{c})]; %#ok<AGROW>
+    end
+    combined.session = [combined.session; summary.(name).session]; %#ok<AGROW>
+    combined.cluster_id = [combined.cluster_id; summary.(name).cluster_id]; %#ok<AGROW>
+    combined.area = [combined.area; summary.(name).area]; %#ok<AGROW>
+    combined.lock_group = [combined.lock_group; repmat(group_order(g), n, 1)]; %#ok<AGROW>
+    combined.n_low = [combined.n_low; summary.(name).n_low]; %#ok<AGROW>
+    combined.n_high = [combined.n_high; summary.(name).n_high]; %#ok<AGROW>
+    combined.n_all = [combined.n_all; summary.(name).n_all]; %#ok<AGROW>
+    combined.n = combined.n + n;
+end
+end
+
+
+function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, split_name)
+figure('Name', figure_label, 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
+hold on
+shade = shade_delta_lags(delta_lag);
+plotted = gobjects(1, numel(curve_names));
+for c = 1:numel(curve_names)
+    shown = smooth_acg_away_from_zero( ...
+        group_acg.(curve_names{c}), centers, skip_abs_lag, smooth_n);
+    plotted(c) = plot_mean_sem(centers, shown, curve_colors(c, :));
+    mass = delta_side_mass(group_acg.(curve_names{c}), centers, delta_lag);
+    disp(sprintf('  %s  %s   mean ACG in [%g %g] s = %.4g   n = %d', ...
+        figure_label, curve_labels{c}, delta_lag(1), delta_lag(2), ...
+        mean(mass, 'omitnan'), sum(isfinite(mass))))
+    group_acg.([curve_names{c}, '_delta_mass']) = mass;
+end
+report_split_contrast(group_acg, figure_label, split_name);
+xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
+xlim([centers(1) centers(end)])
+xlabel('Lag (s)')
+ylabel('Mean normalized autocorrelogram')
+title({figure_label, sprintf('n = %d    shaded: 2-5 Hz', size(group_acg.low, 1))})
+legend(plotted, curve_labels, 'Location', 'best')
+place_delta_shade(shade)
+box off
 end
 
 
