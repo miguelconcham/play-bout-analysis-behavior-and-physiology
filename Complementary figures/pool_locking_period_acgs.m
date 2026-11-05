@@ -1,13 +1,13 @@
-function pooled = pool_locking_period_acgs(acg, bin_edges, run_length, ppc, already_corrected, low_percent, high_percent)
+function pooled = pool_locking_period_acgs(acg, bin_edges, run_length, score, already_corrected, low_percent, high_percent)
 %POOL_LOCKING_PERIOD_ACGS  Overlap-weighted ACGs for low, high, and all runs.
 %
-% Each run has one autocorrelogram row and one PPC. Low runs are those at
-% or below the low_percent percentile of that neuron's finite PPC values
-% (default 25). High runs are at or above high_percent (default 75).
-% Percentiles use linear_percentile. The tails are left empty unless at
-% least four runs have a finite PPC and the high percentile is strictly
-% above the low one. Fewer runs, or a neuron whose runs all share one
-% PPC, have no separated low and high periods.
+% Each run has one autocorrelogram row and one score (PPC, or delta-band
+% power). Low runs are those at or below the low_percent percentile of
+% that neuron's finite scores (default 25). High runs are at or above
+% high_percent (default 75). Percentiles use linear_percentile. The tails
+% are left empty unless at least four runs have a finite score and the
+% high percentile is strictly above the low one. Fewer runs, or a neuron
+% whose runs all share one score, have no separated low and high periods.
 %
 % The pooled value in a lag bin is the sum of pair counts divided by the
 % sum of overlap (T - |lag|). Averaging per-run rates would let a short
@@ -33,30 +33,30 @@ if n_bins < 1 || isempty(acg)
 end
 
 acg = double(acg);
-ppc = double(ppc(:));
+score = double(score(:));
 run_length = double(run_length(:));
 if size(acg, 2) ~= n_bins
     error('pool_locking_period_acgs:width', ...
         'ACG columns (%d) do not match the bin edges.', size(acg, 2));
 end
 n_runs = size(acg, 1);
-if numel(ppc) ~= n_runs || numel(run_length) ~= n_runs
+if numel(score) ~= n_runs || numel(run_length) ~= n_runs
     error('pool_locking_period_acgs:rows', ...
-        'PPC and run length must have one entry per ACG row.');
+        'Score and run length must have one entry per ACG row.');
 end
 
 usable = isfinite(run_length) & run_length > 0;
-ppc_ok = usable & isfinite(ppc);
+score_ok = usable & isfinite(score);
 low_idx = false(n_runs, 1);
 high_idx = false(n_runs, 1);
-if sum(ppc_ok) >= 4
-    pooled.threshold_low = linear_percentile(ppc(ppc_ok), low_percent);
-    pooled.threshold_high = linear_percentile(ppc(ppc_ok), high_percent);
+if sum(score_ok) >= 4
+    pooled.threshold_low = linear_percentile(score(score_ok), low_percent);
+    pooled.threshold_high = linear_percentile(score(score_ok), high_percent);
 end
 if isfinite(pooled.threshold_low) && isfinite(pooled.threshold_high) ...
         && pooled.threshold_high > pooled.threshold_low
-    low_idx = ppc_ok & ppc <= pooled.threshold_low;
-    high_idx = ppc_ok & ppc >= pooled.threshold_high;
+    low_idx = score_ok & score <= pooled.threshold_low;
+    high_idx = score_ok & score >= pooled.threshold_high;
 end
 all_idx = usable & any(isfinite(acg), 2);
 

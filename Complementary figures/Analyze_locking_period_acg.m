@@ -1,22 +1,24 @@
 %% Analyze_locking_period_acg
-% Mean autocorrelogram of spikes in low-locking periods, high-locking
-% periods, and every firing run. Reads the delta-lock table and the firing
-% run tables written by Estimate_spike_train_parsing. Does not recompute
-% phase locking.
+% Mean autocorrelogram of spikes in low and high periods, and in every
+% firing run. Reads the delta-lock table and the firing-run tables written
+% by Estimate_spike_train_parsing. Does not recompute phase locking.
 %
 % Each neuron is labeled from EntireSession in delta_all_neurons_v2.mat:
 % trough-locked, peak-locked (PPC p < alpha, split at +/- pi/2), or
 % non-entrained (PPC p >= 0.1). For each neuron the saved runs are split
-% at that neuron's own PPC: bottom 25% and top 25%. A neuron is
-% plotted only when at least four of its runs have a PPC, so the two
-% tails are separated. The third curve pools
-% every firing run of that neuron. The estimate stores autocorrelograms
-% inside firing runs, so spikes that fall in the gaps between runs are not
-% in these curves.
+% twice, each time at that neuron's own values: bottom 25% and top 25% of
+% PPC, and bottom 25% and top 25% of delta power. A neuron is plotted for
+% a split only when at least four of its runs have that score, so the two
+% tails are separated. The third curve pools every firing run. Delta power
+% is the square of the median delta-band envelope stored in lfp_param
+% column 2. Squaring does not change which runs fall in the outer
+% quartiles. The estimate stores autocorrelograms inside firing runs, so
+% spikes that fall in the gaps between runs are not in these curves.
 %
 % Run autocorrelograms are overlap-weighted (pair counts / (T-|lag|)), the
 % lag-0 bins are blanked, and each neuron is scaled to sum to 1 so a cell
-% with more spikes does not dominate the mean. One figure per lock group.
+% with more spikes does not dominate the mean. One figure per lock group
+% for the locking split, and one figure per lock group for the power split.
 % Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz peak sits outside the
 % +/-0.5 s window saved with the runs.
 
@@ -70,9 +72,12 @@ centers = [];
 n_bins = [];
 bin_w = [];
 acg_raw = empty_group_store(group_order, 0);
+acg_power = empty_group_store(group_order, 0);
 n_in_parsing = zeros(1, numel(group_order));
 n_kept = zeros(1, numel(group_order));
 n_unsplit = zeros(1, numel(group_order));
+n_kept_power = zeros(1, numel(group_order));
+n_unsplit_power = zeros(1, numel(group_order));
 n_missing = 0;
 
 for f = 1:numel(parsing_files)
@@ -102,6 +107,7 @@ for f = 1:numel(parsing_files)
             centers = edges(1:end - 1) + bin_w / 2;
             n_bins = numel(centers);
             acg_raw = empty_group_store(group_order, n_bins);
+            acg_power = empty_group_store(group_order, n_bins);
         elseif numel(ps.config.autocorr_bin_edges) ~= numel(edges) ...
                 || max(abs(ps.config.autocorr_bin_edges(:)' - edges)) > 1e-9
             warning('Analyze_locking_period_acg:edges', ...
@@ -140,10 +146,12 @@ for f = 1:numel(parsing_files)
             rt = run_cell{nn};
             if isempty(rt) || ~istable(rt) || ~ismember('autoccorrelograms', rt.Properties.VariableNames)
                 n_unsplit(g) = n_unsplit(g) + 1;
+                n_unsplit_power(g) = n_unsplit_power(g) + 1;
                 continue
             end
             if size(rt.phase_entrainment, 2) < ppc_col
                 n_unsplit(g) = n_unsplit(g) + 1;
+                n_unsplit_power(g) = n_unsplit_power(g) + 1;
                 continue
             end
             acg = rt.autoccorrelograms;
@@ -151,29 +159,30 @@ for f = 1:numel(parsing_files)
                 warning('Analyze_locking_period_acg:width', ...
                     'ACG size mismatch in %s id %g; cell skipped.', animal_code, this_id);
                 n_unsplit(g) = n_unsplit(g) + 1;
+                n_unsplit_power(g) = n_unsplit_power(g) + 1;
                 continue
             end
-            pooled = pool_locking_period_acgs(acg, edges, acg_run_lengths(rt), ...
+            run_length = acg_run_lengths(rt);
+            this_area = cluster_area_char(ci, nn);
+            pooled = pool_locking_period_acgs(acg, edges, run_length, ...
                 rt.phase_entrainment(:, ppc_col), already_corrected, low_percent, high_percent);
-            if pooled.n_low < 1 || pooled.n_high < 1 ...
-                    || ~any(isfinite(pooled.low)) || ~any(isfinite(pooled.high)) ...
-                    || ~any(isfinite(pooled.all))
+            if split_is_usable(pooled)
+                acg_raw.(group_order{g}) = append_pooled( ...
+                    acg_raw.(group_order{g}), pooled, animal_code, this_id, this_area);
+                n_kept(g) = n_kept(g) + 1;
+            else
                 n_unsplit(g) = n_unsplit(g) + 1;
-                continue
             end
 
-            row = acg_raw.(group_order{g}).n + 1;
-            acg_raw.(group_order{g}).n = row;
-            acg_raw.(group_order{g}).low(row, :) = pooled.low;
-            acg_raw.(group_order{g}).high(row, :) = pooled.high;
-            acg_raw.(group_order{g}).all(row, :) = pooled.all;
-            acg_raw.(group_order{g}).n_low(row, 1) = pooled.n_low;
-            acg_raw.(group_order{g}).n_high(row, 1) = pooled.n_high;
-            acg_raw.(group_order{g}).n_all(row, 1) = pooled.n_all;
-            acg_raw.(group_order{g}).session{row, 1} = animal_code;
-            acg_raw.(group_order{g}).cluster_id(row, 1) = this_id;
-            acg_raw.(group_order{g}).area{row, 1} = cluster_area_char(ci, nn);
-            n_kept(g) = n_kept(g) + 1;
+            pooled_power = pool_locking_period_acgs(acg, edges, run_length, ...
+                run_delta_power(rt), already_corrected, low_percent, high_percent);
+            if split_is_usable(pooled_power)
+                acg_power.(group_order{g}) = append_pooled( ...
+                    acg_power.(group_order{g}), pooled_power, animal_code, this_id, this_area);
+                n_kept_power(g) = n_kept_power(g) + 1;
+            else
+                n_unsplit_power(g) = n_unsplit_power(g) + 1;
+            end
         end
 
         loaded_codes{end + 1} = animal_code; %#ok<AGROW>
@@ -191,76 +200,39 @@ end
 
 %% Normalize and plot
 smooth_n = max(1, round(smooth_half / bin_w));
-curve_names = {'low', 'high', 'all'};
-curve_labels = { ...
-    sprintf('Low %g%% locking', low_percent), ...
-    sprintf('High %g%% locking', 100 - high_percent), ...
-    'All firing runs'};
 curve_colors = [0.20 0.45 0.75; 0.85 0.25 0.20; 0.15 0.15 0.15];
-locking_acg = struct();
-
-for g = 1:numel(group_order)
-    name = group_order{g};
-    n = acg_raw.(name).n;
-    disp([group_title{g}, ' in parsing: ', num2str(n_in_parsing(g)), ...
-        '   plotted: ', num2str(n), ...
-        '   skipped (no separated 25/75 split or no spikes): ', num2str(n_unsplit(g))])
-    if n < 1
-        warning('Analyze_locking_period_acg:group', ...
-            'No %s neurons with both locking tails.', group_title{g});
-        continue
-    end
-    keep = 1:n;
-    for c = 1:numel(curve_names)
-        raw = acg_raw.(name).(curve_names{c})(keep, :);
-        raw = blank_acg_zero_lag(raw, centers, acg_refractory_s);
-        locking_acg.(name).(curve_names{c}) = normalize_acg_rows(raw);
-    end
-    locking_acg.(name).session = acg_raw.(name).session(keep);
-    locking_acg.(name).cluster_id = acg_raw.(name).cluster_id(keep);
-    locking_acg.(name).area = acg_raw.(name).area(keep);
-    locking_acg.(name).n_low = acg_raw.(name).n_low(keep);
-    locking_acg.(name).n_high = acg_raw.(name).n_high(keep);
-    locking_acg.(name).n_all = acg_raw.(name).n_all(keep);
-
-    figure('Name', group_title{g}, 'Color', 'w', ...
-        'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
-    hold on
-    shade = shade_delta_lags(delta_lag);
-    plotted = gobjects(1, numel(curve_names));
-    for c = 1:numel(curve_names)
-        shown = smooth_acg_away_from_zero( ...
-            locking_acg.(name).(curve_names{c}), centers, skip_abs_lag, smooth_n);
-        plotted(c) = plot_mean_sem(centers, shown, curve_colors(c, :));
-        mass = delta_side_mass(locking_acg.(name).(curve_names{c}), centers, delta_lag);
-        disp(sprintf('  %s  %s   mean ACG in [%g %g] s = %.4g   n = %d', ...
-            group_title{g}, curve_labels{c}, delta_lag(1), delta_lag(2), ...
-            mean(mass, 'omitnan'), sum(isfinite(mass))))
-        locking_acg.(name).([curve_names{c}, '_delta_mass']) = mass;
-    end
-    report_locking_contrast(locking_acg.(name), group_title{g});
-    xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
-    xlim([centers(1) centers(end)])
-    xlabel('Lag (s)')
-    ylabel('Mean normalized autocorrelogram')
-    title({group_title{g}, ...
-        sprintf('n = %d    shaded: 2-5 Hz', n)})
-    legend(plotted, curve_labels, 'Location', 'best')
-    place_delta_shade(shade)
-    box off
-end
-
-locking_acg.centers = centers;
-locking_acg.bin_edges = edges;
-locking_acg.parameters = struct( ...
+parameters = struct( ...
     'alpha', alpha, ...
     'non_entrained_p', non_entrained_p, ...
     'low_percent', low_percent, ...
     'high_percent', high_percent, ...
-    'delta_lag', delta_lag);
+    'delta_lag', delta_lag, ...
+    'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
+
+locking_labels = { ...
+    sprintf('Low %g%% locking', low_percent), ...
+    sprintf('High %g%% locking', 100 - high_percent), ...
+    'All firing runs'};
+power_labels = { ...
+    sprintf('Low %g%% delta power', low_percent), ...
+    sprintf('High %g%% delta power', 100 - high_percent), ...
+    'All firing runs'};
+
+locking_acg = summarize_and_plot(acg_raw, group_order, group_title, ...
+    locking_labels, 'locking', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    acg_refractory_s, curve_colors, n_in_parsing, n_unsplit);
+power_acg = summarize_and_plot(acg_power, group_order, group_title, ...
+    power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    acg_refractory_s, curve_colors, n_in_parsing, n_unsplit_power);
+locking_acg.centers = centers;
+locking_acg.bin_edges = edges;
+locking_acg.parameters = parameters;
+power_acg.centers = centers;
+power_acg.bin_edges = edges;
+power_acg.parameters = parameters;
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
-save(summary_path, 'locking_acg');
+save(summary_path, 'locking_acg', 'power_acg');
 disp(['Saved ', summary_path])
 
 
@@ -279,6 +251,94 @@ for g = 1:numel(group_order)
     block.cluster_id = zeros(0, 1);
     block.area = {};
     store.(group_order{g}) = block;
+end
+end
+
+
+function ok = split_is_usable(pooled)
+ok = pooled.n_low >= 1 && pooled.n_high >= 1 ...
+    && any(isfinite(pooled.low)) && any(isfinite(pooled.high)) ...
+    && any(isfinite(pooled.all));
+end
+
+
+function block = append_pooled(block, pooled, animal_code, this_id, this_area)
+row = block.n + 1;
+block.n = row;
+block.low(row, :) = pooled.low;
+block.high(row, :) = pooled.high;
+block.all(row, :) = pooled.all;
+block.n_low(row, 1) = pooled.n_low;
+block.n_high(row, 1) = pooled.n_high;
+block.n_all(row, 1) = pooled.n_all;
+block.session{row, 1} = animal_code;
+block.cluster_id(row, 1) = this_id;
+block.area{row, 1} = this_area;
+end
+
+
+function power = run_delta_power(rt)
+% Square of the median delta-band envelope. lfp_param is
+% [half range, median envelope, mean frequency].
+if ~ismember('lfp_param', rt.Properties.VariableNames) || size(rt.lfp_param, 2) < 2
+    power = nan(height(rt), 1);
+    return
+end
+power = double(rt.lfp_param(:, 2)) .^ 2;
+end
+
+
+function summary = summarize_and_plot(acg_raw, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, acg_refractory_s, curve_colors, n_in_parsing, n_unsplit)
+curve_names = {'low', 'high', 'all'};
+summary = struct();
+for g = 1:numel(group_order)
+    name = group_order{g};
+    n = acg_raw.(name).n;
+    disp([group_title{g}, ', ', split_name, ': ', num2str(n_in_parsing(g)), ...
+        ' in parsing, ', num2str(n), ' plotted, ', num2str(n_unsplit(g)), ...
+        ' skipped (no separated 25/75 split or no spikes)'])
+    if n < 1
+        warning('Analyze_locking_period_acg:group', ...
+            'No %s neurons with both %s tails.', group_title{g}, split_name);
+        continue
+    end
+    keep = 1:n;
+    for c = 1:numel(curve_names)
+        raw = blank_acg_zero_lag(acg_raw.(name).(curve_names{c})(keep, :), centers, acg_refractory_s);
+        summary.(name).(curve_names{c}) = normalize_acg_rows(raw);
+    end
+    summary.(name).session = acg_raw.(name).session(keep);
+    summary.(name).cluster_id = acg_raw.(name).cluster_id(keep);
+    summary.(name).area = acg_raw.(name).area(keep);
+    summary.(name).n_low = acg_raw.(name).n_low(keep);
+    summary.(name).n_high = acg_raw.(name).n_high(keep);
+    summary.(name).n_all = acg_raw.(name).n_all(keep);
+
+    figure('Name', [group_title{g}, ', ', split_name], 'Color', 'w', ...
+        'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
+    hold on
+    shade = shade_delta_lags(delta_lag);
+    plotted = gobjects(1, numel(curve_names));
+    for c = 1:numel(curve_names)
+        shown = smooth_acg_away_from_zero( ...
+            summary.(name).(curve_names{c}), centers, skip_abs_lag, smooth_n);
+        plotted(c) = plot_mean_sem(centers, shown, curve_colors(c, :));
+        mass = delta_side_mass(summary.(name).(curve_names{c}), centers, delta_lag);
+        disp(sprintf('  %s  %s   mean ACG in [%g %g] s = %.4g   n = %d', ...
+            [group_title{g}, ', ', split_name], curve_labels{c}, delta_lag(1), delta_lag(2), ...
+            mean(mass, 'omitnan'), sum(isfinite(mass))))
+        summary.(name).([curve_names{c}, '_delta_mass']) = mass;
+    end
+    report_split_contrast(summary.(name), [group_title{g}, ', ', split_name], split_name);
+    xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
+    xlim([centers(1) centers(end)])
+    xlabel('Lag (s)')
+    ylabel('Mean normalized autocorrelogram')
+    title({[group_title{g}, ', ', split_name], ...
+        sprintf('n = %d    shaded: 2-5 Hz', n)})
+    legend(plotted, curve_labels, 'Location', 'best')
+    place_delta_shade(shade)
+    box off
 end
 end
 
@@ -423,10 +483,10 @@ mass = mean(X(:, lag_idx), 2, 'omitnan');
 end
 
 
-function report_locking_contrast(group_acg, group_label)
+function report_split_contrast(group_acg, group_label, split_name)
 p_low = paired_signrank(group_acg.high_delta_mass, group_acg.low_delta_mass);
 p_all = paired_signrank(group_acg.high_delta_mass, group_acg.all_delta_mass);
-disp(sprintf('  %s signrank, high vs low 25%%: p = %.3g', group_label, p_low))
+disp(sprintf('  %s signrank, high vs low 25%% %s: p = %.3g', group_label, split_name, p_low))
 disp(sprintf('  %s signrank, high vs all runs: p = %.3g', group_label, p_all))
 end
 

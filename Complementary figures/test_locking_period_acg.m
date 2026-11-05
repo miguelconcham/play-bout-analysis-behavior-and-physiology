@@ -68,6 +68,13 @@ assert(abs(pooled.high - 40) < 1e-9, 'High-quartile pool did not keep the strong
 assert(pooled.n_all == 9, 'The run with no PPC was dropped from the all-runs pool.');
 assert(pooled.all > 40, 'The unlabeled run did not enter the all-runs pool.');
 
+power = [1 2 3 4 40 50 60 70]';
+power_pool = pool_locking_period_acgs(zeros(8, 1), [-0.5 0.5], ones(8, 1), power, false);
+assert(isequal(power_pool.low_index, [true; true; false; false; false; false; false; false]), ...
+    'The low 25% of delta power was not the two weakest runs.');
+assert(isequal(power_pool.high_index, [false; false; false; false; false; false; true; true]), ...
+    'The high 25% of delta power was not the two strongest runs.');
+
 tied = pool_locking_period_acgs(ones(6, 1), [-0.5 0.5], ones(6, 1), ones(6, 1), false);
 assert(all(isnan(tied.low)) && all(isnan(tied.high)) && tied.n_low == 0, ...
     'Identical PPC values still produced low and high tails.');
