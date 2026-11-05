@@ -1,4 +1,4 @@
-function irasa_struct = GENERATE_PLAY_SESSION_LPAG_IRASA(current_dir)
+function irasa_struct = GENERATE_PLAY_SESSION_LPAG_IRASA(current_dir, analysis_options)
 % GENERATE_PLAY_SESSION_LPAG_IRASA
 % IRASA of mid-LPAG LFP during complete partner-play sessions.
 %
@@ -8,23 +8,32 @@ function irasa_struct = GENERATE_PLAY_SESSION_LPAG_IRASA(current_dir)
 % synchronization, and mid-LPAG site are the same ones used by
 % GENERATE_PLAY_SESSION_LPAG_SPECTRA.
 %
-% Wen & Liu (2016), section 2.6, computed IRASA on the macaque ECoG and
-% human MEG recordings in a sliding 3 s window stepped by 1 s, and fit
-% the fractal spectrum from 1-30 Hz in every window. That is the window
-% used here. It is not the 10 s window of the FOOOF spectra.
+% ANALYSIS_OPTIONS.window_seconds sets the epoch length. The default is
+% 10 s, which puts the lowest raw-spectrum bin at 0.1 Hz. Set
+% window_step_seconds to a shorter step when the windows should overlap.
+% irasa_play_session_options fills any omitted field.
 %
-% Each window keeps a raw Welch and Fourier spectrum of that same 3 s
-% segment, then IRASA (section 2.4). The sliding spectra are averaged in
-% linear power. The 1-30 Hz power-law line is fit to the session-mean
-% fractal spectrum. The saved session has raw, aperiodic, and periodic
-% fields.
+% Each window stores its raw Welch and Fourier power, its IRASA fractal
+% spectrum, and its IRASA periodic spectrum. Windows are not averaged
+% here. A 1-30 Hz power-law line is fit to each window's fractal spectrum.
 
 %% Analysis parameters
+if nargin < 2
+    analysis_options = struct();
+end
+analysis_options = irasa_play_session_options(analysis_options);
 sampling_rate = 2500;
-window_seconds = 3;
-window_step_seconds = 1;
+window_seconds = analysis_options.window_seconds;
+window_step_seconds = analysis_options.window_step_seconds;
 window_samples = window_seconds * sampling_rate;
 step_samples = window_step_seconds * sampling_rate;
+if abs(window_samples - round(window_samples)) > 1e-6 || ...
+        abs(step_samples - round(step_samples)) > 1e-6
+    error(['window_seconds and window_step_seconds must contain a whole ' ...
+        'number of samples at %g Hz.'], sampling_rate);
+end
+window_samples = round(window_samples);
+step_samples = round(step_samples);
 spectrum_frequency_range = [0.1 40];
 fit_frequency_range = [1 30];
 area2analyze = 'PAG';
@@ -220,7 +229,7 @@ for probe_n = 1:size(Y_Range, 1)
     mid_lpag_map_index(probe_n) = closest_map_index;
 end
 
-%% Create sliding 3 s windows, stepped by 1 s, within each session row
+%% Create windows within each play-session row
 n_lfp_samples = size(LFP, 2);
 session_windows = repmat(struct( ...
     'sample_ranges', zeros(0, 2), ...
@@ -233,8 +242,8 @@ for session_n = 1:size(play_session_ranges, 1)
         floor(play_session_ranges(session_n, 2) * sampling_rate));
     starts = first_sample:step_samples:(last_sample - window_samples + 1);
     if isempty(starts)
-        error('Play-session row %d contains no complete 3-second window.', ...
-            session_n);
+        error('Play-session row %d contains no complete %.3g-second window.', ...
+            session_n, window_seconds);
     end
     ends = starts + window_samples - 1;
     session_windows(session_n).sample_ranges = [starts(:), ends(:)];
@@ -272,12 +281,12 @@ for channel_n = 1:numel(mid_lpag_channel)
     parameters.window_overlap_seconds = window_seconds - window_step_seconds;
     parameters.spectrum_frequency_range = spectrum_frequency_range;
     parameters.fit_frequency_range = fit_frequency_range;
-    parameters.averaging_domain = 'linear power';
+    parameters.stored_spectra = 'one row per window; windows are not averaged';
     parameters.h_values = irasa_settings.h_values(:).';
     parameters.n_segments = irasa_settings.n_segments;
     parameters.segment_fraction = irasa_settings.segment_fraction;
     parameters.reference = ['Wen H, Liu Z (2016) Brain Topography 29:13-26. ' ...
-        'Section 2.6 used a 3 s window stepped by 1 s.'];
+        'Section 2.4 is applied to each window. The default window is 10 s.'];
     irasa_struct(channel_n).parameters = parameters;
 
     session_results = repmat(struct(), size(play_session_ranges, 1), 1);
@@ -309,10 +318,8 @@ for channel_n = 1:numel(mid_lpag_channel)
             window_specs{window_n} = irasa_separate( ...
                 this_lfp, sampling_rate, irasa_settings);
         end
-        summary = irasa_session_summary([window_specs{:}], ...
-            fit_frequency_range);
-        components = irasa_session_components(summary, ...
-            raw_frequency, raw_welch, raw_fourier);
+        components = irasa_session_components([window_specs{:}], ...
+            raw_frequency, raw_welch, raw_fourier, fit_frequency_range);
 
         session_results(session_n).session_index = session_n;
         session_results(session_n).behavior_row = ...
@@ -323,31 +330,18 @@ for channel_n = 1:numel(mid_lpag_channel)
             window_sample_ranges;
         session_results(session_n).window_time_ranges = ...
             session_windows(session_n).time_ranges;
-        session_results(session_n).n_windows = summary.n_windows;
-        session_results(session_n).frequency = summary.frequency;
+        session_results(session_n).n_windows = components.n_windows;
+        session_results(session_n).frequency = components.frequency;
         session_results(session_n).raw = components.raw;
-        session_results(session_n).aperiodic = components.aperiodic;
+        session_results(session_n).fractal = components.fractal;
         session_results(session_n).periodic = components.periodic;
-        session_results(session_n).mixed = summary.mixed;
-        session_results(session_n).fractal = summary.fractal;
-        session_results(session_n).oscillatory = summary.oscillatory;
-        session_results(session_n).window_mixed = summary.window_mixed;
-        session_results(session_n).window_fractal = summary.window_fractal;
-        session_results(session_n).window_oscillatory = ...
-            summary.window_oscillatory;
         session_results(session_n).window_exponent = ...
-            summary.window_exponent;
+            components.window_exponent;
         session_results(session_n).window_log_intercept = ...
-            summary.window_log_intercept;
+            components.window_log_intercept;
         session_results(session_n).window_broadband_log_power = ...
-            summary.window_broadband_log_power;
-        session_results(session_n).exponent = summary.exponent;
-        session_results(session_n).log_intercept = summary.log_intercept;
-        session_results(session_n).broadband_log_power = ...
-            summary.broadband_log_power;
-        session_results(session_n).fit_frequency = summary.fit_frequency;
-        session_results(session_n).fitted_power = summary.fitted_power;
-        session_results(session_n).fit_range = summary.fit_range;
+            components.window_broadband_log_power;
+        session_results(session_n).fit_range = components.fit_range;
     end
     irasa_struct(channel_n).frequency = session_results(1).frequency;
     irasa_struct(channel_n).sessions = session_results;

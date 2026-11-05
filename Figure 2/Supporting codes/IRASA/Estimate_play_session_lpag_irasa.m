@@ -8,6 +8,10 @@
 %
 % Run add_repo_paths once in the MATLAB session, then run this script.
 % Analyse_play_session_lpag_irasa loads the file this script saves.
+%
+% window_seconds is the IRASA epoch. 10 s is the default because the raw
+% spectrum then reaches 0.1 Hz. Change the number to use another length.
+% window_step_seconds stays equal to the window unless set otherwise.
 
 %% Paths and animal selection
 npx_Raw_Data = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\NPX data\NPX raw data';
@@ -21,6 +25,11 @@ animal_list = animal_list(~ismember({animal_list.name}, {'.', '..'}));
 animal2exclude = {''};
 animal_list(ismember({animal_list.name}, animal2exclude)) = [];
 
+%% Window length
+window_seconds = 10;
+analysis_options = irasa_play_session_options(struct( ...
+    'window_seconds', window_seconds));
+
 %% Estimate all recordings
 play_session_lpag_irasa = struct([]);
 animal_names = {};
@@ -30,7 +39,7 @@ for fn = 1:numel(animal_list)
     fprintf('Session %d/%d: %s\n', fn, numel(animal_list), ...
         animal_list(fn).name);
 
-    new_struct = GENERATE_PLAY_SESSION_LPAG_IRASA(animal_path);
+    new_struct = GENERATE_PLAY_SESSION_LPAG_IRASA(animal_path, analysis_options);
 
     if isempty(play_session_lpag_irasa)
         play_session_lpag_irasa = new_struct(:);
@@ -50,5 +59,6 @@ if ~isfolder(saving_folder)
 end
 output_file = fullfile(saving_folder, 'play_session_lpag_irasa.mat');
 disp(['Saving ', output_file])
-save(output_file, 'play_session_lpag_irasa', 'animal_names', '-v7.3');
+save(output_file, 'play_session_lpag_irasa', 'animal_names', ...
+    'analysis_options', '-v7.3');
 disp('Play-session LPAG IRASA estimation complete.')

@@ -7,8 +7,7 @@ function raw = irasa_raw_window_spectrum(signal, sampling_rate)
 %   fourier - rectangular-window periodogram
 % Both are one-sided power spectral densities in power per Hz. DC is
 % removed by a constant detrend. The returned grid is df:df:40 Hz, with
-% df = sampling_rate / numel(signal). A 10 s window at 2500 Hz is the
-% 0.1 Hz FOOOF grid. The 3 s IRASA window is coarser, df = 2500/7500 Hz.
+% df = sampling_rate / numel(signal). A 10 s window has bins of 0.1 Hz.
 
 if nargin < 2
     error('irasa_raw_window_spectrum:input', ...

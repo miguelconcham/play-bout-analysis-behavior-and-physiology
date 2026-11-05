@@ -2,11 +2,11 @@
 % Plot session-wise mid-LPAG IRASA spectra saved by
 % Estimate_play_session_lpag_irasa.
 %
-% Each Partners-session row is one trace. The raw Welch spectrum is the
-% session mean of the raw spectrum of each 3 s window. The
-% aperiodic and periodic traces are the IRASA decomposition. Periodic
-% power is linear and can be negative. The printed exponent is the
-% 1-30 Hz power-law fit of the session-mean aperiodic spectrum.
+% The saved file keeps every window. This script averages those windows
+% in linear power, one trace per Partners session. The raw trace is the
+% Welch power. The fractal and periodic traces are the IRASA components.
+% Periodic power can be negative. The printed exponent is the power-law
+% fit of that session-mean fractal spectrum, over the saved fit range.
 
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
 input_file = fullfile(saving_folder, 'play_session_lpag_irasa.mat');
@@ -55,16 +55,20 @@ for recording_n = 1:n_recordings
                 max(abs(this_session.raw.frequency(:).' - raw_frequency)) > 1e-6
             error('Raw frequency vectors differ between saved IRASA sessions.');
         end
+        raw_mean = mean(this_session.raw.welch, 1, 'omitnan');
+        fractal_mean = mean(this_session.fractal, 1, 'omitnan').';
+        periodic_mean = mean(this_session.periodic, 1, 'omitnan');
+        session_fit = irasa_power_law_fit(struct( ...
+            'frequency', this_session.frequency, ...
+            'fractal', fractal_mean), this_session.fit_range);
         raw_log_power(output_session_n, :) = ...
-            this_session.raw.welch.log10_mean_power(:).';
+            log10(max(raw_mean, realmin('double')));
         fractal_log_power(output_session_n, :) = ...
-            this_session.aperiodic.log10_mean_power(:).';
-        oscillatory_power(output_session_n, :) = ...
-            this_session.periodic.mean_power(:).';
-        exponent(output_session_n) = this_session.exponent;
-        log_intercept(output_session_n) = this_session.log_intercept;
-        broadband_log_power(output_session_n) = ...
-            this_session.broadband_log_power;
+            log10(max(fractal_mean(:).', realmin('double')));
+        oscillatory_power(output_session_n, :) = periodic_mean(:).';
+        exponent(output_session_n) = session_fit.exponent;
+        log_intercept(output_session_n) = session_fit.log_intercept;
+        broadband_log_power(output_session_n) = session_fit.broadband_log_power;
     end
 end
 
@@ -84,7 +88,7 @@ mean_line = plot(raw_frequency, mean(raw_log_power, 1, 'omitnan'), ...
     'k', 'LineWidth', 2);
 xlabel('Frequency (Hz)')
 ylabel('log_{10} power')
-title('Raw Welch spectrogram, session mean')
+title('Raw Welch power, mean of windows')
 legend([session_lines(1), mean_line], ...
     {'Partners sessions', 'Mean'}, 'Location', 'best')
 box off
@@ -97,7 +101,7 @@ mean_line = plot(frequency, mean(fractal_log_power, 1, 'omitnan'), ...
     'k', 'LineWidth', 2);
 xlabel('Frequency (Hz)')
 ylabel('log_{10} power')
-title(sprintf('IRASA aperiodic, mean exponent %.2f', ...
+title(sprintf('IRASA fractal, mean exponent %.2f', ...
     mean(exponent, 'omitnan')))
 legend([session_lines(1), mean_line], ...
     {'Partners sessions', 'Mean'}, 'Location', 'best')
@@ -115,7 +119,7 @@ xline(5, '--', 'Color', [0.4 0.4 0.4]);
 xline(10, '--', 'Color', [0.4 0.4 0.4]);
 xlabel('Frequency (Hz)')
 ylabel('Periodic power')
-title('IRASA periodic spectrum')
+title('IRASA periodic spectrum, mean of windows')
 legend([session_lines(1), mean_line], ...
     {'Partners sessions', 'Mean'}, 'Location', 'best')
 box off
@@ -125,7 +129,7 @@ irasa_results.frequency = frequency(:);
 irasa_results.raw_frequency = raw_frequency(:);
 irasa_results.session_table = irasa_session_table;
 irasa_results.raw_log_power = raw_log_power;
-irasa_results.aperiodic_log_power = fractal_log_power;
+irasa_results.fractal_log_power = fractal_log_power;
 irasa_results.periodic_power = oscillatory_power;
 irasa_results.animal_names = animal_names;
 disp('Play-session LPAG IRASA analysis complete.')
