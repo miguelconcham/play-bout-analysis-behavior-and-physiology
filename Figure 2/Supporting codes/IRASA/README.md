@@ -60,7 +60,10 @@ Run `add_repo_paths` once per MATLAB session, then:
    on `\\experimentfs.home.bccn-berlin.de`.
 3. `Analyse_play_session_lpag_irasa` loads that file, averages the
    windows in linear power, prints one row per Partners session, and
-   draws the raw, fractal, and periodic spectra.
+   draws the raw, fractal, and periodic spectra. It saves each figure
+   beside the `.mat` file and leaves the figures open.
+   `close_figures_after_saving` at the top of the script closes them
+   after saving when set to true.
 
 `irasa_separate` remains the single-epoch function used inside each
 window. Section 2.5 of the paper simulated one 8.5 s epoch (8,500

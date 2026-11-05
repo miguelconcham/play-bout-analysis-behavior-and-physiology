@@ -7,6 +7,13 @@
 % Welch power. The fractal and periodic traces are the IRASA components.
 % Periodic power can be negative. The printed exponent is the power-law
 % fit of that session-mean fractal spectrum, over the saved fit range.
+%
+% Figures are written next to the loaded .mat file and left open.
+% Set close_figures_after_saving to true to close each figure after it
+% is saved.
+
+%% Figure options
+close_figures_after_saving = false;
 
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
 input_file = fullfile(saving_folder, 'play_session_lpag_irasa.mat');
@@ -79,7 +86,7 @@ irasa_session_table = table(session_name, recording_index, session_index, ...
     'BroadbandLogPower'});
 disp(irasa_session_table)
 
-figure('Name', 'Play-session LPAG raw and IRASA spectra');
+raw_figure = figure('Name', 'Play-session LPAG raw and IRASA spectra');
 subplot(1, 2, 1)
 session_lines = plot(raw_frequency, raw_log_power.', ...
     'Color', [0.8 0.8 0.8]);
@@ -106,8 +113,10 @@ title(sprintf('IRASA fractal, mean exponent %.2f', ...
 legend([session_lines(1), mean_line], ...
     {'Partners sessions', 'Mean'}, 'Location', 'best')
 box off
+save_irasa_figure(raw_figure, saving_folder, ...
+    'play_session_lpag_irasa_raw_and_fractal', close_figures_after_saving);
 
-figure('Name', 'Play-session LPAG IRASA periodic spectra');
+periodic_figure = figure('Name', 'Play-session LPAG IRASA periodic spectra');
 hold on
 session_lines = plot(frequency, oscillatory_power.', ...
     'Color', [0.8 0.8 0.8]);
@@ -123,6 +132,8 @@ title('IRASA periodic spectrum, mean of windows')
 legend([session_lines(1), mean_line], ...
     {'Partners sessions', 'Mean'}, 'Location', 'best')
 box off
+save_irasa_figure(periodic_figure, saving_folder, ...
+    'play_session_lpag_irasa_periodic', close_figures_after_saving);
 
 irasa_results = struct();
 irasa_results.frequency = frequency(:);
@@ -133,3 +144,13 @@ irasa_results.fractal_log_power = fractal_log_power;
 irasa_results.periodic_power = oscillatory_power;
 irasa_results.animal_names = animal_names;
 disp('Play-session LPAG IRASA analysis complete.')
+
+function save_irasa_figure(figure_handle, saving_folder, figure_name, close_after_saving)
+figure_base = fullfile(saving_folder, figure_name);
+savefig(figure_handle, [figure_base, '.fig']);
+saveas(figure_handle, [figure_base, '.png']);
+disp(['Saved ', figure_base, '.fig'])
+if close_after_saving
+    close(figure_handle);
+end
+end
