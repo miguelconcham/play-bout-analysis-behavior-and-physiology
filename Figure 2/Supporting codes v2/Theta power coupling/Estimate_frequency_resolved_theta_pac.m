@@ -1842,7 +1842,15 @@ if isfile(mat_file)
         mapped = matfile(mat_file);
         info = whos(mapped, 'LFP');
         n_samples = info.size(2);
-        channel_lfp = double(mapped.LFP(rows, 1:n_samples));
+        % MatFile subscripts must be increasing and equally spaced. Dual
+        % recordings can select one LPAG row per probe, so the requested
+        % rows need not satisfy that restriction. Read one row at a time
+        % to preserve the selected probe order without loading all LFP.
+        channel_lfp = zeros(numel(rows), n_samples);
+        for row_n = 1:numel(rows)
+            channel_lfp(row_n, :) = ...
+                double(mapped.LFP(rows(row_n), 1:n_samples));
+        end
     else
         warning('FrequencyPAC:NonV73LFP', ...
             ['%s is not v7.3 and cannot be read by row. MATLAB must load ' ...
