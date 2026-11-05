@@ -102,7 +102,7 @@ play bout analysis behavior and physiology/
 │   ├── Play partner.m                 # Supp Fig 3g–i
 │   ├── Reciprocity.m                  # Fig 2h + Supp Fig 3a–f
 │   ├── Freq coupling.m
-│   └── Supporting codes v2/
+│   └── Supporting codes/
 │       ├── Helper functions/
 │       ├── Play and behavior PSTH/
 │       ├── LFP spectra/
@@ -190,11 +190,11 @@ HMM pipeline order: `Figure 1/HMM modeling/README.md`.
 | g | Unique $R^2$ for delta-power regressors | `Figure 2/Figure 2.m` | `%% 7 (Figre 2g, Supp Fig 4c,f)` |
 | h | Delta power, reciprocal vs nonreciprocal play | `Figure 2/Reciprocity.m` | `%% 11 (Fig 2h, Supp Fig 3b,c)` |
 
-Related analysis (not a main-figure panel): speed vs theta in `Figure 2/Figure 2.m` sections `%% 18`–`%% 21` and `Figure 2/Supporting codes v2/Speed and peak frequency/Analyze_speed_freq_relation.m`.
+Related analysis (not a main-figure panel): speed vs theta in `Figure 2/Figure 2.m` sections `%% 18`–`%% 21` and `Figure 2/Supporting codes/Speed and peak frequency/Analyze_speed_freq_relation.m`.
 
-### Supporting codes v2
+### Supporting codes
 
-Use **`Figure 2/Supporting codes v2/`** to rebuild `.mat` files. Scripts sit in a theme folder (about 10–20 files each). Functions shared by more than one theme are in `Helper functions/`. Naming:
+Use **`Figure 2/Supporting codes/`** to rebuild `.mat` files. Scripts sit in a theme folder (about 10–20 files each). Functions shared by more than one theme are in `Helper functions/`. Naming:
 
 | Prefix | Role |
 |--------|------|
@@ -462,7 +462,7 @@ Phase of coincident events (not a numbered paper panel here): `Figure 3/Former S
 3. Extract so `Data/` sits next to `Figure 1/`–`Figure 6/`.
 4. Scripts use UNC paths under  
    `...\play bout analysis behavior and physiology\Data\`.
-5. Run `add_repo_paths.m` before estimate / example-CCG scripts. It adds `Figure 2/Supporting codes v2` with its theme folders, and `Figure 3/Supporting codes`.
+5. Run `add_repo_paths.m` before estimate / example-CCG scripts. It adds `Figure 2/Supporting codes` with its theme folders, and `Figure 3/Supporting codes`.
 6. Add shared helpers (`play_bout`, `readNPY`, `run_umap`, `wrap_probe_values`, circular statistics).
 
 ---
