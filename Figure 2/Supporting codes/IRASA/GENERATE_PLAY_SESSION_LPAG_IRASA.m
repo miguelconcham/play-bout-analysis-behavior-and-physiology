@@ -8,10 +8,12 @@ function irasa_struct = GENERATE_PLAY_SESSION_LPAG_IRASA(current_dir)
 % synchronization, and mid-LPAG site are the same ones used by
 % GENERATE_PLAY_SESSION_LPAG_SPECTRA.
 %
-% Each session row is split into non-overlapping 10 s windows. IRASA is
-% run on every window (Wen & Liu 2016, section 2.4). The window spectra
-% are averaged in linear power, and the 1-30 Hz power-law line is fit to
-% that session-mean fractal spectrum.
+% Each session row is split into non-overlapping 10 s windows. Every
+% window keeps the raw Welch and Fourier spectrogram used by the FOOOF
+% play-session pipeline. IRASA then separates that same window (Wen &
+% Liu 2016, section 2.4). Window spectra are averaged in linear power.
+% The 1-30 Hz power-law line is fit to the session-mean fractal spectrum.
+% The saved session has raw, aperiodic, and periodic fields.
 
 %% Analysis parameters
 sampling_rate = 2500;
@@ -276,6 +278,9 @@ for channel_n = 1:numel(mid_lpag_channel)
         window_sample_ranges = session_windows(session_n).sample_ranges;
         n_windows = session_windows(session_n).n_windows;
         window_specs = cell(n_windows, 1);
+        raw_welch = [];
+        raw_fourier = [];
+        raw_frequency = [];
         for window_n = 1:n_windows
             fprintf(['%s channel %g, Partners session %d/%d, ' ...
                 'window %d/%d\n'], animal_code, ...
@@ -284,11 +289,23 @@ for channel_n = 1:numel(mid_lpag_channel)
             sample_range = window_sample_ranges(window_n, 1): ...
                 window_sample_ranges(window_n, 2);
             this_lfp = double(LFP(lfp_row, sample_range));
+            % Raw spectrogram: same Welch and Fourier estimators as the
+            % FOOOF play-session pipeline, before IRASA.
+            raw_window = irasa_raw_window_spectrum(this_lfp, sampling_rate);
+            if isempty(raw_welch)
+                raw_frequency = raw_window.frequency;
+                raw_welch = zeros(n_windows, numel(raw_frequency));
+                raw_fourier = zeros(n_windows, numel(raw_frequency));
+            end
+            raw_welch(window_n, :) = raw_window.welch(:).';
+            raw_fourier(window_n, :) = raw_window.fourier(:).';
             window_specs{window_n} = irasa_separate( ...
                 this_lfp, sampling_rate, irasa_settings);
         end
         summary = irasa_session_summary([window_specs{:}], ...
             fit_frequency_range);
+        components = irasa_session_components(summary, ...
+            raw_frequency, raw_welch, raw_fourier);
 
         session_results(session_n).session_index = session_n;
         session_results(session_n).behavior_row = ...
@@ -301,6 +318,9 @@ for channel_n = 1:numel(mid_lpag_channel)
             session_windows(session_n).time_ranges;
         session_results(session_n).n_windows = summary.n_windows;
         session_results(session_n).frequency = summary.frequency;
+        session_results(session_n).raw = components.raw;
+        session_results(session_n).aperiodic = components.aperiodic;
+        session_results(session_n).periodic = components.periodic;
         session_results(session_n).mixed = summary.mixed;
         session_results(session_n).fractal = summary.fractal;
         session_results(session_n).oscillatory = summary.oscillatory;

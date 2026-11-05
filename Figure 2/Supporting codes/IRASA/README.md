@@ -49,9 +49,11 @@ Run `add_repo_paths` once per MATLAB session, then:
 1. `Estimate_play_session_lpag_irasa` loops Neuropixels folders and
    calls `GENERATE_PLAY_SESSION_LPAG_IRASA` for each recording.
 2. Each Partners-session row is split into non-overlapping 10 s windows.
-   IRASA runs on the mid-LPAG channel in every window. The spectra are
-   averaged in linear power. The 1–30 Hz power-law line is fit to that
-   session-mean fractal spectrum. The saved file is
+   Each window stores the raw Welch and Fourier spectrogram from the
+   FOOOF play-session pipeline, then IRASA separates that same window.
+   The spectra are averaged in linear power. The 1–30 Hz power-law line
+   is fit to the session-mean fractal spectrum. A session therefore
+   contains `raw`, `aperiodic`, and `periodic`. The saved file is
    `Data/Analysis results/psth power by frequency and behavior/play_session_lpag_irasa.mat`
    on `\\experimentfs.home.bccn-berlin.de`.
 3. `Analyse_play_session_lpag_irasa` loads that file, prints one row per
