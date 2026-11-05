@@ -92,5 +92,15 @@ mean_acg = mean(normalized, 1, 'omitnan');
 assert(abs(mean_acg(1) - 0.75) < 1e-12, ...
     'The neuron with more pairs dominated the mean autocorrelogram.');
 
+edges = -1:0.5:1;
+acg = run_window_acgs([0; 1], 0, 2, edges);
+assert(abs(acg(1) - 1 / 1.25) < 1e-12 && abs(acg(4) - 1 / 1.25) < 1e-12, ...
+    'The pair one second apart was not placed at the outer lags.');
+assert(acg(2) == 0 && acg(3) == 0, ...
+    'Empty lag bins inside a long run were not zero.');
+short_acg = run_window_acgs([0; 0.2], 0, 0.4, edges);
+assert(all(isnan(short_acg)), ...
+    'A lag with less than one bin of overlap was kept.');
+
 disp('test_locking_period_acg passed')
 end

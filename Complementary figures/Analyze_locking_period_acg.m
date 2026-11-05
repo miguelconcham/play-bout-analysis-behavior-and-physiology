@@ -20,8 +20,10 @@
 % with more spikes does not dominate the mean. One figure per lock group
 % for the locking split, and one figure per lock group for the power split.
 % Each split also has a figure of all plotted neurons together.
-% Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz peak sits outside the
-% +/-0.5 s window saved with the runs.
+% The lag axis runs to +/- 1 s. Saved histograms that stop at +/- 0.5 s are
+% rebuilt from the session spike times and the saved run intervals.
+% Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz side peak sits at the
+% edge of this window.
 
 %% Paths and parameters
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -29,12 +31,14 @@ run('\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY 
 
 parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
 phase_folder   = fullfile(data_root, 'Analysis results', 'phase locking data');
+npx_root       = fullfile(data_root, 'NPX data', 'NPX raw data');
 
 alpha            = 0.01;
 non_entrained_p  = 0.1;
 low_percent      = 25;
 high_percent     = 75;
 delta_lag        = [0.2 0.5];   % s, 5 Hz to 2 Hz
+acg_lag          = 1;       % s, half-width of the autocorrelogram axis
 smooth_half      = 0.04;        % s, display smoothing away from zero
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
@@ -102,20 +106,21 @@ for f = 1:numel(parsing_files)
             clear ps
             continue
         end
+        saved_edges = ps.config.autocorr_bin_edges(:)';
         if isempty(edges)
-            edges = ps.config.autocorr_bin_edges(:)';
-            bin_w = mean(diff(edges));
+            if isfield(ps.config, 'autocorr_bin_size') && isfinite(ps.config.autocorr_bin_size)
+                bin_w = ps.config.autocorr_bin_size;
+            else
+                bin_w = mean(diff(saved_edges));
+            end
+            edges = (-acg_lag):bin_w:acg_lag;
             centers = edges(1:end - 1) + bin_w / 2;
             n_bins = numel(centers);
             acg_raw = empty_group_store(group_order, n_bins);
             acg_power = empty_group_store(group_order, n_bins);
-        elseif numel(ps.config.autocorr_bin_edges) ~= numel(edges) ...
-                || max(abs(ps.config.autocorr_bin_edges(:)' - edges)) > 1e-9
-            warning('Analyze_locking_period_acg:edges', ...
-                'ACG bins differ in %s; session skipped.', animal_code);
-            clear ps
-            continue
         end
+        saved_covers = numel(saved_edges) == numel(edges) ...
+            && max(abs(saved_edges - edges)) < 1e-6;
 
         ci = ps.cluster_info;
         id_col = double(cluster_id_column(ci));
@@ -128,6 +133,21 @@ for f = 1:numel(parsing_files)
                 'No PPC column in %s; session skipped.', animal_code);
             clear ps
             continue
+        end
+
+        session_times = [];
+        session_clusters = [];
+        if ~saved_covers
+            [session_times, session_clusters] = load_pag_spikes(npx_root, animal_code);
+            if isempty(session_times)
+                warning('Analyze_locking_period_acg:spikes', ...
+                    ['Spike times for %s were not found, so the autocorrelogram ' ...
+                    'could not be extended to +/- %g s. Session skipped.'], ...
+                    animal_code, acg_lag);
+                clear ps
+                continue
+            end
+            disp(['  recomputing autocorrelograms to +/- ', num2str(acg_lag), ' s'])
         end
 
         for nn = 1:height(ci)
@@ -155,7 +175,18 @@ for f = 1:numel(parsing_files)
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
                 continue
             end
-            acg = rt.autoccorrelograms;
+            if saved_covers
+                acg = rt.autoccorrelograms;
+                this_corrected = already_corrected;
+            elseif ~ismember('RunStartTime', rt.Properties.VariableNames) ...
+                    || ~ismember('RunEndTime', rt.Properties.VariableNames)
+                acg = [];
+                this_corrected = true;
+            else
+                acg = run_window_acgs(session_times(session_clusters == this_id), ...
+                    rt.RunStartTime, rt.RunEndTime, edges);
+                this_corrected = true;
+            end
             if size(acg, 2) ~= n_bins || size(acg, 1) ~= height(rt)
                 warning('Analyze_locking_period_acg:width', ...
                     'ACG size mismatch in %s id %g; cell skipped.', animal_code, this_id);
@@ -166,7 +197,7 @@ for f = 1:numel(parsing_files)
             run_length = acg_run_lengths(rt);
             this_area = cluster_area_char(ci, nn);
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
-                rt.phase_entrainment(:, ppc_col), already_corrected, low_percent, high_percent);
+                rt.phase_entrainment(:, ppc_col), this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
                 acg_raw.(group_order{g}) = append_pooled( ...
                     acg_raw.(group_order{g}), pooled, animal_code, this_id, this_area);
@@ -176,7 +207,7 @@ for f = 1:numel(parsing_files)
             end
 
             pooled_power = pool_locking_period_acgs(acg, edges, run_length, ...
-                run_delta_power(rt), already_corrected, low_percent, high_percent);
+                run_delta_power(rt), this_corrected, low_percent, high_percent);
             if split_is_usable(pooled_power)
                 acg_power.(group_order{g}) = append_pooled( ...
                     acg_power.(group_order{g}), pooled_power, animal_code, this_id, this_area);
@@ -208,6 +239,7 @@ parameters = struct( ...
     'low_percent', low_percent, ...
     'high_percent', high_percent, ...
     'delta_lag', delta_lag, ...
+    'acg_lag', acg_lag, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
 
 locking_labels = { ...
@@ -385,13 +417,28 @@ for c = 1:numel(curve_names)
 end
 report_split_contrast(group_acg, figure_label, split_name);
 xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
-xlim([centers(1) centers(end)])
+half_bin = median(diff(centers)) / 2;
+xlim([centers(1) - half_bin, centers(end) + half_bin])
 xlabel('Lag (s)')
 ylabel('Mean normalized autocorrelogram')
 title({figure_label, sprintf('n = %d    shaded: 2-5 Hz', size(group_acg.low, 1))})
 legend(plotted, curve_labels, 'Location', 'best')
 place_delta_shade(shade)
 box off
+end
+
+
+function [spike_times, spike_clusters] = load_pag_spikes(npx_root, animal_code)
+spike_times = [];
+spike_clusters = [];
+folder = fullfile(npx_root, animal_code);
+times_file = fullfile(folder, 'spike_times_PAG.npy');
+clusters_file = fullfile(folder, 'spike_clusters_PAG.npy');
+if exist(times_file, 'file') ~= 2 || exist(clusters_file, 'file') ~= 2
+    return
+end
+spike_times = double(readNPY(times_file)) / 30000;
+spike_clusters = double(readNPY(clusters_file));
 end
 
 
