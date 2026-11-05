@@ -1541,7 +1541,8 @@ for effect_n = 1:numel(effect_names)
     valid = arrayfun(@(x) x.(name).valid, units);
     significant = false(size(valid));
     significant_primary = false(size(valid));
-    for unit_n = find(valid)
+    valid_units = find(valid);
+    for unit_n = valid_units(:)'
         significant(unit_n) = units(unit_n).(name).global_p_fwer < 0.05;
         if isfield(units(unit_n).(name).primary, 'valid') && ...
                 units(unit_n).(name).primary.valid
