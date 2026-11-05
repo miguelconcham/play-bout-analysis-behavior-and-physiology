@@ -5,14 +5,13 @@
 % Data/Analysis results/delta oscillatory episodes/delta_oscillatory_episodes.mat
 % and writes:
 %   session_summary.csv
-%   figures/<recording>_probe<P>_channel<C>.png
-%       minimally processed LFP, 1-5 Hz trace, Hilbert amplitude,
-%       detected episode, peaks, troughs (cycle boundaries), and the
-%       trough-to-trough period histogram
-%   figures/cycle_period_histogram_pooled.png
-%   figures/session_summary.png
-%       episode duration, trough-cycle count, period variability,
-%       and rise-decay / peak-trough symmetry
+%   result_summary.txt
+%   one SVG and one JPEG per figure:
+%       <recording>_probe<P>_channel<C>
+%       cycle_period_histogram_pooled
+%       session_summary
+%           episode duration, trough-cycle count, period variability,
+%           and rise-decay / peak-trough symmetry
 %
 % The histogram axis is 50-1000 ms. A 1-5 Hz cycle is 200-1000 ms
 % (1/5 Hz to 1/1 Hz); that band is shaded. Periods near 50 ms are faster
@@ -22,7 +21,9 @@
 %
 % Episodes are candidates. Filtering can ring around a transient.
 
-%% Load
+%% Output
+% Leave figure_folder empty to write figures inside the results folder.
+figure_folder = '';
 show_figures = false;
 
 this_file = mfilename('fullpath');
@@ -39,7 +40,9 @@ options = delta_episode_options();
 saving_folder = fullfile(options.data_root, 'Analysis results', ...
     'delta oscillatory episodes');
 input_file = fullfile(saving_folder, 'delta_oscillatory_episodes.mat');
-figure_folder = fullfile(saving_folder, 'figures');
+if isempty(figure_folder)
+    figure_folder = fullfile(saving_folder, 'figures');
+end
 
 fprintf('Loading %s\n', input_file);
 load(input_file, 'delta_episodes');
@@ -54,6 +57,9 @@ end
 
 session_summary = delta_episode_summary_table(delta_episodes);
 writetable(session_summary, fullfile(saving_folder, 'session_summary.csv'));
+summary_file = fullfile(saving_folder, 'result_summary.txt');
+write_delta_episode_summary_text(delta_episodes, session_summary, summary_file);
+fprintf('Summary written to %s\n', summary_file);
 disp(session_summary);
 print_session_lines(session_summary);
 
@@ -62,10 +68,10 @@ for recording_n = 1:numel(delta_episodes)
     recording = delta_episodes(recording_n);
     figure_handle = new_figure(show_figures, [1200 900]);
     plot_recording(recording);
-    figure_name = sprintf('%s_probe%g_channel%g.png', ...
+    figure_name = sprintf('%s_probe%g_channel%g', ...
         file_token(recording.animal_name), recording.lpag_probe_number, ...
         recording.lpag_channel);
-    print(figure_handle, fullfile(figure_folder, figure_name), '-dpng', '-r140');
+    save_vector_and_jpeg(figure_handle, figure_folder, figure_name);
     if ~show_figures
         close(figure_handle);
     end
@@ -81,8 +87,8 @@ title(cycle_histogram_title(periods_s, parameters.delta_freq, ...
     parameters.histogram_ms));
 xlabel(period_axis_label(period_kind));
 ylabel('Cycles');
-print(figure_handle, fullfile(figure_folder, 'cycle_period_histogram_pooled.png'), ...
-    '-dpng', '-r140');
+save_vector_and_jpeg(figure_handle, figure_folder, ...
+    'cycle_period_histogram_pooled');
 if ~show_figures
     close(figure_handle);
 end
@@ -90,8 +96,7 @@ end
 %% Session summary
 figure_handle = new_figure(show_figures, [1400 980]);
 plot_session_summary(delta_episodes, session_summary);
-print(figure_handle, fullfile(figure_folder, 'session_summary.png'), ...
-    '-dpng', '-r140');
+save_vector_and_jpeg(figure_handle, figure_folder, 'session_summary');
 if ~show_figures
     close(figure_handle);
 end
@@ -486,6 +491,12 @@ for row_n = 1:height(session_summary)
         session_summary.median_trough_period_cv(row_n), ...
         100 * session_summary.episode_time_fraction(row_n));
 end
+end
+
+function save_vector_and_jpeg(figure_handle, folder_name, base_name)
+print(figure_handle, fullfile(folder_name, [base_name, '.svg']), '-dsvg');
+print(figure_handle, fullfile(folder_name, [base_name, '.jpg']), ...
+    '-djpeg', '-r200');
 end
 
 function figure_handle = new_figure(show_figures, size_pixels)

@@ -7,7 +7,8 @@
 % delta_oscillatory_episodes.mat.
 %
 % Then run Analyze_delta_oscillatory_episodes.m for traces, cycle-period
-% histograms, symmetry, and the session summary.
+% histograms, symmetry, and the session summary. Set figure_folder at the
+% top of Analyze. It writes SVG and JPEG figures plus result_summary.txt.
 %
 % Knobs live in delta_episode_options.m. The ones that change detection:
 %   amplitude_threshold_mode, amplitude_threshold
