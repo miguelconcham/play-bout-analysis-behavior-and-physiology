@@ -35,8 +35,31 @@ log-frequency spacing and fits the line described after section 2.4.
 
 `irasa_simulate_fractal` builds the inverse-FFT power-law series used
 in section 2.5. `test_irasa` checks the defaults, a pure power law, a
-10 Hz peak, and an 8 Hz plus 16 Hz harmonic, without the experiment
-files.
+10 Hz peak, an 8 Hz plus 16 Hz harmonic, and the session-mean summary,
+without the experiment files.
+
+## Play-session pipeline
+
+The recording loop matches the mid-LPAG play-session spectra. It uses
+`Session_structure` / `Partners session` rows only. It does not detect
+play bouts.
+
+Run `add_repo_paths` once per MATLAB session, then:
+
+1. `Estimate_play_session_lpag_irasa` loops Neuropixels folders and
+   calls `GENERATE_PLAY_SESSION_LPAG_IRASA` for each recording.
+2. Each Partners-session row is split into non-overlapping 10 s windows.
+   IRASA runs on the mid-LPAG channel in every window. The spectra are
+   averaged in linear power. The 1–30 Hz power-law line is fit to that
+   session-mean fractal spectrum. The saved file is
+   `Data/Analysis results/psth power by frequency and behavior/play_session_lpag_irasa.mat`
+   on `\\experimentfs.home.bccn-berlin.de`.
+3. `Analyse_play_session_lpag_irasa` loads that file, prints one row per
+   Partners session, and draws the mixed, fractal, and oscillatory
+   spectra.
+
+`irasa_separate` remains the single-epoch function used inside each
+10 s window.
 
 The authors' released toolbox (`amri_sig_fractal` 0.10,
 doi:10.4231/R7WQ01R7) is a later code revision of the same method. It

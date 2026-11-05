@@ -113,6 +113,30 @@ two_channels = irasa_separate([fractal, fractal], sampling_rate);
 assert(max(abs(two_channels.fractal(:, 1) - two_channels.fractal(:, 2))) < 1e-10, ...
     'Identical channels did not produce identical fractal spectra.');
 
+cropped = irasa_separate(fractal, sampling_rate, ...
+    struct('frequency_range', [2 40]));
+session_summary = irasa_session_summary([cropped cropped], [2 20]);
+assert(session_summary.n_windows == 2, 'The session summary dropped a window.');
+assert(max(abs(session_summary.mixed - cropped.mixed)) < 1e-10, ...
+    'Averaging identical windows changed the mixed spectrum.');
+assert(max(abs(session_summary.oscillatory - ...
+    (session_summary.mixed - session_summary.fractal))) < 1e-10, ...
+    'The session residual is not mixed minus fractal.');
+direct_fit = irasa_power_law_fit(cropped, [2 20]);
+assert(abs(session_summary.exponent - direct_fit.exponent) < 1e-8, ...
+    'The session-mean exponent does not match the window fit.');
+assert(isequal(session_summary.fit_range, [2 20]), ...
+    'The session fit range was not stored.');
+failed = false;
+try
+    mismatched = cropped;
+    mismatched.frequency = cropped.frequency(1:end - 1);
+    irasa_session_summary([cropped mismatched], [2 20]);
+    failed = true;
+catch
+end
+assert(~failed, 'Windows with different frequency grids were averaged.');
+
 fprintf(['IRASA recovered exponent %.3f (target 1.5), fractal log-rms %.3f, ' ...
     '10 Hz oscillatory peak ratio %.2f.\n'], ...
     fit.exponent, fractal_log_rms, local_peak_ratio(separated, 10));
