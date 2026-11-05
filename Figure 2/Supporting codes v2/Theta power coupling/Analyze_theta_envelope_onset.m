@@ -22,9 +22,9 @@ if isempty(this_file)
     this_file = ['\\experimentfs.home.bccn-berlin.de\experiment\' ...
         'PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\' ...
         'play bout analysis behavior and physiology\Figure 2\' ...
-        'Supporting codes v2\Analyze_theta_envelope_onset.m'];
+        'Supporting codes v2\Theta power coupling\Analyze_theta_envelope_onset.m'];
 end
-repo_root = fileparts(fileparts(fileparts(this_file)));
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 run(fullfile(repo_root, 'add_repo_paths.m'));
 
 options = theta_envelope_delta_options();

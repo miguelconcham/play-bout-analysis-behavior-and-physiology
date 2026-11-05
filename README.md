@@ -200,7 +200,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 |----------|----------|----------------------|
 | Play-bout band-power PSTH | `Estimate_psth_band_power.m` | `Figure 2.m` |
 | PSTH per behavior | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
-| PSTH per behavior, theta and gamma (same alignments; LFP loaded once per animal) | `Estimate_psth_all_behaviors_theta_gamma.m` | `Analyze_psth_all_behaviors_theta_gamma.m` |
+| PSTH per behavior, delta / theta / gamma (same alignments; LFP loaded once per animal) | `Theta power coupling/Estimate_psth_all_behaviors_theta_gamma.m` | `Analyze_psth_all_behaviors_theta_gamma.m` (grand averages and condition differences); `Theta power coupling/Analyze_psth_preonset_spectrum.m` (pre-onset spectrum and the per-animal check) |
 | Classify two Type2 groups from time-wrapped band power, pooled across sessions and animals | (uses the per-behavior PSTH) | `Analyze_behavior_class_from_timewrap_power.m` |
 | Area maps | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Call-locked PSTH | `Estimate_psth_calls_all_animals.m` | `Figure 2.m` `%% 13`–`%% 17` |
@@ -208,7 +208,9 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | Reciprocity | (uses regressor PSTH) | `Reciprocity.m` |
 | Partner identity | (uses play-bout PSTH) | `Play partner.m` |
 | Speed vs band power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m`; `Figure 2.m` `%% 18`–`%% 21` |
-| Cross-frequency coupling | `Estimate_freq_coupling.m` | `Analyze_freq_coupling.m`; `Freq coupling.m` |
+| Cross-frequency coupling | `Theta power coupling/Estimate_freq_coupling.m` | `Theta power coupling/Analyze_freq_coupling.m`; `Theta power coupling/CrossFreq coupling.m` |
+| Frequency-resolved slow-phase/theta-power coupling, harmonic control, and direct play vs non-play interaction | `Theta power coupling/Estimate_frequency_resolved_theta_pac.m` (resumable overnight estimate, hierarchical inference, CSVs, and figures) | same script |
+| Theta-envelope oscillation from 0.1–6 Hz and behavior-onset locking | `Theta power coupling/Estimate_theta_envelope_delta.m` | `Theta power coupling/Analyze_theta_envelope_delta.m` |
 
 The original (pre-v2) Figure 2 pipeline lives outside this repository, in the parent folder `PlayBout Analysis/Figure 2 Supporting codes/`.
 
