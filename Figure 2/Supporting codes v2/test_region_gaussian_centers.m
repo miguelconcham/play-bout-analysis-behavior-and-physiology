@@ -21,7 +21,11 @@ if exist('normcdf', 'file') == 2
     test_mixture_measurements_for_separated_centers();
 end
 test_short_samples_are_not_fitted();
+test_bump_assignment_uses_posterior();
+test_bump_heights_follow_stored_centers();
+test_frequency_bin_median_interval();
 test_distribution_figure();
+test_amplitude_scatter_colors_assigned_bumps();
 if exist('fitgmdist', 'file') == 2
     test_separated_centers_select_two_components();
 else
@@ -445,6 +449,137 @@ histograms = findall(figure_handle, 'Type', 'histogram');
 assert(numel(histograms) == 2, ...
     'Each region did not draw its center-frequency distribution.');
 close(figure_handle);
+end
+
+function test_bump_assignment_uses_posterior()
+component_table = table([1; 2], [4; 30], [0.5; 0.5], [0.5; 0.5], ...
+    'VariableNames', {'Component', 'MeanHz', 'SDHz', 'Weight'});
+centers = [4; 30; 17];
+[assignment, max_posterior] = assign_bump_centers_to_mixture( ...
+    centers, component_table, 0.5);
+assert(isequal(assignment, [1; 2; 0]), ...
+    'Centers were not assigned by posterior, or the midpoint was forced.');
+assert(max_posterior(1) > 0.99, ...
+    'A center on a component mean did not have a near-certain posterior.');
+assert(abs(max_posterior(3) - 0.5) < 1e-9, ...
+    'The midpoint of two equal components was not posterior 0.5.');
+
+one_component = component_table(1, :);
+[single_assignment, single_posterior] = assign_bump_centers_to_mixture( ...
+    4, one_component, 0.5);
+assert(single_assignment == 1 && single_posterior > 0.99, ...
+    'The only component did not claim its own center.');
+
+invalid_width = component_table;
+invalid_width.SDHz(1) = 0;
+[width_assignment, width_posterior] = assign_bump_centers_to_mixture( ...
+    [4; 30], invalid_width, 0.5);
+assert(isequal(width_assignment, [2; 2]) && all(width_posterior > 0.99), ...
+    'A zero-width component was still given posterior mass.');
+end
+
+function test_bump_heights_follow_stored_centers()
+peak_table = table({'DR'; 'DR'; 'LPAG'}, ...
+    {'Fourier'; 'Fourier'; 'Fourier'}, [4; NaN; 8], [1.5; 9; 0.4], ...
+    'VariableNames', {'Region', 'Method', 'CenterFrequency', 'Height'});
+region = fitted_region('DR', 4, 1, 4);
+[heights, note] = region_bump_heights(region, peak_table, 'Fourier');
+assert(isequal(heights, 1.5), ...
+    'The finite center did not keep its stored height.');
+assert(isempty(note), 'A matched height was reported as missing.');
+
+region.fit.center_frequencies = 5;
+[heights, note] = region_bump_heights(region, peak_table, 'Fourier');
+assert(isempty(heights), 'A mismatched center still returned a height.');
+assert(contains(note, 'do not match'), ...
+    'A mismatched peak table did not explain why heights were left out.');
+
+without_height = peak_table(:, {'Region', 'Method', 'CenterFrequency'});
+[heights, note] = region_bump_heights( ...
+    fitted_region('DR', 4, 1, 4), without_height, 'Fourier');
+assert(isempty(heights) && contains(note, 'not stored'), ...
+    'A peak table without Height was treated as aligned.');
+end
+
+function test_amplitude_scatter_colors_assigned_bumps()
+region = fitted_region('DR', [3; 3.4; 28; 31], 2, [3.2; 29.5]);
+region.bump_height = [2; 2.2; 0.3; 0.4];
+region.bump_height_note = '';
+figure_handle = plot_region_gaussian_centers( ...
+    region, [0.1 45], 'BIC', 8, 1, 'Fourier', 0.5);
+scatters = findall(figure_handle, 'Type', 'scatter');
+keep_scatter = true(numel(scatters), 1);
+for scatter_n = 1:numel(scatters)
+    parent_type = get(scatters(scatter_n).Parent, 'Type');
+    parent_tag = get(scatters(scatter_n).Parent, 'Tag');
+    keep_scatter(scatter_n) = ~strcmp(parent_type, 'legend') && ...
+        ~strcmp(parent_tag, 'legend');
+end
+scatters = scatters(keep_scatter);
+x_values = zeros(0, 1);
+y_values = zeros(0, 1);
+for scatter_n = 1:numel(scatters)
+    x_values = [x_values; scatters(scatter_n).XData(:)]; %#ok<AGROW>
+    y_values = [y_values; scatters(scatter_n).YData(:)]; %#ok<AGROW>
+end
+assert(numel(scatters) == 2, ...
+    'The two frequency clusters were not drawn as separate scatters.');
+assert(isequal(sort(x_values), [3; 3.4; 28; 31]), ...
+    'The scatter did not keep every bump center.');
+assert(isequal(sort(y_values), [0.3; 0.4; 2; 2.2]), ...
+    'The scatter did not keep every bump height.');
+for scatter_n = 1:numel(scatters)
+    x = scatters(scatter_n).XData(:);
+    assert(all(x < 10) || all(x > 20), ...
+        'One scatter mixed bumps from both frequency clusters.');
+end
+[bin_center, median_height, lower_ci, ~] = ...
+    frequency_bin_median_interval( ...
+    [3; 3.4; 28; 31], [2; 2.2; 0.3; 0.4], [0.1 45], 1, 0.95);
+assert(max(abs(bin_center - [3.5; 28.5; 31.5])) < 1e-12, ...
+    'The 1 Hz bins were not centered on 3.5, 28.5, and 31.5 Hz.');
+assert(max(abs(median_height - [2.1; 0.3; 0.4])) < 1e-12, ...
+    'The binned median heights were not 2.1, 0.3, and 0.4.');
+assert(all(isnan(lower_ci)), ...
+    'Bins of one or two bumps still drew a confidence interval.');
+median_lines = findall(figure_handle, 'Type', 'line');
+median_y = [];
+for line_n = 1:numel(median_lines)
+    if strncmp(get(median_lines(line_n), 'DisplayName'), 'Median', 6)
+        median_y = median_lines(line_n).YData(:);
+    end
+end
+assert(isequal(numel(median_y), numel(median_height)) && ...
+    max(abs(median_y - median_height)) < 1e-12, ...
+    'The median markers did not follow the binned medians.');
+close(figure_handle);
+end
+
+function test_frequency_bin_median_interval()
+heights = (1:20).';
+[bin_center, median_height, lower_ci, upper_ci] = ...
+    frequency_bin_median_interval( ...
+    0.2 * ones(20, 1), heights, [0 2], 1, 0.95);
+assert(abs(bin_center - 0.5) < 1e-12, ...
+    'Twenty bumps at 0.2 Hz were not in the 0.5 Hz bin.');
+assert(abs(median_height - 10.5) < 1e-12, ...
+    'The median of 1:20 was not 10.5.');
+assert(abs(lower_ci - 6) < 1e-12 && abs(upper_ci - 15) < 1e-12, ...
+    'The 95% median interval for 1:20 was not 6 to 15.');
+
+[~, small_median, small_lower, small_upper] = ...
+    frequency_bin_median_interval([0.2; 0.4], [1; 3], [0 2], 1, 0.95);
+assert(abs(small_median - 2) < 1e-12, ...
+    'The median of two heights was not their midpoint.');
+assert(isnan(small_lower) && isnan(small_upper), ...
+    'Two bumps produced a confidence interval.');
+
+[empty_center, empty_median, empty_lower, empty_upper] = ...
+    frequency_bin_median_interval( ...
+    zeros(0, 1), zeros(0, 1), [0 2], 1, 0.95);
+assert(isempty(empty_center) && isempty(empty_median) && ...
+    isempty(empty_lower) && isempty(empty_upper), ...
+    'No bumps still returned a bin.');
 end
 
 function test_separated_centers_select_two_components()

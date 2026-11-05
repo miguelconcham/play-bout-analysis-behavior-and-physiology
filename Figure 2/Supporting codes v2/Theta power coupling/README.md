@@ -9,6 +9,14 @@ cross-frequency coupling analyses.
 - `Analyze_psth_preonset_spectrum.m`: test the 2–3 Hz oscillation of theta
   power before behavior onset, including play/non-play summaries,
   animal-level checks, and trial-wise circular-shift nulls.
+- `Estimate_theta_envelope_delta.m` and `GENERATE_THETA_ENVELOPE_DELTA.m`:
+  test whether the theta amplitude oscillates between 0.1 and 6 Hz and
+  whether that pattern locks to individual behaviors.
+- `Analyze_theta_envelope_delta.m`, `Analyze_theta_envelope_session.m`, and
+  `Analyze_theta_envelope_onset.m`: session spectra, coherence, and
+  behavior-onset figures.
+- `test_theta_envelope_delta.m`: synthetic checks that do not read the
+  experiment files.
 - `Estimate_frequency_resolved_theta_pac.m`: primary frequency-resolved
   slow-phase/theta-power analysis, independent block-shift nulls, harmonic
   controls, play/non-play interaction, and hierarchical inference.

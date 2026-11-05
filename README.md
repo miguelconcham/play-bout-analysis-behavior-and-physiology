@@ -210,6 +210,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | Speed vs band power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m`; `Figure 2.m` `%% 18`–`%% 21` |
 | Cross-frequency coupling | `Theta power coupling/Estimate_freq_coupling.m` | `Theta power coupling/Analyze_freq_coupling.m`; `Theta power coupling/CrossFreq coupling.m` |
 | Frequency-resolved slow-phase/theta-power coupling, harmonic control, and direct play vs non-play interaction | `Theta power coupling/Estimate_frequency_resolved_theta_pac.m` (resumable overnight estimate, hierarchical inference, CSVs, and figures) | same script |
+| Theta-envelope oscillation from 0.1–6 Hz and behavior-onset locking | `Theta power coupling/Estimate_theta_envelope_delta.m` | `Theta power coupling/Analyze_theta_envelope_delta.m` |
 
 The original (pre-v2) Figure 2 pipeline lives outside this repository, in the parent folder `PlayBout Analysis/Figure 2 Supporting codes/`.
 
