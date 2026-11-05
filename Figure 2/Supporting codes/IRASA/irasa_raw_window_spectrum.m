@@ -1,14 +1,14 @@
 function raw = irasa_raw_window_spectrum(signal, sampling_rate)
-%IRASA_RAW_WINDOW_SPECTRUM  Raw 10 s spectrum used before FOOOF.
+%IRASA_RAW_WINDOW_SPECTRUM  Raw spectrum of one IRASA window.
 %
 % Same two estimators as GENERATE_PLAY_SESSION_LPAG_SPECTRA, computed
-% on one non-overlapping window before any aperiodic fit:
+% on one window before the IRASA separation:
 %   welch   - one periodic Hann segment, Welch density scaling
 %   fourier - rectangular-window periodogram
 % Both are one-sided power spectral densities in power per Hz. DC is
 % removed by a constant detrend. The returned grid is df:df:40 Hz, with
-% df = sampling_rate / numel(signal). A 10 s window at 2500 Hz is
-% 0.1:0.1:40 Hz, the grid passed to fooof_matlab.
+% df = sampling_rate / numel(signal). A 10 s window at 2500 Hz is the
+% 0.1 Hz FOOOF grid. The 3 s IRASA window is coarser, df = 2500/7500 Hz.
 
 if nargin < 2
     error('irasa_raw_window_spectrum:input', ...

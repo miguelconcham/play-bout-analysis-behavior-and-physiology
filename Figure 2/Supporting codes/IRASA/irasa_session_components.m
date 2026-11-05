@@ -2,7 +2,7 @@ function components = irasa_session_components(summary, raw_frequency, welch_win
 %IRASA_SESSION_COMPONENTS  Raw spectrogram plus IRASA decomposition.
 %
 % RAW_FREQUENCY and the window matrices come from
-% irasa_raw_window_spectrum, one row per 10 s window. They are the raw
+% irasa_raw_window_spectrum, one row per sliding window. They are the raw
 % spectra estimated before decomposition, on the same grid as the FOOOF
 % play-session pipeline. SUMMARY comes from irasa_session_summary.
 %

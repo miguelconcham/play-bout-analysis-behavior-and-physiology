@@ -48,11 +48,12 @@ Run `add_repo_paths` once per MATLAB session, then:
 
 1. `Estimate_play_session_lpag_irasa` loops Neuropixels folders and
    calls `GENERATE_PLAY_SESSION_LPAG_IRASA` for each recording.
-2. Each Partners-session row is split into non-overlapping 10 s windows.
-   Each window stores the raw Welch and Fourier spectrogram from the
-   FOOOF play-session pipeline, then IRASA separates that same window.
-   The spectra are averaged in linear power. The 1–30 Hz power-law line
-   is fit to the session-mean fractal spectrum. A session therefore
+2. Each Partners-session row is split into sliding 3 s windows stepped
+   by 1 s. That duration is the one Wen and Liu used on the ECoG and MEG
+   recordings (section 2.6). Each window stores a raw Welch and Fourier
+   spectrum of those 3 s, then IRASA separates the same samples. The
+   spectra are averaged in linear power. The 1–30 Hz power-law line is
+   fit to the session-mean fractal spectrum. A session therefore
    contains `raw`, `aperiodic`, and `periodic`. The saved file is
    `Data/Analysis results/psth power by frequency and behavior/play_session_lpag_irasa.mat`
    on `\\experimentfs.home.bccn-berlin.de`.
@@ -61,7 +62,8 @@ Run `add_repo_paths` once per MATLAB session, then:
    spectra.
 
 `irasa_separate` remains the single-epoch function used inside each
-10 s window.
+3 s window. The simulation in section 2.5 used one 8.5 s epoch
+(8,500 samples at 1,000 Hz) rather than this sliding window.
 
 The authors' released toolbox (`amri_sig_fractal` 0.10,
 doi:10.4231/R7WQ01R7) is a later code revision of the same method. It

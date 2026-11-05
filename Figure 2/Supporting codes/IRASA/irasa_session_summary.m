@@ -2,7 +2,7 @@ function summary = irasa_session_summary(window_specs, fit_range)
 %IRASA_SESSION_SUMMARY  Average IRASA windows, then fit the fractal line.
 %
 % WINDOW_SPECS is a struct array of irasa_separate outputs, one per
-% non-overlapping window of one Partners session. Spectra are averaged
+% sliding window of one Partners session. Spectra are averaged
 % in linear power, the same domain used for the Welch play-session
 % spectra. The oscillatory spectrum is then mixed minus fractal, which
 % matches the mean of the window residuals. The power-law fit is applied

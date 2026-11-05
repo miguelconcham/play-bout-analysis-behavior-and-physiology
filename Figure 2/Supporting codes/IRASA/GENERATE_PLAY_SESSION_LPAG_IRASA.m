@@ -8,17 +8,23 @@ function irasa_struct = GENERATE_PLAY_SESSION_LPAG_IRASA(current_dir)
 % synchronization, and mid-LPAG site are the same ones used by
 % GENERATE_PLAY_SESSION_LPAG_SPECTRA.
 %
-% Each session row is split into non-overlapping 10 s windows. Every
-% window keeps the raw Welch and Fourier spectrogram used by the FOOOF
-% play-session pipeline. IRASA then separates that same window (Wen &
-% Liu 2016, section 2.4). Window spectra are averaged in linear power.
-% The 1-30 Hz power-law line is fit to the session-mean fractal spectrum.
-% The saved session has raw, aperiodic, and periodic fields.
+% Wen & Liu (2016), section 2.6, computed IRASA on the macaque ECoG and
+% human MEG recordings in a sliding 3 s window stepped by 1 s, and fit
+% the fractal spectrum from 1-30 Hz in every window. That is the window
+% used here. It is not the 10 s window of the FOOOF spectra.
+%
+% Each window keeps a raw Welch and Fourier spectrum of that same 3 s
+% segment, then IRASA (section 2.4). The sliding spectra are averaged in
+% linear power. The 1-30 Hz power-law line is fit to the session-mean
+% fractal spectrum. The saved session has raw, aperiodic, and periodic
+% fields.
 
 %% Analysis parameters
 sampling_rate = 2500;
-window_seconds = 10;
+window_seconds = 3;
+window_step_seconds = 1;
 window_samples = window_seconds * sampling_rate;
+step_samples = window_step_seconds * sampling_rate;
 spectrum_frequency_range = [0.1 40];
 fit_frequency_range = [1 30];
 area2analyze = 'PAG';
@@ -214,7 +220,7 @@ for probe_n = 1:size(Y_Range, 1)
     mid_lpag_map_index(probe_n) = closest_map_index;
 end
 
-%% Create full 10-second windows within each play-session row
+%% Create sliding 3 s windows, stepped by 1 s, within each session row
 n_lfp_samples = size(LFP, 2);
 session_windows = repmat(struct( ...
     'sample_ranges', zeros(0, 2), ...
@@ -225,9 +231,9 @@ for session_n = 1:size(play_session_ranges, 1)
     first_sample = max(1, ceil(play_session_ranges(session_n, 1) * sampling_rate));
     last_sample = min(n_lfp_samples, ...
         floor(play_session_ranges(session_n, 2) * sampling_rate));
-    starts = first_sample:window_samples:(last_sample - window_samples + 1);
+    starts = first_sample:step_samples:(last_sample - window_samples + 1);
     if isempty(starts)
-        error('Play-session row %d contains no complete 10-second window.', ...
+        error('Play-session row %d contains no complete 3-second window.', ...
             session_n);
     end
     ends = starts + window_samples - 1;
@@ -261,8 +267,9 @@ for channel_n = 1:numel(mid_lpag_channel)
     parameters = struct();
     parameters.sampling_rate = sampling_rate;
     parameters.window_seconds = window_seconds;
+    parameters.window_step_seconds = window_step_seconds;
     parameters.window_samples = window_samples;
-    parameters.window_overlap_seconds = 0;
+    parameters.window_overlap_seconds = window_seconds - window_step_seconds;
     parameters.spectrum_frequency_range = spectrum_frequency_range;
     parameters.fit_frequency_range = fit_frequency_range;
     parameters.averaging_domain = 'linear power';
@@ -270,7 +277,7 @@ for channel_n = 1:numel(mid_lpag_channel)
     parameters.n_segments = irasa_settings.n_segments;
     parameters.segment_fraction = irasa_settings.segment_fraction;
     parameters.reference = ['Wen H, Liu Z (2016) Brain Topography 29:13-26. ' ...
-        'Section 2.4, applied to each 10 s window.'];
+        'Section 2.6 used a 3 s window stepped by 1 s.'];
     irasa_struct(channel_n).parameters = parameters;
 
     session_results = repmat(struct(), size(play_session_ranges, 1), 1);

@@ -3,7 +3,7 @@
 % Estimate_play_session_lpag_irasa.
 %
 % Each Partners-session row is one trace. The raw Welch spectrum is the
-% session mean of the same 10 s spectrogram used before FOOOF. The
+% session mean of the raw spectrum of each 3 s window. The
 % aperiodic and periodic traces are the IRASA decomposition. Periodic
 % power is linear and can be negative. The printed exponent is the
 % 1-30 Hz power-law fit of the session-mean aperiodic spectrum.
