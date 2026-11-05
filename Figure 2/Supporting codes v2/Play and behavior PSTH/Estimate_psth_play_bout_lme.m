@@ -28,6 +28,7 @@
 this_dir = fileparts(mfilename('fullpath'));
 if ~isempty(this_dir)
     addpath(this_dir);
+    addpath(fullfile(fileparts(this_dir), 'Helper functions'));
 end
 
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';

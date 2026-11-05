@@ -4,7 +4,7 @@
 % Separate from Analyze_psth_all_behaviors.m, which stays the delta script.
 %
 % band_list selects which saved
-% Theta power coupling/Estimate_psth_all_behaviors_theta_gamma.m
+% Theta frequency coupling/Estimate_psth_all_behaviors_theta_gamma.m
 % files to fit. 'delta' keeps the original result filenames. 'theta' and
 % 'gamma' write results_full_lfp_per_behavior_<band>.mat and
 % results_full_lfp_per_behavior_time_warpped_<band>.mat.
@@ -19,13 +19,13 @@
 % Onset and offset lines are drawn after those bars and span the y axis.
 % Figures open maximized.
 % The pre-onset spectrum, and the per-animal check of that spectrum, are in
-% Theta power coupling/Analyze_psth_preonset_spectrum.m.
+% Theta frequency coupling/Analyze_psth_preonset_spectrum.m.
 % %% Save open figures as SVG writes every named figure with print -dsvg.
-% Run Theta power coupling/Estimate_psth_all_behaviors_theta_gamma.m first
+% Run Theta frequency coupling/Estimate_psth_all_behaviors_theta_gamma.m first
 % so those PSTH files exist.
 
-this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_psth_all_behaviors_theta_gamma.m';
-repo_root = fileparts(fileparts(fileparts(this_file)));
+this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Theta frequency coupling\Analyze_psth_all_behaviors_theta_gamma.m';
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 figure_2_new_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Figure codes\FIgure 2 delta modulation per behavior';

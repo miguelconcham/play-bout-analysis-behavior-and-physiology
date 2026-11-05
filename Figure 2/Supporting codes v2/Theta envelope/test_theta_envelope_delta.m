@@ -8,6 +8,8 @@ function test_theta_envelope_delta()
 this_dir = fileparts(mfilename('fullpath'));
 if ~isempty(this_dir)
     addpath(this_dir);
+    addpath(fullfile(fileparts(this_dir), 'Theta envelope statistics'));
+    addpath(fullfile(fileparts(this_dir), 'Helper functions'));
 end
 if exist('pkg', 'file') == 2
     try

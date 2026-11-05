@@ -1,7 +1,7 @@
 %% Analyze_behavior_class_from_timewrap_power
 % Can band power tell two Type2 behavior groups apart?
 % Uses the time-wrapped PSTHs already saved by
-% Theta power coupling/Estimate_psth_all_behaviors_theta_gamma.m.
+% Theta frequency coupling/Estimate_psth_all_behaviors_theta_gamma.m.
 % It does not reload LFP.
 %
 % First approach: one model, trained on events pooled from every kept
@@ -59,8 +59,8 @@ n_permutations = 200;
 rng_seed = 1;
 
 %% Paths
-this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Analyze_behavior_class_from_timewrap_power.m';
-repo_root = fileparts(fileparts(fileparts(this_file)));
+this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes v2\Play and behavior PSTH\Analyze_behavior_class_from_timewrap_power.m';
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 

@@ -102,7 +102,17 @@ play bout analysis behavior and physiology/
 │   ├── Play partner.m                 # Supp Fig 3g–i
 │   ├── Reciprocity.m                  # Fig 2h + Supp Fig 3a–f
 │   ├── Freq coupling.m
-│   └── Supporting codes v2/           # GENERATE / Estimate / Analyze pipelines
+│   └── Supporting codes v2/
+│       ├── Helper functions/
+│       ├── Play and behavior PSTH/
+│       ├── LFP spectra/
+│       ├── Speed and peak frequency/
+│       ├── Region gaussian centers/
+│       ├── Coherence and phase lag/
+│       ├── Delta episodes/
+│       ├── Theta frequency coupling/
+│       ├── Theta envelope/
+│       └── Theta envelope statistics/
 ├── Figure 3/
 │   ├── Figure 3a-e.m
 │   ├── Figure 3g-h Activation Index.m
@@ -180,11 +190,11 @@ HMM pipeline order: `Figure 1/HMM modeling/README.md`.
 | g | Unique $R^2$ for delta-power regressors | `Figure 2/Figure 2.m` | `%% 7 (Figre 2g, Supp Fig 4c,f)` |
 | h | Delta power, reciprocal vs nonreciprocal play | `Figure 2/Reciprocity.m` | `%% 11 (Fig 2h, Supp Fig 3b,c)` |
 
-Related analysis (not a main-figure panel): speed vs theta in `Figure 2/Figure 2.m` sections `%% 18`–`%% 21` and `Figure 2/Supporting codes v2/Analyze_speed_freq_relation.m`.
+Related analysis (not a main-figure panel): speed vs theta in `Figure 2/Figure 2.m` sections `%% 18`–`%% 21` and `Figure 2/Supporting codes v2/Speed and peak frequency/Analyze_speed_freq_relation.m`.
 
 ### Supporting codes v2
 
-Use **`Figure 2/Supporting codes v2/`** to rebuild `.mat` files. Naming:
+Use **`Figure 2/Supporting codes v2/`** to rebuild `.mat` files. Scripts sit in a theme folder (about 10–20 files each). Functions shared by more than one theme are in `Helper functions/`. Naming:
 
 | Prefix | Role |
 |--------|------|
@@ -200,7 +210,7 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 |----------|----------|----------------------|
 | Play-bout band-power PSTH | `Estimate_psth_band_power.m` | `Figure 2.m` |
 | PSTH per behavior | `Estimate_psth_all_behaviors.m` | `Analyze_psth_all_behaviors.m` |
-| PSTH per behavior, delta / theta / gamma (same alignments; LFP loaded once per animal) | `Theta power coupling/Estimate_psth_all_behaviors_theta_gamma.m` | `Analyze_psth_all_behaviors_theta_gamma.m` (grand averages and condition differences); `Theta power coupling/Analyze_psth_preonset_spectrum.m` (pre-onset spectrum and the per-animal check) |
+| PSTH per behavior, delta / theta / gamma (same alignments; LFP loaded once per animal) | `Theta frequency coupling/Estimate_psth_all_behaviors_theta_gamma.m` | `Analyze_psth_all_behaviors_theta_gamma.m` (grand averages and condition differences); `Theta frequency coupling/Analyze_psth_preonset_spectrum.m` (pre-onset spectrum and the per-animal check) |
 | Classify two Type2 groups from time-wrapped band power, pooled across sessions and animals | (uses the per-behavior PSTH) | `Analyze_behavior_class_from_timewrap_power.m` |
 | Area maps | `Estimate_psth_area_maps.m` | `Analyze_psth_area_maps.m` |
 | Call-locked PSTH | `Estimate_psth_calls_all_animals.m` | `Figure 2.m` `%% 13`–`%% 17` |
@@ -208,9 +218,9 @@ Estimate_*.m  →  GENERATE_*  →  save .mat  →  Analyze_*.m  →  Figure 2.m
 | Reciprocity | (uses regressor PSTH) | `Reciprocity.m` |
 | Partner identity | (uses play-bout PSTH) | `Play partner.m` |
 | Speed vs band power | `Estimate_speed_freq_relation.m` | `Analyze_speed_freq_relation.m`; `Figure 2.m` `%% 18`–`%% 21` |
-| Cross-frequency coupling | `Theta power coupling/Estimate_freq_coupling.m` | `Theta power coupling/Analyze_freq_coupling.m`; `Theta power coupling/CrossFreq coupling.m` |
-| Frequency-resolved slow-phase/theta-power coupling, harmonic control, and direct play vs non-play interaction | `Theta power coupling/Estimate_frequency_resolved_theta_pac.m` (resumable overnight estimate, hierarchical inference, CSVs, and figures) | same script |
-| Theta-envelope oscillation from 0.1–6 Hz and behavior-onset locking | `Theta power coupling/Estimate_theta_envelope_delta.m` | `Theta power coupling/Analyze_theta_envelope_delta.m` |
+| Cross-frequency coupling | `Theta frequency coupling/Estimate_freq_coupling.m` | `Theta frequency coupling/Analyze_freq_coupling.m`; `Theta frequency coupling/CrossFreq coupling.m` |
+| Frequency-resolved slow-phase/theta-power coupling, harmonic control, and direct play vs non-play interaction | `Theta frequency coupling/Estimate_frequency_resolved_theta_pac.m` (resumable overnight estimate, hierarchical inference, CSVs, and figures) | same script |
+| Theta-envelope oscillation from 0.1–6 Hz and behavior-onset locking | `Theta envelope/Estimate_theta_envelope_delta.m` | `Theta envelope/Analyze_theta_envelope_delta.m` |
 
 The original (pre-v2) Figure 2 pipeline lives outside this repository, in the parent folder `PlayBout Analysis/Figure 2 Supporting codes/`.
 
@@ -452,7 +462,7 @@ Phase of coincident events (not a numbered paper panel here): `Figure 3/Former S
 3. Extract so `Data/` sits next to `Figure 1/`–`Figure 6/`.
 4. Scripts use UNC paths under  
    `...\play bout analysis behavior and physiology\Data\`.
-5. Add `Figure 2/Supporting codes v2` and `Figure 3/Supporting codes` to the MATLAB path before running estimate / example-CCG scripts.
+5. Run `add_repo_paths.m` before estimate / example-CCG scripts. It adds `Figure 2/Supporting codes v2` with its theme folders, and `Figure 3/Supporting codes`.
 6. Add shared helpers (`play_bout`, `readNPY`, `run_umap`, `wrap_probe_values`, circular statistics).
 
 ---

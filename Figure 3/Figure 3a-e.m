@@ -1109,7 +1109,7 @@ end
 
 lpag_repo_root = fileparts(data_root);
 addpath(fullfile(lpag_repo_root, 'Custom functions'));
-addpath(fullfile(lpag_repo_root, 'Figure 2', 'Supporting codes v2'));
+addpath(genpath(fullfile(lpag_repo_root, 'Figure 2', 'Supporting codes v2')));
 addpath(fullfile(lpag_repo_root, 'Figure 3', 'Supporting codes'));
 
 disp('Loading pairwise coherence maps')

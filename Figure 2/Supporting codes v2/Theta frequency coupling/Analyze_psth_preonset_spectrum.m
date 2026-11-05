@@ -66,11 +66,11 @@
 %% Paths
 this_file = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
     'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\' ...
-    'Figure 2\Supporting codes v2\Theta power coupling\Analyze_psth_preonset_spectrum.m'];
+    'Figure 2\Supporting codes v2\Theta frequency coupling\Analyze_psth_preonset_spectrum.m'];
 repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
-addpath(fileparts(this_file));
+addpath(genpath(fileparts(fileparts(this_file))));
 
 all_behaviors = {'Pounce', 'CC', 'Boxing', 'Evasion', 'Pin', 'Escape', 'CB', 'CD', ...
     'Grooming', 'Rearing', 'Sniffing', 'Scratching', 'PounceI', 'Bite'};

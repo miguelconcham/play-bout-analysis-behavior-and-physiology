@@ -23,7 +23,7 @@ n_frequency = numel(frequency);
 
 %% Locate repository data and identify the recording
 this_file = mfilename('fullpath');
-repo_root = fileparts(fileparts(fileparts(this_file)));
+repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 repository_data_root = fullfile(repo_root, 'Data');
 recording_data_root = fileparts(fileparts(fileparts(current_dir)));
 if isfile(fullfile(recording_data_root, 'Area_limits_GoodLooking.xlsx'))

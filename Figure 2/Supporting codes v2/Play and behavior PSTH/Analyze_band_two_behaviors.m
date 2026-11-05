@@ -3,7 +3,7 @@
 % Defaults: gamma, Pounce/PounceI.
 %
 % The input is NOT averaged per session. In
-% Theta power coupling/GENERATE_PSTH_ALL_BEHAVIORS_BANDS.m, every row of
+% Theta frequency coupling/GENERATE_PSTH_ALL_BEHAVIORS_BANDS.m, every row of
 % all_behavior_psth_self/other{alignment, behavior} is one annotated
 % behavior event. psth_structure and animal_names retain its recording
 % session and electrode.
