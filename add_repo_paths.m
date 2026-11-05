@@ -12,7 +12,7 @@ addpath(genpath(fullfile(repo_root, 'Custom functions')));
 addpath(fullfile(repo_root, 'Figure 1', 'LDA analysis'));
 addpath(fullfile(repo_root, 'Figure 1', 'HMM modeling'));
 addpath(fullfile(repo_root, 'Figure 1', 'Behavior probability'));
-addpath(genpath(fullfile(repo_root, 'Figure 2', 'Supporting codes v2')));
+addpath(genpath(fullfile(repo_root, 'Figure 2', 'Supporting codes')));
 addpath(fullfile(repo_root, 'Figure 3', 'Supporting codes'));
 addpath(fullfile(repo_root, 'Figure 6', 'Supplementary codes'));
 addpath(fullfile(repo_root, 'Complementary figures'));
