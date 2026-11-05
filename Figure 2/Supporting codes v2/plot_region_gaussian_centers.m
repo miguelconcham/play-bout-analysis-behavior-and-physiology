@@ -1,7 +1,7 @@
 function figure_handle = plot_region_gaussian_centers( ...
         region_results, frequency_limits, selection_criterion, ...
         threshold_hz, histogram_bin_hz, spectral_method, ...
-        minimum_assignment_posterior)
+        minimum_assignment_posterior, amplitude_confidence_level)
 %PLOT_REGION_GAUSSIAN_CENTERS  Centers, BIC/AIC, mixture, and bump height.
 %
 % One row per region. The left panel is the information criterion for
@@ -10,7 +10,9 @@ function figure_handle = plot_region_gaussian_centers( ...
 % The right panel scatters each bump's stored FOOOF height against its
 % center frequency. A bump takes the color of the selected component with
 % the highest posterior when that posterior clears
-% minimum_assignment_posterior and exceeds the other components.
+% minimum_assignment_posterior and exceeds the other components. The same
+% panel draws the median height in each frequency bin and its confidence
+% interval. histogram_bin_hz is that bin width.
 
 if nargin < 4
     threshold_hz = [];
@@ -23,6 +25,9 @@ if nargin < 6 || isempty(spectral_method)
 end
 if nargin < 7 || isempty(minimum_assignment_posterior)
     minimum_assignment_posterior = 0.5;
+end
+if nargin < 8 || isempty(amplitude_confidence_level)
+    amplitude_confidence_level = 0.95;
 end
 
 n_regions = numel(region_results);
@@ -52,7 +57,8 @@ for region_n = 1:n_regions
 
     subplot(n_regions, 3, (region_n - 1) * 3 + 3)
     plot_amplitudes(this_region, frequency_limits, label_x, ...
-        minimum_assignment_posterior, height_limits)
+        minimum_assignment_posterior, height_limits, histogram_bin_hz, ...
+        amplitude_confidence_level)
 end
 
 if isempty(spectral_method)
@@ -221,7 +227,7 @@ box off
 end
 
 function plot_amplitudes(this_region, frequency_limits, label_x, ...
-        minimum_posterior, height_limits)
+        minimum_posterior, height_limits, bin_hz, confidence)
 centers = stored_centers(this_region);
 heights = stored_heights(this_region);
 if numel(heights) ~= numel(centers)
@@ -262,8 +268,8 @@ if fitted
         component_color = component_colors(component_n, :);
         if any(keep)
             legend_handles(end + 1, 1) = scatter( ...
-                centers(keep), heights(keep), 22, component_color, ...
-                'filled', 'MarkerFaceAlpha', 0.55, ...
+                centers(keep), heights(keep), 16, component_color, ...
+                'filled', 'MarkerFaceAlpha', 0.18, ...
                 'MarkerEdgeColor', 'none'); %#ok<AGROW>
         else
             legend_handles(end + 1, 1) = plot(nan, nan, 'o', ...
@@ -277,13 +283,37 @@ end
 unassigned = assignment == 0 & finite;
 if any(unassigned)
     legend_handles(end + 1, 1) = scatter( ...
-        centers(unassigned), heights(unassigned), 22, ...
-        [0.45 0.45 0.45], 'filled', 'MarkerFaceAlpha', 0.35, ...
+        centers(unassigned), heights(unassigned), 16, ...
+        [0.45 0.45 0.45], 'filled', 'MarkerFaceAlpha', 0.18, ...
         'MarkerEdgeColor', 'none');
     if fitted
         legend_labels{end + 1} = 'Unassigned'; %#ok<AGROW>
     else
         legend_labels{end + 1} = 'Mixture not fitted'; %#ok<AGROW>
+    end
+end
+
+[bin_center, median_height, lower_ci, upper_ci] = ...
+    frequency_bin_median_interval( ...
+    centers(finite), heights(finite), frequency_limits, bin_hz, confidence);
+if ~isempty(bin_center)
+    [line_frequency, line_height] = median_line_with_gaps( ...
+        bin_center, median_height, bin_hz);
+    plot(line_frequency, line_height, 'k-', 'LineWidth', 1.4, ...
+        'HandleVisibility', 'off');
+    legend_handles(end + 1, 1) = plot(bin_center, median_height, 'ko', ...
+        'MarkerFaceColor', 'k', 'MarkerSize', 4.5, 'LineStyle', 'none', ...
+        'DisplayName', 'Median');
+    legend_labels{end + 1} = sprintf('Median (%g Hz)', bin_hz); %#ok<AGROW>
+    finite_ci = isfinite(lower_ci) & isfinite(upper_ci);
+    if any(finite_ci)
+        legend_handles(end + 1, 1) = errorbar( ...
+            bin_center(finite_ci), median_height(finite_ci), ...
+            median_height(finite_ci) - lower_ci(finite_ci), ...
+            upper_ci(finite_ci) - median_height(finite_ci), ...
+            'k', 'LineStyle', 'none', 'Marker', 'none', ...
+            'LineWidth', 1.15, 'CapSize', 5);
+        legend_labels{end + 1} = sprintf('%g%% CI', 100 * confidence); %#ok<AGROW>
     end
 end
 
@@ -306,6 +336,20 @@ if ~isempty(legend_handles)
 end
 grid on
 box off
+end
+
+function [line_frequency, line_height] = median_line_with_gaps( ...
+        bin_center, median_height, bin_hz)
+line_frequency = bin_center(1);
+line_height = median_height(1);
+for bin_n = 2:numel(bin_center)
+    if bin_center(bin_n) - bin_center(bin_n - 1) > bin_hz * 1.01
+        line_frequency(end + 1, 1) = NaN; %#ok<AGROW>
+        line_height(end + 1, 1) = NaN; %#ok<AGROW>
+    end
+    line_frequency(end + 1, 1) = bin_center(bin_n); %#ok<AGROW>
+    line_height(end + 1, 1) = median_height(bin_n); %#ok<AGROW>
+end
 end
 
 function show_amplitude_note(this_region, fallback)
