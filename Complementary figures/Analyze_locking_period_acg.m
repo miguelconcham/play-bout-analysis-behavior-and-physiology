@@ -24,6 +24,15 @@
 % rebuilt from the session spike times and the saved run intervals.
 % Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz side peak sits at the
 % edge of this window.
+%
+% Each plotted autocorrelogram is also scored neuron by neuron. The burst
+% is the mean level from the first positive bin through 50 ms. Oscillatory
+% peaks are local maxima from 100 ms onward; height is findpeaks
+% prominence, the height above the higher neighboring valley. The first
+% peak is the earliest one. A second peak counts only near twice that lag,
+% and only when that window was observed. Low and high are the same
+% neuron, so the plots connect the two conditions with a line. A second
+% cycle that the runs are too short to measure is left out of the pair.
 
 %% Paths and parameters
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -263,6 +272,12 @@ locking_acg.parameters = parameters;
 power_acg.centers = centers;
 power_acg.bin_edges = edges;
 power_acg.parameters = parameters;
+locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order);
+power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order);
+plot_paired_peak_scores(locking_acg, group_order, group_title, ...
+    'Mean PPC of the runs', 'locking');
+plot_paired_peak_scores(power_acg, group_order, group_title, ...
+    'Mean delta power of the runs', 'delta power');
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -280,6 +295,9 @@ for g = 1:numel(group_order)
     block.n_low = zeros(0, 1);
     block.n_high = zeros(0, 1);
     block.n_all = zeros(0, 1);
+    block.score_low = zeros(0, 1);
+    block.score_high = zeros(0, 1);
+    block.score_all = zeros(0, 1);
     block.session = {};
     block.cluster_id = zeros(0, 1);
     block.area = {};
@@ -304,6 +322,9 @@ block.all(row, :) = pooled.all;
 block.n_low(row, 1) = pooled.n_low;
 block.n_high(row, 1) = pooled.n_high;
 block.n_all(row, 1) = pooled.n_all;
+block.score_low(row, 1) = pooled.score_low;
+block.score_high(row, 1) = pooled.score_high;
+block.score_all(row, 1) = pooled.score_all;
 block.session{row, 1} = animal_code;
 block.cluster_id(row, 1) = this_id;
 block.area{row, 1} = this_area;
@@ -346,6 +367,9 @@ for g = 1:numel(group_order)
     summary.(name).n_low = acg_raw.(name).n_low(keep);
     summary.(name).n_high = acg_raw.(name).n_high(keep);
     summary.(name).n_all = acg_raw.(name).n_all(keep);
+    summary.(name).score_low = acg_raw.(name).score_low(keep);
+    summary.(name).score_high = acg_raw.(name).score_high(keep);
+    summary.(name).score_all = acg_raw.(name).score_all(keep);
     summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
         [group_title{g}, ', ', split_name], centers, delta_lag, skip_abs_lag, ...
         smooth_n, curve_colors, split_name);
@@ -378,6 +402,9 @@ combined.lock_group = cell(0, 1);
 combined.n_low = zeros(0, 1);
 combined.n_high = zeros(0, 1);
 combined.n_all = zeros(0, 1);
+combined.score_low = zeros(0, 1);
+combined.score_high = zeros(0, 1);
+combined.score_all = zeros(0, 1);
 for g = 1:numel(group_order)
     name = group_order{g};
     if ~isfield(summary, name) || ~isfield(summary.(name), 'low')
@@ -394,6 +421,9 @@ for g = 1:numel(group_order)
     combined.n_low = [combined.n_low; summary.(name).n_low]; %#ok<AGROW>
     combined.n_high = [combined.n_high; summary.(name).n_high]; %#ok<AGROW>
     combined.n_all = [combined.n_all; summary.(name).n_all]; %#ok<AGROW>
+    combined.score_low = [combined.score_low; summary.(name).score_low]; %#ok<AGROW>
+    combined.score_high = [combined.score_high; summary.(name).score_high]; %#ok<AGROW>
+    combined.score_all = [combined.score_all; summary.(name).score_all]; %#ok<AGROW>
     combined.n = combined.n + n;
 end
 end
@@ -425,6 +455,225 @@ title({figure_label, sprintf('n = %d    shaded: 2-5 Hz', size(group_acg.low, 1))
 legend(plotted, curve_labels, 'Location', 'best')
 place_delta_shade(shade)
 box off
+end
+
+
+function summary = add_peak_scores(summary, centers, smooth_n, group_order)
+names = [group_order, {'all_neurons'}];
+for k = 1:numel(names)
+    if ~isfield(summary, names{k}) || ~isfield(summary.(names{k}), 'low')
+        continue
+    end
+    summary.(names{k}) = score_condition_acgs(summary.(names{k}), centers, smooth_n);
+end
+end
+
+
+function group = score_condition_acgs(group, centers, smooth_n)
+curve_names = {'low', 'high', 'all'};
+for c = 1:numel(curve_names)
+    group.([curve_names{c}, '_peaks']) = score_acg_matrix( ...
+        group.(curve_names{c}), centers, smooth_n);
+end
+end
+
+
+function scores = score_acg_matrix(acg, centers, smooth_n)
+n = size(acg, 1);
+scores.burst = nan(n, 1);
+scores.first_measurable = false(n, 1);
+scores.first_present = false(n, 1);
+scores.first_lag = nan(n, 1);
+scores.first_prominence = nan(n, 1);
+scores.second_measurable = false(n, 1);
+scores.second_present = false(n, 1);
+scores.second_lag = nan(n, 1);
+scores.second_prominence = nan(n, 1);
+scores.n_cycles = nan(n, 1);
+for row = 1:n
+    peaks = acg_delta_peaks(acg(row, :), centers, smooth_n);
+    scores.burst(row) = peaks.burst;
+    scores.first_measurable(row) = peaks.first_measurable;
+    scores.first_present(row) = peaks.first_present;
+    scores.first_lag(row) = peaks.first_lag;
+    scores.first_prominence(row) = peaks.first_prominence;
+    scores.second_measurable(row) = peaks.second_measurable;
+    scores.second_present(row) = peaks.second_present;
+    scores.second_lag(row) = peaks.second_lag;
+    scores.second_prominence(row) = peaks.second_prominence;
+    scores.n_cycles(row) = peaks.n_cycles;
+end
+end
+
+
+function plot_paired_peak_scores(summary, group_order, group_title, score_label, split_name)
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low_peaks') ...
+        || summary.all_neurons.n < 1
+    return
+end
+neurons = summary.all_neurons;
+colors = lock_group_colors();
+measures = {'burst', 'first_prominence', 'second_prominence'};
+measure_labels = { ...
+    'Burst level, 0-50 ms', ...
+    'First-peak prominence', ...
+    'Second-cycle prominence'};
+figure('Name', ['Paired ACG peaks, ', split_name], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.05 0.05 0.9 0.9])
+for m = 1:numel(measures)
+    [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measures{m});
+    subplot(3, 2, 2 * m - 1)
+    plot_paired_categories(neurons.lock_group(ok), y_low(ok), y_high(ok), ...
+        group_order, colors, measure_labels{m})
+    subplot(3, 2, 2 * m)
+    plot_paired_against_score(neurons.lock_group(ok), ...
+        neurons.score_low(ok), neurons.score_high(ok), y_low(ok), y_high(ok), ...
+        group_order, colors, score_label, measure_labels{m})
+    report_paired_peaks(summary, group_order, group_title, measures{m}, ...
+        measure_labels{m}, split_name);
+end
+legend_group_colors(group_order, group_title, colors)
+
+figure('Name', ['ACG cycle counts, ', split_name], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.2 0.2 0.55 0.45])
+plot_paired_cycle_counts(neurons, group_order, group_title, colors, split_name)
+end
+
+
+function [y_low, y_high, ok] = paired_peak_values(low_peaks, high_peaks, measure_name)
+y_low = low_peaks.(measure_name);
+y_high = high_peaks.(measure_name);
+ok = isfinite(y_low) & isfinite(y_high);
+if strcmp(measure_name, 'second_prominence')
+    ok = ok & low_peaks.second_measurable & high_peaks.second_measurable;
+elseif strcmp(measure_name, 'first_prominence')
+    ok = ok & low_peaks.first_measurable & high_peaks.first_measurable;
+end
+end
+
+
+function plot_paired_categories(lock_group, y_low, y_high, group_order, colors, y_label)
+hold on
+for g = 1:numel(group_order)
+    idx = strcmp(lock_group, group_order{g});
+    if ~any(idx)
+        continue
+    end
+    x = [ones(sum(idx), 1), 2 * ones(sum(idx), 1)];
+    plot(x', [y_low(idx), y_high(idx)]', '-', ...
+        'Color', [colors(g, :), 0.25], 'HandleVisibility', 'off')
+    plot([1 2], [mean(y_low(idx), 'omitnan'), mean(y_high(idx), 'omitnan')], ...
+        '-', 'Color', colors(g, :), 'LineWidth', 2.5, 'HandleVisibility', 'off')
+end
+xlim([0.6 2.4])
+set(gca, 'XTick', [1 2], 'XTickLabel', {'Low 25%', 'High 25%'})
+ylabel(y_label)
+title(sprintf('Paired, n = %d', numel(y_low)))
+box off
+end
+
+
+function plot_paired_against_score(lock_group, x_low, x_high, y_low, y_high, group_order, colors, x_label, y_label)
+hold on
+for g = 1:numel(group_order)
+    idx = strcmp(lock_group, group_order{g});
+    if ~any(idx)
+        continue
+    end
+    plot([x_low(idx), x_high(idx)]', [y_low(idx), y_high(idx)]', '-', ...
+        'Color', [colors(g, :), 0.3], 'HandleVisibility', 'off')
+    scatter(x_low(idx), y_low(idx), 18, colors(g, :), 'filled', ...
+        'MarkerFaceAlpha', 0.7, 'HandleVisibility', 'off')
+    scatter(x_high(idx), y_high(idx), 28, colors(g, :), 'filled', ...
+        'MarkerFaceAlpha', 0.9, 'HandleVisibility', 'off')
+end
+xlabel(x_label)
+ylabel(y_label)
+title('Each line is one neuron')
+box off
+end
+
+
+function report_paired_peaks(summary, group_order, group_title, measure_name, measure_label, split_name)
+for g = 1:numel(group_order)
+    if ~isfield(summary, group_order{g}) || ~isfield(summary.(group_order{g}), 'low_peaks')
+        continue
+    end
+    [y_low, y_high, ok] = paired_peak_values( ...
+        summary.(group_order{g}).low_peaks, summary.(group_order{g}).high_peaks, measure_name);
+    p = paired_signrank(y_high(ok), y_low(ok));
+    disp(sprintf('  %s, %s, %s: high - low = %.3g, signrank p = %.3g, n = %d', ...
+        group_title{g}, split_name, measure_label, ...
+        mean(y_high(ok) - y_low(ok), 'omitnan'), p, sum(ok)))
+end
+end
+
+
+function plot_paired_cycle_counts(neurons, group_order, group_title, ~, split_name)
+classifiable_low = neurons.low_peaks.n_cycles == 0 | neurons.low_peaks.second_measurable;
+classifiable_high = neurons.high_peaks.n_cycles == 0 | neurons.high_peaks.second_measurable;
+ok = classifiable_low & classifiable_high;
+fractions = zeros(numel(group_order), 3, 2);
+ns = zeros(numel(group_order), 1);
+for g = 1:numel(group_order)
+    idx = ok & strcmp(neurons.lock_group, group_order{g});
+    ns(g) = sum(idx);
+    if ~any(idx)
+        continue
+    end
+    fractions(g, :, 1) = cycle_fraction(neurons.low_peaks.n_cycles(idx));
+    fractions(g, :, 2) = cycle_fraction(neurons.high_peaks.n_cycles(idx));
+end
+low_bars = squeeze(fractions(:, :, 1));
+high_bars = squeeze(fractions(:, :, 2));
+if numel(group_order) == 1
+    low_bars = low_bars(:)';
+    high_bars = high_bars(:)';
+end
+bar_x = (1:numel(group_order))';
+cycle_colors = [0.75 0.75 0.75; 0.30 0.55 0.85; 0.80 0.30 0.25];
+hold on
+low_bars_handle = bar(bar_x - 0.16, low_bars, 0.3, 'stacked');
+high_bars_handle = bar(bar_x + 0.16, high_bars, 0.3, 'stacked');
+for s = 1:3
+    low_bars_handle(s).FaceColor = cycle_colors(s, :);
+    low_bars_handle(s).FaceAlpha = 0.45;
+    low_bars_handle(s).EdgeColor = 'none';
+    high_bars_handle(s).FaceColor = cycle_colors(s, :);
+    high_bars_handle(s).EdgeColor = 'none';
+end
+legend(high_bars_handle, {'0 cycles', '1 cycle', '2 cycles'}, 'Location', 'eastoutside')
+xlim([0.4, numel(group_order) + 0.6])
+set(gca, 'XTick', 1:numel(group_order), 'XTickLabel', group_title)
+ylabel('Fraction of paired neurons')
+title({['Cycles in the autocorrelogram, ', split_name], ...
+    'Left bar low 25%, right bar high 25%. Stack: 0, 1, 2 cycles'})
+for g = 1:numel(group_order)
+    text(bar_x(g), 1.02, sprintf('n=%d', ns(g)), ...
+        'HorizontalAlignment', 'center', 'FontSize', 8)
+end
+ylim([0 1.12])
+box off
+end
+
+
+function fraction = cycle_fraction(n_cycles)
+fraction = [mean(n_cycles == 0), mean(n_cycles == 1), mean(n_cycles == 2)];
+end
+
+
+function colors = lock_group_colors()
+colors = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45];
+end
+
+
+function legend_group_colors(group_order, group_title, colors)
+hold on
+handles = gobjects(1, numel(group_order));
+for g = 1:numel(group_order)
+    handles(g) = plot(nan, nan, '-', 'Color', colors(g, :), 'LineWidth', 2.5);
+end
+legend(handles, group_title, 'Location', 'eastoutside')
 end
 
 

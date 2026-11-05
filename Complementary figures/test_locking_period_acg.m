@@ -2,7 +2,8 @@ function test_locking_period_acg()
 %TEST_LOCKING_PERIOD_ACG  Checks that do not need the experiment files.
 %
 % Delta-lock labels, within-neuron locking quartiles, overlap-weighted
-% pooling, and per-neuron ACG normalization. Run this file by name after
+% pooling, per-neuron ACG normalization, and delta-cycle peak scores.
+% Run this file by name after
 % add_repo_paths.
 
 this_dir = fileparts(mfilename('fullpath'));
@@ -102,5 +103,41 @@ short_acg = run_window_acgs([0; 0.2], 0, 0.4, edges);
 assert(all(isnan(short_acg)), ...
     'A lag with less than one bin of overlap was kept.');
 
+centers = -1:0.01:1;
+two_cycles = synthetic_acg(centers, [0.02 0.30 0.60], [1 0.5 0.3]);
+found = acg_delta_peaks(two_cycles, centers, 1);
+assert(found.burst > 0.4, ...
+    'The 50 ms burst was not measured.');
+assert(found.first_present && found.first_lag > 0.25 && found.first_lag < 0.36, ...
+    'The first delta peak was not near 300 ms.');
+assert(found.first_prominence > 0.05, ...
+    'The first peak did not stand above its valleys.');
+assert(found.second_present && found.second_lag > 0.54 && found.second_lag < 0.68, ...
+    'The second cycle was not near twice the first lag.');
+assert(found.n_cycles == 2, 'Two delta cycles were not counted.');
+
+decay = synthetic_acg(centers, 0.02, 1);
+quiet = acg_delta_peaks(decay, centers, 1);
+assert(quiet.first_measurable && ~quiet.first_present && quiet.first_prominence == 0, ...
+    'A smooth decay was called a delta peak.');
+assert(isnan(quiet.n_cycles) || quiet.n_cycles == 0, ...
+    'A smooth decay was given two cycles.');
+
+slow = synthetic_acg(centers, [0.02 0.70], [0.4 0.5]);
+one_cycle = acg_delta_peaks(slow, centers, 1);
+assert(one_cycle.first_present && one_cycle.first_lag > 0.60 && one_cycle.first_lag < 0.80, ...
+    'A slow delta peak was not kept as the first cycle.');
+assert(~one_cycle.second_measurable, ...
+    'A second cycle was required beyond the end of the trace.');
+
 disp('test_locking_period_acg passed')
+end
+
+
+function y = synthetic_acg(centers, peak_lags, peak_heights)
+t = centers(:)';
+y = 0.15 * exp(-abs(t) / 0.35);
+for k = 1:numel(peak_lags)
+    y = y + peak_heights(k) * exp(-((abs(t) - peak_lags(k)) / 0.035) .^ 2);
+end
 end
