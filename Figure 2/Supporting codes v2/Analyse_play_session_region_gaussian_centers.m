@@ -11,6 +11,14 @@
 % After Select_play_session_region_gaussian_centers.m, set it to one of
 % the printed names, for example 'ICL' or 'SlopeHeuristicRegression'.
 % The elbow and overlap settings below must match that script.
+%
+% The third column scatters the FOOOF height of each bump against its
+% center frequency. A bump is colored as a member of one selected
+% component when its posterior for that component is at least
+% minimum_assignment_posterior and higher than every other component.
+% A weaker or tied bump is drawn in gray. Height is the log10-power
+% amplitude stored in the peak table. A saved file without that column
+% leaves the amplitude column blank.
 
 %% Regions to draw
 saving_folder = ['\\experimentfs.home.bccn-berlin.de\experiment\' ...
@@ -49,6 +57,12 @@ low_frequency_threshold_hz = NaN;
 % NaN uses the bin width stored by Estimate.
 histogram_bin_hz = NaN;
 
+% A bump is colored as a member of a selected component only when that
+% component's posterior is at least this value and strictly higher than
+% the others. 0.5 means the chosen component is at least as likely as
+% every remaining component together.
+minimum_assignment_posterior = 0.5;
+
 %% Load the saved mixtures
 output_file = fullfile(saving_folder, ...
     'play_session_region_gaussian_center_mixtures.mat');
@@ -63,6 +77,11 @@ if ~isfield(loaded, 'region_gaussian_centers')
         '%s has no region_gaussian_centers.', output_file);
 end
 region_gaussian_centers = loaded.region_gaussian_centers;
+if isfield(region_gaussian_centers, 'peak_table')
+    peak_table = region_gaussian_centers.peak_table;
+else
+    peak_table = table();
+end
 
 if ischar(spectral_method) || isstring(spectral_method)
     method_names = cellstr(spectral_method);
@@ -130,8 +149,22 @@ for method_n = 1:numel(method_names)
         continue
     end
     fprintf('%s figure: %s.\n', method_name, strjoin({plotted.name}, ', '));
+    for region_n = 1:numel(plotted)
+        [heights, height_note] = region_bump_heights( ...
+            plotted(region_n), peak_table, method_name);
+        plotted(region_n).bump_height = heights;
+        plotted(region_n).bump_height_note = height_note;
+        if isempty(height_note)
+            fprintf('  %s: %d bump heights for the amplitude scatter.\n', ...
+                plotted(region_n).name, numel(heights));
+        else
+            fprintf('  %s amplitudes left out: %s.\n', ...
+                plotted(region_n).name, height_note);
+        end
+    end
     plot_region_gaussian_centers(plotted, frequency_limits, ...
-        selection_criterion, threshold_hz, bin_hz, method_name);
+        selection_criterion, threshold_hz, bin_hz, method_name, ...
+        minimum_assignment_posterior);
     for region_n = 1:numel(plotted)
         this_region = plotted(region_n);
         best_n = NaN;
