@@ -3,12 +3,12 @@
 %
 % Run add_repo_paths, then run this script. It calls
 % GENERATE_DELTA_OSCILLATORY_EPISODES once per Neuropixels folder and
-% saves Data/Analysis results/delta oscillatory episodes/
-% delta_oscillatory_episodes.mat.
+% saves Data/Analysis results/delta oscillatory episodes/<file_name_code>.
 %
-% Then run Analyze_delta_oscillatory_episodes.m for traces, cycle-period
-% histograms, symmetry, and the session summary. Set figure_folder at the
-% top of Analyze. It writes SVG and JPEG figures plus result_summary.txt.
+% Then run Analyze_delta_oscillatory_episodes.m with the same
+% file_name_code. It writes SVG and JPEG figures plus a text summary.
+% The default names replace the previous default run. Set file_name_code
+% and table_name_code before a run that must keep those files.
 %
 % Knobs live in delta_episode_options.m. The ones that change detection:
 %   amplitude_threshold_mode, amplitude_threshold
@@ -31,6 +31,17 @@
 % Detected episodes are candidates. The 1-5 Hz filter can ring around a
 % transient. Keep the minimally processed trace in view when judging them.
 
+%% Output
+% Leave min_cycles_override empty to keep delta_episode_options (3).
+% Change the file names when this run must not replace an earlier one.
+% Point Analyze at the same file_name_code. A 2-cycle rerun:
+%   min_cycles_override = 2;
+%   file_name_code = 'delta_oscillatory_episodes_2c.mat';
+%   table_name_code = 'session_summary_2c.csv';
+min_cycles_override = [];
+file_name_code = 'delta_oscillatory_episodes.mat';
+table_name_code = 'session_summary.csv';
+
 %% Paths
 this_file = mfilename('fullpath');
 if isempty(this_file)
@@ -43,6 +54,9 @@ repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 run(fullfile(repo_root, 'add_repo_paths.m'));
 
 options = delta_episode_options();
+if ~isempty(min_cycles_override)
+    options.min_cycles = min_cycles_override;
+end
 options.filter_coefficients = delta_bandpass_coefficients(options);
 options.cycle_lowpass_coefficients = delta_lowpass_coefficients(options);
 npx_raw_data = fullfile(options.data_root, 'NPX data', 'NPX raw data');
@@ -128,12 +142,12 @@ else
     session_summary = delta_episode_summary_table(delta_episodes);
 end
 detection_parameters = options;
-output_file = fullfile(saving_folder, 'delta_oscillatory_episodes.mat');
+output_file = fullfile(saving_folder, file_name_code);
 fprintf('Saving %s\n', output_file);
 save(output_file, 'delta_episodes', 'animal_names', 'session_summary', ...
     'failures', 'detection_parameters', '-v7.3');
 if ~isempty(session_summary)
-    writetable(session_summary, fullfile(saving_folder, 'session_summary.csv'));
+    writetable(session_summary, fullfile(saving_folder, table_name_code));
     disp(session_summary);
 end
 fprintf('Delta-episode estimation finished. %d channels, %d skipped or failed.\n', ...

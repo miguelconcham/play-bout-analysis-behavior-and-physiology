@@ -2,16 +2,21 @@
 % Plots and the session summary for candidate continuous delta episodes.
 %
 % Run Estimate_delta_oscillatory_episodes.m first. This script reads
-% Data/Analysis results/delta oscillatory episodes/delta_oscillatory_episodes.mat
+% Data/Analysis results/delta oscillatory episodes/<file_name_code>
 % and writes:
-%   session_summary.csv
-%   result_summary.txt
-%   one SVG and one JPEG per figure:
+%   session_summary.csv, or session_summary<tag>.csv
+%   result_summary.txt, or result_summary<tag>.txt
+%   one SVG and one JPEG per figure, in figures/ or figures<tag>/:
 %       <recording>_probe<P>_channel<C>
 %       cycle_period_histogram_pooled
 %       session_summary
 %           episode duration, trough-cycle count, period variability,
 %           and rise-decay / peak-trough symmetry
+%
+% file_name_code must match Estimate. For
+% delta_oscillatory_episodes_2c.mat the tag is _2c, so the summary and
+% figures land beside the default run instead of replacing it. Set
+% table_name_code, summary_name_code, or figure_folder to override that.
 %
 % The histogram axis is 50-1000 ms. A 1-5 Hz cycle is 200-1000 ms
 % (1/5 Hz to 1/1 Hz); that band is shaded. Periods near 50 ms are faster
@@ -22,7 +27,11 @@
 % Episodes are candidates. Filtering can ring around a transient.
 
 %% Output
-% Leave figure_folder empty to write figures inside the results folder.
+% Match file_name_code to the mat file written by Estimate.
+% Leave the other three empty to derive them from that name.
+file_name_code = 'delta_oscillatory_episodes.mat';
+table_name_code = '';
+summary_name_code = '';
 figure_folder = '';
 show_figures = false;
 
@@ -39,9 +48,16 @@ run(fullfile(repo_root, 'add_repo_paths.m'));
 options = delta_episode_options();
 saving_folder = fullfile(options.data_root, 'Analysis results', ...
     'delta oscillatory episodes');
-input_file = fullfile(saving_folder, 'delta_oscillatory_episodes.mat');
+run_tag = delta_output_tag(file_name_code);
+input_file = fullfile(saving_folder, file_name_code);
+if isempty(table_name_code)
+    table_name_code = ['session_summary' run_tag '.csv'];
+end
+if isempty(summary_name_code)
+    summary_name_code = ['result_summary' run_tag '.txt'];
+end
 if isempty(figure_folder)
-    figure_folder = fullfile(saving_folder, 'figures');
+    figure_folder = fullfile(saving_folder, ['figures' run_tag]);
 end
 
 fprintf('Loading %s\n', input_file);
@@ -56,8 +72,8 @@ if ~isfolder(figure_folder)
 end
 
 session_summary = delta_episode_summary_table(delta_episodes);
-writetable(session_summary, fullfile(saving_folder, 'session_summary.csv'));
-summary_file = fullfile(saving_folder, 'result_summary.txt');
+writetable(session_summary, fullfile(saving_folder, table_name_code));
+summary_file = fullfile(saving_folder, summary_name_code);
 write_delta_episode_summary_text(delta_episodes, session_summary, summary_file);
 fprintf('Summary written to %s\n', summary_file);
 disp(session_summary);
@@ -490,6 +506,21 @@ for row_n = 1:height(session_summary)
         1000 * session_summary.median_trough_period_s(row_n), ...
         session_summary.median_trough_period_cv(row_n), ...
         100 * session_summary.episode_time_fraction(row_n));
+end
+end
+
+function tag = delta_output_tag(file_name)
+[~, stem] = fileparts(file_name);
+prefix = 'delta_oscillatory_episodes';
+if strcmp(stem, prefix)
+    tag = '';
+    return
+end
+headed = [prefix '_'];
+if strncmp(stem, headed, numel(headed))
+    tag = stem(numel(prefix) + 1:end);
+else
+    tag = ['_' stem];
 end
 end
 
