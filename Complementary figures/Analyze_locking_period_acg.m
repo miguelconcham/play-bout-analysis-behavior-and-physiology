@@ -33,6 +33,11 @@
 % and only when that window was observed. Low and high are the same
 % neuron, so the plots connect the two conditions with a line. A second
 % cycle that the runs are too short to measure is left out of the pair.
+% The sum-to-1 scaling is not a division by firing rate. Set
+% plot_rate_scaled_peaks to also score the same peaks on
+% (pair counts / overlap) / (firing rate of those runs * bin width),
+% a conditional rate in Hz. A flat Poisson autocorrelogram then sits near
+% the firing rate of the runs.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
 % delta power goes with a bigger change in that measure.
@@ -60,6 +65,7 @@ acg_lag          = 1;       % s, half-width of the autocorrelogram axis
 smooth_half      = 0.04;        % s, full smooth width; Gaussian sigma is a quarter of this
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
+plot_rate_scaled_peaks = true;  % extra peak figures in conditional rate (Hz)
 
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -219,7 +225,8 @@ for f = 1:numel(parsing_files)
                 rt.phase_entrainment(:, ppc_col), this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
                 acg_raw.(group_order{g}) = append_pooled( ...
-                    acg_raw.(group_order{g}), pooled, animal_code, this_id, this_area, this_rate);
+                    acg_raw.(group_order{g}), pooled, animal_code, this_id, this_area, ...
+                    this_rate, tail_rate_struct(rt, pooled));
                 n_kept(g) = n_kept(g) + 1;
             else
                 n_unsplit(g) = n_unsplit(g) + 1;
@@ -229,7 +236,8 @@ for f = 1:numel(parsing_files)
                 run_delta_power(rt), this_corrected, low_percent, high_percent);
             if split_is_usable(pooled_power)
                 acg_power.(group_order{g}) = append_pooled( ...
-                    acg_power.(group_order{g}), pooled_power, animal_code, this_id, this_area, this_rate);
+                    acg_power.(group_order{g}), pooled_power, animal_code, this_id, this_area, ...
+                    this_rate, tail_rate_struct(rt, pooled_power));
                 n_kept_power(g) = n_kept_power(g) + 1;
             else
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
@@ -259,6 +267,7 @@ parameters = struct( ...
     'high_percent', high_percent, ...
     'delta_lag', delta_lag, ...
     'acg_lag', acg_lag, ...
+    'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
 
 locking_labels = { ...
@@ -292,6 +301,12 @@ plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
     'PPC', 'locking');
 plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
     'delta power', 'delta power');
+if plot_rate_scaled_peaks
+    plot_rate_scaled_peaks_for(locking_acg, bin_w, centers, smooth_n, ...
+        group_order, group_title, 'Mean PPC of the runs', 'locking');
+    plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
+        group_order, group_title, 'Mean delta power of the runs', 'delta power');
+end
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -313,6 +328,9 @@ for g = 1:numel(group_order)
     block.score_high = zeros(0, 1);
     block.score_all = zeros(0, 1);
     block.firing_rate = zeros(0, 1);
+    block.rate_low = zeros(0, 1);
+    block.rate_high = zeros(0, 1);
+    block.rate_all = zeros(0, 1);
     block.session = {};
     block.cluster_id = zeros(0, 1);
     block.area = {};
@@ -328,7 +346,7 @@ ok = pooled.n_low >= 1 && pooled.n_high >= 1 ...
 end
 
 
-function block = append_pooled(block, pooled, animal_code, this_id, this_area, firing_rate)
+function block = append_pooled(block, pooled, animal_code, this_id, this_area, firing_rate, tail_rates)
 row = block.n + 1;
 block.n = row;
 block.low(row, :) = pooled.low;
@@ -341,6 +359,9 @@ block.score_low(row, 1) = pooled.score_low;
 block.score_high(row, 1) = pooled.score_high;
 block.score_all(row, 1) = pooled.score_all;
 block.firing_rate(row, 1) = firing_rate;
+block.rate_low(row, 1) = tail_rates.low;
+block.rate_high(row, 1) = tail_rates.high;
+block.rate_all(row, 1) = tail_rates.all;
 block.session{row, 1} = animal_code;
 block.cluster_id(row, 1) = this_id;
 block.area{row, 1} = this_area;
@@ -375,6 +396,7 @@ for g = 1:numel(group_order)
     keep = 1:n;
     for c = 1:numel(curve_names)
         raw = blank_acg_zero_lag(acg_raw.(name).(curve_names{c})(keep, :), centers, acg_refractory_s);
+        summary.(name).(['mass_', curve_names{c}]) = sum(raw, 2, 'omitnan');
         summary.(name).(curve_names{c}) = normalize_acg_rows(raw);
     end
     summary.(name).session = acg_raw.(name).session(keep);
@@ -387,6 +409,9 @@ for g = 1:numel(group_order)
     summary.(name).score_high = acg_raw.(name).score_high(keep);
     summary.(name).score_all = acg_raw.(name).score_all(keep);
     summary.(name).firing_rate = acg_raw.(name).firing_rate(keep);
+    summary.(name).rate_low = acg_raw.(name).rate_low(keep);
+    summary.(name).rate_high = acg_raw.(name).rate_high(keep);
+    summary.(name).rate_all = acg_raw.(name).rate_all(keep);
     summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
         [group_title{g}, ', ', split_name], centers, delta_lag, skip_abs_lag, ...
         smooth_n, curve_colors, split_name);
@@ -423,6 +448,12 @@ combined.score_low = zeros(0, 1);
 combined.score_high = zeros(0, 1);
 combined.score_all = zeros(0, 1);
 combined.firing_rate = zeros(0, 1);
+combined.rate_low = zeros(0, 1);
+combined.rate_high = zeros(0, 1);
+combined.rate_all = zeros(0, 1);
+combined.mass_low = zeros(0, 1);
+combined.mass_high = zeros(0, 1);
+combined.mass_all = zeros(0, 1);
 for g = 1:numel(group_order)
     name = group_order{g};
     if ~isfield(summary, name) || ~isfield(summary.(name), 'low')
@@ -443,6 +474,12 @@ for g = 1:numel(group_order)
     combined.score_high = [combined.score_high; summary.(name).score_high]; %#ok<AGROW>
     combined.score_all = [combined.score_all; summary.(name).score_all]; %#ok<AGROW>
     combined.firing_rate = [combined.firing_rate; summary.(name).firing_rate]; %#ok<AGROW>
+    combined.rate_low = [combined.rate_low; summary.(name).rate_low]; %#ok<AGROW>
+    combined.rate_high = [combined.rate_high; summary.(name).rate_high]; %#ok<AGROW>
+    combined.rate_all = [combined.rate_all; summary.(name).rate_all]; %#ok<AGROW>
+    combined.mass_low = [combined.mass_low; summary.(name).mass_low]; %#ok<AGROW>
+    combined.mass_high = [combined.mass_high; summary.(name).mass_high]; %#ok<AGROW>
+    combined.mass_all = [combined.mass_all; summary.(name).mass_all]; %#ok<AGROW>
     combined.n = combined.n + n;
 end
 end
@@ -525,7 +562,10 @@ end
 end
 
 
-function plot_paired_peak_scores(summary, group_order, group_title, score_label, split_name)
+function plot_paired_peak_scores(summary, group_order, group_title, score_label, split_name, unit_label)
+if nargin < 6 || isempty(unit_label)
+    unit_label = '';
+end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low_peaks') ...
         || summary.all_neurons.n < 1
     return
@@ -537,7 +577,15 @@ measure_labels = { ...
     'Burst level, 0-50 ms', ...
     'First-peak prominence', ...
     'Second-cycle prominence'};
-figure('Name', ['Paired ACG peaks, ', split_name], 'Color', 'w', ...
+if ~isempty(unit_label)
+    for m = 1:numel(measure_labels)
+        measure_labels{m} = [measure_labels{m}, ' (', unit_label, ')'];
+    end
+    figure_name = ['Paired ACG peaks, ', split_name, ', ', unit_label];
+else
+    figure_name = ['Paired ACG peaks, ', split_name];
+end
+figure('Name', figure_name, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.05 0.05 0.9 0.9])
 for m = 1:numel(measures)
     [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measures{m});
@@ -557,9 +605,11 @@ for m = 1:numel(measures)
 end
 legend_group_colors(group_order, group_title, colors)
 
-figure('Name', ['ACG cycle counts, ', split_name], 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.2 0.2 0.55 0.45])
-plot_paired_cycle_counts(neurons, group_order, group_title, colors, split_name)
+if isempty(unit_label)
+    figure('Name', ['ACG cycle counts, ', split_name], 'Color', 'w', ...
+        'Units', 'normalized', 'OuterPosition', [0.2 0.2 0.55 0.45])
+    plot_paired_cycle_counts(neurons, group_order, group_title, colors, split_name)
+end
 end
 
 
@@ -968,6 +1018,67 @@ if exist(times_file, 'file') ~= 2 || exist(clusters_file, 'file') ~= 2
 end
 spike_times = double(readNPY(times_file)) / 30000;
 spike_clusters = double(readNPY(clusters_file));
+end
+
+
+function plot_rate_scaled_peaks_for(summary, bin_w, centers, smooth_n, group_order, group_title, score_label, split_name)
+scaled = rate_scale_summary(summary, bin_w, group_order);
+scaled = add_peak_scores(scaled, centers, smooth_n, group_order);
+plot_paired_peak_scores(scaled, group_order, group_title, score_label, split_name, 'Hz');
+end
+
+
+function summary = rate_scale_summary(summary, bin_w, group_order)
+names = [group_order, {'all_neurons'}];
+curve_names = {'low', 'high', 'all'};
+for k = 1:numel(names)
+    if ~isfield(summary, names{k}) || ~isfield(summary.(names{k}), 'low')
+        continue
+    end
+    group = summary.(names{k});
+    for c = 1:numel(curve_names)
+        curve = curve_names{c};
+        group.(curve) = scale_acg_by_rate(group.(curve), ...
+            group.(['mass_', curve]), group.(['rate_', curve]), bin_w);
+    end
+    summary.(names{k}) = group;
+end
+end
+
+
+function Y = scale_acg_by_rate(Y, mass, rate, bin_w)
+% (pair counts / overlap) / (firing rate * bin width), in Hz.
+% Y is the sum-to-1 curve and mass is the sum of the edge-corrected bins,
+% so mass .* Y restores pair counts / overlap.
+factor = mass(:) ./ (rate(:) * bin_w);
+factor(~isfinite(factor) | rate(:) <= 0 | mass(:) <= 0) = NaN;
+Y = Y .* factor;
+end
+
+
+function rates = tail_rate_struct(rt, pooled)
+rates.low = tail_firing_rate(rt, pooled.low_index);
+rates.high = tail_firing_rate(rt, pooled.high_index);
+rates.all = neuron_run_rate(rt);
+end
+
+
+function rate = tail_firing_rate(rt, idx)
+rate = NaN;
+if ~ismember('RunNumSpikes', rt.Properties.VariableNames) || isempty(idx)
+    return
+end
+idx = idx(:);
+if numel(idx) ~= height(rt) || ~any(idx)
+    return
+end
+n_spikes = double(rt.RunNumSpikes(:));
+duration = acg_run_lengths(rt);
+ok = idx & isfinite(n_spikes) & n_spikes >= 0 & isfinite(duration) & duration > 0;
+if ~any(ok)
+    return
+end
+rate = sum(n_spikes(ok)) / sum(duration(ok));
 end
 
 
