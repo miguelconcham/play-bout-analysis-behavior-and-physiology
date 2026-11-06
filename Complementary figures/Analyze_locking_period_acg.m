@@ -15,6 +15,11 @@
 % quartiles. The estimate stores autocorrelograms inside firing runs, so
 % spikes that fall in the gaps between runs are not in these curves.
 %
+% Only areas_to_keep are analyzed. The depth tables label superior
+% colliculus as SupCol; that label is kept as SC. Matching ignores case
+% and spaces. VLPAG and DLPAG are not treated as LPAG, and DMPAG, InfCol,
+% isRt, and PAG are left out.
+%
 % Run autocorrelograms are overlap-weighted (pair counts / (T-|lag|)), the
 % lag-0 bins are blanked, and each neuron is scaled to sum to 1 so a cell
 % with more spikes does not dominate the mean. One figure per lock group
@@ -77,6 +82,7 @@ smooth_half      = 0.04;        % s, full smooth width; Gaussian sigma is a quar
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
 plot_rate_scaled_peaks = true;  % extra peak figures in conditional rate (Hz)
+areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -93,9 +99,13 @@ for i = 1:n_cells
         all_neurons.EntireSession.PreferedAngle(i), ...
         alpha, non_entrained_p);
 end
+in_area = false(n_cells, 1);
+for i = 1:n_cells
+    in_area(i) = ~isempty(canonical_kept_area(cluster_area_char(all_neurons, i), areas_to_keep));
+end
 for g = 1:numel(group_order)
-    disp([group_title{g}, ': ', num2str(sum(strcmp(lock_group, group_order{g}))), ...
-        ' / ', num2str(n_cells)])
+    disp([group_title{g}, ': ', num2str(sum(strcmp(lock_group, group_order{g}) & in_area)), ...
+        ' / ', num2str(sum(in_area)), ' in ', strjoin(areas_to_keep, ', ')])
 end
 
 %% One parsing file at a time
@@ -119,6 +129,7 @@ n_unsplit = zeros(1, numel(group_order));
 n_kept_power = zeros(1, numel(group_order));
 n_unsplit_power = zeros(1, numel(group_order));
 n_missing = 0;
+n_outside = 0;
 
 for f = 1:numel(parsing_files)
     disp(['Loading ', parsing_files(f).name, ' ...'])
@@ -192,6 +203,15 @@ for f = 1:numel(parsing_files)
                 n_missing = n_missing + 1;
                 continue
             end
+            this_area = cluster_area_char(ci, nn);
+            if isempty(strtrim(this_area))
+                this_area = cluster_area_char(all_neurons, hit);
+            end
+            this_area = canonical_kept_area(this_area, areas_to_keep);
+            if isempty(this_area)
+                n_outside = n_outside + 1;
+                continue
+            end
             this_group = lock_group{hit};
             g = find(strcmp(group_order, this_group), 1);
             if isempty(g)
@@ -230,7 +250,6 @@ for f = 1:numel(parsing_files)
                 continue
             end
             run_length = acg_run_lengths(rt);
-            this_area = cluster_area_char(ci, nn);
             this_rate = neuron_run_rate(rt);
             this_ppc = rt.phase_entrainment(:, ppc_col);
             this_power = run_delta_power(rt);
@@ -267,6 +286,7 @@ end
 
 disp(['Parsing sessions: ', num2str(numel(loaded_codes))])
 disp(['Cells in the parsing files but not in the delta table: ', num2str(n_missing)])
+disp(['Cells outside ', strjoin(areas_to_keep, ', '), ': ', num2str(n_outside)])
 if isempty(edges)
     error('Analyze_locking_period_acg:nobins', 'No parsing struct contained ACG bin edges.');
 end
@@ -282,6 +302,7 @@ parameters = struct( ...
     'delta_lag', delta_lag, ...
     'acg_lag', acg_lag, ...
     'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
+    'areas_to_keep', {areas_to_keep}, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
 
 locking_labels = { ...
@@ -1359,6 +1380,30 @@ if iscell(a)
     end
 end
 a = char(string(a));
+end
+
+
+function name = canonical_kept_area(label, areas_to_keep)
+% Map a depth-table label onto areas_to_keep. SupCol and SC are the
+% superior colliculus. Tokens are split on commas so a combined label can
+% match, while VLPAG does not match LPAG.
+name = '';
+text = strtrim(char(string(label)));
+if isempty(text)
+    return
+end
+tokens = regexp(text, '[,;/]+', 'split');
+for k = 1:numel(tokens)
+    token = upper(regexprep(strtrim(tokens{k}), '\s+', ''));
+    if any(strcmp(token, {'SC', 'SUPCOL', 'SUPERIORCOLLICULUS'}))
+        token = 'SC';
+    end
+    hit = strcmpi(areas_to_keep, token);
+    if any(hit)
+        name = areas_to_keep{find(hit, 1)};
+        return
+    end
+end
 end
 
 
