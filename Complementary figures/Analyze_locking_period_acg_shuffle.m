@@ -17,6 +17,9 @@
 % The result file is rewritten after every neuron. Stop the script and run
 % it again: finished neurons are skipped. Lower n_shuffles to shorten a
 % first pass. Only runs that fall in a plotted tail are shuffled.
+% Only areas_to_keep are analyzed. SupCol is the superior-colliculus
+% label in the depth tables and is kept as SC. VLPAG and DLPAG are not
+% treated as LPAG.
 %
 % Run this file, not the unit test, to produce the figures:
 %   Analyze_locking_period_acg_shuffle
@@ -38,6 +41,7 @@ high_percent     = 75;
 acg_lag          = 1;
 smooth_half      = 0.04;
 acg_refractory_s = 0.005;
+areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -53,6 +57,7 @@ parameters = struct( ...
     'acg_lag', acg_lag, ...
     'smooth_half', smooth_half, ...
     'acg_refractory_s', acg_refractory_s, ...
+    'areas_to_keep', {areas_to_keep}, ...
     'null', 'uniform spike times inside each firing run');
 
 records = {};
@@ -68,6 +73,7 @@ if resume && exist(checkpoint, 'file') == 2
         records = num2cell(records(:));
     end
     records = records(:);
+    records = records_in_areas(records, areas_to_keep);
     disp(['Resuming from ', num2str(numel(records)), ' neurons in ', checkpoint])
 else
     disp(['Checkpoint: ', checkpoint])
@@ -168,6 +174,14 @@ for f = 1:numel(parsing_files)
             if isempty(hit)
                 continue
             end
+            this_area = cluster_area_char(ci, nn);
+            if isempty(strtrim(this_area))
+                this_area = cluster_area_char(all_neurons, hit);
+            end
+            this_area = canonical_kept_area(this_area, areas_to_keep);
+            if isempty(this_area)
+                continue
+            end
             this_group = lock_group{hit};
             if ~any(strcmp(group_order, this_group))
                 continue
@@ -253,7 +267,7 @@ for f = 1:numel(parsing_files)
             rec = blank_record(n_shuffles);
             rec.session = animal_code;
             rec.cluster_id = this_id;
-            rec.area = cluster_area_char(ci, nn);
+            rec.area = this_area;
             rec.lock_group = this_group;
             if lock_ok
                 rec.locking = pack_split(pooled, centers, smooth_n, acg_refractory_s, ...
@@ -670,6 +684,44 @@ if iscell(a)
     end
 end
 a = char(string(a));
+end
+
+
+function name = canonical_kept_area(label, areas_to_keep)
+% SupCol and SC are the superior colliculus. VLPAG does not match LPAG.
+name = '';
+text = strtrim(char(string(label)));
+if isempty(text)
+    return
+end
+tokens = regexp(text, '[,;/]+', 'split');
+for k = 1:numel(tokens)
+    token = upper(regexprep(strtrim(tokens{k}), '\s+', ''));
+    if any(strcmp(token, {'SC', 'SUPCOL', 'SUPERIORCOLLICULUS'}))
+        token = 'SC';
+    end
+    hit = strcmpi(areas_to_keep, token);
+    if any(hit)
+        name = areas_to_keep{find(hit, 1)};
+        return
+    end
+end
+end
+
+
+function records = records_in_areas(records, areas_to_keep)
+keep = false(numel(records), 1);
+for i = 1:numel(records)
+    if ~isstruct(records{i}) || ~isfield(records{i}, 'area')
+        continue
+    end
+    keep(i) = ~isempty(canonical_kept_area(records{i}.area, areas_to_keep));
+end
+n_drop = sum(~keep);
+records = records(keep);
+if n_drop > 0
+    disp(['Dropped ', num2str(n_drop), ' checkpoint neurons outside the selected areas'])
+end
 end
 
 
