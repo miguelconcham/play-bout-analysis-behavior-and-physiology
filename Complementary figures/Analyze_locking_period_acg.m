@@ -50,7 +50,8 @@
 % the firing rate of the runs.
 % The same all-runs autocorrelogram is then used in a linear model of
 % mean delta power. Predictors are the mean firing rate of those runs,
-% their mean PPC, and the first-peak and second-cycle prominences.
+% their mean PPC, the 0-50 ms burst, and the first-peak and second-cycle
+% prominences.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -1751,8 +1752,8 @@ end
 
 function model = fit_delta_power_contributions(summary, group_order, group_title)
 % Mean delta power of the runs in the all-runs autocorrelogram, predicted
-% by their mean firing rate, their mean PPC, and the two delta-peak
-% prominences of that autocorrelogram. One row per neuron.
+% by their mean firing rate, their mean PPC, the 0-50 ms burst, and the
+% two delta-peak prominences of that autocorrelogram. One row per neuron.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
@@ -1773,10 +1774,10 @@ end
 
 
 function [X, y, names, kept] = power_model_design(neurons)
-names = {'Firing rate', 'PPC', 'First-peak prominence', 'Second-cycle prominence'};
+names = {'Firing rate', 'PPC', 'Burst, 0-50 ms', 'First-peak prominence', 'Second-cycle prominence'};
 peaks = neurons.all_peaks;
 y_all = neurons.model_power(:);
-X_all = [neurons.model_fr(:), neurons.model_ppc(:), ...
+X_all = [neurons.model_fr(:), neurons.model_ppc(:), peaks.burst(:), ...
     peaks.first_prominence(:), peaks.second_prominence(:)];
 kept = isfinite(y_all) & all(isfinite(X_all), 2) ...
     & peaks.first_measurable(:) & peaks.second_measurable(:);
