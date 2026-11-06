@@ -65,6 +65,9 @@
 % Example neurons are the higher-firing-rate cells among those with that
 % peak pattern. In the paired plots, higher-rate neurons are drawn in front.
 % The mean curve still gives every neuron the same weight.
+% figure_folder, at the top of the script, is where figures are written
+% as SVG and JPG and where statistics.txt collects the command-window
+% tests. Leave it empty to save nothing.
 
 %% Paths and parameters
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -85,9 +88,24 @@ skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
 plot_rate_scaled_peaks = true;  % extra peak figures in conditional rate (Hz)
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
+% Leave empty to keep figures on screen only. Otherwise every figure is
+% written there as SVG and JPG, and statistics.txt gets the command window.
+figure_folder = '';
 
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
+
+if ~isempty(figure_folder)
+    if exist(figure_folder, 'dir') ~= 7
+        mkdir(figure_folder)
+    end
+    stats_path = fullfile(figure_folder, 'statistics.txt');
+    if exist(stats_path, 'file') == 2
+        delete(stats_path)
+    end
+    diary(stats_path)
+    diary_cleanup = onCleanup(@() diary('off')); %#ok<NASGU>
+end
 
 %% Delta-lock labels
 load(fullfile(phase_folder, 'delta_all_neurons_v2.mat'), 'all_neurons');
@@ -305,6 +323,7 @@ parameters = struct( ...
     'acg_lag', acg_lag, ...
     'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
     'areas_to_keep', {areas_to_keep}, ...
+    'figure_folder', figure_folder, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
 
 locking_labels = { ...
@@ -359,6 +378,45 @@ locking_acg.delta_power_model = fit_delta_power_contributions( ...
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
 disp(['Saved ', summary_path])
+if ~isempty(figure_folder)
+    save_open_figures(figure_folder)
+    diary('off')
+end
+
+
+function save_open_figures(folder)
+figs = findall(0, 'Type', 'figure');
+if isempty(figs)
+    disp(['No figures to save in ', folder])
+    return
+end
+[~, order] = sort([figs.Number]);
+figs = figs(order);
+for i = 1:numel(figs)
+    name = strtrim(figs(i).Name);
+    if isempty(name)
+        name = sprintf('figure_%d', figs(i).Number);
+    end
+    name = regexprep(name, '[^\w]+', '_');
+    name = regexprep(name, '^_|_$', '');
+    if isempty(name)
+        name = sprintf('figure_%d', figs(i).Number);
+    end
+    base = name;
+    suffix = 1;
+    while exist(fullfile(folder, [base '.svg']), 'file') == 2
+        suffix = suffix + 1;
+        base = sprintf('%s_%d', name, suffix);
+    end
+    set(figs(i), 'PaperPositionMode', 'auto')
+    svg_path = fullfile(folder, [base '.svg']);
+    jpg_path = fullfile(folder, [base '.jpg']);
+    print(figs(i), svg_path, '-dsvg')
+    print(figs(i), jpg_path, '-djpeg', '-r200')
+    disp(['Saved ', svg_path])
+    disp(['Saved ', jpg_path])
+end
+end
 
 
 function store = empty_group_store(group_order, n_bins)
@@ -1740,7 +1798,7 @@ fit.ok = true;
 fit.names = names;
 Xs = (X - mean(X, 1)) ./ sd;
 ys = (y - mean(y)) / std(y, 0);
-[fit.beta, fit.rsq, fit.F, fit.p_model] = standardized_ols(Xs, ys);
+[fit.beta, fit.rsq, fit.F, fit.p_model, fit.t_beta, fit.p_beta] = standardized_ols(Xs, ys);
 fit.unique_rsq = zeros(n_pred, 1);
 for k = 1:n_pred
     keep = true(1, n_pred);
@@ -1768,6 +1826,8 @@ fit.beta = [];
 fit.rsq = NaN;
 fit.F = NaN;
 fit.p_model = NaN;
+fit.t_beta = [];
+fit.p_beta = [];
 fit.unique_rsq = [];
 fit.weight = [];
 fit.weight_rsq = NaN;
@@ -1776,16 +1836,18 @@ fit.predictor_corr = [];
 end
 
 
-function [beta, rsq, Fstat, p_model] = standardized_ols(X, y)
+function [beta, rsq, Fstat, p_model, t_beta, p_beta] = standardized_ols(X, y)
 n = size(X, 1);
 k = size(X, 2);
 A = [ones(n, 1), X];
 coef = pinv(A) * y;
+beta = coef(2:end);
+t_beta = nan(k, 1);
+p_beta = nan(k, 1);
 resid = y - A * coef;
 ss_res = sum(resid .^ 2);
 ss_tot = sum((y - mean(y)) .^ 2);
 if ss_tot <= 0
-    beta = coef(2:end);
     rsq = NaN;
     Fstat = NaN;
     p_model = NaN;
@@ -1794,7 +1856,6 @@ end
 rsq = 1 - ss_res / ss_tot;
 dof1 = k;
 dof2 = n - k - 1;
-beta = coef(2:end);
 if dof2 < 1 || ss_res < 0
     Fstat = NaN;
     p_model = NaN;
@@ -1802,6 +1863,22 @@ if dof2 < 1 || ss_res < 0
 end
 Fstat = ((ss_tot - ss_res) / dof1) / (ss_res / dof2);
 p_model = betainc(dof2 / (dof2 + dof1 * Fstat), dof2 / 2, dof1 / 2);
+mse = ss_res / dof2;
+covb = mse * pinv(A' * A);
+se = sqrt(max(real(diag(covb)), 0));
+tstat = coef ./ se;
+tstat(~isfinite(se) | se <= 0) = NaN;
+pstat = t_two_tailed(tstat, dof2);
+t_beta = tstat(2:end);
+p_beta = pstat(2:end);
+end
+
+
+function p = t_two_tailed(tstat, dof)
+p = nan(size(tstat));
+ok = isfinite(tstat) & isfinite(dof) & dof > 0;
+ratio = dof ./ (dof + tstat(ok) .^ 2);
+p(ok) = betainc(ratio, dof / 2, 0.5);
 end
 
 
@@ -1830,9 +1907,10 @@ disp(sprintf('  Full R^2 = %.3g, F = %.3g, p = %.3g', fit.rsq, fit.F, fit.p_mode
 disp(['  Predictor correlations (', strjoin(fit.names, ', '), ')'])
 disp(fit.predictor_corr)
 for k = 1:numel(fit.names)
-    disp(sprintf(['  %s: standardized beta = %.3g, unique dR^2 = %.3g, ' ...
-        'relative weight = %.3g (%.1f%% of R^2)'], ...
-        fit.names{k}, fit.beta(k), fit.unique_rsq(k), fit.weight(k), fit.percent_of_rsq(k)))
+    disp(sprintf(['  %s: standardized beta = %.3g, t = %.3g, p = %.3g, ' ...
+        'unique dR^2 = %.3g, relative weight = %.3g (%.1f%% of R^2)'], ...
+        fit.names{k}, fit.beta(k), fit.t_beta(k), fit.p_beta(k), ...
+        fit.unique_rsq(k), fit.weight(k), fit.percent_of_rsq(k)))
 end
 end
 
