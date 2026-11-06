@@ -1,0 +1,133 @@
+function test_acg_delta_component_phase()
+%TEST_ACG_DELTA_COMPONENT_PHASE  Pair counting and phase summaries.
+%
+% The symmetric autocorrelogram lists each pair twice. These checks keep
+% each pair once and each spike once, without the experiment files.
+% Run this file by name after add_repo_paths.
+
+this_dir = fileparts(mfilename('fullpath'));
+if ~isempty(this_dir)
+    addpath(this_dir);
+end
+
+lag = [0.2 0.5];
+rhythm = [0; 0.3; 0.6; 0.9];
+selected = acg_delta_component_spikes(rhythm, 0, 1, lag);
+assert(selected.n_pairs == 3, ...
+    'A 300 ms train did not make three pairs inside 200-500 ms.');
+assert(selected.n_acg_entries == 6, ...
+    'The symmetric autocorrelogram tally was not twice the pair count.');
+assert(selected.n_spikes == 4, ...
+    'Interior spikes were kept once per listing instead of once per spike.');
+assert(isequal(selected.listings, [1; 2; 2; 1]), ...
+    'The ends of a rhythmic train were not listed once and the interior twice.');
+assert(all(selected.mask) && selected.n_run_spikes == 4, ...
+    'A spike inside the run was dropped from the component.');
+
+unsorted = acg_delta_component_spikes([0.9; 0; 0.6; 0.3], 0, 1, lag);
+assert(isequal(unsorted.listings, [1; 1; 2; 2]), ...
+    'Listings did not follow the input order.');
+assert(unsorted.n_pairs == 3 && unsorted.n_spikes == 4, ...
+    'Sorting the train changed the pair count.');
+
+two_partners = acg_delta_component_spikes([0; 0.25; 0.40], 0, 1, lag);
+assert(two_partners.n_pairs == 2, ...
+    'Two partners of the same spike were not two pairs.');
+assert(isequal(two_partners.listings, [2; 1; 1]), ...
+    'A spike with two forward partners was not listed twice.');
+assert(two_partners.n_spikes == 3 && two_partners.n_acg_entries == 4, ...
+    'Unique spikes were replaced by the autocorrelogram tally.');
+
+burst = acg_delta_component_spikes([0; 0.01; 0.02], 0, 1, lag);
+assert(burst.n_pairs == 0 && burst.n_spikes == 0, ...
+    'The 0-50 ms burst was treated as the delta side peak.');
+
+assert(acg_delta_component_spikes([0; 0.2], 0, 1, lag).n_pairs == 1, ...
+    'A lag on the near edge of the window was dropped.');
+assert(acg_delta_component_spikes([0; 0.5], 0, 1, lag).n_pairs == 1, ...
+    'A lag on the far edge of the window was dropped.');
+assert(acg_delta_component_spikes([0; 0.199], 0, 1, lag).n_pairs == 0, ...
+    'A lag just outside the window was kept.');
+assert(acg_delta_component_spikes([0; 0; 0.3], 0, 1, lag).n_pairs == 2, ...
+    'Two spikes at the same time failed to pair with the later spike.');
+
+crossed = acg_delta_component_spikes([0.1; 0.45], [0; 0.35], [0.3; 1], lag);
+assert(crossed.n_pairs == 0 && all(crossed.in_run) && ~any(crossed.mask), ...
+    'A pair that crosses two runs was included.');
+same_run = acg_delta_component_spikes([0.1; 0.45; 5], 0, 1, lag);
+assert(same_run.n_pairs == 1 && same_run.n_run_spikes == 2, ...
+    'A spike outside the run entered the run sample.');
+assert(isequal(same_run.mask, [true; true; false]), ...
+    'The out-of-run spike was marked as part of the side peak.');
+
+overlap = acg_delta_component_spikes([0; 0.3], [0; 0], [1; 1], lag);
+assert(overlap.n_pairs == 1, ...
+    'The same pair was counted in both overlapping runs.');
+
+empty_train = acg_delta_component_spikes([], 0, 1, lag);
+assert(empty_train.n_pairs == 0 && isempty(empty_train.mask), ...
+    'An empty train produced a pair.');
+with_nan = acg_delta_component_spikes([0; NaN; 0.3], 0, 1, lag);
+assert(with_nan.n_pairs == 1 && isequal(with_nan.mask, [true; false; true]), ...
+    'A missing spike time entered a pair.');
+
+phases = [0; 0.5; 0; 0];
+listed = [phases(1); phases(2); phases(2); phases(3); phases(3); phases(4)];
+once = component_phase_summary(phases, 16);
+weighted = component_phase_summary(listed, 16);
+assert(once.n == 4 && weighted.n == 6, ...
+    'The phase summary did not keep the sample it was given.');
+assert(abs(once.ppc - weighted.ppc) > 1e-8, ...
+    'Duplicating the interior spikes left PPC unchanged.');
+assert(abs(once.angle - weighted.angle) > 1e-8, ...
+    'Duplicating the interior spikes left the mean angle unchanged.');
+
+locked_peak = component_phase_summary(zeros(40, 1), 32);
+assert(abs(locked_peak.proj_peak - 1) < 1e-12, ...
+    'Spikes at phase 0 did not project onto the peak.');
+assert(abs(locked_peak.proj_trough + 1) < 1e-12, ...
+    'Spikes at phase 0 did not project against the trough.');
+assert(locked_peak.frac_peak == 1, ...
+    'Phase 0 was outside the peak half-circle.');
+assert(locked_peak.p_peak < 1e-6 && locked_peak.p_trough > 0.99, ...
+    'The V-test did not put phase 0 on the peak.');
+assert(abs(locked_peak.proj_peak + locked_peak.proj_trough) < 1e-12, ...
+    'The trough projection was not the opposite of the peak projection.');
+
+locked_trough = component_phase_summary(pi * ones(40, 1), 32);
+assert(locked_trough.frac_peak == 0, ...
+    'Phase pi was counted on the peak side.');
+assert(abs(locked_trough.proj_trough - 1) < 1e-9, ...
+    'Phase pi did not project onto the trough.');
+assert(locked_trough.p_trough < 1e-6 && locked_trough.p_peak > 0.99, ...
+    'The V-test did not put phase pi on the trough.');
+assert(sum(locked_trough.hist) == locked_trough.n, ...
+    'The phase histogram dropped spikes.');
+assert(component_phase_summary(-pi, 4).hist(1) == 1, ...
+    'Phase -pi missed the first histogram bin.');
+assert(component_phase_summary(pi * (1 - 1e-8), 4).hist(end) == 1, ...
+    'A phase on the peak-to-trough edge missed the last histogram bin.');
+
+split = component_phase_summary([0; pi], 32);
+assert(abs(split.frac_peak - 0.5) < 1e-12, ...
+    'One peak spike and one trough spike were not half and half.');
+assert(strcmp(delta_lock_group(0.001, 0, 0.01, 0.1), 'peak') ...
+    && strcmp(delta_lock_group(0.001, pi, 0.01, 0.1), 'trough'), ...
+    'The peak half-circle is not the one used for the lock labels.');
+
+threw = false;
+try
+    acg_delta_component_spikes([0; 1], 0, 1, [0.5 0.2]);
+catch ME
+    threw = strcmp(ME.identifier, 'acg_delta_component_spikes:lag');
+end
+assert(threw, 'A reversed lag window was accepted.');
+
+none = component_phase_summary([], 32);
+assert(none.n == 0 && all(isnan([none.angle, none.ppc, none.frac_peak])), ...
+    'An empty phase sample received a number.');
+assert(isequal(size(none.hist), [1 32]), ...
+    'The empty histogram changed width.');
+
+disp('test_acg_delta_component_phase passed')
+end
