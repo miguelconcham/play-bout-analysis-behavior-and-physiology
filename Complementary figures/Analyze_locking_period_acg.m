@@ -33,6 +33,10 @@
 % and only when that window was observed. Low and high are the same
 % neuron, so the plots connect the two conditions with a line. A second
 % cycle that the runs are too short to measure is left out of the pair.
+%
+% Analyze_locking_period_acg_shuffle is a separate, slower script. It
+% rebuilds the same peaks after placing spikes uniformly inside each run,
+% and it can be stopped and continued.
 
 %% Paths and parameters
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
