@@ -28,7 +28,9 @@
 % The lag axis runs to +/- 1 s. Saved histograms that stop at +/- 0.5 s are
 % rebuilt from the session spike times and the saved run intervals.
 % Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz side peak sits at the
-% edge of this window.
+% edge of this window. The shading does not set the vertical scale. Every
+% mean autocorrelogram uses one y limit, taken from the highest and lowest
+% mean plus or minus its standard error, and rounded onto a short decimal.
 %
 % Each plotted autocorrelogram is also scored neuron by neuron. The burst
 % is the mean level from the first positive bin through 50 ms. Oscillatory
@@ -320,12 +322,21 @@ locking_acg = summarize_and_plot(acg_raw, group_order, group_title, ...
 power_acg = summarize_and_plot(acg_power, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     acg_refractory_s, curve_colors, n_in_parsing, n_unsplit_power);
+acg_ylim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, ...
+    centers, skip_abs_lag, smooth_n);
+parameters.acg_ylim = acg_ylim;
 locking_acg.centers = centers;
 locking_acg.bin_edges = edges;
 locking_acg.parameters = parameters;
 power_acg.centers = centers;
 power_acg.bin_edges = edges;
 power_acg.parameters = parameters;
+locking_acg = plot_summary_acgs(locking_acg, group_order, group_title, ...
+    locking_labels, 'locking', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    curve_colors, acg_ylim);
+power_acg = plot_summary_acgs(power_acg, group_order, group_title, ...
+    power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    curve_colors, acg_ylim);
 locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order);
 power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order);
 plot_paired_peak_scores(locking_acg, group_order, group_title, ...
@@ -458,9 +469,8 @@ for g = 1:numel(group_order)
     summary.(name).model_fr = acg_raw.(name).model_fr(keep);
     summary.(name).model_ppc = acg_raw.(name).model_ppc(keep);
     summary.(name).model_power = acg_raw.(name).model_power(keep);
-    summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
-        [group_title{g}, ', ', split_name], centers, delta_lag, skip_abs_lag, ...
-        smooth_n, curve_colors, split_name);
+    summary.(name) = record_delta_mass(summary.(name), curve_names, curve_labels, ...
+        [group_title{g}, ', ', split_name], centers, delta_lag, split_name);
 end
 
 summary.all_neurons = stack_plotted_neurons(summary, group_order);
@@ -471,9 +481,8 @@ if summary.all_neurons.n < 1
 end
 n_all = summary.all_neurons.n;
 disp(['All neurons, ', split_name, ': ', num2str(n_all), ' plotted'])
-summary.all_neurons = plot_acg_curves(summary.all_neurons, curve_names, curve_labels, ...
-    ['All neurons, ', split_name], centers, delta_lag, skip_abs_lag, ...
-    smooth_n, curve_colors, split_name);
+summary.all_neurons = record_delta_mass(summary.all_neurons, curve_names, curve_labels, ...
+    ['All neurons, ', split_name], centers, delta_lag, split_name);
 end
 
 
@@ -537,7 +546,40 @@ end
 end
 
 
-function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, split_name)
+function summary = plot_summary_acgs(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim)
+curve_names = {'low', 'high', 'all'};
+for g = 1:numel(group_order)
+    name = group_order{g};
+    if ~isfield(summary, name) || ~isfield(summary.(name), 'low')
+        continue
+    end
+    summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
+        [group_title{g}, ', ', split_name], centers, delta_lag, skip_abs_lag, ...
+        smooth_n, curve_colors, acg_ylim);
+end
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
+        || summary.all_neurons.n < 1
+    return
+end
+summary.all_neurons = plot_acg_curves(summary.all_neurons, curve_names, curve_labels, ...
+    ['All neurons, ', split_name], centers, delta_lag, skip_abs_lag, ...
+    smooth_n, curve_colors, acg_ylim);
+end
+
+
+function group_acg = record_delta_mass(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, split_name)
+for c = 1:numel(curve_names)
+    mass = delta_side_mass(group_acg.(curve_names{c}), centers, delta_lag);
+    disp(sprintf('  %s  %s   mean ACG in [%g %g] s = %.4g   n = %d', ...
+        figure_label, curve_labels{c}, delta_lag(1), delta_lag(2), ...
+        mean(mass, 'omitnan'), sum(isfinite(mass))))
+    group_acg.([curve_names{c}, '_delta_mass']) = mass;
+end
+report_split_contrast(group_acg, figure_label, split_name)
+end
+
+
+function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim)
 figure('Name', figure_label, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
 hold on
@@ -547,16 +589,13 @@ for c = 1:numel(curve_names)
     shown = smooth_acg_away_from_zero( ...
         group_acg.(curve_names{c}), centers, skip_abs_lag, smooth_n);
     plotted(c) = plot_mean_sem(centers, shown, curve_colors(c, :));
-    mass = delta_side_mass(group_acg.(curve_names{c}), centers, delta_lag);
-    disp(sprintf('  %s  %s   mean ACG in [%g %g] s = %.4g   n = %d', ...
-        figure_label, curve_labels{c}, delta_lag(1), delta_lag(2), ...
-        mean(mass, 'omitnan'), sum(isfinite(mass))))
-    group_acg.([curve_names{c}, '_delta_mass']) = mass;
 end
-report_split_contrast(group_acg, figure_label, split_name);
 xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
 half_bin = median(diff(centers)) / 2;
 xlim([centers(1) - half_bin, centers(end) + half_bin])
+ylim(acg_ylim)
+yticks(readable_acg_ticks(acg_ylim))
+ytickformat('%g')
 xlabel('Lag (s)')
 ylabel('Mean normalized autocorrelogram')
 title({figure_label, sprintf('n = %d    shaded: 2-5 Hz', size(group_acg.low, 1))})
@@ -1498,13 +1537,120 @@ end
 end
 
 
+function y_lim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, centers, skip_abs_lag, smooth_n)
+% One vertical range for every mean autocorrelogram. The range is the
+% mean curve plus and minus its standard error, not the delta-band shade.
+curve_names = {'low', 'high', 'all'};
+names = [group_order, {'all_neurons'}];
+summaries = {locking_acg, power_acg};
+lo = inf;
+hi = -inf;
+for s = 1:numel(summaries)
+    summary = summaries{s};
+    for k = 1:numel(names)
+        if ~isfield(summary, names{k}) || ~isfield(summary.(names{k}), 'low')
+            continue
+        end
+        group = summary.(names{k});
+        for c = 1:numel(curve_names)
+            shown = smooth_acg_away_from_zero( ...
+                group.(curve_names{c}), centers, skip_abs_lag, smooth_n);
+            mu = mean(shown, 1, 'omitnan');
+            n = sum(isfinite(shown), 1);
+            sem = std(shown, 0, 1, 'omitnan') ./ sqrt(max(n, 1));
+            band_lo = mu - sem;
+            band_hi = mu + sem;
+            band_lo = band_lo(isfinite(band_lo));
+            band_hi = band_hi(isfinite(band_hi));
+            if ~isempty(band_lo)
+                lo = min(lo, min(band_lo));
+            end
+            if ~isempty(band_hi)
+                hi = max(hi, max(band_hi));
+            end
+        end
+    end
+end
+y_lim = readable_acg_scale(lo, hi);
+disp(sprintf(['Mean autocorrelograms span %.4g to %.4g. ' ...
+    'Shared y limit is [%.4g %.4g].'], lo, hi, y_lim(1), y_lim(2)))
+end
+
+
+function y_lim = readable_acg_scale(lo, hi)
+if ~isfinite(hi) || hi <= 0
+    y_lim = [0 0.01];
+    return
+end
+top = nice_decimal(hi, 'ceil');
+if top <= hi
+    top = nice_decimal(hi * 1.05, 'ceil');
+end
+if ~isfinite(lo) || lo >= 0
+    bottom = 0;
+else
+    bottom = -nice_decimal(-lo, 'ceil');
+    if bottom >= lo
+        bottom = -nice_decimal(-lo * 1.05, 'ceil');
+    end
+end
+y_lim = [bottom, top];
+end
+
+
+function ticks = readable_acg_ticks(y_lim)
+span = y_lim(2) - y_lim(1);
+step = nice_decimal(span / 4, 'ceil');
+if step <= 0
+    ticks = y_lim;
+    return
+end
+ticks = y_lim(1):step:y_lim(2);
+if numel(ticks) < 3
+    step = nice_decimal(span / 4, 'floor');
+    if step <= 0
+        step = span / 4;
+    end
+    ticks = y_lim(1):step:y_lim(2);
+end
+if abs(ticks(end) - y_lim(2)) > step * 1e-6
+    ticks(end + 1) = y_lim(2); %#ok<AGROW>
+end
+end
+
+
+function y = nice_decimal(x, direction)
+% Next 1, 2, or 5 times a power of ten, so tick labels stay short.
+if ~isfinite(x) || x <= 0
+    y = 0;
+    return
+end
+exp10 = floor(log10(x));
+base = 10 ^ exp10;
+mantissa = x / base;
+grid = [1 2 5 10];
+if strcmp(direction, 'floor')
+    pick = find(grid <= mantissa + 1e-9, 1, 'last');
+    if isempty(pick)
+        pick = 1;
+    end
+else
+    pick = find(grid + 1e-9 >= mantissa, 1, 'first');
+    if isempty(pick)
+        pick = numel(grid);
+    end
+end
+y = grid(pick) * base;
+end
+
+
 function shade = shade_delta_lags(lag_win)
 shade = gobjects(1, 2);
 for k = 1:2
     sign = 2 * (k - 1) - 1;
     x1 = sign * lag_win(1);
     x2 = sign * lag_win(2);
-    shade(k) = patch([x1 x2 x2 x1], [0 0 1 1], [0.95 0.85 0.40], ...
+    shade(k) = patch([x1 x2 x2 x1], [0 0 0 0], [0.95 0.85 0.40], ...
         'FaceAlpha', 0.35, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 end
 end
