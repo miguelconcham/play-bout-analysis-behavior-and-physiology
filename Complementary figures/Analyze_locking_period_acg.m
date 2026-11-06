@@ -68,7 +68,9 @@
 % The mean curve still gives every neuron the same weight.
 % figure_folder, at the top of the script, is where figures are written
 % as SVG and JPG and where statistics.txt collects the command-window
-% tests. Leave it empty to save nothing.
+% tests. Leave it empty to save nothing. Set reprint_stats_only to reload
+% the saved summary and print those tests again without reloading spikes
+% or opening figures.
 
 %% Paths and parameters
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -92,6 +94,10 @@ areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG, and statistics.txt gets the command window.
 figure_folder = '';
+% true reloads locking_period_acg_summary.mat and reprints the tests.
+% Spikes are not reloaded and no figures are opened. A non-empty
+% figure_folder still receives a new statistics.txt.
+reprint_stats_only = false;
 
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -106,6 +112,20 @@ if ~isempty(figure_folder)
     end
     diary(stats_path)
     diary_cleanup = onCleanup(@() diary('off')); %#ok<NASGU>
+end
+
+if reprint_stats_only
+    summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
+    if exist(summary_path, 'file') ~= 2
+        error('Analyze_locking_period_acg:nosummary', ...
+            'No saved summary at %s. Run once with reprint_stats_only = false.', summary_path);
+    end
+    loaded = load(summary_path, 'locking_acg', 'power_acg');
+    smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
+    reprint_saved_statistics(loaded.locking_acg, loaded.power_acg, ...
+        group_order, group_title, plot_rate_scaled_peaks, smooth_n);
+    disp(['Reprinted statistics from ', summary_path])
+    return
 end
 
 %% Delta-lock labels
@@ -737,8 +757,7 @@ else
     end
     figure_name = ['Paired ACG peaks, ', split_name, ', firing-rate Hz'];
 end
-disp(' ')
-disp(['Paired tests, ', split_name, ': ', scale_label])
+report_peak_tests(summary, group_order, group_title, score_label, split_name, unit_label);
 n_col = 2 + isempty(unit_label);
 figure('Name', figure_name, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.02 0.05 0.96 0.9])
@@ -758,8 +777,6 @@ for m = 1:numel(measures)
     plot_paired_against_score(neurons.lock_group(ok), ...
         neurons.score_low(ok), neurons.score_high(ok), y_low(ok), y_high(ok), ...
         neurons.firing_rate(ok), group_order, colors, score_label, measure_labels{m})
-    report_paired_increase(summary, neurons, group_order, group_title, ...
-        measures{m}, measure_labels{m}, split_name, score_label, scale_label);
     if n_col == 3 && m > 1
         [lag_low, lag_high, lag_ok] = paired_peak_values( ...
             neurons.low_peaks, neurons.high_peaks, lag_measures{m});
@@ -770,8 +787,6 @@ for m = 1:numel(measures)
             neurons.score_low(lag_ok), neurons.score_high(lag_ok));
         title(sprintf('Latency, n = %d\nmedian high-low %.3g s, p = %.3g', ...
             lag_change.n, lag_change.median_delta, lag_change.p_two))
-        report_paired_latency(summary, neurons, group_order, group_title, ...
-            lag_measures{m}, lag_labels{m}, split_name, score_label, scale_label);
     end
 end
 legend_group_colors(group_order, group_title, colors)
@@ -862,6 +877,101 @@ xlabel(x_label)
 ylabel(y_label)
 title('Each line is one neuron')
 box off
+end
+
+
+function report_peak_tests(summary, group_order, group_title, score_label, split_name, unit_label)
+if nargin < 6 || isempty(unit_label)
+    unit_label = '';
+    scale_label = 'sum-to-1 normalized autocorrelogram';
+else
+    scale_label = 'firing-rate normalization (Hz)';
+end
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low_peaks')
+    return
+end
+neurons = summary.all_neurons;
+measures = {'burst', 'first_prominence', 'second_prominence'};
+measure_labels = { ...
+    'Burst level, 0-50 ms', ...
+    'First-peak prominence', ...
+    'Second-cycle prominence'};
+lag_measures = {'first_lag', 'second_lag'};
+lag_labels = {'First-peak latency (s)', 'Second-cycle latency (s)'};
+if ~isempty(unit_label)
+    for m = 1:numel(measure_labels)
+        measure_labels{m} = [measure_labels{m}, ' (Hz)'];
+    end
+end
+disp(' ')
+disp(['Paired tests, ', split_name, ': ', scale_label])
+for m = 1:numel(measures)
+    report_paired_increase(summary, neurons, group_order, group_title, ...
+        measures{m}, measure_labels{m}, split_name, score_label, scale_label);
+    if isempty(unit_label) && m > 1
+        report_paired_latency(summary, neurons, group_order, group_title, ...
+            lag_measures{m - 1}, lag_labels{m - 1}, split_name, score_label, scale_label);
+    end
+end
+end
+
+
+function reprint_saved_statistics(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n)
+params = locking_acg.parameters;
+centers = locking_acg.centers(:).';
+bin_w = median(diff(centers));
+locking_labels = { ...
+    sprintf('Low %g%% locking', params.low_percent), ...
+    sprintf('High %g%% locking', 100 - params.high_percent), ...
+    'All firing runs'};
+power_labels = { ...
+    sprintf('Low %g%% delta power', params.low_percent), ...
+    sprintf('High %g%% delta power', 100 - params.high_percent), ...
+    'All firing runs'};
+reprint_split_mass(locking_acg, group_order, group_title, locking_labels, ...
+    'locking', centers, params.delta_lag);
+reprint_split_mass(power_acg, group_order, group_title, power_labels, ...
+    'delta power', centers, params.delta_lag);
+report_peak_tests(locking_acg, group_order, group_title, ...
+    'Mean PPC of the runs', 'locking', '');
+report_peak_tests(power_acg, group_order, group_title, ...
+    'Mean delta power of the runs', 'delta power', '');
+if plot_rate_scaled_peaks
+    locking_hz = add_peak_scores(rate_scale_summary(locking_acg, bin_w, group_order), ...
+        centers, smooth_n, group_order);
+    power_hz = add_peak_scores(rate_scale_summary(power_acg, bin_w, group_order), ...
+        centers, smooth_n, group_order);
+    report_peak_tests(locking_hz, group_order, group_title, ...
+        'Mean PPC of the runs', 'locking', 'Hz');
+    report_peak_tests(power_hz, group_order, group_title, ...
+        'Mean delta power of the runs', 'delta power', 'Hz');
+end
+if isfield(locking_acg, 'delta_power_model')
+    model = locking_acg.delta_power_model;
+    if model.all.ok
+        report_power_model(model.all);
+    end
+    for g = 1:numel(group_order)
+        if isfield(model, 'groups') && isfield(model.groups, group_order{g}) ...
+                && model.groups.(group_order{g}).ok
+            report_power_model(model.groups.(group_order{g}));
+        end
+    end
+end
+end
+
+
+function reprint_split_mass(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag)
+curve_names = {'low', 'high', 'all'};
+names = [group_order, {'all_neurons'}];
+titles = [group_title, {'All neurons'}];
+for g = 1:numel(names)
+    if ~isfield(summary, names{g}) || ~isfield(summary.(names{g}), 'low')
+        continue
+    end
+    record_delta_mass(summary.(names{g}), curve_names, curve_labels, ...
+        [titles{g}, ', ', split_name], centers, delta_lag, split_name);
+end
 end
 
 
