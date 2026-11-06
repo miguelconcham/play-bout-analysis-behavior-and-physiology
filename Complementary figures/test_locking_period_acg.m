@@ -166,6 +166,18 @@ blocked = gaussian_smooth_acg([1 NaN 4], 2);
 assert(isnan(blocked(2)) && abs(blocked(1) - 1) < 1e-12 && abs(blocked(3) - 4) < 1e-12, ...
     'Gaussian smoothing crossed a missing bin.');
 
+centers = -0.50:0.01:0.50;
+n = 30;
+low = zeros(n, numel(centers));
+high = zeros(n, numel(centers));
+high(:, abs(centers) >= 0.20 & abs(centers) <= 0.30) = 1;
+found = paired_acg_clusters(low, high, centers, 0.05, 199);
+assert(numel(found.clusters) == 1, 'The planted lag window was not one cluster.');
+assert(abs(found.clusters(1).x0 - 0.195) < 1e-9 && abs(found.clusters(1).x1 - 0.305) < 1e-9, ...
+    'The cluster did not cover the planted 0.20-0.30 s window.');
+assert(found.clusters(1).survives && found.clusters(1).p <= 0.05, ...
+    'The planted cluster did not survive the sign-flip test.');
+
 disp('test_locking_period_acg passed')
 end
 

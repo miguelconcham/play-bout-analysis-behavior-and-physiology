@@ -31,6 +31,12 @@
 % edge of this window. The shading does not set the vertical scale. Every
 % mean autocorrelogram uses one y limit, taken from the highest and lowest
 % mean plus or minus its standard error, and rounded onto a short decimal.
+% On each mean autocorrelogram, grey bars in the top tenth of the axis mark
+% lags where the paired low-versus-high test is significant on its own.
+% The bars are mirrored because the autocorrelogram is. The statistics
+% report gives the cluster test for those same bars: the lag range on the
+% positive side and the cluster p-value. A bar survives when that p-value
+% is at or below acg_cluster_alpha.
 %
 % Each plotted autocorrelogram is also scored neuron by neuron. The burst
 % is the mean level from the first positive bin through 50 ms. Oscillatory
@@ -94,6 +100,8 @@ acg_lag          = 1;       % s, half-width of the autocorrelogram axis
 smooth_half      = 0.04;        % s, full smooth width; Gaussian sigma is a quarter of this
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
+acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutoff
+acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
 plot_rate_scaled_peaks = true;  % false: paired plots use the sum-to-1 autocorrelogram only
                                  % true: those plots, plus a second set in firing-rate units (Hz)
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
@@ -123,7 +131,8 @@ if reprint_stats_only
     loaded = load(summary_path, 'locking_acg', 'power_acg');
     smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
     reprint_saved_statistics(loaded.locking_acg, loaded.power_acg, ...
-        group_order, group_title, plot_rate_scaled_peaks, smooth_n);
+        group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
+        skip_abs_lag, acg_cluster_alpha, acg_cluster_perm);
     disp(['Reprinted statistics from ', summary_path])
     stop_statistics_diary()
     return
@@ -348,6 +357,8 @@ parameters = struct( ...
     'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
     'areas_to_keep', {areas_to_keep}, ...
     'figure_folder', figure_folder, ...
+    'acg_cluster_alpha', acg_cluster_alpha, ...
+    'acg_cluster_perm', acg_cluster_perm, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
 
 locking_labels = { ...
@@ -361,10 +372,12 @@ power_labels = { ...
 
 locking_acg = summarize_and_plot(acg_raw, group_order, group_title, ...
     locking_labels, 'locking', centers, delta_lag, skip_abs_lag, smooth_n, ...
-    acg_refractory_s, curve_colors, n_in_parsing, n_unsplit);
+    acg_refractory_s, curve_colors, n_in_parsing, n_unsplit, ...
+    acg_cluster_alpha, acg_cluster_perm);
 power_acg = summarize_and_plot(acg_power, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
-    acg_refractory_s, curve_colors, n_in_parsing, n_unsplit_power);
+    acg_refractory_s, curve_colors, n_in_parsing, n_unsplit_power, ...
+    acg_cluster_alpha, acg_cluster_perm);
 acg_ylim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, ...
     centers, skip_abs_lag, smooth_n);
 parameters.acg_ylim = acg_ylim;
@@ -543,7 +556,7 @@ power = double(rt.lfp_param(:, 2)) .^ 2;
 end
 
 
-function summary = summarize_and_plot(acg_raw, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, acg_refractory_s, curve_colors, n_in_parsing, n_unsplit)
+function summary = summarize_and_plot(acg_raw, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, acg_refractory_s, curve_colors, n_in_parsing, n_unsplit, cluster_alpha, cluster_perm)
 curve_names = {'low', 'high', 'all'};
 summary = struct();
 disp_block(['Mean autocorrelogram, ', split_name])
@@ -582,7 +595,8 @@ for g = 1:numel(group_order)
     summary.(name).model_ppc = acg_raw.(name).model_ppc(keep);
     summary.(name).model_power = acg_raw.(name).model_power(keep);
     summary.(name) = record_delta_mass(summary.(name), curve_names, curve_labels, ...
-        [group_title{g}, ', ', split_name], centers, delta_lag, split_name);
+        [group_title{g}, ', ', split_name], centers, delta_lag, split_name, ...
+        skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 end
 
 summary.all_neurons = stack_plotted_neurons(summary, group_order);
@@ -595,7 +609,8 @@ n_all = summary.all_neurons.n;
 disp_rule()
 disp(['All neurons, ', split_name, ': ', num2str(n_all), ' plotted'])
 summary.all_neurons = record_delta_mass(summary.all_neurons, curve_names, curve_labels, ...
-    ['All neurons, ', split_name], centers, delta_lag, split_name);
+    ['All neurons, ', split_name], centers, delta_lag, split_name, ...
+    skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 end
 
 
@@ -680,7 +695,7 @@ summary.all_neurons = plot_acg_curves(summary.all_neurons, curve_names, curve_la
 end
 
 
-function group_acg = record_delta_mass(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, split_name)
+function group_acg = record_delta_mass(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, split_name, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm)
 for c = 1:numel(curve_names)
     mass = delta_side_mass(group_acg.(curve_names{c}), centers, delta_lag);
     disp(sprintf('  %s  %s   mean ACG in [%g %g] s = %.4g   n = %d', ...
@@ -689,6 +704,11 @@ for c = 1:numel(curve_names)
     group_acg.([curve_names{c}, '_delta_mass']) = mass;
 end
 report_split_contrast(group_acg, figure_label, split_name)
+low_s = smooth_acg_away_from_zero(group_acg.low, centers, skip_abs_lag, smooth_n);
+high_s = smooth_acg_away_from_zero(group_acg.high, centers, skip_abs_lag, smooth_n);
+group_acg.low_high_clusters = paired_acg_clusters( ...
+    low_s, high_s, centers, cluster_alpha, cluster_perm);
+report_acg_clusters(group_acg.low_high_clusters, figure_label, split_name)
 end
 
 
@@ -711,9 +731,12 @@ yticks(readable_acg_ticks(acg_ylim))
 ytickformat('%g')
 xlabel('Lag (s)')
 ylabel('Mean normalized autocorrelogram')
-title({figure_label, sprintf('n = %d    shaded: 2-5 Hz', size(group_acg.low, 1))})
+title({figure_label, sprintf('n = %d    band: 2-5 Hz    top bars: uncorrected low vs high', size(group_acg.low, 1))})
 legend(plotted, curve_labels, 'Location', 'best')
 place_delta_shade(shade)
+if isfield(group_acg, 'low_high_clusters')
+    shade_acg_clusters(group_acg.low_high_clusters, acg_ylim)
+end
 box off
 end
 
@@ -1041,7 +1064,7 @@ end
 end
 
 
-function reprint_saved_statistics(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n)
+function reprint_saved_statistics(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, cluster_alpha, cluster_perm)
 params = locking_acg.parameters;
 centers = locking_acg.centers(:).';
 bin_w = median(diff(centers));
@@ -1054,9 +1077,9 @@ power_labels = { ...
     sprintf('High %g%% delta power', 100 - params.high_percent), ...
     'All firing runs'};
 reprint_split_mass(locking_acg, group_order, group_title, locking_labels, ...
-    'locking', centers, params.delta_lag);
+    'locking', centers, params.delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 reprint_split_mass(power_acg, group_order, group_title, power_labels, ...
-    'delta power', centers, params.delta_lag);
+    'delta power', centers, params.delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 report_peak_tests(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking', '');
 report_peak_tests(power_acg, group_order, group_title, ...
@@ -1086,7 +1109,7 @@ end
 end
 
 
-function reprint_split_mass(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag)
+function reprint_split_mass(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm)
 curve_names = {'low', 'high', 'all'};
 names = [group_order, {'all_neurons'}];
 titles = [group_title, {'All neurons'}];
@@ -1097,7 +1120,8 @@ for g = 1:numel(names)
     end
     disp_rule()
     record_delta_mass(summary.(names{g}), curve_names, curve_labels, ...
-        [titles{g}, ', ', split_name], centers, delta_lag, split_name);
+        [titles{g}, ', ', split_name], centers, delta_lag, split_name, ...
+        skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 end
 end
 
@@ -1809,6 +1833,46 @@ p_low = paired_signrank(group_acg.high_delta_mass, group_acg.low_delta_mass);
 p_all = paired_signrank(group_acg.high_delta_mass, group_acg.all_delta_mass);
 disp(sprintf('  %s two-sided signrank, high vs low 25%% %s: p = %.3g', group_label, split_name, p_low))
 disp(sprintf('  %s two-sided signrank, high vs all runs: p = %.3g', group_label, p_all))
+end
+
+
+function report_acg_clusters(result, figure_label, split_name)
+disp(sprintf(['  %s cluster test, high vs low 25%% %s, positive lags: ' ...
+    'uncorrected signrank p < %.3g, %d sign flips'], ...
+    figure_label, split_name, result.alpha, result.n_perm))
+if isempty(result.clusters)
+    disp('  No contiguous uncorrected difference.')
+    return
+end
+for k = 1:numel(result.clusters)
+    cluster = result.clusters(k);
+    if cluster.survives
+        fate = 'survives';
+    else
+        fate = 'does not survive';
+    end
+    disp(sprintf('  Cluster %.3g-%.3g s, cluster p = %.3g, %s', ...
+        cluster.x0, cluster.x1, cluster.p, fate))
+end
+disp('  The same ranges are shaded at negative lags. The bars themselves are uncorrected.')
+end
+
+
+function shade_acg_clusters(result, y_lim)
+if isempty(result.clusters)
+    return
+end
+span = y_lim(2) - y_lim(1);
+y0 = y_lim(2) - 0.1 * span;
+y1 = y_lim(2);
+for k = 1:numel(result.clusters)
+    x0 = result.clusters(k).x0;
+    x1 = result.clusters(k).x1;
+    patch([x0 x1 x1 x0], [y0 y0 y1 y1], [0.25 0.25 0.25], ...
+        'FaceAlpha', 0.45, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    patch([-x1 -x0 -x0 -x1], [y0 y0 y1 y1], [0.25 0.25 0.25], ...
+        'FaceAlpha', 0.45, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+end
 end
 
 
