@@ -158,6 +158,14 @@ end
 assert(mean(null_prom, 'omitnan') < 0.5 * regular_peaks.first_prominence, ...
     'Uniform within-run times did not flatten the rhythmic peak.');
 
+impulse = [0 0 0 0 1 0 0 0 0];
+smoothed = gaussian_smooth_acg(impulse, 1);
+assert(smoothed(5) > 0.35 && smoothed(5) > smoothed(4) && smoothed(4) > smoothed(3), ...
+    'The Gaussian smooth did not keep the center of the peak above its shoulders.');
+blocked = gaussian_smooth_acg([1 NaN 4], 2);
+assert(isnan(blocked(2)) && abs(blocked(1) - 1) < 1e-12 && abs(blocked(3) - 4) < 1e-12, ...
+    'Gaussian smoothing crossed a missing bin.');
+
 disp('test_locking_period_acg passed')
 end
 

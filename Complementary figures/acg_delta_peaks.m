@@ -3,8 +3,11 @@ function peaks = acg_delta_peaks(acg_row, centers, smooth_n)
 %
 % The positive and negative lags are averaged. The burst is the mean level
 % from the first positive bin through 50 ms, measured before smoothing.
-% Oscillatory peaks are found with findpeaks on the smoothed curve from
-% 100 ms onward. Prominence is the height above the higher neighboring
+% Oscillatory peaks are found with findpeaks on the Gaussian-smoothed
+% curve from 100 ms onward. smooth_n is the moving-average width in bins.
+% The Gaussian standard deviation is one quarter of that width, so the
+% center of a peak keeps more of its height than it did under a flat
+% average. Prominence is the height above the higher neighboring
 % valley, which keeps a bump on the decay and ignores a smooth shoulder.
 % The first peak is the earliest one. A second peak counts only when it
 % lies near twice that lag and the whole search window was observed.
@@ -125,10 +128,10 @@ y = y_raw;
 if smooth_n <= 1 || isempty(y_raw)
     return
 end
-keep = t_pos > 0.02 & isfinite(y_raw);
-if sum(keep) < smooth_n
+keep = t_pos > 0.02;
+if ~any(keep)
     return
 end
-smoothed = smooth(y_raw(keep), smooth_n);
-y(keep) = smoothed(:)';
+% Sigma is a quarter of the moving-average width, in bins.
+y(keep) = gaussian_smooth_acg(y_raw(keep), smooth_n / 4);
 end

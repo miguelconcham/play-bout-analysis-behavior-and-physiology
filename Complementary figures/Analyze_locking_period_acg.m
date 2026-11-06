@@ -55,7 +55,7 @@ low_percent      = 25;
 high_percent     = 75;
 delta_lag        = [0.2 0.5];   % s, 5 Hz to 2 Hz
 acg_lag          = 1;       % s, half-width of the autocorrelogram axis
-smooth_half      = 0.04;        % s, display smoothing away from zero
+smooth_half      = 0.04;        % s, full smooth width; Gaussian sigma is a quarter of this
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
 
@@ -1007,12 +1007,10 @@ pos = centers > skip_abs_lag;
 neg = centers < -skip_abs_lag;
 for j = 1:size(X, 1)
     if any(pos)
-        y = smooth(X(j, pos), smooth_n);
-        Y(j, pos) = y(:)';
+        Y(j, pos) = gaussian_smooth_acg(X(j, pos), smooth_n / 4);
     end
     if any(neg)
-        y = smooth(X(j, neg), smooth_n);
-        Y(j, neg) = y(:)';
+        Y(j, neg) = gaussian_smooth_acg(X(j, neg), smooth_n / 4);
     end
 end
 end
