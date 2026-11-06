@@ -14,20 +14,20 @@
 % The second cycle is compared only when the observed curve could measure
 % it. A shuffle that finds no second cycle counts as prominence 0.
 %
-% The result file is rewritten after every neuron. Stop the script and run
-% it again: finished neurons are skipped. Lower n_shuffles to shorten a
-% first pass. Only runs that fall in a plotted tail are shuffled.
+% The result file is rewritten after every neuron. resume is false, so
+% this run starts at neuron 0 and deletes a previous checkpoint. Set
+% resume to true only to continue a run that this script has already
+% started. Only runs that fall in a plotted tail are shuffled.
 % Only areas_to_keep are analyzed. SupCol is the superior-colliculus
 % label in the depth tables and is kept as SC. VLPAG and DLPAG are not
 % treated as LPAG.
 %
-% Bin edges and the saved analysis parameters are loaded from
-% locking_period_acg_summary.mat, the file the main script writes at the
-% end of a full run. The shuffle refuses to start when that summary
-% disagrees with the assignments at the top of Analyze_locking_period_acg.m,
-% or when the saved axis does not reach +/- acg_lag. Smoothing width and
-% the refractory blank are read from that script when the summary does
-% not store them. The run already in progress does not store them.
+% Every analysis setting is read from the assignments at the top of
+% Analyze_locking_period_acg.m in this same folder: alpha, the
+% non-entrained threshold, the 25/75 tails, acg_lag, the delta window,
+% smooth_half, skip_abs_lag, the refractory blank, and areas_to_keep.
+% The lag axis is built from that acg_lag and the parsing bin width, the
+% same way Analyze_locking_period_acg builds it. No summary file is read.
 %
 % Those same shuffles are averaged across neurons in two scales. The sum-to-1
 % mean gives every neuron the same weight. The rate-ratio mean divides
@@ -54,18 +54,17 @@ phase_folder   = fullfile(data_root, 'Analysis results', 'phase locking data');
 npx_root       = fullfile(data_root, 'NPX data', 'NPX raw data');
 
 n_shuffles = 500;
-% true continues a checkpoint built from this same summary. A checkpoint
-% from another axis or another parameter block stops the script. Set this
-% false only to ignore that file and start over.
-resume     = true;
+% false starts at neuron 0 and deletes the previous checkpoint.
+% true continues a checkpoint that this script already started with the
+% same parameters.
+resume     = false;
 
-summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 script_dir = fileparts(mfilename('fullpath'));
 if isempty(script_dir)
     script_dir = fileparts(which('Analyze_locking_period_acg_shuffle'));
 end
 script_path = fullfile(script_dir, 'Analyze_locking_period_acg.m');
-[analysis, edges, centers] = load_locking_acg_parameters(summary_path, script_path);
+analysis = read_analysis_script(script_path);
 alpha = analysis.alpha;
 non_entrained_p = analysis.non_entrained_p;
 low_percent = analysis.low_percent;
@@ -76,7 +75,7 @@ smooth_half = analysis.smooth_half;
 skip_abs_lag = analysis.skip_abs_lag;
 acg_refractory_s = analysis.acg_refractory_s;
 areas_to_keep = analysis.areas_to_keep;
-bin_w = median(diff(centers));
+[edges, centers, bin_w] = axis_from_parsing(parsing_folder, acg_lag);
 n_bins = numel(centers);
 smooth_n = max(1, round(smooth_half / bin_w));
 if abs(skip_abs_lag - 0.02) > 1e-9
@@ -84,7 +83,7 @@ if abs(skip_abs_lag - 0.02) > 1e-9
         ['Peak scoring leaves lags within 20 ms unsmoothed. The loaded ' ...
         'skip_abs_lag is %g s.'], skip_abs_lag);
 end
-disp_locked_parameters(analysis, summary_path, edges, bin_w, n_bins, smooth_n)
+disp_script_parameters(analysis, edges, bin_w, n_bins, smooth_n)
 
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -122,6 +121,11 @@ disp(sprintf(['Grand-average accumulators are %.1f MB for sum-to-1 and rate rati
 
 records = {};
 grand = [];
+if ~resume && exist(checkpoint, 'file') == 2
+    delete(checkpoint);
+    disp(['Deleted previous checkpoint ', checkpoint])
+    disp('Starting from zero.')
+end
 if resume && exist(checkpoint, 'file') == 2
     stored = load(checkpoint, 'shuffle_records', 'parameters', 'grand_average');
     if ~isfield(stored, 'grand_average')
@@ -159,8 +163,10 @@ if resume && exist(checkpoint, 'file') == 2
             'Delete it or set resume = false.'], checkpoint, n_shuffles, n_bins);
     end
     disp(['Resuming from ', num2str(numel(records)), ' neurons in ', checkpoint])
+elseif resume
+    disp(['No checkpoint at ', checkpoint, '. Starting from zero.'])
 else
-    disp(['Checkpoint: ', checkpoint])
+    disp(['Starting from zero. Checkpoint: ', checkpoint])
 end
 if isempty(grand)
     grand = empty_grand(grand_order, n_shuffles, n_bins);
@@ -918,84 +924,43 @@ spike_clusters = double(readNPY(clusters_file));
 end
 
 
-function [analysis, edges, centers] = load_locking_acg_parameters(summary_path, script_path)
-if exist(summary_path, 'file') ~= 2
-    error('Analyze_locking_period_acg_shuffle:nosummary', ...
-        ['No autocorrelogram summary at %s. Wait until Analyze_locking_period_acg ' ...
-        'prints that it saved this file.'], summary_path);
-end
+function analysis = read_analysis_script(script_path)
 if exist(script_path, 'file') ~= 2
     error('Analyze_locking_period_acg_shuffle:noscript', ...
         'Analyze_locking_period_acg.m was not found next to this script.');
 end
-loaded = load(summary_path, 'locking_acg');
-if ~isfield(loaded, 'locking_acg') || ~isfield(loaded.locking_acg, 'centers') ...
-        || ~isfield(loaded.locking_acg, 'bin_edges') ...
-        || ~isfield(loaded.locking_acg, 'parameters')
-    error('Analyze_locking_period_acg_shuffle:nosummary', ...
-        ['%s has no saved axis or parameters. Wait until the full ' ...
-        'Analyze_locking_period_acg run saves it.'], summary_path);
-end
-centers = loaded.locking_acg.centers(:).';
-edges = loaded.locking_acg.bin_edges(:).';
-analysis = loaded.locking_acg.parameters;
-script_names = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', ...
+names = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', ...
     'acg_lag', 'delta_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s'};
-from_script = read_script_assignments(script_path, script_names);
-saved_names = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', ...
-    'acg_lag', 'delta_lag'};
-for i = 1:numel(saved_names)
-    name = saved_names{i};
-    if ~isfield(analysis, name) || isempty(analysis.(name))
-        error('Analyze_locking_period_acg_shuffle:summary', ...
-            ['%s does not store %s. That file is not the summary from the ' ...
-            'run of Analyze_locking_period_acg now in progress. Wait until ' ...
-            'that run saves.'], summary_path, name);
+analysis = read_script_assignments(script_path, names);
+analysis.areas_to_keep = read_script_areas(script_path);
+analysis.script_path = script_path;
+end
+
+
+function [edges, centers, bin_w] = axis_from_parsing(parsing_folder, acg_lag)
+% Same axis as Analyze_locking_period_acg: +/- acg_lag at the parsing bin width.
+files = list_parsing_mat_files(parsing_folder);
+for f = 1:numel(files)
+    S = load(files(f).path, 'parsing_struct');
+    if ~isfield(S, 'parsing_struct') || isempty(S.parsing_struct)
+        continue
     end
-    if ~same_setting(analysis.(name), from_script.(name))
-        error('Analyze_locking_period_acg_shuffle:summary', ...
-            ['%s has %s = %s, but Analyze_locking_period_acg.m has %s = %s. ' ...
-            'The shuffle was not started.'], summary_path, name, ...
-            setting_text(analysis.(name)), name, setting_text(from_script.(name)));
+    ps = S.parsing_struct(1);
+    if ~isfield(ps, 'config') || ~isfield(ps.config, 'autocorr_bin_edges')
+        continue
     end
-end
-script_only = {'smooth_half', 'skip_abs_lag', 'acg_refractory_s'};
-for i = 1:numel(script_only)
-    name = script_only{i};
-    if isfield(analysis, name) && ~isempty(analysis.(name)) ...
-            && ~same_setting(analysis.(name), from_script.(name))
-        error('Analyze_locking_period_acg_shuffle:summary', ...
-            ['%s has %s = %s, but Analyze_locking_period_acg.m has %s = %s. ' ...
-            'The shuffle was not started.'], summary_path, name, ...
-            setting_text(analysis.(name)), name, setting_text(from_script.(name)));
+    saved_edges = ps.config.autocorr_bin_edges(:)';
+    if isfield(ps.config, 'autocorr_bin_size') && isfinite(ps.config.autocorr_bin_size)
+        bin_w = ps.config.autocorr_bin_size;
+    else
+        bin_w = mean(diff(saved_edges));
     end
-    analysis.(name) = from_script.(name);
+    edges = (-acg_lag):bin_w:acg_lag;
+    centers = edges(1:end - 1) + bin_w / 2;
+    return
 end
-areas_script = read_script_areas(script_path);
-if ~isfield(analysis, 'areas_to_keep') || isempty(analysis.areas_to_keep)
-    error('Analyze_locking_period_acg_shuffle:summary', ...
-        '%s does not store areas_to_keep.', summary_path);
-end
-if ~same_setting(analysis.areas_to_keep, areas_script)
-    error('Analyze_locking_period_acg_shuffle:summary', ...
-        ['%s keeps areas %s, but Analyze_locking_period_acg.m keeps %s. ' ...
-        'The shuffle was not started.'], summary_path, ...
-        setting_text(analysis.areas_to_keep), setting_text(areas_script));
-end
-if numel(edges) ~= numel(centers) + 1
-    error('Analyze_locking_period_acg_shuffle:summary', ...
-        '%s bin edges do not match its centers.', summary_path);
-end
-bin_w = median(diff(edges));
-acg_lag = double(analysis.acg_lag);
-if abs(edges(1) + acg_lag) > bin_w || abs(edges(end) - acg_lag) > bin_w
-    error('Analyze_locking_period_acg_shuffle:summary', ...
-        ['%s covers %+g to %+g s, but acg_lag is %g s. Wait until the ' ...
-        'full run saves an axis of +/- acg_lag.'], summary_path, ...
-        edges(1), edges(end), acg_lag);
-end
-analysis.smooth_source = script_path;
-analysis.summary_path = summary_path;
+error('Analyze_locking_period_acg_shuffle:nobins', ...
+    'No parsing struct contained ACG bin edges.');
 end
 
 
@@ -1020,21 +985,15 @@ end
 end
 
 
-function disp_locked_parameters(analysis, summary_path, edges, bin_w, n_bins, smooth_n)
-disp(['Summary: ', summary_path])
-disp(sprintf('  axis %+g to %+g s, bin %g s, %d bins', edges(1), edges(end), bin_w, n_bins))
+function disp_script_parameters(analysis, edges, bin_w, n_bins, smooth_n)
+disp(['Parameters from ', analysis.script_path])
 disp(sprintf('  alpha = %g, non-entrained p = %g', analysis.alpha, analysis.non_entrained_p))
 disp(sprintf('  tails = %g / %g, acg_lag = %g s, delta window = %s s', ...
     analysis.low_percent, analysis.high_percent, analysis.acg_lag, mat2str(double(analysis.delta_lag))))
 disp(['  areas = ', strjoin(analysis.areas_to_keep, ', ')])
-disp(['Smoothing and refractory blank from ', analysis.smooth_source])
 disp(sprintf('  smooth_half = %g s, skip_abs_lag = %g s, refractory = %g s, smooth_n = %d', ...
     analysis.smooth_half, analysis.skip_abs_lag, analysis.acg_refractory_s, smooth_n))
-if isfield(analysis, 'plot_rate_scaled_peaks') && ~analysis.plot_rate_scaled_peaks
-    warning('Analyze_locking_period_acg_shuffle:ratePlots', ...
-        ['The summary was saved with plot_rate_scaled_peaks = false. ' ...
-        'The shuffle still scores the rate-ratio curves.']);
-end
+disp(sprintf('  axis %+g to %+g s, bin %g s, %d bins', edges(1), edges(end), bin_w, n_bins))
 end
 
 
