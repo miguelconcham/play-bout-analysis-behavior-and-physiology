@@ -31,7 +31,10 @@
 % prominence, the height above the higher neighboring valley. The first
 % peak is the earliest one. A second peak counts only near twice that lag,
 % and only when that window was observed. Low and high are the same
-% neuron, so the plots connect the two conditions with a line. A second
+% neuron. The low-versus-high panel is a scatter of the low tail against
+% the high tail, with the identity line as reference. The mean is a cross,
+% so an increase sits above that line. The panel against PPC or delta power
+% still connects the two tails of each neuron. A second
 % cycle that the runs are too short to measure is left out of the pair.
 % The sum-to-1 scaling is not a division by firing rate. Set
 % plot_rate_scaled_peaks to also score the same peaks on
@@ -654,23 +657,42 @@ end
 
 
 function plot_paired_categories(lock_group, y_low, y_high, firing_rate, group_order, colors, y_label)
+% Low tail on x, high tail on y. The dashed line is equality. A cross above
+% that line is a larger value in the high tail.
 hold on
+vals = [y_low(:); y_high(:)];
+vals = vals(isfinite(vals));
+if isempty(vals)
+    axis off
+    return
+end
+lo = min(vals);
+hi = max(vals);
+span = hi - lo;
+if span <= 0
+    span = max(abs(lo), 1);
+end
+pad = 0.08 * span;
+lim = [lo - pad, hi + pad];
+plot(lim, lim, '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1, 'HandleVisibility', 'off')
 for g = 1:numel(group_order)
     idx = strcmp(lock_group, group_order{g});
     if ~any(idx)
         continue
     end
     order = idx_high_rate_last(idx, firing_rate);
-    x = [ones(numel(order), 1), 2 * ones(numel(order), 1)];
-    plot(x', [y_low(order), y_high(order)]', '-', ...
-        'Color', [colors(g, :), 0.25], 'HandleVisibility', 'off')
-    plot([1 2], [mean(y_low(order), 'omitnan'), mean(y_high(order), 'omitnan')], ...
-        '-', 'Color', colors(g, :), 'LineWidth', 2.5, 'HandleVisibility', 'off')
+    scatter(y_low(order), y_high(order), 22, colors(g, :), 'filled', ...
+        'MarkerFaceAlpha', 0.75, 'HandleVisibility', 'off')
+    plot(mean(y_low(order), 'omitnan'), mean(y_high(order), 'omitnan'), '+', ...
+        'Color', colors(g, :), 'MarkerSize', 12, 'LineWidth', 1.6, 'HandleVisibility', 'off')
 end
-xlim([0.6 2.4])
-set(gca, 'XTick', [1 2], 'XTickLabel', {'Low 25%', 'High 25%'})
-ylabel(y_label)
-title(sprintf('Paired, n = %d', numel(y_low)))
+plot(mean(y_low, 'omitnan'), mean(y_high, 'omitnan'), '+', ...
+    'Color', 'k', 'MarkerSize', 16, 'LineWidth', 2.4, 'HandleVisibility', 'off')
+xlim(lim)
+ylim(lim)
+axis square
+xlabel({'Low 25%', y_label})
+ylabel({'High 25%', y_label})
 box off
 end
 
@@ -840,7 +862,8 @@ function legend_group_colors(group_order, group_title, colors)
 hold on
 handles = gobjects(1, numel(group_order));
 for g = 1:numel(group_order)
-    handles(g) = plot(nan, nan, '-', 'Color', colors(g, :), 'LineWidth', 2.5);
+    handles(g) = plot(nan, nan, 'o', 'Color', colors(g, :), ...
+        'MarkerFaceColor', colors(g, :), 'MarkerSize', 6, 'LineStyle', 'none');
 end
 legend(handles, group_title, 'Location', 'eastoutside')
 end
