@@ -830,11 +830,100 @@ end
 legend_group_colors(group_order, group_title, colors)
 
 if isempty(unit_label)
+    plot_paired_by_lock_group(neurons, group_order, group_title, colors, split_name, scale_label)
     figure('Name', ['ACG cycle counts, ', split_name], 'Color', 'w', ...
         'Units', 'normalized', 'OuterPosition', [0.2 0.2 0.55 0.45])
     plot_paired_cycle_counts(neurons, group_order, group_title, colors, split_name)
     plot_first_latency_distributions(neurons, group_order, group_title, colors, split_name)
 end
+end
+
+
+function plot_paired_by_lock_group(neurons, group_order, group_title, colors, split_name, scale_label)
+col_titles = [group_title, {'All neurons'}];
+n_col = numel(col_titles);
+row_measures = {'burst', 'first_prominence', 'second_prominence', 'first_lag', 'second_lag'};
+row_labels = { ...
+    'Burst level, 0-50 ms', ...
+    'First-peak prominence', ...
+    'Second-cycle prominence', ...
+    'First-peak latency (s)', ...
+    'Second-cycle latency (s)'};
+side_names = { ...
+    'one-sided increase p', 'one-sided increase p', 'one-sided increase p', ...
+    'one-sided later p', 'one-sided later p'};
+units = {'', '', '', ' s', ' s'};
+figure('Name', ['Paired by lock group, ', split_name], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.02 0.02 0.96 0.96])
+for r = 1:numel(row_measures)
+    [y_low, y_high, ok] = paired_peak_values( ...
+        neurons.low_peaks, neurons.high_peaks, row_measures{r});
+    masks = cell(1, n_col);
+    for c = 1:numel(group_order)
+        masks{c} = ok & strcmp(neurons.lock_group, group_order{c});
+    end
+    masks{n_col} = ok;
+    lim = paired_cloud_limits(y_low(ok), y_high(ok));
+    for c = 1:n_col
+        subplot(numel(row_measures), n_col, (r - 1) * n_col + c)
+        in = masks{c};
+        plot_one_paired_cloud(neurons.lock_group(in), y_low(in), y_high(in), ...
+            neurons.firing_rate(in), group_order, colors, lim, r == numel(row_measures))
+        if c == 1
+            ylabel({'High 25%', row_labels{r}})
+        end
+        change = paired_change_stats(y_low(in), y_high(in), ...
+            neurons.score_low(in), neurons.score_high(in));
+        title(sprintf(['%s, n = %d\nmedian high-low %.3g%s\n' ...
+            'two-sided signrank p = %.3g\n%s = %.3g'], ...
+            col_titles{c}, change.n, change.median_delta, units{r}, ...
+            change.p_two, side_names{r}, change.p_increase), 'FontSize', 8)
+    end
+end
+sgtitle({['Low 25% vs high 25% by lock group, ', split_name], scale_label})
+end
+
+
+function lim = paired_cloud_limits(y_low, y_high)
+vals = [y_low(:); y_high(:)];
+vals = vals(isfinite(vals));
+if isempty(vals)
+    lim = [0 1];
+    return
+end
+lo = min(vals);
+hi = max(vals);
+span = hi - lo;
+if span <= 0
+    span = max(abs(lo), 1);
+end
+lim = [lo - 0.08 * span, hi + 0.08 * span];
+end
+
+
+function plot_one_paired_cloud(lock_group, y_low, y_high, firing_rate, group_order, colors, lim, show_xlabel)
+hold on
+plot(lim, lim, '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1, 'HandleVisibility', 'off')
+for g = 1:numel(group_order)
+    idx = strcmp(lock_group, group_order{g});
+    if ~any(idx)
+        continue
+    end
+    order = idx_high_rate_last(idx, firing_rate);
+    scatter(y_low(order), y_high(order), 16, colors(g, :), 'filled', ...
+        'MarkerFaceAlpha', 0.75, 'HandleVisibility', 'off')
+end
+if ~isempty(y_low)
+    plot(mean(y_low, 'omitnan'), mean(y_high, 'omitnan'), '+', ...
+        'Color', 'k', 'MarkerSize', 12, 'LineWidth', 2, 'HandleVisibility', 'off')
+end
+xlim(lim)
+ylim(lim)
+axis square
+if show_xlabel
+    xlabel('Low 25%')
+end
+box off
 end
 
 
