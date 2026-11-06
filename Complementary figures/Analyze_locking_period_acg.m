@@ -33,6 +33,9 @@
 % and only when that window was observed. Low and high are the same
 % neuron, so the plots connect the two conditions with a line. A second
 % cycle that the runs are too short to measure is left out of the pair.
+% For each measure the script tests whether the high tail is larger than
+% the low tail in the same neuron, and whether a bigger change in PPC or
+% delta power goes with a bigger change in that measure.
 % A reference figure for each split shows the strongest t1-only neuron and
 % the strongest t1-and-t2 neuron in each lock group. The printed burst,
 % prominences, lags, and mean score are the values on the scatter plots.
@@ -532,12 +535,16 @@ for m = 1:numel(measures)
     subplot(3, 2, 2 * m - 1)
     plot_paired_categories(neurons.lock_group(ok), y_low(ok), y_high(ok), ...
         group_order, colors, measure_labels{m})
+    change = paired_change_stats(y_low(ok), y_high(ok), ...
+        neurons.score_low(ok), neurons.score_high(ok));
+    title(sprintf('Paired, n = %d\nmedian high-low %.3g, increase p = %.3g', ...
+        change.n, change.median_delta, change.p_increase))
     subplot(3, 2, 2 * m)
     plot_paired_against_score(neurons.lock_group(ok), ...
         neurons.score_low(ok), neurons.score_high(ok), y_low(ok), y_high(ok), ...
         group_order, colors, score_label, measure_labels{m})
-    report_paired_peaks(summary, group_order, group_title, measures{m}, ...
-        measure_labels{m}, split_name);
+    report_paired_increase(summary, neurons, group_order, group_title, ...
+        measures{m}, measure_labels{m}, split_name, score_label);
 end
 legend_group_colors(group_order, group_title, colors)
 
@@ -601,18 +608,58 @@ box off
 end
 
 
-function report_paired_peaks(summary, group_order, group_title, measure_name, measure_label, split_name)
+function report_paired_increase(summary, neurons, group_order, group_title, measure_name, measure_label, split_name, score_label)
+disp(['Paired increase, ', split_name, ', ', measure_label])
+[y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measure_name);
+print_paired_increase('All neurons', y_low(ok), y_high(ok), ...
+    neurons.score_low(ok), neurons.score_high(ok), score_label);
 for g = 1:numel(group_order)
     if ~isfield(summary, group_order{g}) || ~isfield(summary.(group_order{g}), 'low_peaks')
         continue
     end
-    [y_low, y_high, ok] = paired_peak_values( ...
-        summary.(group_order{g}).low_peaks, summary.(group_order{g}).high_peaks, measure_name);
-    p = paired_signrank(y_high(ok), y_low(ok));
-    disp(sprintf('  %s, %s, %s: high - low = %.3g, signrank p = %.3g, n = %d', ...
-        group_title{g}, split_name, measure_label, ...
-        mean(y_high(ok) - y_low(ok), 'omitnan'), p, sum(ok)))
+    block = summary.(group_order{g});
+    [g_low, g_high, g_ok] = paired_peak_values(block.low_peaks, block.high_peaks, measure_name);
+    print_paired_increase(group_title{g}, g_low(g_ok), g_high(g_ok), ...
+        block.score_low(g_ok), block.score_high(g_ok), score_label);
 end
+end
+
+
+function print_paired_increase(label, y_low, y_high, x_low, x_high, score_label)
+stats = paired_change_stats(y_low, y_high, x_low, x_high);
+disp(sprintf(['  %s: median high-low = %.3g, increased %d/%d, ' ...
+    'signrank p = %.3g, increase p = %.3g, Spearman with %s change rho = %.3g p = %.3g'], ...
+    label, stats.median_delta, stats.n_increased, stats.n, ...
+    stats.p_two, stats.p_increase, score_label, stats.rho, stats.p_rho))
+end
+
+
+function stats = paired_change_stats(y_low, y_high, x_low, x_high)
+delta = y_high(:) - y_low(:);
+score_change = x_high(:) - x_low(:);
+stats.n = numel(delta);
+stats.n_increased = sum(delta > 0);
+if isempty(delta)
+    stats.median_delta = NaN;
+else
+    stats.median_delta = median(delta, 'omitnan');
+end
+stats.p_two = paired_signrank(y_high, y_low, 'both');
+stats.p_increase = paired_signrank(y_high, y_low, 'right');
+[stats.rho, stats.p_rho] = spearman_change(score_change, delta);
+end
+
+
+function [rho, p] = spearman_change(dx, dy)
+ok = isfinite(dx) & isfinite(dy);
+dx = dx(ok);
+dy = dy(ok);
+if numel(dx) < 3 || numel(unique(dx)) < 2 || numel(unique(dy)) < 2
+    rho = NaN;
+    p = NaN;
+    return
+end
+[rho, p] = corr(dx(:), dy(:), 'Type', 'Spearman');
 end
 
 
@@ -1026,7 +1073,10 @@ disp(sprintf('  %s signrank, high vs all runs: p = %.3g', group_label, p_all))
 end
 
 
-function p = paired_signrank(a, b)
+function p = paired_signrank(a, b, tail)
+if nargin < 3 || isempty(tail)
+    tail = 'both';
+end
 ok = isfinite(a) & isfinite(b);
 a = a(ok);
 b = b(ok);
@@ -1034,7 +1084,7 @@ if numel(a) < 2 || all(a == b)
     p = NaN;
     return
 end
-p = signrank(a, b);
+p = signrank(a, b, 'tail', tail);
 end
 
 
