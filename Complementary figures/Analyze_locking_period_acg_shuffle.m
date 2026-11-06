@@ -21,6 +21,20 @@
 % label in the depth tables and is kept as SC. VLPAG and DLPAG are not
 % treated as LPAG.
 %
+% Bin edges and the saved analysis parameters are loaded from
+% locking_period_acg_summary.mat. Smoothing width, the refractory blank,
+% and any other setting that summary does not store are read from the
+% assignments at the top of Analyze_locking_period_acg.m.
+%
+% Those same shuffles are averaged across neurons. The mean sum-to-1
+% autocorrelogram of each lock group, including delta-locked neurons
+% (peak-locked or trough-locked), is smoothed with the same Gaussian and
+% scored for a first peak and a second cycle. Shuffle index s of every
+% neuron is averaged the same way, which is one draw of the null mean.
+% With 10 ms bins and a +/- 1 s axis the running sum is about 10 MB.
+% The autocorrelograms are not computed again. A checkpoint that stored
+% only prominences has no shuffled curves, so it cannot be resumed.
+%
 % Run this file, not the unit test, to produce the figures:
 %   Analyze_locking_period_acg_shuffle
 
@@ -32,19 +46,42 @@ parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
 phase_folder   = fullfile(data_root, 'Analysis results', 'phase locking data');
 npx_root       = fullfile(data_root, 'NPX data', 'NPX raw data');
 
-n_shuffles       = 200;
-resume           = true;
-alpha            = 0.01;
-non_entrained_p  = 0.1;
-low_percent      = 25;
-high_percent     = 75;
-acg_lag          = 1;
-smooth_half      = 0.04;
-acg_refractory_s = 0.005;
-areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
+n_shuffles = 200;
+resume     = true;
+
+summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
+script_dir = fileparts(mfilename('fullpath'));
+if isempty(script_dir)
+    script_dir = fileparts(which('Analyze_locking_period_acg_shuffle'));
+end
+script_path = fullfile(script_dir, 'Analyze_locking_period_acg.m');
+[analysis, edges, centers] = load_locking_acg_parameters(summary_path, script_path);
+alpha = analysis.alpha;
+non_entrained_p = analysis.non_entrained_p;
+low_percent = analysis.low_percent;
+high_percent = analysis.high_percent;
+acg_lag = analysis.acg_lag;
+smooth_half = analysis.smooth_half;
+skip_abs_lag = analysis.skip_abs_lag;
+acg_refractory_s = analysis.acg_refractory_s;
+areas_to_keep = analysis.areas_to_keep;
+bin_w = median(diff(centers));
+n_bins = numel(centers);
+smooth_n = max(1, round(smooth_half / bin_w));
+if abs(skip_abs_lag - 0.02) > 1e-9
+    warning('Analyze_locking_period_acg_shuffle:smoothGap', ...
+        ['Peak scoring leaves lags within 20 ms unsmoothed. The loaded ' ...
+        'skip_abs_lag is %g s.'], skip_abs_lag);
+end
+disp(['ACG axis from ', summary_path, ': +/- ', num2str(max(abs(centers))), ...
+    ' s, bin ', num2str(bin_w), ' s, ', num2str(n_bins), ' bins'])
+disp(['Smoothing from ', analysis.smooth_source, ': smooth_half = ', ...
+    num2str(smooth_half), ' s, refractory blank = ', num2str(acg_refractory_s), ' s'])
 
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
+grand_order = {'trough', 'peak', 'delta', 'nonentrained'};
+grand_title = {'Trough-locked', 'Peak-locked', 'Delta-locked', 'Non-entrained'};
 checkpoint = fullfile(parsing_folder, ...
     sprintf('locking_period_acg_shuffle_n%d.mat', n_shuffles));
 
@@ -56,13 +93,27 @@ parameters = struct( ...
     'high_percent', high_percent, ...
     'acg_lag', acg_lag, ...
     'smooth_half', smooth_half, ...
+    'skip_abs_lag', skip_abs_lag, ...
     'acg_refractory_s', acg_refractory_s, ...
     'areas_to_keep', {areas_to_keep}, ...
+    'grand_average', true, ...
     'null', 'uniform spike times inside each firing run');
 
+grand_bytes = numel(grand_order) * 2 * 2 * n_shuffles * n_bins * 8 * 2;
+disp(sprintf(['Grand-average accumulator is %.1f MB (%d groups, %d shuffles, ' ...
+    '%d bins). Each neuron is still shuffled once.'], ...
+    grand_bytes / 1e6, numel(grand_order), n_shuffles, n_bins))
+
 records = {};
+grand = [];
 if resume && exist(checkpoint, 'file') == 2
-    stored = load(checkpoint, 'shuffle_records', 'parameters');
+    stored = load(checkpoint, 'shuffle_records', 'parameters', 'grand_average');
+    if ~isfield(stored, 'grand_average')
+        error('Analyze_locking_period_acg_shuffle:checkpoint', ...
+            ['%s stored peak prominences only. The grand-average null is ' ...
+            'accumulated while shuffling, so this file cannot be resumed. ' ...
+            'Delete it or set resume = false.'], checkpoint);
+    end
     if ~shuffle_checkpoint_matches(stored, parameters)
         error('Analyze_locking_period_acg_shuffle:checkpoint', ...
             ['%s was built with different parameters. Delete it or set ' ...
@@ -74,9 +125,24 @@ if resume && exist(checkpoint, 'file') == 2
     end
     records = records(:);
     records = records_in_areas(records, areas_to_keep);
+    grand = stored.grand_average;
+    dropped = setdiff(grand.included_keys, neuron_keys(records));
+    if ~isempty(dropped)
+        error('Analyze_locking_period_acg_shuffle:checkpoint', ...
+            ['The area filter removed neurons already added to the ' ...
+            'grand average in %s. Delete it or set resume = false.'], checkpoint);
+    end
+    if grand.n_shuffles ~= n_shuffles || grand.n_bins ~= n_bins
+        error('Analyze_locking_period_acg_shuffle:checkpoint', ...
+            ['%s grand average does not match %d shuffles and %d bins. ' ...
+            'Delete it or set resume = false.'], checkpoint, n_shuffles, n_bins);
+    end
     disp(['Resuming from ', num2str(numel(records)), ' neurons in ', checkpoint])
 else
     disp(['Checkpoint: ', checkpoint])
+end
+if isempty(grand)
+    grand = empty_grand(grand_order, n_shuffles, n_bins);
 end
 done_keys = neuron_keys(records);
 
@@ -101,11 +167,6 @@ if isempty(parsing_files)
 end
 
 loaded_codes = {};
-edges = [];
-centers = [];
-n_bins = [];
-bin_w = [];
-smooth_n = [];
 
 for f = 1:numel(parsing_files)
     disp(['Loading ', parsing_files(f).name, ' ...'])
@@ -129,17 +190,6 @@ for f = 1:numel(parsing_files)
             continue
         end
         saved_edges = ps.config.autocorr_bin_edges(:)';
-        if isempty(edges)
-            if isfield(ps.config, 'autocorr_bin_size') && isfinite(ps.config.autocorr_bin_size)
-                bin_w = ps.config.autocorr_bin_size;
-            else
-                bin_w = mean(diff(saved_edges));
-            end
-            edges = (-acg_lag):bin_w:acg_lag;
-            centers = edges(1:end - 1) + bin_w / 2;
-            n_bins = numel(centers);
-            smooth_n = max(1, round(smooth_half / bin_w));
-        end
         saved_covers = numel(saved_edges) == numel(edges) ...
             && max(abs(saved_edges - edges)) < 1e-6;
 
@@ -236,6 +286,7 @@ for f = 1:numel(parsing_files)
                 animal_code, this_id, this_group, sum(use), n_shuffles))
             rng(neuron_shuffle_seed(animal_code, this_id), 'twister');
             nulls = empty_nulls(n_shuffles);
+            null_curves = blank_null_curves(n_shuffles, n_bins);
             t0 = tic;
             for s = 1:n_shuffles
                 shuffled = shuffle_spikes_within_runs(spikes, ...
@@ -246,18 +297,22 @@ for f = 1:numel(parsing_files)
                 if lock_ok
                     sh_lock = pool_locking_period_acgs(acg_s, edges, run_length, ppc, ...
                         true, low_percent, high_percent);
-                    nulls = store_null_tail(nulls, 'locking', 'low', s, ...
-                        score_pooled_row(sh_lock.low, centers, smooth_n, acg_refractory_s));
-                    nulls = store_null_tail(nulls, 'locking', 'high', s, ...
-                        score_pooled_row(sh_lock.high, centers, smooth_n, acg_refractory_s));
+                    [peaks, row] = score_pooled_row(sh_lock.low, centers, smooth_n, acg_refractory_s);
+                    nulls = store_null_tail(nulls, 'locking', 'low', s, peaks);
+                    null_curves.locking.low(s, :) = row;
+                    [peaks, row] = score_pooled_row(sh_lock.high, centers, smooth_n, acg_refractory_s);
+                    nulls = store_null_tail(nulls, 'locking', 'high', s, peaks);
+                    null_curves.locking.high(s, :) = row;
                 end
                 if power_ok
                     sh_power = pool_locking_period_acgs(acg_s, edges, run_length, power, ...
                         true, low_percent, high_percent);
-                    nulls = store_null_tail(nulls, 'power', 'low', s, ...
-                        score_pooled_row(sh_power.low, centers, smooth_n, acg_refractory_s));
-                    nulls = store_null_tail(nulls, 'power', 'high', s, ...
-                        score_pooled_row(sh_power.high, centers, smooth_n, acg_refractory_s));
+                    [peaks, row] = score_pooled_row(sh_power.low, centers, smooth_n, acg_refractory_s);
+                    nulls = store_null_tail(nulls, 'power', 'low', s, peaks);
+                    null_curves.power.low(s, :) = row;
+                    [peaks, row] = score_pooled_row(sh_power.high, centers, smooth_n, acg_refractory_s);
+                    nulls = store_null_tail(nulls, 'power', 'high', s, peaks);
+                    null_curves.power.high(s, :) = row;
                 end
                 if mod(s, 25) == 0
                     disp(sprintf('    shuffle %d/%d (%.0f s)', s, n_shuffles, toc(t0)))
@@ -277,10 +332,25 @@ for f = 1:numel(parsing_files)
                 rec.power = pack_split(pooled_power, centers, smooth_n, acg_refractory_s, ...
                     nulls.power);
             end
+            obs_curves = blank_obs_curves(n_bins);
+            if lock_ok
+                [~, obs_curves.locking.low] = score_pooled_row( ...
+                    pooled.low, centers, smooth_n, acg_refractory_s);
+                [~, obs_curves.locking.high] = score_pooled_row( ...
+                    pooled.high, centers, smooth_n, acg_refractory_s);
+            end
+            if power_ok
+                [~, obs_curves.power.low] = score_pooled_row( ...
+                    pooled_power.low, centers, smooth_n, acg_refractory_s);
+                [~, obs_curves.power.high] = score_pooled_row( ...
+                    pooled_power.high, centers, smooth_n, acg_refractory_s);
+            end
+            grand = add_neuron_to_grand(grand, this_group, this_key, obs_curves, null_curves);
             records{end + 1, 1} = rec; %#ok<SAGROW>
             done_keys{end + 1, 1} = this_key; %#ok<SAGROW>
             shuffle_records = records; %#ok<NASGU>
-            save(checkpoint, 'shuffle_records', 'parameters');
+            grand_average = grand; %#ok<NASGU>
+            save(checkpoint, 'shuffle_records', 'parameters', 'grand_average');
             disp(['    saved ', num2str(numel(records)), ' neurons'])
         end
 
@@ -295,6 +365,7 @@ plot_shuffle_exception(records, group_order, group_title, 'locking', ...
     'Mean PPC of the runs');
 plot_shuffle_exception(records, group_order, group_title, 'power', ...
     'Mean delta power of the runs');
+report_grand_shuffle(grand, centers, smooth_n, grand_order, grand_title);
 
 
 function rec = blank_record(n_shuffles)
@@ -400,14 +471,19 @@ end
 end
 
 
-function peaks = score_pooled_row(acg_row, centers, smooth_n, refractory)
+function [peaks, row] = score_pooled_row(acg_row, centers, smooth_n, refractory)
+row = normalized_pooled_row(acg_row, centers, refractory);
+peaks = acg_delta_peaks(row, centers, smooth_n);
+end
+
+
+function row = normalized_pooled_row(acg_row, centers, refractory)
+row = nan(1, numel(centers));
 if isempty(acg_row) || ~any(isfinite(acg_row))
-    peaks = acg_delta_peaks(nan(1, numel(centers)), centers, smooth_n);
     return
 end
 row = blank_acg_zero_lag(acg_row(:)', centers, refractory);
 row = normalize_acg_rows(row);
-peaks = acg_delta_peaks(row, centers, smooth_n);
 end
 
 
@@ -429,12 +505,15 @@ end
 
 function match = shuffle_checkpoint_matches(stored, parameters)
 match = isfield(stored, 'parameters') && isfield(stored, 'shuffle_records') ...
+    && isfield(stored.parameters, 'grand_average') && stored.parameters.grand_average ...
     && stored.parameters.n_shuffles == parameters.n_shuffles ...
     && stored.parameters.alpha == parameters.alpha ...
     && stored.parameters.non_entrained_p == parameters.non_entrained_p ...
     && stored.parameters.low_percent == parameters.low_percent ...
     && stored.parameters.high_percent == parameters.high_percent ...
-    && stored.parameters.acg_lag == parameters.acg_lag;
+    && stored.parameters.acg_lag == parameters.acg_lag ...
+    && stored.parameters.smooth_half == parameters.smooth_half ...
+    && stored.parameters.acg_refractory_s == parameters.acg_refractory_s;
 end
 
 
@@ -753,4 +832,270 @@ if exist(times_file, 'file') ~= 2 || exist(clusters_file, 'file') ~= 2
 end
 spike_times = double(readNPY(times_file)) / 30000;
 spike_clusters = double(readNPY(clusters_file));
+end
+
+
+function [analysis, edges, centers] = load_locking_acg_parameters(summary_path, script_path)
+if exist(summary_path, 'file') ~= 2
+    error('Analyze_locking_period_acg_shuffle:nosummary', ...
+        ['No autocorrelogram summary at %s. Run Analyze_locking_period_acg ' ...
+        'first so the shuffle uses that axis and those parameters.'], summary_path);
+end
+if exist(script_path, 'file') ~= 2
+    error('Analyze_locking_period_acg_shuffle:noscript', ...
+        'Analyze_locking_period_acg.m was not found next to this script.');
+end
+loaded = load(summary_path, 'locking_acg');
+if ~isfield(loaded, 'locking_acg') || ~isfield(loaded.locking_acg, 'centers') ...
+        || ~isfield(loaded.locking_acg, 'bin_edges')
+    error('Analyze_locking_period_acg_shuffle:nosummary', ...
+        ['%s has no saved bin edges. Run Analyze_locking_period_acg again ' ...
+        'so the shuffle can use the same axis.'], summary_path);
+end
+centers = loaded.locking_acg.centers(:).';
+edges = loaded.locking_acg.bin_edges(:).';
+if isfield(loaded.locking_acg, 'parameters')
+    analysis = loaded.locking_acg.parameters;
+else
+    analysis = struct();
+end
+needed = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', 'acg_lag', ...
+    'smooth_half', 'skip_abs_lag', 'acg_refractory_s', 'delta_lag'};
+from_script = read_script_assignments(script_path, needed);
+had_smooth = isfield(analysis, 'smooth_half') && ~isempty(analysis.smooth_half);
+for i = 1:numel(needed)
+    name = needed{i};
+    if ~isfield(analysis, name) || isempty(analysis.(name))
+        analysis.(name) = from_script.(name);
+    end
+end
+if ~isfield(analysis, 'areas_to_keep') || isempty(analysis.areas_to_keep)
+    analysis.areas_to_keep = read_script_areas(script_path);
+end
+if had_smooth
+    analysis.smooth_source = summary_path;
+else
+    analysis.smooth_source = script_path;
+end
+end
+
+
+function values = read_script_assignments(script_path, names)
+text = fileread(script_path);
+values = struct();
+for i = 1:numel(names)
+    name = names{i};
+    token = regexp(text, ['(?m)^', name, '\s*=\s*([^;%]+)'], 'tokens', 'once');
+    if isempty(token)
+        error('Analyze_locking_period_acg_shuffle:script', ...
+            'Analyze_locking_period_acg.m has no assignment for %s.', name);
+    end
+    values.(name) = str2num(token{1}); %#ok<ST2NM>
+    if isempty(values.(name))
+        error('Analyze_locking_period_acg_shuffle:script', ...
+            'Could not read %s from Analyze_locking_period_acg.m.', name);
+    end
+end
+end
+
+
+function areas = read_script_areas(script_path)
+text = fileread(script_path);
+token = regexp(text, '(?m)^areas_to_keep\s*=\s*(\{[^;]+\})', 'tokens', 'once');
+if isempty(token)
+    error('Analyze_locking_period_acg_shuffle:script', ...
+        'Analyze_locking_period_acg.m has no areas_to_keep assignment.');
+end
+quoted = regexp(token{1}, '''([^'']+)''', 'tokens');
+areas = cell(1, numel(quoted));
+for i = 1:numel(quoted)
+    areas{i} = quoted{i}{1};
+end
+end
+
+
+function grand = empty_grand(group_order, n_shuffles, n_bins)
+grand.n_shuffles = n_shuffles;
+grand.n_bins = n_bins;
+grand.included_keys = cell(0, 1);
+grand.group_order = group_order;
+splits = {'locking', 'power'};
+tails = {'low', 'high'};
+for s = 1:numel(splits)
+    for t = 1:numel(tails)
+        for g = 1:numel(group_order)
+            block.sum_obs = zeros(1, n_bins);
+            block.n_obs = zeros(1, n_bins);
+            block.sum_null = zeros(n_shuffles, n_bins);
+            block.n_null = zeros(n_shuffles, n_bins);
+            block.n_neurons = 0;
+            grand.(splits{s}).(tails{t}).(group_order{g}) = block;
+        end
+    end
+end
+end
+
+
+function curves = blank_null_curves(n_shuffles, n_bins)
+curves.locking.low = nan(n_shuffles, n_bins);
+curves.locking.high = nan(n_shuffles, n_bins);
+curves.power.low = nan(n_shuffles, n_bins);
+curves.power.high = nan(n_shuffles, n_bins);
+end
+
+
+function curves = blank_obs_curves(n_bins)
+curves.locking.low = nan(1, n_bins);
+curves.locking.high = nan(1, n_bins);
+curves.power.low = nan(1, n_bins);
+curves.power.high = nan(1, n_bins);
+end
+
+
+function grand = add_neuron_to_grand(grand, lock_group, neuron_key, obs_curves, null_curves)
+targets = {lock_group};
+if any(strcmp(lock_group, {'trough', 'peak'}))
+    targets{end + 1} = 'delta'; %#ok<AGROW>
+end
+splits = {'locking', 'power'};
+tails = {'low', 'high'};
+for g = 1:numel(targets)
+    for s = 1:numel(splits)
+        for t = 1:numel(tails)
+            row = obs_curves.(splits{s}).(tails{t});
+            if ~any(isfinite(row))
+                continue
+            end
+            grand.(splits{s}).(tails{t}).(targets{g}) = add_grand_curve( ...
+                grand.(splits{s}).(tails{t}).(targets{g}), row, ...
+                null_curves.(splits{s}).(tails{t}));
+        end
+    end
+end
+grand.included_keys{end + 1, 1} = neuron_key; %#ok<AGROW>
+end
+
+
+function block = add_grand_curve(block, row, null_rows)
+finite = isfinite(row);
+block.sum_obs(finite) = block.sum_obs(finite) + row(finite);
+block.n_obs(finite) = block.n_obs(finite) + 1;
+block.n_neurons = block.n_neurons + 1;
+for s = 1:size(null_rows, 1)
+    sample = null_rows(s, :);
+    finite = isfinite(sample);
+    block.sum_null(s, finite) = block.sum_null(s, finite) + sample(finite);
+    block.n_null(s, finite) = block.n_null(s, finite) + 1;
+end
+end
+
+
+function report_grand_shuffle(grand, centers, smooth_n, group_order, group_title)
+splits = {'locking', 'power'};
+split_labels = {'locking', 'delta power'};
+tails = {'low', 'high'};
+tail_labels = {'Low 25%', 'High 25%'};
+disp(' ')
+disp('Grand-average shuffle. Peaks are scored on the Gaussian-smoothed mean sum-to-1 autocorrelogram.')
+disp('The all-runs curve is not tested: runs between the two tails are not shuffled.')
+for s = 1:numel(splits)
+    figure('Name', ['Grand average shuffle, ', split_labels{s}], 'Color', 'w', ...
+        'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.8])
+    for t = 1:numel(tails)
+        for g = 1:numel(group_order)
+            block = grand.(splits{s}).(tails{t}).(group_order{g});
+            subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
+            result = grand_peak_result(block, centers, smooth_n);
+            plot_grand_panel(result, [group_title{g}, ', ', tail_labels{t}])
+            disp(sprintf(['  %s, %s, %s: n = %d, first prom = %.3g, shuffle p = %.3g, ' ...
+                'second prom = %.3g, shuffle p = %.3g'], ...
+                group_title{g}, split_labels{s}, tail_labels{t}, result.n, ...
+                result.first_prominence, result.first_p, ...
+                result.second_prominence, result.second_p))
+        end
+    end
+    sgtitle({['Grand mean versus shuffle, ', split_labels{s}], ...
+        'Black is the observed mean. Grey is the central 95% of shuffled means.'})
+end
+end
+
+
+function result = grand_peak_result(block, centers, smooth_n)
+result.n = block.n_neurons;
+result.first_prominence = NaN;
+result.first_p = NaN;
+result.second_prominence = NaN;
+result.second_p = NaN;
+result.first_lag = NaN;
+result.second_lag = NaN;
+result.fold_t = centers(centers > 0);
+result.observed = nan(size(result.fold_t));
+result.null_lo = result.observed;
+result.null_hi = result.observed;
+result.null_median = result.observed;
+if block.n_neurons < 1
+    return
+end
+mu = block.sum_obs ./ block.n_obs;
+mu(block.n_obs == 0) = NaN;
+obs = acg_delta_peaks(mu, centers, smooth_n);
+result.fold_t = obs.fold_t;
+result.observed = obs.fold_y;
+result.first_lag = obs.first_lag;
+result.second_lag = obs.second_lag;
+result.first_prominence = obs.first_prominence;
+result.second_prominence = obs.second_prominence;
+n_s = size(block.sum_null, 1);
+null_fold = nan(n_s, numel(obs.fold_t));
+null_first = nan(n_s, 1);
+null_second = nan(n_s, 1);
+for s = 1:n_s
+    sample = block.sum_null(s, :) ./ block.n_null(s, :);
+    sample(block.n_null(s, :) == 0) = NaN;
+    pk = acg_delta_peaks(sample, centers, smooth_n);
+    null_first(s) = null_first_value(pk);
+    null_second(s) = null_second_value(pk);
+    if numel(pk.fold_y) == numel(obs.fold_t)
+        null_fold(s, :) = pk.fold_y;
+    end
+end
+result.first_p = exception_p(obs.first_prominence, null_first);
+if obs.second_measurable
+    result.second_p = exception_p(obs.second_prominence, null_second);
+end
+result.null_lo = prctile(null_fold, 2.5, 1);
+result.null_hi = prctile(null_fold, 97.5, 1);
+result.null_median = median(null_fold, 1, 'omitnan');
+end
+
+
+function plot_grand_panel(result, panel_title)
+if result.n < 1
+    title({panel_title, 'n = 0'})
+    axis off
+    return
+end
+t = result.fold_t;
+hold on
+fill([t, fliplr(t)], [result.null_lo, fliplr(result.null_hi)], ...
+    [0.75 0.75 0.75], 'EdgeColor', 'none', 'HandleVisibility', 'off')
+plot(t, result.null_median, '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1)
+plot(t, result.observed, 'k', 'LineWidth', 1.6)
+mark_grand_peak(result.first_lag, result.observed, result.fold_t)
+mark_grand_peak(result.second_lag, result.observed, result.fold_t)
+xlabel('Lag (s)')
+ylabel('Smoothed mean ACG')
+title({panel_title, sprintf('n = %d\nfirst p = %.3g, second p = %.3g', ...
+    result.n, result.first_p, result.second_p)})
+box off
+end
+
+
+function mark_grand_peak(lag, y, t)
+if ~isfinite(lag) || isempty(t)
+    return
+end
+[~, idx] = min(abs(t - lag));
+plot(t(idx), y(idx), 'o', 'Color', 'k', 'MarkerFaceColor', 'k', ...
+    'MarkerSize', 5, 'HandleVisibility', 'off')
 end
