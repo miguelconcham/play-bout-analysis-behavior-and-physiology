@@ -144,6 +144,7 @@ in_area = false(n_cells, 1);
 for i = 1:n_cells
     in_area(i) = ~isempty(canonical_kept_area(cluster_area_char(all_neurons, i), areas_to_keep));
 end
+disp_block('Lock groups')
 for g = 1:numel(group_order)
     disp([group_title{g}, ': ', num2str(sum(strcmp(lock_group, group_order{g}) & in_area)), ...
         ' / ', num2str(sum(in_area)), ' in ', strjoin(areas_to_keep, ', ')])
@@ -325,6 +326,7 @@ for f = 1:numel(parsing_files)
     clear S
 end
 
+disp_block('Parsing')
 disp(['Parsing sessions: ', num2str(numel(loaded_codes))])
 disp(['Cells in the parsing files but not in the delta table: ', num2str(n_missing)])
 disp(['Cells outside ', strjoin(areas_to_keep, ', '), ': ', num2str(n_outside)])
@@ -515,9 +517,11 @@ end
 function summary = summarize_and_plot(acg_raw, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, acg_refractory_s, curve_colors, n_in_parsing, n_unsplit)
 curve_names = {'low', 'high', 'all'};
 summary = struct();
+disp_block(['Mean autocorrelogram, ', split_name])
 for g = 1:numel(group_order)
     name = group_order{g};
     n = acg_raw.(name).n;
+    disp_rule()
     disp([group_title{g}, ', ', split_name, ': ', num2str(n_in_parsing(g)), ...
         ' in parsing, ', num2str(n), ' plotted, ', num2str(n_unsplit(g)), ...
         ' skipped (no separated 25/75 split or no spikes)'])
@@ -559,6 +563,7 @@ if summary.all_neurons.n < 1
     return
 end
 n_all = summary.all_neurons.n;
+disp_rule()
 disp(['All neurons, ', split_name, ': ', num2str(n_all), ' plotted'])
 summary.all_neurons = record_delta_mass(summary.all_neurons, curve_names, curve_labels, ...
     ['All neurons, ', split_name], centers, delta_lag, split_name);
@@ -903,8 +908,7 @@ if ~isempty(unit_label)
         measure_labels{m} = [measure_labels{m}, ' (Hz)'];
     end
 end
-disp(' ')
-disp(['Paired tests, ', split_name, ': ', scale_label])
+disp_block(['Paired tests, ', split_name, ': ', scale_label])
 for m = 1:numel(measures)
     report_paired_increase(summary, neurons, group_order, group_title, ...
         measures{m}, measure_labels{m}, split_name, score_label, scale_label);
@@ -965,17 +969,31 @@ function reprint_split_mass(summary, group_order, group_title, curve_labels, spl
 curve_names = {'low', 'high', 'all'};
 names = [group_order, {'all_neurons'}];
 titles = [group_title, {'All neurons'}];
+disp_block(['Mean autocorrelogram, ', split_name])
 for g = 1:numel(names)
     if ~isfield(summary, names{g}) || ~isfield(summary.(names{g}), 'low')
         continue
     end
+    disp_rule()
     record_delta_mass(summary.(names{g}), curve_names, curve_labels, ...
         [titles{g}, ', ', split_name], centers, delta_lag, split_name);
 end
 end
 
 
+function disp_block(title)
+disp_rule()
+disp(title)
+end
+
+
+function disp_rule()
+disp(repmat('-', 1, 72))
+end
+
+
 function report_paired_increase(summary, neurons, group_order, group_title, measure_name, measure_label, split_name, score_label, scale_label)
+disp_rule()
 disp(['Paired increase, ', scale_label, ', ', split_name, ', ', measure_label])
 [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measure_name);
 print_paired_increase('All neurons', y_low(ok), y_high(ok), ...
@@ -993,6 +1011,7 @@ end
 
 
 function report_paired_latency(summary, neurons, group_order, group_title, measure_name, measure_label, split_name, score_label, scale_label)
+disp_rule()
 disp(['Paired latency, ', scale_label, ', ', split_name, ', ', measure_label])
 [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measure_name);
 print_paired_shift('All neurons', y_low(ok), y_high(ok), ...
@@ -1188,6 +1207,7 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
     return
 end
 neurons = summary.all_neurons;
+disp_block(['Peak examples, ', split_name])
 t1_rows = select_strong_examples(neurons, group_order, 't1');
 both_rows = select_strong_examples(neurons, group_order, 'both');
 if isempty(t1_rows) && isempty(both_rows)
@@ -1746,6 +1766,7 @@ for s = 1:numel(summaries)
     end
 end
 y_lim = readable_acg_scale(lo, hi);
+disp_block('Shared autocorrelogram scale')
 disp(sprintf(['Mean autocorrelograms span %.4g to %.4g. ' ...
     'Shared y limit is [%.4g %.4g].'], lo, hi, y_lim(1), y_lim(2)))
 end
@@ -1901,12 +1922,14 @@ fit = empty_power_fit(label);
 fit.n = size(X, 1);
 n_pred = numel(names);
 if fit.n < n_pred + 5
+    disp_block(['Delta power model, ', label])
     disp(['Delta power model, ', label, ': n = ', num2str(fit.n), ...
         ' is too small for ', num2str(n_pred), ' predictors.'])
     return
 end
 sd = std(X, 0, 1);
 if any(~isfinite(sd) | sd <= 0) || ~isfinite(std(y)) || std(y) <= 0
+    disp_block(['Delta power model, ', label])
     disp(['Delta power model, ', label, ': a variable has no spread.'])
     return
 end
@@ -2018,6 +2041,7 @@ end
 
 
 function report_power_model(fit)
+disp_block(['Delta power model, ', fit.label])
 disp(['Delta power model, ', fit.label, ', n = ', num2str(fit.n)])
 disp(sprintf('  Full R^2 = %.3g, F = %.3g, p = %.3g', fit.rsq, fit.F, fit.p_model))
 disp(['  Predictor correlations (', strjoin(fit.names, ', '), ')'])
