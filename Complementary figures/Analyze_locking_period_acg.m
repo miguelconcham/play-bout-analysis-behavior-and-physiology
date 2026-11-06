@@ -59,7 +59,7 @@
 % The same all-runs autocorrelogram is then used in a linear model of
 % mean delta power. Predictors are the mean firing rate of those runs,
 % their mean PPC, the 0-50 ms burst, and the first-peak and second-cycle
-% prominences. The same fit is repeated without PPC, on the same neurons.
+% prominences.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -68,17 +68,12 @@
 % second cycle, and test whether that lag shifts between the two tails.
 % A separate figure shows the distribution of those first-peak latencies
 % in the low tail and the high tail, using the same paired neurons.
-% A reference figure for each split shows a t1-only neuron and a
-% t1-and-t2 neuron in each lock group. Among cells with that peak pattern,
-% the higher firing rate is chosen. The printed burst, prominences, lags,
-% and mean score are the values on the scatter plots.
+% A reference figure for each split shows the strongest t1-only neuron and
+% the strongest t1-and-t2 neuron in each lock group. The printed burst,
+% prominences, lags, and mean score are the values on the scatter plots.
 % Example neurons are the higher-firing-rate cells among those with that
 % peak pattern. In the paired plots, higher-rate neurons are drawn in front.
 % The mean curve still gives every neuron the same weight.
-%
-% Analyze_locking_period_acg_shuffle is a separate, slower script. It
-% rebuilds the same peaks after placing spikes uniformly inside each run,
-% and it can be stopped and continued.
 % figure_folder, at the top of the script, is where figures are written
 % as SVG and JPG and where statistics.txt collects the command-window
 % tests. Leave it empty to save nothing. Set reprint_stats_only to reload
@@ -387,9 +382,6 @@ parameters = struct( ...
     'high_percent', high_percent, ...
     'delta_lag', delta_lag, ...
     'acg_lag', acg_lag, ...
-    'smooth_half', smooth_half, ...
-    'skip_abs_lag', skip_abs_lag, ...
-    'acg_refractory_s', acg_refractory_s, ...
     'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
     'areas_to_keep', {areas_to_keep}, ...
     'figure_folder', figure_folder, ...
@@ -452,8 +444,6 @@ if plot_rate_scaled_peaks
 end
 locking_acg.delta_power_model = fit_delta_power_contributions( ...
     locking_acg, group_order, group_title);
-locking_acg.delta_power_model_no_ppc = fit_delta_power_contributions( ...
-    locking_acg, group_order, group_title, true, false);
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -1265,21 +1255,10 @@ model_has_delta = isfield(locking_acg, 'delta_power_model') ...
 if isfield(locking_acg, 'delta_power_model') && isfield(locking_acg.delta_power_model, 'all') ...
         && locking_acg.delta_power_model.all.ok && model_has_delta
     plot_power_contributions(locking_acg.delta_power_model, group_order, group_title, ...
-        locking_acg.delta_power_model.all.names, 'Delta power contributions');
+        locking_acg.delta_power_model.all.names);
 else
     locking_acg.delta_power_model = fit_delta_power_contributions( ...
         locking_acg, group_order, group_title);
-end
-model_no_ppc_ready = isfield(locking_acg, 'delta_power_model_no_ppc') ...
-    && isfield(locking_acg.delta_power_model_no_ppc, 'groups') ...
-    && isfield(locking_acg.delta_power_model_no_ppc.groups, 'delta') ...
-    && locking_acg.delta_power_model_no_ppc.all.ok;
-if model_no_ppc_ready
-    plot_power_contributions(locking_acg.delta_power_model_no_ppc, group_order, group_title, ...
-        locking_acg.delta_power_model_no_ppc.all.names, 'Delta power contributions, without PPC');
-else
-    locking_acg.delta_power_model_no_ppc = fit_delta_power_contributions( ...
-        locking_acg, group_order, group_title, true, false);
 end
 end
 
@@ -1351,23 +1330,6 @@ if isfield(locking_acg, 'delta_power_model')
     if ~isfield(model, 'groups') || ~isfield(model.groups, 'delta')
         model = fit_delta_power_contributions(locking_acg, group_order, group_title, false);
     end
-    if model.all.ok
-        report_power_model(model.all);
-    end
-    for g = 1:numel(group_order)
-        if isfield(model, 'groups') && isfield(model.groups, group_order{g}) ...
-                && model.groups.(group_order{g}).ok
-            report_power_model(model.groups.(group_order{g}));
-        end
-    end
-end
-needs_no_ppc = ~isfield(locking_acg, 'delta_power_model_no_ppc') ...
-    || ~isfield(locking_acg.delta_power_model_no_ppc, 'groups') ...
-    || ~isfield(locking_acg.delta_power_model_no_ppc.groups, 'delta');
-if needs_no_ppc
-    fit_delta_power_contributions(locking_acg, group_order, group_title, false, false);
-else
-    model = locking_acg.delta_power_model_no_ppc;
     if model.all.ok
         report_power_model(model.all);
     end
@@ -2415,17 +2377,13 @@ m = mean(values(idx));
 end
 
 
-function model = fit_delta_power_contributions(summary, group_order, group_title, do_plot, include_ppc)
+function model = fit_delta_power_contributions(summary, group_order, group_title, do_plot)
 if nargin < 4
     do_plot = true;
 end
-if nargin < 5
-    include_ppc = true;
-end
 % Mean delta power of the runs in the all-runs autocorrelogram, predicted
 % by their mean firing rate, their mean PPC, the 0-50 ms burst, and the
-% two delta-peak prominences of that autocorrelogram. include_ppc false
-% repeats that fit without PPC, on the same neurons. One row per neuron.
+% two delta-peak prominences of that autocorrelogram. One row per neuron.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
@@ -2433,31 +2391,21 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks'
     return
 end
 neurons = summary.all_neurons;
-[X, y, names, kept] = power_model_design(neurons, include_ppc);
-if include_ppc
-    tag = '';
-    figure_name = 'Delta power contributions';
-else
-    tag = ', without PPC';
-    figure_name = 'Delta power contributions, without PPC';
-end
-model.all = fit_one_power_model(X, y, names, ['All neurons', tag]);
+[X, y, names, kept] = power_model_design(neurons);
+model.all = fit_one_power_model(X, y, names, 'All neurons');
 model.groups = struct();
 for g = 1:numel(group_order)
     in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
     model.groups.(group_order{g}) = fit_one_power_model( ...
-        X(in_group, :), y(in_group), names, [group_title{g}, tag]);
+        X(in_group, :), y(in_group), names, group_title{g});
 end
 if do_plot
-    plot_power_contributions(model, group_order, group_title, names, figure_name);
+    plot_power_contributions(model, group_order, group_title, names);
 end
 end
 
 
-function [X, y, names, kept] = power_model_design(neurons, include_ppc)
-if nargin < 2
-    include_ppc = true;
-end
+function [X, y, names, kept] = power_model_design(neurons)
 names = {'Firing rate', 'PPC', 'Burst, 0-50 ms', 'First-peak prominence', 'Second-cycle prominence'};
 peaks = neurons.all_peaks;
 y_all = neurons.model_power(:);
@@ -2467,10 +2415,6 @@ kept = isfinite(y_all) & all(isfinite(X_all), 2) ...
     & peaks.first_measurable(:) & peaks.second_measurable(:);
 X = X_all(kept, :);
 y = y_all(kept);
-if ~include_ppc
-    names = names([1, 3, 4, 5]);
-    X = X(:, [1, 3, 4, 5]);
-end
 end
 
 
@@ -2612,10 +2556,7 @@ end
 end
 
 
-function plot_power_contributions(model, group_order, group_title, names, figure_name)
-if nargin < 5 || isempty(figure_name)
-    figure_name = 'Delta power contributions';
-end
+function plot_power_contributions(model, group_order, group_title, names)
 if ~model.all.ok
     return
 end
@@ -2633,13 +2574,12 @@ for i = 1:numel(keys)
     end
     pct(i, :) = fit.percent_of_rsq(:)';
 end
-figure('Name', figure_name, 'Color', 'w', ...
+figure('Name', 'Delta power contributions', 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.15 0.2 0.7 0.5])
 bar(pct)
 set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
 ylabel('Share of explained delta-power variance (%)')
 legend(names, 'Location', 'eastoutside')
-title({figure_name, sprintf('All-runs autocorrelogram, R^2 = %.2f, n = %d', ...
-    model.all.rsq, model.all.n)})
+title(sprintf('All-runs autocorrelogram, R^2 = %.2f, n = %d', model.all.rsq, model.all.n))
 box off
 end
