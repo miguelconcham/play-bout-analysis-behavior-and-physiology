@@ -89,7 +89,8 @@ acg_lag          = 1;       % s, half-width of the autocorrelogram axis
 smooth_half      = 0.04;        % s, full smooth width; Gaussian sigma is a quarter of this
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
-plot_rate_scaled_peaks = true;  % extra peak figures in conditional rate (Hz)
+plot_rate_scaled_peaks = true;  % false: paired plots use the sum-to-1 autocorrelogram only
+                                 % true: those plots, plus a second set in firing-rate units (Hz)
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG, and statistics.txt gets the command window.
@@ -102,17 +103,11 @@ reprint_stats_only = false;
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
 
-if ~isempty(figure_folder)
-    if exist(figure_folder, 'dir') ~= 7
-        mkdir(figure_folder)
-    end
-    stats_path = fullfile(figure_folder, 'statistics.txt');
-    if exist(stats_path, 'file') == 2
-        delete(stats_path)
-    end
-    diary(stats_path)
-    diary_cleanup = onCleanup(@() diary('off')); %#ok<NASGU>
+if exist('diary_cleanup', 'var')
+    delete(diary_cleanup)
+    clear diary_cleanup
 end
+start_statistics_diary(figure_folder)
 
 if reprint_stats_only
     summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
@@ -125,6 +120,7 @@ if reprint_stats_only
     reprint_saved_statistics(loaded.locking_acg, loaded.power_acg, ...
         group_order, group_title, plot_rate_scaled_peaks, smooth_n);
     disp(['Reprinted statistics from ', summary_path])
+    stop_statistics_diary()
     return
 end
 
@@ -403,7 +399,35 @@ save(summary_path, 'locking_acg', 'power_acg');
 disp(['Saved ', summary_path])
 if ~isempty(figure_folder)
     save_open_figures(figure_folder)
+end
+stop_statistics_diary()
+
+
+function start_statistics_diary(folder)
+% A script keeps variables in the base workspace. An onCleanup left there
+% runs when the next run replaces it, and that call turns diary off before
+% any line is printed, so statistics.txt stays empty.
+if strcmp(get(0, 'Diary'), 'on')
     diary('off')
+end
+if isempty(folder)
+    return
+end
+if exist(folder, 'dir') ~= 7
+    mkdir(folder)
+end
+stats_path = fullfile(folder, 'statistics.txt');
+if exist(stats_path, 'file') == 2
+    delete(stats_path)
+end
+diary(stats_path)
+end
+
+
+function stop_statistics_diary()
+if strcmp(get(0, 'Diary'), 'on')
+    diary('off')
+end
 end
 
 
