@@ -34,6 +34,11 @@
 % compared with the same peaks of the shuffled means. With 500 shuffles,
 % 10 ms bins and both scales, the running sums are about 50 MB.
 %
+% At the end, each smoothed curve is also drawn with a shuffle-percentile
+% axis. One hundred means that lag is above every shuffle, so a high
+% autocorrelogram stays high. This is saved for every neuron and for the
+% grand mean of each cell type, on both scales.
+%
 % Run this file, not the unit test, to produce the figures:
 %   Analyze_locking_period_acg_shuffle
 
@@ -97,6 +102,7 @@ parameters = struct( ...
     'areas_to_keep', {areas_to_keep}, ...
     'grand_average', true, ...
     'rate_ratio', true, ...
+    'percentile_curves', true, ...
     'null', 'uniform spike times inside each firing run');
 
 grand_bytes = 2 * numel(grand_order) * 2 * 2 * n_shuffles * n_bins * 8 * 2;
@@ -372,6 +378,8 @@ for f = 1:numel(parsing_files)
             end
             grand = add_neuron_to_grand(grand, this_group, this_key, ...
                 obs_curves, null_curves, obs_ratio, null_ratio);
+            rec = attach_percentile(rec, obs_curves, null_curves, ...
+                obs_ratio, null_ratio, centers, smooth_n);
             records{end + 1, 1} = rec; %#ok<SAGROW>
             done_keys{end + 1, 1} = this_key; %#ok<SAGROW>
             shuffle_records = records; %#ok<NASGU>
@@ -392,6 +400,7 @@ plot_shuffle_exception(records, group_order, group_title, 'locking', ...
 plot_shuffle_exception(records, group_order, group_title, 'power', ...
     'Mean delta power of the runs');
 report_grand_shuffle(grand, centers, smooth_n, grand_order, grand_title);
+plot_percentile_curves(records, grand, centers, smooth_n, grand_order, grand_title);
 
 
 function rec = blank_record(n_shuffles)
@@ -425,6 +434,9 @@ tail.second_measurable = false;
 tail.second_p = NaN;
 tail.null_first = nan(n_shuffles, 1);
 tail.null_second = nan(n_shuffles, 1);
+tail.pctl_lag = [];
+tail.sum_pctl = [];
+tail.ratio_pctl = [];
 end
 
 
@@ -561,7 +573,8 @@ match = isfield(stored, 'parameters') && isfield(stored, 'shuffle_records') ...
     && stored.parameters.acg_lag == parameters.acg_lag ...
     && stored.parameters.smooth_half == parameters.smooth_half ...
     && stored.parameters.acg_refractory_s == parameters.acg_refractory_s ...
-    && isfield(stored.parameters, 'rate_ratio') && stored.parameters.rate_ratio;
+    && isfield(stored.parameters, 'rate_ratio') && stored.parameters.rate_ratio ...
+    && isfield(stored.parameters, 'percentile_curves') && stored.parameters.percentile_curves;
 end
 
 
@@ -1101,6 +1114,7 @@ result.observed = nan(size(result.fold_t));
 result.null_lo = result.observed;
 result.null_hi = result.observed;
 result.null_median = result.observed;
+result.percentile = result.observed;
 if block.n_neurons < 1
     return
 end
@@ -1134,6 +1148,7 @@ end
 result.null_lo = prctile(null_fold, 2.5, 1);
 result.null_hi = prctile(null_fold, 97.5, 1);
 result.null_median = median(null_fold, 1, 'omitnan');
+result.percentile = amplitude_percentile(result.observed, null_fold);
 end
 
 
@@ -1155,6 +1170,175 @@ xlabel('Lag (s)')
 ylabel(y_label)
 title({panel_title, sprintf('n = %d\nfirst p = %.3g, second p = %.3g', ...
     result.n, result.first_p, result.second_p)})
+box off
+end
+
+
+function rec = attach_percentile(rec, obs_sum, null_sum, obs_ratio, null_ratio, centers, smooth_n)
+splits = {'locking', 'power'};
+tails = {'low', 'high'};
+for s = 1:numel(splits)
+    if ~rec.(splits{s}).usable
+        continue
+    end
+    for t = 1:numel(tails)
+        name = tails{t};
+        [pctl, lag] = curve_percentile(obs_sum.(splits{s}).(name), ...
+            null_sum.(splits{s}).(name), centers, smooth_n);
+        rec.(splits{s}).(name).pctl_lag = lag;
+        rec.(splits{s}).(name).sum_pctl = pctl;
+        rec.(splits{s}).(name).ratio_pctl = curve_percentile( ...
+            obs_ratio.(splits{s}).(name), null_ratio.(splits{s}).(name), ...
+            centers, smooth_n);
+    end
+end
+end
+
+
+function [pctl, lag] = curve_percentile(obs_row, null_rows, centers, smooth_n)
+obs = acg_delta_peaks(obs_row, centers, smooth_n);
+lag = obs.fold_t;
+pctl = nan(size(lag));
+if isempty(lag)
+    return
+end
+null_y = nan(size(null_rows, 1), numel(lag));
+for s = 1:size(null_rows, 1)
+    if ~any(isfinite(null_rows(s, :)))
+        continue
+    end
+    pk = acg_delta_peaks(null_rows(s, :), centers, smooth_n);
+    if numel(pk.fold_y) == numel(lag)
+        null_y(s, :) = pk.fold_y;
+    end
+end
+pctl = amplitude_percentile(obs.fold_y, null_y);
+end
+
+
+function pctl = amplitude_percentile(observed, null_rows)
+% 100 means the observed value is above every shuffle. 0 means it is below
+% every shuffle. A tie counts as half, so a high autocorrelogram stays high.
+observed = double(observed(:).');
+pctl = nan(size(observed));
+if isempty(null_rows)
+    return
+end
+finite = isfinite(null_rows);
+n = sum(finite, 1);
+below = sum(finite & null_rows < observed, 1);
+equal = sum(finite & null_rows == observed, 1);
+pctl = 100 * (below + 0.5 * equal) ./ n;
+pctl(n == 0 | ~isfinite(observed)) = NaN;
+end
+
+
+function plot_percentile_curves(records, grand, centers, smooth_n, group_order, group_title)
+scales = {'sum_pctl', 'ratio_pctl'};
+scale_names = {'sum_to_one', 'rate_ratio'};
+scale_labels = {'sum-to-1', 'rate ratio (Poisson = 1)'};
+splits = {'locking', 'power'};
+split_labels = {'locking', 'delta power'};
+tails = {'low', 'high'};
+tail_labels = {'Low 25%', 'High 25%'};
+for k = 1:numel(scales)
+    for s = 1:numel(splits)
+        figure('Name', ['Neuron shuffle percentile, ', split_labels{s}, ', ', scale_labels{k}], ...
+            'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.06 0.92 0.84])
+        for t = 1:numel(tails)
+            for g = 1:numel(group_order)
+                subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
+                chosen = records_in_group(records, group_order{g});
+                plot_neuron_percentile(chosen, splits{s}, tails{t}, scales{k}, ...
+                    [group_title{g}, ', ', tail_labels{t}])
+            end
+        end
+        sgtitle({['Each neuron against its own shuffles, ', split_labels{s}, ', ', scale_labels{k}], ...
+            '100 means that lag is above every shuffle. The black line is the median neuron.'})
+    end
+    for s = 1:numel(splits)
+        figure('Name', ['Grand-average shuffle percentile, ', split_labels{s}, ', ', scale_labels{k}], ...
+            'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.06 0.92 0.84])
+        for t = 1:numel(tails)
+            for g = 1:numel(group_order)
+                block = grand.(scale_names{k}).(splits{s}).(tails{t}).(group_order{g});
+                subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
+                result = grand_peak_result(block, centers, smooth_n);
+                plot_grand_percentile(result, [group_title{g}, ', ', tail_labels{t}])
+            end
+        end
+        sgtitle({['Grand mean against shuffled means, ', split_labels{s}, ', ', scale_labels{k}], ...
+            '100 means the mean autocorrelogram is above every shuffled mean.'})
+    end
+end
+end
+
+
+function chosen = records_in_group(records, group_name)
+chosen = {};
+for i = 1:numel(records)
+    group = records{i}.lock_group;
+    if strcmp(group_name, 'delta')
+        keep = any(strcmp(group, {'trough', 'peak'}));
+    else
+        keep = strcmp(group, group_name);
+    end
+    if keep
+        chosen{end + 1, 1} = records{i}; %#ok<AGROW>
+    end
+end
+end
+
+
+function plot_neuron_percentile(records, split_name, tail_name, field_name, panel_title)
+hold on
+drawn = 0;
+stack = [];
+lag = [];
+for i = 1:numel(records)
+    tail = records{i}.(split_name).(tail_name);
+    if ~isfield(tail, field_name) || isempty(tail.(field_name)) || ~any(isfinite(tail.(field_name)))
+        continue
+    end
+    lag = tail.pctl_lag;
+    y = tail.(field_name);
+    plot(lag, y, 'Color', [0.25 0.45 0.75 0.28], 'LineWidth', 0.6, 'HandleVisibility', 'off')
+    stack(end + 1, :) = y; %#ok<AGROW>
+    drawn = drawn + 1;
+end
+if drawn < 1
+    title({panel_title, 'n = 0'})
+    axis off
+    return
+end
+plot(lag, median(stack, 1, 'omitnan'), 'k', 'LineWidth', 1.6)
+plot(lag([1 end]), [50 50], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+plot(lag([1 end]), [95 95], '--', 'Color', [0.7 0.25 0.25], 'HandleVisibility', 'off')
+ylim([0 100])
+xlabel('Lag (s)')
+ylabel('Shuffle percentile')
+title({panel_title, sprintf('n = %d', drawn)})
+box off
+end
+
+
+function plot_grand_percentile(result, panel_title)
+if result.n < 1 || isempty(result.fold_t)
+    title({panel_title, 'n = 0'})
+    axis off
+    return
+end
+t = result.fold_t;
+hold on
+plot(t([1 end]), [50 50], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+plot(t([1 end]), [95 95], '--', 'Color', [0.7 0.25 0.25], 'HandleVisibility', 'off')
+plot(t, result.percentile, 'k', 'LineWidth', 1.6)
+mark_grand_peak(result.first_lag, result.percentile, t)
+mark_grand_peak(result.second_lag, result.percentile, t)
+ylim([0 100])
+xlabel('Lag (s)')
+ylabel('Shuffle percentile')
+title({panel_title, sprintf('n = %d', result.n)})
 box off
 end
 
