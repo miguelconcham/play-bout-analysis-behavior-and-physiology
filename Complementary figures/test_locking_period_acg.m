@@ -130,6 +130,14 @@ assert(one_cycle.first_present && one_cycle.first_lag > 0.60 && one_cycle.first_
 assert(~one_cycle.second_measurable, ...
     'A second cycle was required beyond the end of the trace.');
 
+impulse = [0 0 0 0 1 0 0 0 0];
+smoothed = gaussian_smooth_acg(impulse, 1);
+assert(smoothed(5) > 0.35 && smoothed(5) > smoothed(4) && smoothed(4) > smoothed(3), ...
+    'The Gaussian smooth did not keep the center of the peak above its shoulders.');
+blocked = gaussian_smooth_acg([1 NaN 4], 2);
+assert(isnan(blocked(2)) && abs(blocked(1) - 1) < 1e-12 && abs(blocked(3) - 4) < 1e-12, ...
+    'Gaussian smoothing crossed a missing bin.');
+
 disp('test_locking_period_acg passed')
 end
 
