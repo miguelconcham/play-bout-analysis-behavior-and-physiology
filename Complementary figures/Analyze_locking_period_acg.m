@@ -76,7 +76,9 @@
 % as SVG and JPG and where statistics.txt collects the command-window
 % tests. Leave it empty to save nothing. Set reprint_stats_only to reload
 % the saved summary and print those tests again without reloading spikes
-% or opening figures.
+% or opening figures. Set redraw_figures_only to reload that summary and
+% draw the figures, including cluster bars computed from the saved curves.
+% Spikes are not reloaded.
 
 %% Paths and parameters
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -107,6 +109,10 @@ figure_folder = '';
 % Spikes are not reloaded and no figures are opened. A non-empty
 % figure_folder still receives a new statistics.txt.
 reprint_stats_only = false;
+% true reloads the same summary and draws the figures. Spike files are
+% not read. Cluster bars are computed from the saved curves when the
+% summary does not already contain them.
+redraw_figures_only = false;
 
 group_order = {'trough', 'peak', 'nonentrained'};
 group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -129,6 +135,26 @@ if reprint_stats_only
         group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
         skip_abs_lag, acg_cluster_alpha, acg_cluster_perm);
     disp(['Reprinted statistics from ', summary_path])
+    stop_statistics_diary()
+    return
+end
+
+if redraw_figures_only
+    summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
+    if exist(summary_path, 'file') ~= 2
+        error('Analyze_locking_period_acg:nosummary', ...
+            'No saved summary at %s. Run once with redraw_figures_only = false.', summary_path);
+    end
+    loaded = load(summary_path, 'locking_acg', 'power_acg');
+    smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
+    [locking_acg, power_acg] = redraw_saved_figures(loaded.locking_acg, loaded.power_acg, ...
+        group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
+        skip_abs_lag, delta_lag, acg_cluster_alpha, acg_cluster_perm);
+    save(summary_path, 'locking_acg', 'power_acg');
+    disp(['Drew figures from ', summary_path])
+    if ~isempty(figure_folder)
+        save_open_figures(figure_folder)
+    end
     stop_statistics_diary()
     return
 end
@@ -1055,6 +1081,92 @@ for m = 1:numel(measures)
         report_paired_latency(summary, neurons, group_order, group_title, ...
             lag_measures{m - 1}, lag_labels{m - 1}, split_name, score_label, scale_label);
     end
+end
+end
+
+
+function [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, cluster_alpha, cluster_perm)
+centers = locking_acg.centers(:).';
+bin_w = median(diff(centers));
+if isfield(locking_acg, 'parameters') && isfield(locking_acg.parameters, 'low_percent')
+    low_percent = locking_acg.parameters.low_percent;
+    high_percent = locking_acg.parameters.high_percent;
+else
+    low_percent = 25;
+    high_percent = 75;
+end
+locking_labels = { ...
+    sprintf('Low %g%% locking', low_percent), ...
+    sprintf('High %g%% locking', 100 - high_percent), ...
+    'All firing runs'};
+power_labels = { ...
+    sprintf('Low %g%% delta power', low_percent), ...
+    sprintf('High %g%% delta power', 100 - high_percent), ...
+    'All firing runs'};
+curve_colors = [0.20 0.45 0.75; 0.85 0.25 0.20; 0.15 0.15 0.15];
+locking_acg = ensure_acg_clusters(locking_acg, group_order, group_title, ...
+    'locking', centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
+power_acg = ensure_acg_clusters(power_acg, group_order, group_title, ...
+    'delta power', centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
+if isfield(locking_acg, 'parameters') && isfield(locking_acg.parameters, 'acg_ylim')
+    acg_ylim = locking_acg.parameters.acg_ylim;
+else
+    acg_ylim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, ...
+        centers, skip_abs_lag, smooth_n);
+end
+locking_acg = plot_summary_acgs(locking_acg, group_order, group_title, ...
+    locking_labels, 'locking', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    curve_colors, acg_ylim);
+power_acg = plot_summary_acgs(power_acg, group_order, group_title, ...
+    power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    curve_colors, acg_ylim);
+if ~isfield(locking_acg, 'all_neurons') || ~isfield(locking_acg.all_neurons, 'low_peaks')
+    locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order);
+    power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order);
+end
+plot_paired_peak_scores(locking_acg, group_order, group_title, ...
+    'Mean PPC of the runs', 'locking');
+plot_paired_peak_scores(power_acg, group_order, group_title, ...
+    'Mean delta power of the runs', 'delta power');
+plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
+    'PPC', 'locking');
+plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
+    'delta power', 'delta power');
+if plot_rate_scaled_peaks
+    plot_rate_scaled_peaks_for(locking_acg, bin_w, centers, smooth_n, ...
+        group_order, group_title, 'Mean PPC of the runs', 'locking');
+    plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
+        group_order, group_title, 'Mean delta power of the runs', 'delta power');
+end
+if isfield(locking_acg, 'delta_power_model') && isfield(locking_acg.delta_power_model, 'all') ...
+        && locking_acg.delta_power_model.all.ok
+    plot_power_contributions(locking_acg.delta_power_model, group_order, group_title, ...
+        locking_acg.delta_power_model.all.names);
+else
+    locking_acg.delta_power_model = fit_delta_power_contributions( ...
+        locking_acg, group_order, group_title);
+end
+end
+
+
+function summary = ensure_acg_clusters(summary, group_order, group_title, split_name, centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm)
+names = [group_order, {'all_neurons'}];
+titles = [group_title, {'All neurons'}];
+disp_block(['ACG clusters, ', split_name])
+for g = 1:numel(names)
+    if ~isfield(summary, names{g}) || ~isfield(summary.(names{g}), 'low')
+        continue
+    end
+    group = summary.(names{g});
+    if ~isfield(group, 'low_high_clusters')
+        low_s = smooth_acg_away_from_zero(group.low, centers, skip_abs_lag, smooth_n);
+        high_s = smooth_acg_away_from_zero(group.high, centers, skip_abs_lag, smooth_n);
+        group.low_high_clusters = paired_acg_clusters( ...
+            low_s, high_s, centers, cluster_alpha, cluster_perm);
+    end
+    disp_rule()
+    report_acg_clusters(group.low_high_clusters, [titles{g}, ', ', split_name], split_name)
+    summary.(names{g}) = group;
 end
 end
 
