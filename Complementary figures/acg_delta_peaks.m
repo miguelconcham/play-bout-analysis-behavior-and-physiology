@@ -25,12 +25,15 @@ peaks = empty_peaks();
 if isempty(t_pos)
     return
 end
+peaks.fold_t = t_pos;
+peaks.fold_y = y_raw;
 burst_idx = t_pos <= burst_end & isfinite(y_raw);
 if any(burst_idx)
     peaks.burst = mean(y_raw(burst_idx));
 end
 
 y = smooth_positive_acg(y_raw, t_pos, smooth_n);
+peaks.fold_y = y;
 search = t_pos >= search_start & t_pos <= (t_pos(end) - edge_margin);
 if ~any(search)
     return
@@ -99,6 +102,8 @@ peaks.second_lag = NaN;
 peaks.second_height = NaN;
 peaks.second_prominence = NaN;
 peaks.n_cycles = NaN;
+peaks.fold_t = [];
+peaks.fold_y = [];
 end
 
 

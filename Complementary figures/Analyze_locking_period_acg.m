@@ -33,6 +33,9 @@
 % and only when that window was observed. Low and high are the same
 % neuron, so the plots connect the two conditions with a line. A second
 % cycle that the runs are too short to measure is left out of the pair.
+% A reference figure for each split shows the strongest t1-only neuron and
+% the strongest t1-and-t2 neuron in each lock group. The printed burst,
+% prominences, lags, and mean score are the values on the scatter plots.
 %
 % Analyze_locking_period_acg_shuffle is a separate, slower script. It
 % rebuilds the same peaks after placing spikes uniformly inside each run,
@@ -282,6 +285,10 @@ plot_paired_peak_scores(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking');
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
     'Mean delta power of the runs', 'delta power');
+plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
+    'PPC', 'locking');
+plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
+    'delta power', 'delta power');
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -678,6 +685,188 @@ for g = 1:numel(group_order)
     handles(g) = plot(nan, nan, '-', 'Color', colors(g, :), 'LineWidth', 2.5);
 end
 legend(handles, group_title, 'Location', 'eastoutside')
+end
+
+
+function plot_peak_examples(summary, centers, smooth_n, group_order, group_title, score_label, split_name)
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
+        || summary.all_neurons.n < 1
+    return
+end
+neurons = summary.all_neurons;
+t1_rows = select_strong_examples(neurons, group_order, 't1');
+both_rows = select_strong_examples(neurons, group_order, 'both');
+if isempty(t1_rows) && isempty(both_rows)
+    disp(['No peak examples for ', split_name])
+    return
+end
+n_col = max(numel(t1_rows), numel(both_rows));
+figure('Name', ['ACG peak examples, ', split_name], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.04 0.05 0.92 0.88])
+row_rows = {t1_rows, both_rows};
+row_names = {'Strong t1, no t2', 'Strong t1 and t2'};
+for r = 1:2
+    rows = row_rows{r};
+    for c = 1:n_col
+        subplot(2, n_col, (r - 1) * n_col + c)
+        if c > numel(rows)
+            axis off
+            continue
+        end
+        draw_peak_example(neurons, rows(c), centers, smooth_n, ...
+            group_order, group_title, score_label, row_names{r}, split_name)
+    end
+end
+sgtitle({['Reference for the peak scatters, ', split_name], ...
+    'Grey band is the 0-50 ms burst. The stem is the prominence on the scatter plots.'})
+end
+
+
+function rows = select_strong_examples(neurons, group_order, kind)
+strength = example_strength(neurons, kind);
+rows = zeros(0, 1);
+for g = 1:numel(group_order)
+    idx = find(strcmp(neurons.lock_group, group_order{g}) & strength > 0);
+    if isempty(idx)
+        continue
+    end
+    [~, pick] = max(strength(idx));
+    rows(end + 1, 1) = idx(pick); %#ok<AGROW>
+end
+end
+
+
+function strength = example_strength(neurons, kind)
+n = neurons.n;
+strength = -inf(n, 1);
+for i = 1:n
+    if strcmp(kind, 't1') && ...
+            (neurons.low_peaks.second_present(i) || neurons.high_peaks.second_present(i))
+        continue
+    end
+    strength(i) = max( ...
+        side_strength(neurons.low_peaks, i, kind), ...
+        side_strength(neurons.high_peaks, i, kind));
+end
+end
+
+
+function s = side_strength(peaks, i, kind)
+s = -inf;
+if ~peaks.first_present(i) || ~isfinite(peaks.first_prominence(i)) ...
+        || peaks.first_prominence(i) <= 0
+    return
+end
+if strcmp(kind, 't1')
+    if peaks.second_measurable(i) && ~peaks.second_present(i)
+        s = peaks.first_prominence(i);
+    end
+    return
+end
+if peaks.second_present(i) && isfinite(peaks.second_prominence(i)) ...
+        && peaks.second_prominence(i) > 0
+    s = min(peaks.first_prominence(i), peaks.second_prominence(i));
+end
+end
+
+
+function draw_peak_example(neurons, row, centers, smooth_n, group_order, group_title, score_label, kind_name, split_name)
+low_color = [0.20 0.45 0.75];
+high_color = [0.85 0.25 0.20];
+low_pk = acg_delta_peaks(neurons.low(row, :), centers, smooth_n);
+high_pk = acg_delta_peaks(neurons.high(row, :), centers, smooth_n);
+hold on
+low_line = plot(low_pk.fold_t, low_pk.fold_y, 'Color', low_color, 'LineWidth', 1.6);
+high_line = plot(high_pk.fold_t, high_pk.fold_y, 'Color', high_color, 'LineWidth', 1.6);
+mark_scored_peak(low_pk, 'first', low_color);
+mark_scored_peak(low_pk, 'second', low_color);
+mark_scored_peak(high_pk, 'first', high_color);
+mark_scored_peak(high_pk, 'second', high_color);
+xlim([0 1])
+xlabel('Lag (s)')
+ylabel('Folded normalized ACG')
+group_name = neurons.lock_group{row};
+hit = find(strcmp(group_order, group_name), 1);
+if ~isempty(hit)
+    group_name = group_title{hit};
+end
+title({kind_name, sprintf('%s, %s, id %g, %s', ...
+    group_name, neurons.session{row}, neurons.cluster_id(row), neurons.area{row})}, ...
+    'Interpreter', 'none')
+yl = ylim;
+burst = patch([0 0.05 0.05 0], [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
+    'FaceAlpha', 0.28, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+ylim(yl)
+uistack(burst, 'bottom')
+if ~isempty(low_line) && ~isempty(high_line)
+    legend([low_line, high_line], {'Low 25%', 'High 25%'}, 'Location', 'southeast')
+end
+text(0.98, 0.98, example_parameter_text(neurons, row, score_label), ...
+    'Units', 'normalized', 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', ...
+    'FontSize', 8, 'BackgroundColor', 'w', 'Margin', 3, 'Interpreter', 'none')
+box off
+disp(sprintf('  example %s, %s: %s id %g\n%s', split_name, kind_name, ...
+    neurons.session{row}, neurons.cluster_id(row), ...
+    example_parameter_text(neurons, row, score_label)))
+end
+
+
+function mark_scored_peak(peaks, which, color)
+if strcmp(which, 'first')
+    present = peaks.first_present;
+    lag = peaks.first_lag;
+    prom = peaks.first_prominence;
+    label = 't1';
+else
+    present = peaks.second_present;
+    lag = peaks.second_lag;
+    prom = peaks.second_prominence;
+    label = 't2';
+end
+if ~present || ~isfinite(lag) || ~isfinite(prom) || isempty(peaks.fold_t)
+    return
+end
+y = interp1(peaks.fold_t, peaks.fold_y, lag, 'nearest');
+if ~isfinite(y)
+    return
+end
+plot([lag lag], [max(y - prom, 0), y], '-', 'Color', color, ...
+    'LineWidth', 1.3, 'HandleVisibility', 'off')
+plot(lag, y, 'o', 'Color', color, 'MarkerFaceColor', color, ...
+    'MarkerSize', 5, 'HandleVisibility', 'off')
+text(lag, y, ['  ' label], 'Color', color, 'FontSize', 8, ...
+    'VerticalAlignment', 'bottom', 'Interpreter', 'none', 'HandleVisibility', 'off')
+end
+
+
+function txt = example_parameter_text(neurons, row, score_label)
+txt = sprintf('%s\n%s', ...
+    tail_parameter_line('Low', neurons.low_peaks, row, neurons.score_low(row), score_label), ...
+    tail_parameter_line('High', neurons.high_peaks, row, neurons.score_high(row), score_label));
+end
+
+
+function line = tail_parameter_line(name, peaks, row, score, score_label)
+line = sprintf('%s  burst %.3g   t1 %s   t2 %s   %s %.3g', ...
+    name, peaks.burst(row), ...
+    peak_phrase(peaks.first_present(row), peaks.first_measurable(row), ...
+        peaks.first_lag(row), peaks.first_prominence(row)), ...
+    peak_phrase(peaks.second_present(row), peaks.second_measurable(row), ...
+        peaks.second_lag(row), peaks.second_prominence(row)), ...
+    score_label, score);
+end
+
+
+function phrase = peak_phrase(present, measurable, lag, prom)
+if present && isfinite(lag) && isfinite(prom)
+    phrase = sprintf('%d ms, prom %.3g', round(1000 * lag), prom);
+    return
+end
+if measurable
+    phrase = 'none, prom 0';
+    return
+end
+phrase = 'n/a';
 end
 
 
