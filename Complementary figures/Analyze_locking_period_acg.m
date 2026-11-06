@@ -52,7 +52,9 @@
 % plot_rate_scaled_peaks to also score the same peaks on
 % (pair counts / overlap) / (firing rate of those runs * bin width),
 % a conditional rate in Hz. A flat Poisson autocorrelogram then sits near
-% the firing rate of the runs.
+% the firing rate of the runs. The same switch also redraws the mean
+% autocorrelograms in those units, with their own y limit and the same
+% low-versus-high cluster test.
 % The same all-runs autocorrelogram is then used in a linear model of
 % mean delta power. Predictors are the mean firing rate of those runs,
 % their mean PPC, the 0-50 ms burst, and the first-peak and second-cycle
@@ -103,8 +105,8 @@ skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
 acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutoff
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
-plot_rate_scaled_peaks = true;  % false: paired plots use the sum-to-1 autocorrelogram only
-                                 % true: those plots, plus a second set in firing-rate units (Hz)
+plot_rate_scaled_peaks = true;  % false: sum-to-1 autocorrelograms only
+                                 % true: also the firing-rate autocorrelograms, their cluster tests, and the peak figures in Hz
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG, and statistics.txt gets the command window.
@@ -418,6 +420,11 @@ locking_acg = plot_summary_acgs(locking_acg, group_order, group_title, ...
 power_acg = plot_summary_acgs(power_acg, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     curve_colors, acg_ylim);
+if plot_rate_scaled_peaks
+    plot_rate_scaled_mean_acgs(locking_acg, power_acg, bin_w, centers, ...
+        group_order, group_title, locking_labels, power_labels, delta_lag, ...
+        skip_abs_lag, smooth_n, curve_colors, acg_cluster_alpha, acg_cluster_perm);
+end
 locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order);
 power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order);
 plot_paired_peak_scores(locking_acg, group_order, group_title, ...
@@ -699,7 +706,13 @@ end
 end
 
 
-function summary = plot_summary_acgs(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim)
+function summary = plot_summary_acgs(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, name_suffix)
+if nargin < 12 || isempty(y_label)
+    y_label = 'Mean normalized autocorrelogram';
+end
+if nargin < 13
+    name_suffix = '';
+end
 curve_names = {'low', 'high', 'all'};
 for g = 1:numel(group_order)
     name = group_order{g};
@@ -707,16 +720,16 @@ for g = 1:numel(group_order)
         continue
     end
     summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
-        [group_title{g}, ', ', split_name], centers, delta_lag, skip_abs_lag, ...
-        smooth_n, curve_colors, acg_ylim);
+        [group_title{g}, ', ', split_name, name_suffix], centers, delta_lag, skip_abs_lag, ...
+        smooth_n, curve_colors, acg_ylim, y_label);
 end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
         || summary.all_neurons.n < 1
     return
 end
 summary.all_neurons = plot_acg_curves(summary.all_neurons, curve_names, curve_labels, ...
-    ['All neurons, ', split_name], centers, delta_lag, skip_abs_lag, ...
-    smooth_n, curve_colors, acg_ylim);
+    ['All neurons, ', split_name, name_suffix], centers, delta_lag, skip_abs_lag, ...
+    smooth_n, curve_colors, acg_ylim, y_label);
 end
 
 
@@ -737,7 +750,10 @@ report_acg_clusters(group_acg.low_high_clusters, figure_label, split_name)
 end
 
 
-function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim)
+function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label)
+if nargin < 11 || isempty(y_label)
+    y_label = 'Mean normalized autocorrelogram';
+end
 figure('Name', figure_label, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
 hold on
@@ -755,7 +771,7 @@ ylim(acg_ylim)
 yticks(readable_acg_ticks(acg_ylim))
 ytickformat('%g')
 xlabel('Lag (s)')
-ylabel('Mean normalized autocorrelogram')
+ylabel(y_label)
 title({figure_label, sprintf('n = %d    band: 2-5 Hz    top bars: clusters that survive', size(group_acg.low, 1))})
 legend(plotted, curve_labels, 'Location', 'best')
 place_delta_shade(shade)
@@ -1124,6 +1140,11 @@ locking_acg = plot_summary_acgs(locking_acg, group_order, group_title, ...
 power_acg = plot_summary_acgs(power_acg, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     curve_colors, acg_ylim);
+if plot_rate_scaled_peaks
+    plot_rate_scaled_mean_acgs(locking_acg, power_acg, bin_w, centers, ...
+        group_order, group_title, locking_labels, power_labels, delta_lag, ...
+        skip_abs_lag, smooth_n, curve_colors, cluster_alpha, cluster_perm);
+end
 if ~isfield(locking_acg, 'all_neurons') || ~isfield(locking_acg.all_neurons, 'low_peaks')
     locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order);
     power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order);
@@ -1191,6 +1212,14 @@ reprint_split_mass(locking_acg, group_order, group_title, locking_labels, ...
     'locking', centers, params.delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 reprint_split_mass(power_acg, group_order, group_title, power_labels, ...
     'delta power', centers, params.delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
+if plot_rate_scaled_peaks
+    rate_scaled_acg_stats(locking_acg, bin_w, group_order, group_title, ...
+        locking_labels, 'locking', centers, params.delta_lag, skip_abs_lag, ...
+        smooth_n, cluster_alpha, cluster_perm);
+    rate_scaled_acg_stats(power_acg, bin_w, group_order, group_title, ...
+        power_labels, 'delta power', centers, params.delta_lag, skip_abs_lag, ...
+        smooth_n, cluster_alpha, cluster_perm);
+end
 report_peak_tests(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking', '');
 report_peak_tests(power_acg, group_order, group_title, ...
@@ -1689,6 +1718,44 @@ spike_clusters = double(readNPY(clusters_file));
 end
 
 
+function plot_rate_scaled_mean_acgs(locking_acg, power_acg, bin_w, centers, group_order, group_title, locking_labels, power_labels, delta_lag, skip_abs_lag, smooth_n, curve_colors, cluster_alpha, cluster_perm)
+locking_hz = rate_scaled_acg_stats(locking_acg, bin_w, group_order, group_title, ...
+    locking_labels, 'locking', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    cluster_alpha, cluster_perm);
+power_hz = rate_scaled_acg_stats(power_acg, bin_w, group_order, group_title, ...
+    power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    cluster_alpha, cluster_perm);
+acg_ylim = shared_mean_acg_ylim(locking_hz, power_hz, group_order, ...
+    centers, skip_abs_lag, smooth_n, 'firing-rate normalization (Hz)');
+y_label = 'Conditional firing rate (Hz)';
+name_suffix = ', firing-rate Hz';
+plot_summary_acgs(locking_hz, group_order, group_title, locking_labels, ...
+    'locking', centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, ...
+    acg_ylim, y_label, name_suffix);
+plot_summary_acgs(power_hz, group_order, group_title, power_labels, ...
+    'delta power', centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, ...
+    acg_ylim, y_label, name_suffix);
+end
+
+
+function scaled = rate_scaled_acg_stats(summary, bin_w, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm)
+scaled = rate_scale_summary(summary, bin_w, group_order);
+names = [group_order, {'all_neurons'}];
+titles = [group_title, {'All neurons'}];
+curve_names = {'low', 'high', 'all'};
+disp_block(['Mean autocorrelogram, firing-rate normalization (Hz), ', split_name])
+for g = 1:numel(names)
+    if ~isfield(scaled, names{g}) || ~isfield(scaled.(names{g}), 'low')
+        continue
+    end
+    disp_rule()
+    scaled.(names{g}) = record_delta_mass(scaled.(names{g}), curve_names, curve_labels, ...
+        [titles{g}, ', ', split_name, ', Hz'], centers, delta_lag, split_name, ...
+        skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
+end
+end
+
+
 function plot_rate_scaled_peaks_for(summary, bin_w, centers, smooth_n, group_order, group_title, score_label, split_name)
 scaled = rate_scale_summary(summary, bin_w, group_order);
 scaled = add_peak_scores(scaled, centers, smooth_n, group_order);
@@ -2032,9 +2099,12 @@ end
 end
 
 
-function y_lim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, centers, skip_abs_lag, smooth_n)
+function y_lim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, centers, skip_abs_lag, smooth_n, scale_label)
 % One vertical range for every mean autocorrelogram. The range is the
 % mean curve plus and minus its standard error, not the delta-band shade.
+if nargin < 7 || isempty(scale_label)
+    scale_label = 'sum-to-1 normalized autocorrelogram';
+end
 curve_names = {'low', 'high', 'all'};
 names = [group_order, {'all_neurons'}];
 summaries = {locking_acg, power_acg};
@@ -2067,7 +2137,7 @@ for s = 1:numel(summaries)
     end
 end
 y_lim = readable_acg_scale(lo, hi);
-disp_block('Shared autocorrelogram scale')
+disp_block(['Shared autocorrelogram scale, ', scale_label])
 disp(sprintf(['Mean autocorrelograms span %.4g to %.4g. ' ...
     'Shared y limit is [%.4g %.4g].'], lo, hi, y_lim(1), y_lim(2)))
 end
