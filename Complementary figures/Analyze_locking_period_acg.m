@@ -732,14 +732,18 @@ measure_labels = { ...
     'Burst level, 0-50 ms', ...
     'First-peak prominence', ...
     'Second-cycle prominence'};
-if ~isempty(unit_label)
-    for m = 1:numel(measure_labels)
-        measure_labels{m} = [measure_labels{m}, ' (', unit_label, ')'];
-    end
-    figure_name = ['Paired ACG peaks, ', split_name, ', ', unit_label];
+if isempty(unit_label)
+    scale_label = 'sum-to-1 normalized autocorrelogram';
+    figure_name = ['Paired ACG peaks, ', split_name, ', sum-to-1'];
 else
-    figure_name = ['Paired ACG peaks, ', split_name];
+    scale_label = 'firing-rate normalization (Hz)';
+    for m = 1:numel(measure_labels)
+        measure_labels{m} = [measure_labels{m}, ' (Hz)'];
+    end
+    figure_name = ['Paired ACG peaks, ', split_name, ', firing-rate Hz'];
 end
+disp(' ')
+disp(['Paired tests, ', split_name, ': ', scale_label])
 n_col = 2 + isempty(unit_label);
 figure('Name', figure_name, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.02 0.05 0.96 0.9])
@@ -759,7 +763,7 @@ for m = 1:numel(measures)
         neurons.score_low(ok), neurons.score_high(ok), y_low(ok), y_high(ok), ...
         neurons.firing_rate(ok), group_order, colors, score_label, measure_labels{m})
     report_paired_increase(summary, neurons, group_order, group_title, ...
-        measures{m}, measure_labels{m}, split_name, score_label);
+        measures{m}, measure_labels{m}, split_name, score_label, scale_label);
     if n_col == 3 && m > 1
         [lag_low, lag_high, lag_ok] = paired_peak_values( ...
             neurons.low_peaks, neurons.high_peaks, lag_measures{m});
@@ -771,7 +775,7 @@ for m = 1:numel(measures)
         title(sprintf('Latency, n = %d\nmedian high-low %.3g s, p = %.3g', ...
             lag_change.n, lag_change.median_delta, lag_change.p_two))
         report_paired_latency(summary, neurons, group_order, group_title, ...
-            lag_measures{m}, lag_labels{m}, split_name, score_label);
+            lag_measures{m}, lag_labels{m}, split_name, score_label, scale_label);
     end
 end
 legend_group_colors(group_order, group_title, colors)
@@ -865,8 +869,8 @@ box off
 end
 
 
-function report_paired_increase(summary, neurons, group_order, group_title, measure_name, measure_label, split_name, score_label)
-disp(['Paired increase, ', split_name, ', ', measure_label])
+function report_paired_increase(summary, neurons, group_order, group_title, measure_name, measure_label, split_name, score_label, scale_label)
+disp(['Paired increase, ', scale_label, ', ', split_name, ', ', measure_label])
 [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measure_name);
 print_paired_increase('All neurons', y_low(ok), y_high(ok), ...
     neurons.score_low(ok), neurons.score_high(ok), score_label);
@@ -882,8 +886,8 @@ end
 end
 
 
-function report_paired_latency(summary, neurons, group_order, group_title, measure_name, measure_label, split_name, score_label)
-disp(['Paired latency, ', split_name, ', ', measure_label])
+function report_paired_latency(summary, neurons, group_order, group_title, measure_name, measure_label, split_name, score_label, scale_label)
+disp(['Paired latency, ', scale_label, ', ', split_name, ', ', measure_label])
 [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measure_name);
 print_paired_shift('All neurons', y_low(ok), y_high(ok), ...
     neurons.score_low(ok), neurons.score_high(ok), score_label);
