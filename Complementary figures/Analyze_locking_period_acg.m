@@ -32,11 +32,10 @@
 % mean autocorrelogram uses one y limit, taken from the highest and lowest
 % mean plus or minus its standard error, and rounded onto a short decimal.
 % On each mean autocorrelogram, grey bars in the top tenth of the axis mark
-% lags where the paired low-versus-high test is significant on its own.
-% The bars are mirrored because the autocorrelogram is. The statistics
-% report gives the cluster test for those same bars: the lag range on the
-% positive side and the cluster p-value. A bar survives when that p-value
-% is at or below acg_cluster_alpha.
+% clusters that survive the sign-flip test. The bars are mirrored because
+% the autocorrelogram is. The statistics report lists every cluster, with
+% its positive-lag range and cluster p-value, including those that do not
+% survive. A cluster survives when that p-value is at or below acg_cluster_alpha.
 %
 % Each plotted autocorrelogram is also scored neuron by neuron. The burst
 % is the mean level from the first positive bin through 50 ms. Oscillatory
@@ -757,7 +756,7 @@ yticks(readable_acg_ticks(acg_ylim))
 ytickformat('%g')
 xlabel('Lag (s)')
 ylabel('Mean normalized autocorrelogram')
-title({figure_label, sprintf('n = %d    band: 2-5 Hz    top bars: uncorrected low vs high', size(group_acg.low, 1))})
+title({figure_label, sprintf('n = %d    band: 2-5 Hz    top bars: clusters that survive', size(group_acg.low, 1))})
 legend(plotted, curve_labels, 'Location', 'best')
 place_delta_shade(shade)
 if isfield(group_acg, 'low_high_clusters')
@@ -1966,7 +1965,7 @@ for k = 1:numel(result.clusters)
     disp(sprintf('  Cluster %.3g-%.3g s, cluster p = %.3g, %s', ...
         cluster.x0, cluster.x1, cluster.p, fate))
 end
-disp('  The same ranges are shaded at negative lags. The bars themselves are uncorrected.')
+disp('  Only clusters that survive are shaded, on the positive lags and on their negative mirrors.')
 end
 
 
@@ -1978,6 +1977,9 @@ span = y_lim(2) - y_lim(1);
 y0 = y_lim(2) - 0.1 * span;
 y1 = y_lim(2);
 for k = 1:numel(result.clusters)
+    if ~result.clusters(k).survives
+        continue
+    end
     x0 = result.clusters(k).x0;
     x1 = result.clusters(k).x1;
     patch([x0 x1 x1 x0], [y0 y0 y1 y1], [0.25 0.25 0.25], ...
