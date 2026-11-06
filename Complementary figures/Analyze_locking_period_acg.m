@@ -772,7 +772,7 @@ for r = 1:2
     end
 end
 sgtitle({['Reference for the peak scatters, ', split_name], ...
-    'Line: Gaussian smooth, sigma = 40 ms. Numbers: the scatter-plot measures. Grey: 0-50 ms burst.'})
+    'Line is the Gaussian used to detect the peaks. Grey band is the 0-50 ms burst.'})
 end
 
 
@@ -861,8 +861,6 @@ low_color = [0.20 0.45 0.75];
 high_color = [0.85 0.25 0.20];
 low_pk = acg_delta_peaks(neurons.low(row, :), centers, smooth_n);
 high_pk = acg_delta_peaks(neurons.high(row, :), centers, smooth_n);
-low_pk.fold_y = smooth_example_trace(low_pk.fold_y, smooth_n);
-high_pk.fold_y = smooth_example_trace(high_pk.fold_y, smooth_n);
 hold on
 low_line = plot(low_pk.fold_t, low_pk.fold_y, 'Color', low_color, 'LineWidth', 1.6);
 high_line = plot(high_pk.fold_t, high_pk.fold_y, 'Color', high_color, 'LineWidth', 1.6);
@@ -897,17 +895,6 @@ box off
 disp(sprintf('  example %s, %s: %s id %g\n%s', split_name, kind_name, ...
     neurons.session{row}, neurons.cluster_id(row), ...
     example_parameter_text(neurons, row, score_label)))
-end
-
-
-function y = smooth_example_trace(y, smooth_n)
-% Wider Gaussian than the one used to score peaks. smooth_n is the
-% smooth_half window in bins (40 ms at 10 ms bins). A single-neuron
-% histogram stays noisy at the 10 ms scoring sigma.
-if isempty(y) || ~isfinite(smooth_n) || smooth_n <= 0
-    return
-end
-y = gaussian_smooth_acg(y, smooth_n);
 end
 
 
