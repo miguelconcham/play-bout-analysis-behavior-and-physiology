@@ -2,7 +2,8 @@ function test_locking_period_acg()
 %TEST_LOCKING_PERIOD_ACG  Checks that do not need the experiment files.
 %
 % Delta-lock labels, within-neuron locking quartiles, overlap-weighted
-% pooling, per-neuron ACG normalization, and delta-cycle peak scores.
+% pooling, per-neuron ACG normalization, delta-cycle peak scores, and
+% within-run spike shuffles.
 % Run this file by name after
 % add_repo_paths.
 
@@ -129,6 +130,33 @@ assert(one_cycle.first_present && one_cycle.first_lag > 0.60 && one_cycle.first_
     'A slow delta peak was not kept as the first cycle.');
 assert(~one_cycle.second_measurable, ...
     'A second cycle was required beyond the end of the trace.');
+
+rng(1, 'twister');
+regular = (0.1:0.2:3.9)';
+shuffled = shuffle_spikes_within_runs(regular, 0, 4);
+assert(numel(shuffled) == numel(regular), ...
+    'The within-run shuffle changed the spike count.');
+assert(all(shuffled >= 0 & shuffled <= 4), ...
+    'Shuffled spikes left the firing run.');
+assert(std(diff(sort(shuffled))) > 0.02, ...
+    'Shuffled spikes kept the original interspike intervals.');
+shuffle_edges = -1:0.01:1;
+shuffle_centers = shuffle_edges(1:end - 1) + 0.005;
+regular_peaks = acg_delta_peaks(run_window_acgs(regular, 0, 4, shuffle_edges), ...
+    shuffle_centers, 1);
+assert(regular_peaks.first_present && regular_peaks.first_prominence > 0.2, ...
+    'The regular train did not produce a delta-range peak.');
+null_prom = nan(20, 1);
+for s = 1:numel(null_prom)
+    shuffled = shuffle_spikes_within_runs(regular, 0, 4);
+    null_peaks = acg_delta_peaks(run_window_acgs(shuffled, 0, 4, shuffle_edges), ...
+        shuffle_centers, 1);
+    if null_peaks.first_measurable
+        null_prom(s) = null_peaks.first_prominence;
+    end
+end
+assert(mean(null_prom, 'omitnan') < 0.5 * regular_peaks.first_prominence, ...
+    'Uniform within-run times did not flatten the rhythmic peak.');
 
 impulse = [0 0 0 0 1 0 0 0 0];
 smoothed = gaussian_smooth_acg(impulse, 1);
