@@ -892,9 +892,14 @@ for m = 1:numel(measures)
     end
 end
 legend_group_colors(group_order, group_title, colors)
+if isempty(unit_label)
+    scale_tag = 'sum-to-1';
+else
+    scale_tag = 'rate ratio';
+end
+plot_paired_by_lock_group(neurons, group_order, group_title, colors, split_name, scale_label, scale_tag)
 
 if isempty(unit_label)
-    plot_paired_by_lock_group(neurons, group_order, group_title, colors, split_name, scale_label)
     figure('Name', ['ACG cycle counts, ', split_name], 'Color', 'w', ...
         'Units', 'normalized', 'OuterPosition', [0.2 0.2 0.55 0.45])
     plot_paired_cycle_counts(neurons, group_order, group_title, colors, split_name)
@@ -903,9 +908,7 @@ end
 end
 
 
-function plot_paired_by_lock_group(neurons, group_order, group_title, colors, split_name, scale_label)
-col_titles = [group_title, {'All neurons'}];
-n_col = numel(col_titles);
+function plot_paired_by_lock_group(neurons, group_order, group_title, colors, split_name, scale_label, scale_tag)
 row_measures = {'burst', 'first_prominence', 'second_prominence', 'first_lag', 'second_lag'};
 row_labels = { ...
     'Burst level, 0-50 ms', ...
@@ -917,34 +920,34 @@ side_names = { ...
     'one-sided increase p', 'one-sided increase p', 'one-sided increase p', ...
     'one-sided later p', 'one-sided later p'};
 units = {'', '', '', ' s', ' s'};
-figure('Name', ['Paired by lock group, ', split_name], 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.02 0.02 0.96 0.96])
-for r = 1:numel(row_measures)
-    [y_low, y_high, ok] = paired_peak_values( ...
-        neurons.low_peaks, neurons.high_peaks, row_measures{r});
-    masks = cell(1, n_col);
-    for c = 1:numel(group_order)
-        masks{c} = ok & strcmp(neurons.lock_group, group_order{c});
+panel_names = [group_order, {'all'}];
+panel_titles = [group_title, {'All neurons'}];
+for c = 1:numel(panel_names)
+    figure('Name', ['Paired, ', panel_titles{c}, ', ', split_name, ', ', scale_tag], ...
+        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.18 0.04 0.42 0.92])
+    if strcmp(panel_names{c}, 'all')
+        in_panel = true(numel(neurons.lock_group), 1);
+    else
+        in_panel = strcmp(neurons.lock_group, panel_names{c});
     end
-    masks{n_col} = ok;
-    lim = paired_cloud_limits(y_low(ok), y_high(ok));
-    for c = 1:n_col
-        subplot(numel(row_measures), n_col, (r - 1) * n_col + c)
-        in = masks{c};
+    for r = 1:numel(row_measures)
+        [y_low, y_high, ok] = paired_peak_values( ...
+            neurons.low_peaks, neurons.high_peaks, row_measures{r});
+        in = ok & in_panel;
+        subplot(numel(row_measures), 1, r)
+        lim = paired_cloud_limits(y_low(in), y_high(in));
         plot_one_paired_cloud(neurons.lock_group(in), y_low(in), y_high(in), ...
-            neurons.firing_rate(in), group_order, colors, lim, r == numel(row_measures))
-        if c == 1
-            ylabel({'High 25%', row_labels{r}})
-        end
+            neurons.firing_rate(in), group_order, colors, lim, true)
+        ylabel({'High 25%', row_labels{r}})
         change = paired_change_stats(y_low(in), y_high(in), ...
             neurons.score_low(in), neurons.score_high(in));
-        title(sprintf(['%s, n = %d\nmedian high-low %.3g%s\n' ...
-            'two-sided signrank p = %.3g\n%s = %.3g'], ...
-            col_titles{c}, change.n, change.median_delta, units{r}, ...
-            change.p_two, side_names{r}, change.p_increase), 'FontSize', 8)
+        title(sprintf(['n = %d, median high-low %.3g%s\n' ...
+            'two-sided signrank p = %.3g, %s = %.3g'], ...
+            change.n, change.median_delta, units{r}, ...
+            change.p_two, side_names{r}, change.p_increase))
     end
+    sgtitle({[panel_titles{c}, ', ', split_name], scale_label})
 end
-sgtitle({['Low 25% vs high 25% by lock group, ', split_name], scale_label})
 end
 
 
@@ -974,7 +977,7 @@ for g = 1:numel(group_order)
         continue
     end
     order = idx_high_rate_last(idx, firing_rate);
-    scatter(y_low(order), y_high(order), 16, colors(g, :), 'filled', ...
+    scatter(y_low(order), y_high(order), 36, colors(g, :), 'filled', ...
         'MarkerFaceAlpha', 0.75, 'HandleVisibility', 'off')
 end
 if ~isempty(y_low)
