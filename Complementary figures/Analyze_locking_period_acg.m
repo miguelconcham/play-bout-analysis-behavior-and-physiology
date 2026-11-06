@@ -41,6 +41,10 @@
 % (pair counts / overlap) / (firing rate of those runs * bin width),
 % a conditional rate in Hz. A flat Poisson autocorrelogram then sits near
 % the firing rate of the runs.
+% The same all-runs autocorrelogram is then used in a linear model of
+% mean delta power. Predictors are the mean firing rate of those runs,
+% their mean PPC, and the first-peak and second-cycle prominences.
+% Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
 % delta power goes with a bigger change in that measure. The same paired
@@ -233,23 +237,26 @@ for f = 1:numel(parsing_files)
             run_length = acg_run_lengths(rt);
             this_area = cluster_area_char(ci, nn);
             this_rate = neuron_run_rate(rt);
+            this_ppc = rt.phase_entrainment(:, ppc_col);
+            this_power = run_delta_power(rt);
+            run_means = all_run_means(rt, acg, run_length, this_ppc, this_power);
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
-                rt.phase_entrainment(:, ppc_col), this_corrected, low_percent, high_percent);
+                this_ppc, this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
                 acg_raw.(group_order{g}) = append_pooled( ...
                     acg_raw.(group_order{g}), pooled, animal_code, this_id, this_area, ...
-                    this_rate, tail_rate_struct(rt, pooled));
+                    this_rate, tail_rate_struct(rt, pooled), run_means);
                 n_kept(g) = n_kept(g) + 1;
             else
                 n_unsplit(g) = n_unsplit(g) + 1;
             end
 
             pooled_power = pool_locking_period_acgs(acg, edges, run_length, ...
-                run_delta_power(rt), this_corrected, low_percent, high_percent);
+                this_power, this_corrected, low_percent, high_percent);
             if split_is_usable(pooled_power)
                 acg_power.(group_order{g}) = append_pooled( ...
                     acg_power.(group_order{g}), pooled_power, animal_code, this_id, this_area, ...
-                    this_rate, tail_rate_struct(rt, pooled_power));
+                    this_rate, tail_rate_struct(rt, pooled_power), run_means);
                 n_kept_power(g) = n_kept_power(g) + 1;
             else
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
@@ -319,6 +326,8 @@ if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean delta power of the runs', 'delta power');
 end
+locking_acg.delta_power_model = fit_delta_power_contributions( ...
+    locking_acg, group_order, group_title);
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -343,6 +352,9 @@ for g = 1:numel(group_order)
     block.rate_low = zeros(0, 1);
     block.rate_high = zeros(0, 1);
     block.rate_all = zeros(0, 1);
+    block.model_fr = zeros(0, 1);
+    block.model_ppc = zeros(0, 1);
+    block.model_power = zeros(0, 1);
     block.session = {};
     block.cluster_id = zeros(0, 1);
     block.area = {};
@@ -358,7 +370,7 @@ ok = pooled.n_low >= 1 && pooled.n_high >= 1 ...
 end
 
 
-function block = append_pooled(block, pooled, animal_code, this_id, this_area, firing_rate, tail_rates)
+function block = append_pooled(block, pooled, animal_code, this_id, this_area, firing_rate, tail_rates, run_means)
 row = block.n + 1;
 block.n = row;
 block.low(row, :) = pooled.low;
@@ -374,6 +386,9 @@ block.firing_rate(row, 1) = firing_rate;
 block.rate_low(row, 1) = tail_rates.low;
 block.rate_high(row, 1) = tail_rates.high;
 block.rate_all(row, 1) = tail_rates.all;
+block.model_fr(row, 1) = run_means.fr;
+block.model_ppc(row, 1) = run_means.ppc;
+block.model_power(row, 1) = run_means.power;
 block.session{row, 1} = animal_code;
 block.cluster_id(row, 1) = this_id;
 block.area{row, 1} = this_area;
@@ -424,6 +439,9 @@ for g = 1:numel(group_order)
     summary.(name).rate_low = acg_raw.(name).rate_low(keep);
     summary.(name).rate_high = acg_raw.(name).rate_high(keep);
     summary.(name).rate_all = acg_raw.(name).rate_all(keep);
+    summary.(name).model_fr = acg_raw.(name).model_fr(keep);
+    summary.(name).model_ppc = acg_raw.(name).model_ppc(keep);
+    summary.(name).model_power = acg_raw.(name).model_power(keep);
     summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
         [group_title{g}, ', ', split_name], centers, delta_lag, skip_abs_lag, ...
         smooth_n, curve_colors, split_name);
@@ -463,6 +481,9 @@ combined.firing_rate = zeros(0, 1);
 combined.rate_low = zeros(0, 1);
 combined.rate_high = zeros(0, 1);
 combined.rate_all = zeros(0, 1);
+combined.model_fr = zeros(0, 1);
+combined.model_ppc = zeros(0, 1);
+combined.model_power = zeros(0, 1);
 combined.mass_low = zeros(0, 1);
 combined.mass_high = zeros(0, 1);
 combined.mass_all = zeros(0, 1);
@@ -489,6 +510,9 @@ for g = 1:numel(group_order)
     combined.rate_low = [combined.rate_low; summary.(name).rate_low]; %#ok<AGROW>
     combined.rate_high = [combined.rate_high; summary.(name).rate_high]; %#ok<AGROW>
     combined.rate_all = [combined.rate_all; summary.(name).rate_all]; %#ok<AGROW>
+    combined.model_fr = [combined.model_fr; summary.(name).model_fr]; %#ok<AGROW>
+    combined.model_ppc = [combined.model_ppc; summary.(name).model_ppc]; %#ok<AGROW>
+    combined.model_power = [combined.model_power; summary.(name).model_power]; %#ok<AGROW>
     combined.mass_low = [combined.mass_low; summary.(name).mass_low]; %#ok<AGROW>
     combined.mass_high = [combined.mass_high; summary.(name).mass_high]; %#ok<AGROW>
     combined.mass_all = [combined.mass_all; summary.(name).mass_all]; %#ok<AGROW>
@@ -1453,4 +1477,204 @@ for k = 1:numel(shade)
     set(shade(k), 'YData', [yl(1) yl(1) yl(2) yl(2)], 'XData', x)
 end
 uistack(shade, 'bottom')
+end
+
+
+function means = all_run_means(rt, acg, run_length, ppc, power)
+% Means over the runs that enter the all-runs autocorrelogram.
+all_idx = isfinite(run_length(:)) & run_length(:) > 0 & any(isfinite(acg), 2);
+means.fr = tail_firing_rate(rt, all_idx);
+means.ppc = mean_on(ppc, all_idx);
+means.power = mean_on(power, all_idx);
+end
+
+
+function m = mean_on(values, idx)
+values = double(values(:));
+idx = idx(:) & isfinite(values);
+if ~any(idx)
+    m = NaN;
+    return
+end
+m = mean(values(idx));
+end
+
+
+function model = fit_delta_power_contributions(summary, group_order, group_title)
+% Mean delta power of the runs in the all-runs autocorrelogram, predicted
+% by their mean firing rate, their mean PPC, and the two delta-peak
+% prominences of that autocorrelogram. One row per neuron.
+model = struct();
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
+        || ~isfield(summary.all_neurons, 'model_power')
+    model.all = empty_power_fit('All neurons');
+    return
+end
+neurons = summary.all_neurons;
+[X, y, names, kept] = power_model_design(neurons);
+model.all = fit_one_power_model(X, y, names, 'All neurons');
+model.groups = struct();
+for g = 1:numel(group_order)
+    in_group = strcmp(neurons.lock_group(kept), group_order{g});
+    model.groups.(group_order{g}) = fit_one_power_model( ...
+        X(in_group, :), y(in_group), names, group_title{g});
+end
+plot_power_contributions(model, group_order, group_title, names);
+end
+
+
+function [X, y, names, kept] = power_model_design(neurons)
+names = {'Firing rate', 'PPC', 'First-peak prominence', 'Second-cycle prominence'};
+peaks = neurons.all_peaks;
+y_all = neurons.model_power(:);
+X_all = [neurons.model_fr(:), neurons.model_ppc(:), ...
+    peaks.first_prominence(:), peaks.second_prominence(:)];
+kept = isfinite(y_all) & all(isfinite(X_all), 2) ...
+    & peaks.first_measurable(:) & peaks.second_measurable(:);
+X = X_all(kept, :);
+y = y_all(kept);
+end
+
+
+function fit = fit_one_power_model(X, y, names, label)
+fit = empty_power_fit(label);
+fit.n = size(X, 1);
+n_pred = numel(names);
+if fit.n < n_pred + 5
+    disp(['Delta power model, ', label, ': n = ', num2str(fit.n), ...
+        ' is too small for ', num2str(n_pred), ' predictors.'])
+    return
+end
+sd = std(X, 0, 1);
+if any(~isfinite(sd) | sd <= 0) || ~isfinite(std(y)) || std(y) <= 0
+    disp(['Delta power model, ', label, ': a variable has no spread.'])
+    return
+end
+fit.ok = true;
+fit.names = names;
+Xs = (X - mean(X, 1)) ./ sd;
+ys = (y - mean(y)) / std(y, 0);
+[fit.beta, fit.rsq, fit.F, fit.p_model] = standardized_ols(Xs, ys);
+fit.unique_rsq = zeros(n_pred, 1);
+for k = 1:n_pred
+    keep = true(1, n_pred);
+    keep(k) = false;
+    [~, rsq_without] = standardized_ols(Xs(:, keep), ys);
+    fit.unique_rsq(k) = fit.rsq - rsq_without;
+end
+[fit.weight, fit.weight_rsq] = johnson_relative_weights(Xs, ys);
+if fit.rsq > 0
+    fit.percent_of_rsq = 100 * fit.weight / fit.rsq;
+else
+    fit.percent_of_rsq = nan(n_pred, 1);
+end
+fit.predictor_corr = corr(X);
+report_power_model(fit);
+end
+
+
+function fit = empty_power_fit(label)
+fit.ok = false;
+fit.label = label;
+fit.n = 0;
+fit.names = {};
+fit.beta = [];
+fit.rsq = NaN;
+fit.F = NaN;
+fit.p_model = NaN;
+fit.unique_rsq = [];
+fit.weight = [];
+fit.weight_rsq = NaN;
+fit.percent_of_rsq = [];
+fit.predictor_corr = [];
+end
+
+
+function [beta, rsq, Fstat, p_model] = standardized_ols(X, y)
+n = size(X, 1);
+k = size(X, 2);
+A = [ones(n, 1), X];
+coef = pinv(A) * y;
+resid = y - A * coef;
+ss_res = sum(resid .^ 2);
+ss_tot = sum((y - mean(y)) .^ 2);
+if ss_tot <= 0
+    beta = coef(2:end);
+    rsq = NaN;
+    Fstat = NaN;
+    p_model = NaN;
+    return
+end
+rsq = 1 - ss_res / ss_tot;
+dof1 = k;
+dof2 = n - k - 1;
+beta = coef(2:end);
+if dof2 < 1 || ss_res < 0
+    Fstat = NaN;
+    p_model = NaN;
+    return
+end
+Fstat = ((ss_tot - ss_res) / dof1) / (ss_res / dof2);
+p_model = betainc(dof2 / (dof2 + dof1 * Fstat), dof2 / 2, dof1 / 2);
+end
+
+
+function [weight, rsq] = johnson_relative_weights(X, y)
+% Relative weights for correlated predictors. The symmetric factor of the
+% predictor correlation matrix splits R^2, including variance the
+% predictors share, so the weights sum to the model R^2.
+Rxx = corr(X);
+Rxy = corr(X, y);
+[Q, D] = eig((Rxx + Rxx') / 2);
+eigvals = real(diag(D));
+[eigvals, order] = sort(eigvals, 'descend');
+Q = Q(:, order);
+eigvals(eigvals < 1e-10) = 1e-10;
+Lam = Q * diag(sqrt(eigvals)) * Q';
+beta = Lam \ Rxy;
+weight = (Lam .^ 2) * (beta .^ 2);
+weight = real(weight(:));
+rsq = sum(weight);
+end
+
+
+function report_power_model(fit)
+disp(['Delta power model, ', fit.label, ', n = ', num2str(fit.n)])
+disp(sprintf('  Full R^2 = %.3g, F = %.3g, p = %.3g', fit.rsq, fit.F, fit.p_model))
+disp(['  Predictor correlations (', strjoin(fit.names, ', '), ')'])
+disp(fit.predictor_corr)
+for k = 1:numel(fit.names)
+    disp(sprintf(['  %s: standardized beta = %.3g, unique dR^2 = %.3g, ' ...
+        'relative weight = %.3g (%.1f%% of R^2)'], ...
+        fit.names{k}, fit.beta(k), fit.unique_rsq(k), fit.weight(k), fit.percent_of_rsq(k)))
+end
+end
+
+
+function plot_power_contributions(model, group_order, group_title, names)
+if ~model.all.ok
+    return
+end
+labels = [{'All neurons'}, group_title];
+keys = [{'all'}, group_order];
+pct = nan(numel(keys), numel(names));
+for i = 1:numel(keys)
+    if i == 1
+        fit = model.all;
+    else
+        fit = model.groups.(keys{i});
+    end
+    if ~fit.ok
+        continue
+    end
+    pct(i, :) = fit.percent_of_rsq(:)';
+end
+figure('Name', 'Delta power contributions', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.15 0.2 0.7 0.5])
+bar(pct)
+set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels)
+ylabel('Share of explained delta-power variance (%)')
+legend(names, 'Location', 'eastoutside')
+title(sprintf('All-runs autocorrelogram, R^2 = %.2f, n = %d', model.all.rsq, model.all.n))
+box off
 end
