@@ -50,11 +50,11 @@
 % cycle that the runs are too short to measure is left out of the pair.
 % The sum-to-1 scaling is not a division by firing rate. Set
 % plot_rate_scaled_peaks to also score the same peaks on
-% (pair counts / overlap) / (firing rate of those runs * bin width),
-% a conditional rate in Hz. A flat Poisson autocorrelogram then sits near
-% the firing rate of the runs. The same switch also redraws the mean
-% autocorrelograms in those units, with their own y limit and the same
-% low-versus-high cluster test.
+% (pair counts / overlap) / (firing rate of those runs ^ 2 * bin width).
+% Each curve uses the firing rate of its own tail. A flat Poisson
+% autocorrelogram then sits at 1, so a change in rate does not lift the
+% curve. The same switch also redraws the mean autocorrelograms in that
+% ratio, with their own y limit and the same low-versus-high cluster test.
 % The same all-runs autocorrelogram is then used in a linear model of
 % mean delta power. Predictors are the mean firing rate of those runs,
 % their mean PPC, the 0-50 ms burst, and the first-peak and second-cycle
@@ -101,7 +101,7 @@ acg_refractory_s = 0.005;
 acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutoff
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
 plot_rate_scaled_peaks = true;  % false: sum-to-1 autocorrelograms only
-                                 % true: also the firing-rate autocorrelograms, their cluster tests, and the peak figures in Hz
+                                 % true: also the rate-ratio autocorrelograms (Poisson = 1), their cluster tests, and the peak figures
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG, and statistics.txt gets the command window.
@@ -844,11 +844,11 @@ if isempty(unit_label)
     scale_label = 'sum-to-1 normalized autocorrelogram';
     figure_name = ['Paired ACG peaks, ', split_name, ', sum-to-1'];
 else
-    scale_label = 'firing-rate normalization (Hz)';
+    scale_label = 'rate ratio (Poisson = 1)';
     for m = 1:numel(measure_labels)
-        measure_labels{m} = [measure_labels{m}, ' (Hz)'];
+        measure_labels{m} = [measure_labels{m}, ' (ratio)'];
     end
-    figure_name = ['Paired ACG peaks, ', split_name, ', firing-rate Hz'];
+    figure_name = ['Paired ACG peaks, ', split_name, ', rate ratio'];
 end
 report_peak_tests(summary, group_order, group_title, score_label, split_name, unit_label);
 n_col = 2 + isempty(unit_label);
@@ -1070,7 +1070,7 @@ if nargin < 6 || isempty(unit_label)
     unit_label = '';
     scale_label = 'sum-to-1 normalized autocorrelogram';
 else
-    scale_label = 'firing-rate normalization (Hz)';
+    scale_label = 'rate ratio (Poisson = 1)';
 end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low_peaks')
     return
@@ -1085,7 +1085,7 @@ lag_measures = {'first_lag', 'second_lag'};
 lag_labels = {'First-peak latency (s)', 'Second-cycle latency (s)'};
 if ~isempty(unit_label)
     for m = 1:numel(measure_labels)
-        measure_labels{m} = [measure_labels{m}, ' (Hz)'];
+        measure_labels{m} = [measure_labels{m}, ' (ratio)'];
     end
 end
 disp_block(['Paired tests, ', split_name, ': ', scale_label])
@@ -1225,9 +1225,9 @@ if plot_rate_scaled_peaks
     power_hz = add_peak_scores(rate_scale_summary(power_acg, bin_w, group_order), ...
         centers, smooth_n, group_order);
     report_peak_tests(locking_hz, group_order, group_title, ...
-        'Mean PPC of the runs', 'locking', 'Hz');
+        'Mean PPC of the runs', 'locking', 'ratio');
     report_peak_tests(power_hz, group_order, group_title, ...
-        'Mean delta power of the runs', 'delta power', 'Hz');
+        'Mean delta power of the runs', 'delta power', 'ratio');
 end
 if isfield(locking_acg, 'delta_power_model')
     model = locking_acg.delta_power_model;
@@ -1721,9 +1721,9 @@ power_hz = rate_scaled_acg_stats(power_acg, bin_w, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     cluster_alpha, cluster_perm);
 acg_ylim = shared_mean_acg_ylim(locking_hz, power_hz, group_order, ...
-    centers, skip_abs_lag, smooth_n, 'firing-rate normalization (Hz)');
-y_label = 'Conditional firing rate (Hz)';
-name_suffix = ', firing-rate Hz';
+    centers, skip_abs_lag, smooth_n, 'rate ratio (Poisson = 1)');
+y_label = 'Ratio to Poisson rate';
+name_suffix = ', rate ratio';
 plot_summary_acgs(locking_hz, group_order, group_title, locking_labels, ...
     'locking', centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, ...
     acg_ylim, y_label, name_suffix);
@@ -1738,14 +1738,14 @@ scaled = rate_scale_summary(summary, bin_w, group_order);
 names = [group_order, {'all_neurons'}];
 titles = [group_title, {'All neurons'}];
 curve_names = {'low', 'high', 'all'};
-disp_block(['Mean autocorrelogram, firing-rate normalization (Hz), ', split_name])
+disp_block(['Mean autocorrelogram, rate ratio (Poisson = 1), ', split_name])
 for g = 1:numel(names)
     if ~isfield(scaled, names{g}) || ~isfield(scaled.(names{g}), 'low')
         continue
     end
     disp_rule()
     scaled.(names{g}) = record_delta_mass(scaled.(names{g}), curve_names, curve_labels, ...
-        [titles{g}, ', ', split_name, ', Hz'], centers, delta_lag, split_name, ...
+        [titles{g}, ', ', split_name, ', rate ratio'], centers, delta_lag, split_name, ...
         skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 end
 end
@@ -1754,7 +1754,7 @@ end
 function plot_rate_scaled_peaks_for(summary, bin_w, centers, smooth_n, group_order, group_title, score_label, split_name)
 scaled = rate_scale_summary(summary, bin_w, group_order);
 scaled = add_peak_scores(scaled, centers, smooth_n, group_order);
-plot_paired_peak_scores(scaled, group_order, group_title, score_label, split_name, 'Hz');
+plot_paired_peak_scores(scaled, group_order, group_title, score_label, split_name, 'ratio');
 end
 
 
@@ -1777,10 +1777,11 @@ end
 
 
 function Y = scale_acg_by_rate(Y, mass, rate, bin_w)
-% (pair counts / overlap) / (firing rate * bin width), in Hz.
-% Y is the sum-to-1 curve and mass is the sum of the edge-corrected bins,
-% so mass .* Y restores pair counts / overlap.
-factor = mass(:) ./ (rate(:) * bin_w);
+% (pair counts / overlap) / (tail firing rate ^ 2 * bin width).
+% Y is the sum-to-1 curve and mass restores pair counts / overlap.
+% The rate is the firing rate of the runs in that curve. A Poisson
+% autocorrelogram then sits at 1.
+factor = mass(:) ./ ((rate(:) .^ 2) * bin_w);
 factor(~isfinite(factor) | rate(:) <= 0 | mass(:) <= 0) = NaN;
 Y = Y .* factor;
 end
