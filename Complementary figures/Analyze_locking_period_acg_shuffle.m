@@ -26,14 +26,13 @@
 % and any other setting that summary does not store are read from the
 % assignments at the top of Analyze_locking_period_acg.m.
 %
-% Those same shuffles are averaged across neurons. The mean sum-to-1
-% autocorrelogram of each lock group, including delta-locked neurons
-% (peak-locked or trough-locked), is smoothed with the same Gaussian and
-% scored for a first peak and a second cycle. Shuffle index s of every
-% neuron is averaged the same way, which is one draw of the null mean.
-% With 10 ms bins and a +/- 1 s axis the running sum is about 10 MB.
-% The autocorrelograms are not computed again. A checkpoint that stored
-% only prominences has no shuffled curves, so it cannot be resumed.
+% Those same shuffles are averaged across neurons in two scales. The sum-to-1
+% mean gives every neuron the same weight. The rate-ratio mean divides
+% each curve by the square of that tail's firing rate and the bin width,
+% so a Poisson autocorrelogram sits at 1. Both means are smoothed with the
+% same Gaussian, and the first peak and second cycle of each mean are
+% compared with the same peaks of the shuffled means. With 500 shuffles,
+% 10 ms bins and both scales, the running sums are about 50 MB.
 %
 % Run this file, not the unit test, to produce the figures:
 %   Analyze_locking_period_acg_shuffle
@@ -46,7 +45,7 @@ parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
 phase_folder   = fullfile(data_root, 'Analysis results', 'phase locking data');
 npx_root       = fullfile(data_root, 'NPX data', 'NPX raw data');
 
-n_shuffles = 200;
+n_shuffles = 500;
 resume     = true;
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
@@ -97,11 +96,12 @@ parameters = struct( ...
     'acg_refractory_s', acg_refractory_s, ...
     'areas_to_keep', {areas_to_keep}, ...
     'grand_average', true, ...
+    'rate_ratio', true, ...
     'null', 'uniform spike times inside each firing run');
 
-grand_bytes = numel(grand_order) * 2 * 2 * n_shuffles * n_bins * 8 * 2;
-disp(sprintf(['Grand-average accumulator is %.1f MB (%d groups, %d shuffles, ' ...
-    '%d bins). Each neuron is still shuffled once.'], ...
+grand_bytes = 2 * numel(grand_order) * 2 * 2 * n_shuffles * n_bins * 8 * 2;
+disp(sprintf(['Grand-average accumulators are %.1f MB for sum-to-1 and rate ratio ' ...
+    '(%d groups, %d shuffles, %d bins). Each neuron is still shuffled once.'], ...
     grand_bytes / 1e6, numel(grand_order), n_shuffles, n_bins))
 
 records = {};
@@ -131,6 +131,11 @@ if resume && exist(checkpoint, 'file') == 2
         error('Analyze_locking_period_acg_shuffle:checkpoint', ...
             ['The area filter removed neurons already added to the ' ...
             'grand average in %s. Delete it or set resume = false.'], checkpoint);
+    end
+    if ~isfield(grand, 'sum_to_one') || ~isfield(grand, 'rate_ratio')
+        error('Analyze_locking_period_acg_shuffle:checkpoint', ...
+            ['%s has no rate-ratio grand average. Delete it or set ' ...
+            'resume = false.'], checkpoint);
     end
     if grand.n_shuffles ~= n_shuffles || grand.n_bins ~= n_bins
         error('Analyze_locking_period_acg_shuffle:checkpoint', ...
@@ -287,6 +292,17 @@ for f = 1:numel(parsing_files)
             rng(neuron_shuffle_seed(animal_code, this_id), 'twister');
             nulls = empty_nulls(n_shuffles);
             null_curves = blank_null_curves(n_shuffles, n_bins);
+            null_ratio = blank_null_curves(n_shuffles, n_bins);
+            rate_lock = struct('low', NaN, 'high', NaN);
+            rate_power = struct('low', NaN, 'high', NaN);
+            if lock_ok
+                rate_lock.low = tail_firing_rate(rt, pooled.low_index);
+                rate_lock.high = tail_firing_rate(rt, pooled.high_index);
+            end
+            if power_ok
+                rate_power.low = tail_firing_rate(rt, pooled_power.low_index);
+                rate_power.high = tail_firing_rate(rt, pooled_power.high_index);
+            end
             t0 = tic;
             for s = 1:n_shuffles
                 shuffled = shuffle_spikes_within_runs(spikes, ...
@@ -297,22 +313,30 @@ for f = 1:numel(parsing_files)
                 if lock_ok
                     sh_lock = pool_locking_period_acgs(acg_s, edges, run_length, ppc, ...
                         true, low_percent, high_percent);
-                    [peaks, row] = score_pooled_row(sh_lock.low, centers, smooth_n, acg_refractory_s);
+                    [peaks, row, ratio] = score_tail_curves(sh_lock.low, centers, smooth_n, ...
+                        acg_refractory_s, rate_lock.low, bin_w);
                     nulls = store_null_tail(nulls, 'locking', 'low', s, peaks);
                     null_curves.locking.low(s, :) = row;
-                    [peaks, row] = score_pooled_row(sh_lock.high, centers, smooth_n, acg_refractory_s);
+                    null_ratio.locking.low(s, :) = ratio;
+                    [peaks, row, ratio] = score_tail_curves(sh_lock.high, centers, smooth_n, ...
+                        acg_refractory_s, rate_lock.high, bin_w);
                     nulls = store_null_tail(nulls, 'locking', 'high', s, peaks);
                     null_curves.locking.high(s, :) = row;
+                    null_ratio.locking.high(s, :) = ratio;
                 end
                 if power_ok
                     sh_power = pool_locking_period_acgs(acg_s, edges, run_length, power, ...
                         true, low_percent, high_percent);
-                    [peaks, row] = score_pooled_row(sh_power.low, centers, smooth_n, acg_refractory_s);
+                    [peaks, row, ratio] = score_tail_curves(sh_power.low, centers, smooth_n, ...
+                        acg_refractory_s, rate_power.low, bin_w);
                     nulls = store_null_tail(nulls, 'power', 'low', s, peaks);
                     null_curves.power.low(s, :) = row;
-                    [peaks, row] = score_pooled_row(sh_power.high, centers, smooth_n, acg_refractory_s);
+                    null_ratio.power.low(s, :) = ratio;
+                    [peaks, row, ratio] = score_tail_curves(sh_power.high, centers, smooth_n, ...
+                        acg_refractory_s, rate_power.high, bin_w);
                     nulls = store_null_tail(nulls, 'power', 'high', s, peaks);
                     null_curves.power.high(s, :) = row;
+                    null_ratio.power.high(s, :) = ratio;
                 end
                 if mod(s, 25) == 0
                     disp(sprintf('    shuffle %d/%d (%.0f s)', s, n_shuffles, toc(t0)))
@@ -333,19 +357,21 @@ for f = 1:numel(parsing_files)
                     nulls.power);
             end
             obs_curves = blank_obs_curves(n_bins);
+            obs_ratio = blank_obs_curves(n_bins);
             if lock_ok
-                [~, obs_curves.locking.low] = score_pooled_row( ...
-                    pooled.low, centers, smooth_n, acg_refractory_s);
-                [~, obs_curves.locking.high] = score_pooled_row( ...
-                    pooled.high, centers, smooth_n, acg_refractory_s);
+                [~, obs_curves.locking.low, obs_ratio.locking.low] = score_tail_curves( ...
+                    pooled.low, centers, smooth_n, acg_refractory_s, rate_lock.low, bin_w);
+                [~, obs_curves.locking.high, obs_ratio.locking.high] = score_tail_curves( ...
+                    pooled.high, centers, smooth_n, acg_refractory_s, rate_lock.high, bin_w);
             end
             if power_ok
-                [~, obs_curves.power.low] = score_pooled_row( ...
-                    pooled_power.low, centers, smooth_n, acg_refractory_s);
-                [~, obs_curves.power.high] = score_pooled_row( ...
-                    pooled_power.high, centers, smooth_n, acg_refractory_s);
+                [~, obs_curves.power.low, obs_ratio.power.low] = score_tail_curves( ...
+                    pooled_power.low, centers, smooth_n, acg_refractory_s, rate_power.low, bin_w);
+                [~, obs_curves.power.high, obs_ratio.power.high] = score_tail_curves( ...
+                    pooled_power.high, centers, smooth_n, acg_refractory_s, rate_power.high, bin_w);
             end
-            grand = add_neuron_to_grand(grand, this_group, this_key, obs_curves, null_curves);
+            grand = add_neuron_to_grand(grand, this_group, this_key, ...
+                obs_curves, null_curves, obs_ratio, null_ratio);
             records{end + 1, 1} = rec; %#ok<SAGROW>
             done_keys{end + 1, 1} = this_key; %#ok<SAGROW>
             shuffle_records = records; %#ok<NASGU>
@@ -472,18 +498,39 @@ end
 
 
 function [peaks, row] = score_pooled_row(acg_row, centers, smooth_n, refractory)
-row = normalized_pooled_row(acg_row, centers, refractory);
+[row, ~] = normalized_pooled_row(acg_row, centers, refractory);
 peaks = acg_delta_peaks(row, centers, smooth_n);
 end
 
 
-function row = normalized_pooled_row(acg_row, centers, refractory)
+function [peaks, row, ratio] = score_tail_curves(acg_row, centers, smooth_n, refractory, rate, bin_w)
+[row, mass] = normalized_pooled_row(acg_row, centers, refractory);
+peaks = acg_delta_peaks(row, centers, smooth_n);
+ratio = rate_ratio_curve(row, mass, rate, bin_w);
+end
+
+
+function [row, mass] = normalized_pooled_row(acg_row, centers, refractory)
 row = nan(1, numel(centers));
+mass = NaN;
 if isempty(acg_row) || ~any(isfinite(acg_row))
     return
 end
-row = blank_acg_zero_lag(acg_row(:)', centers, refractory);
-row = normalize_acg_rows(row);
+blanked = blank_acg_zero_lag(acg_row(:)', centers, refractory);
+mass = sum(blanked, 'omitnan');
+row = normalize_acg_rows(blanked);
+end
+
+
+function ratio = rate_ratio_curve(row, mass, rate, bin_w)
+% Sum-to-1 row times its mass is pair counts / overlap. Dividing by
+% (tail firing rate ^ 2 * bin width) puts a Poisson autocorrelogram at 1.
+ratio = nan(size(row));
+if ~isfinite(rate) || rate <= 0 || ~isfinite(mass) || mass <= 0 || ~isfinite(bin_w) || bin_w <= 0
+    return
+end
+ratio = row .* (mass / ((rate ^ 2) * bin_w));
+ratio(~isfinite(row)) = NaN;
 end
 
 
@@ -513,7 +560,8 @@ match = isfield(stored, 'parameters') && isfield(stored, 'shuffle_records') ...
     && stored.parameters.high_percent == parameters.high_percent ...
     && stored.parameters.acg_lag == parameters.acg_lag ...
     && stored.parameters.smooth_half == parameters.smooth_half ...
-    && stored.parameters.acg_refractory_s == parameters.acg_refractory_s;
+    && stored.parameters.acg_refractory_s == parameters.acg_refractory_s ...
+    && isfield(stored.parameters, 'rate_ratio') && stored.parameters.rate_ratio;
 end
 
 
@@ -919,8 +967,15 @@ grand.n_shuffles = n_shuffles;
 grand.n_bins = n_bins;
 grand.included_keys = cell(0, 1);
 grand.group_order = group_order;
+grand.sum_to_one = empty_scale(group_order, n_shuffles, n_bins);
+grand.rate_ratio = empty_scale(group_order, n_shuffles, n_bins);
+end
+
+
+function scale = empty_scale(group_order, n_shuffles, n_bins)
 splits = {'locking', 'power'};
 tails = {'low', 'high'};
+scale = struct();
 for s = 1:numel(splits)
     for t = 1:numel(tails)
         for g = 1:numel(group_order)
@@ -929,7 +984,7 @@ for s = 1:numel(splits)
             block.sum_null = zeros(n_shuffles, n_bins);
             block.n_null = zeros(n_shuffles, n_bins);
             block.n_neurons = 0;
-            grand.(splits{s}).(tails{t}).(group_order{g}) = block;
+            scale.(splits{s}).(tails{t}).(group_order{g}) = block;
         end
     end
 end
@@ -952,7 +1007,14 @@ curves.power.high = nan(1, n_bins);
 end
 
 
-function grand = add_neuron_to_grand(grand, lock_group, neuron_key, obs_curves, null_curves)
+function grand = add_neuron_to_grand(grand, lock_group, neuron_key, obs_curves, null_curves, obs_ratio, null_ratio)
+grand.sum_to_one = add_scale_neuron(grand.sum_to_one, lock_group, obs_curves, null_curves);
+grand.rate_ratio = add_scale_neuron(grand.rate_ratio, lock_group, obs_ratio, null_ratio);
+grand.included_keys{end + 1, 1} = neuron_key; %#ok<AGROW>
+end
+
+
+function scale = add_scale_neuron(scale, lock_group, obs_curves, null_curves)
 targets = {lock_group};
 if any(strcmp(lock_group, {'trough', 'peak'}))
     targets{end + 1} = 'delta'; %#ok<AGROW>
@@ -966,13 +1028,12 @@ for g = 1:numel(targets)
             if ~any(isfinite(row))
                 continue
             end
-            grand.(splits{s}).(tails{t}).(targets{g}) = add_grand_curve( ...
-                grand.(splits{s}).(tails{t}).(targets{g}), row, ...
+            scale.(splits{s}).(tails{t}).(targets{g}) = add_grand_curve( ...
+                scale.(splits{s}).(tails{t}).(targets{g}), row, ...
                 null_curves.(splits{s}).(tails{t}));
         end
     end
 end
-grand.included_keys{end + 1, 1} = neuron_key; %#ok<AGROW>
 end
 
 
@@ -991,31 +1052,38 @@ end
 
 
 function report_grand_shuffle(grand, centers, smooth_n, group_order, group_title)
+scales = {'sum_to_one', 'rate_ratio'};
+scale_labels = {'sum-to-1', 'rate ratio (Poisson = 1)'};
+y_labels = {'Smoothed mean ACG', 'Ratio to Poisson rate'};
 splits = {'locking', 'power'};
 split_labels = {'locking', 'delta power'};
 tails = {'low', 'high'};
 tail_labels = {'Low 25%', 'High 25%'};
 disp(' ')
-disp('Grand-average shuffle. Peaks are scored on the Gaussian-smoothed mean sum-to-1 autocorrelogram.')
+disp('Grand-average shuffle. Peaks are scored on the Gaussian-smoothed mean autocorrelogram.')
+disp('Sum-to-1 gives every neuron the same weight. Rate ratio divides each curve by its own tail rate squared.')
 disp('The all-runs curve is not tested: runs between the two tails are not shuffled.')
-for s = 1:numel(splits)
-    figure('Name', ['Grand average shuffle, ', split_labels{s}], 'Color', 'w', ...
-        'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.8])
-    for t = 1:numel(tails)
-        for g = 1:numel(group_order)
-            block = grand.(splits{s}).(tails{t}).(group_order{g});
-            subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
-            result = grand_peak_result(block, centers, smooth_n);
-            plot_grand_panel(result, [group_title{g}, ', ', tail_labels{t}])
-            disp(sprintf(['  %s, %s, %s: n = %d, first prom = %.3g, shuffle p = %.3g, ' ...
-                'second prom = %.3g, shuffle p = %.3g'], ...
-                group_title{g}, split_labels{s}, tail_labels{t}, result.n, ...
-                result.first_prominence, result.first_p, ...
-                result.second_prominence, result.second_p))
+for k = 1:numel(scales)
+    scale = grand.(scales{k});
+    for s = 1:numel(splits)
+        figure('Name', ['Grand average shuffle, ', split_labels{s}, ', ', scale_labels{k}], ...
+            'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.8])
+        for t = 1:numel(tails)
+            for g = 1:numel(group_order)
+                block = scale.(splits{s}).(tails{t}).(group_order{g});
+                subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
+                result = grand_peak_result(block, centers, smooth_n);
+                plot_grand_panel(result, [group_title{g}, ', ', tail_labels{t}], y_labels{k})
+                disp(sprintf(['  %s, %s, %s, %s: n = %d, first prom = %.3g, shuffle p = %.3g, ' ...
+                    'second prom = %.3g, shuffle p = %.3g'], ...
+                    scale_labels{k}, group_title{g}, split_labels{s}, tail_labels{t}, result.n, ...
+                    result.first_prominence, result.first_p, ...
+                    result.second_prominence, result.second_p))
+            end
         end
+        sgtitle({['Grand mean versus shuffle, ', split_labels{s}, ', ', scale_labels{k}], ...
+            'Black is the observed mean. Grey is the central 95% of shuffled means.'})
     end
-    sgtitle({['Grand mean versus shuffle, ', split_labels{s}], ...
-        'Black is the observed mean. Grey is the central 95% of shuffled means.'})
 end
 end
 
@@ -1069,7 +1137,7 @@ result.null_median = median(null_fold, 1, 'omitnan');
 end
 
 
-function plot_grand_panel(result, panel_title)
+function plot_grand_panel(result, panel_title, y_label)
 if result.n < 1
     title({panel_title, 'n = 0'})
     axis off
@@ -1084,10 +1152,29 @@ plot(t, result.observed, 'k', 'LineWidth', 1.6)
 mark_grand_peak(result.first_lag, result.observed, result.fold_t)
 mark_grand_peak(result.second_lag, result.observed, result.fold_t)
 xlabel('Lag (s)')
-ylabel('Smoothed mean ACG')
+ylabel(y_label)
 title({panel_title, sprintf('n = %d\nfirst p = %.3g, second p = %.3g', ...
     result.n, result.first_p, result.second_p)})
 box off
+end
+
+
+function rate = tail_firing_rate(rt, idx)
+rate = NaN;
+if ~ismember('RunNumSpikes', rt.Properties.VariableNames) || isempty(idx)
+    return
+end
+idx = idx(:);
+if numel(idx) ~= height(rt) || ~any(idx)
+    return
+end
+n_spikes = double(rt.RunNumSpikes(:));
+duration = acg_run_lengths(rt);
+ok = idx & isfinite(n_spikes) & n_spikes >= 0 & isfinite(duration) & duration > 0;
+if ~any(ok)
+    return
+end
+rate = sum(n_spikes(ok)) / sum(duration(ok));
 end
 
 
