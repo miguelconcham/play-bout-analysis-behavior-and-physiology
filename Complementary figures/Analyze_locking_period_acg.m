@@ -36,9 +36,13 @@
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
 % delta power goes with a bigger change in that measure.
-% A reference figure for each split shows the strongest t1-only neuron and
-% the strongest t1-and-t2 neuron in each lock group. The printed burst,
-% prominences, lags, and mean score are the values on the scatter plots.
+% A reference figure for each split shows a t1-only neuron and a
+% t1-and-t2 neuron in each lock group. Among cells with that peak pattern,
+% the higher firing rate is chosen. The printed burst, prominences, lags,
+% and mean score are the values on the scatter plots.
+% Example neurons are the higher-firing-rate cells among those with that
+% peak pattern. In the paired plots, higher-rate neurons are drawn in front.
+% The mean curve still gives every neuron the same weight.
 %
 % Analyze_locking_period_acg_shuffle is a separate, slower script. It
 % rebuilds the same peaks after placing spikes uniformly inside each run,
@@ -215,11 +219,12 @@ for f = 1:numel(parsing_files)
             end
             run_length = acg_run_lengths(rt);
             this_area = cluster_area_char(ci, nn);
+            this_rate = neuron_run_rate(rt);
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
                 rt.phase_entrainment(:, ppc_col), this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
                 acg_raw.(group_order{g}) = append_pooled( ...
-                    acg_raw.(group_order{g}), pooled, animal_code, this_id, this_area);
+                    acg_raw.(group_order{g}), pooled, animal_code, this_id, this_area, this_rate);
                 n_kept(g) = n_kept(g) + 1;
             else
                 n_unsplit(g) = n_unsplit(g) + 1;
@@ -229,7 +234,7 @@ for f = 1:numel(parsing_files)
                 run_delta_power(rt), this_corrected, low_percent, high_percent);
             if split_is_usable(pooled_power)
                 acg_power.(group_order{g}) = append_pooled( ...
-                    acg_power.(group_order{g}), pooled_power, animal_code, this_id, this_area);
+                    acg_power.(group_order{g}), pooled_power, animal_code, this_id, this_area, this_rate);
                 n_kept_power(g) = n_kept_power(g) + 1;
             else
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
@@ -312,6 +317,7 @@ for g = 1:numel(group_order)
     block.score_low = zeros(0, 1);
     block.score_high = zeros(0, 1);
     block.score_all = zeros(0, 1);
+    block.firing_rate = zeros(0, 1);
     block.session = {};
     block.cluster_id = zeros(0, 1);
     block.area = {};
@@ -327,7 +333,7 @@ ok = pooled.n_low >= 1 && pooled.n_high >= 1 ...
 end
 
 
-function block = append_pooled(block, pooled, animal_code, this_id, this_area)
+function block = append_pooled(block, pooled, animal_code, this_id, this_area, firing_rate)
 row = block.n + 1;
 block.n = row;
 block.low(row, :) = pooled.low;
@@ -339,6 +345,7 @@ block.n_all(row, 1) = pooled.n_all;
 block.score_low(row, 1) = pooled.score_low;
 block.score_high(row, 1) = pooled.score_high;
 block.score_all(row, 1) = pooled.score_all;
+block.firing_rate(row, 1) = firing_rate;
 block.session{row, 1} = animal_code;
 block.cluster_id(row, 1) = this_id;
 block.area{row, 1} = this_area;
@@ -384,6 +391,7 @@ for g = 1:numel(group_order)
     summary.(name).score_low = acg_raw.(name).score_low(keep);
     summary.(name).score_high = acg_raw.(name).score_high(keep);
     summary.(name).score_all = acg_raw.(name).score_all(keep);
+    summary.(name).firing_rate = acg_raw.(name).firing_rate(keep);
     summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
         [group_title{g}, ', ', split_name], centers, delta_lag, skip_abs_lag, ...
         smooth_n, curve_colors, split_name);
@@ -419,6 +427,7 @@ combined.n_all = zeros(0, 1);
 combined.score_low = zeros(0, 1);
 combined.score_high = zeros(0, 1);
 combined.score_all = zeros(0, 1);
+combined.firing_rate = zeros(0, 1);
 for g = 1:numel(group_order)
     name = group_order{g};
     if ~isfield(summary, name) || ~isfield(summary.(name), 'low')
@@ -438,6 +447,7 @@ for g = 1:numel(group_order)
     combined.score_low = [combined.score_low; summary.(name).score_low]; %#ok<AGROW>
     combined.score_high = [combined.score_high; summary.(name).score_high]; %#ok<AGROW>
     combined.score_all = [combined.score_all; summary.(name).score_all]; %#ok<AGROW>
+    combined.firing_rate = [combined.firing_rate; summary.(name).firing_rate]; %#ok<AGROW>
     combined.n = combined.n + n;
 end
 end
@@ -538,7 +548,7 @@ for m = 1:numel(measures)
     [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measures{m});
     subplot(3, 2, 2 * m - 1)
     plot_paired_categories(neurons.lock_group(ok), y_low(ok), y_high(ok), ...
-        group_order, colors, measure_labels{m})
+        neurons.firing_rate(ok), group_order, colors, measure_labels{m})
     change = paired_change_stats(y_low(ok), y_high(ok), ...
         neurons.score_low(ok), neurons.score_high(ok));
     title(sprintf('Paired, n = %d\nmedian high-low %.3g, increase p = %.3g', ...
@@ -546,7 +556,7 @@ for m = 1:numel(measures)
     subplot(3, 2, 2 * m)
     plot_paired_against_score(neurons.lock_group(ok), ...
         neurons.score_low(ok), neurons.score_high(ok), y_low(ok), y_high(ok), ...
-        group_order, colors, score_label, measure_labels{m})
+        neurons.firing_rate(ok), group_order, colors, score_label, measure_labels{m})
     report_paired_increase(summary, neurons, group_order, group_title, ...
         measures{m}, measure_labels{m}, split_name, score_label);
 end
@@ -570,17 +580,18 @@ end
 end
 
 
-function plot_paired_categories(lock_group, y_low, y_high, group_order, colors, y_label)
+function plot_paired_categories(lock_group, y_low, y_high, firing_rate, group_order, colors, y_label)
 hold on
 for g = 1:numel(group_order)
     idx = strcmp(lock_group, group_order{g});
     if ~any(idx)
         continue
     end
-    x = [ones(sum(idx), 1), 2 * ones(sum(idx), 1)];
-    plot(x', [y_low(idx), y_high(idx)]', '-', ...
+    order = idx_high_rate_last(idx, firing_rate);
+    x = [ones(numel(order), 1), 2 * ones(numel(order), 1)];
+    plot(x', [y_low(order), y_high(order)]', '-', ...
         'Color', [colors(g, :), 0.25], 'HandleVisibility', 'off')
-    plot([1 2], [mean(y_low(idx), 'omitnan'), mean(y_high(idx), 'omitnan')], ...
+    plot([1 2], [mean(y_low(order), 'omitnan'), mean(y_high(order), 'omitnan')], ...
         '-', 'Color', colors(g, :), 'LineWidth', 2.5, 'HandleVisibility', 'off')
 end
 xlim([0.6 2.4])
@@ -591,18 +602,19 @@ box off
 end
 
 
-function plot_paired_against_score(lock_group, x_low, x_high, y_low, y_high, group_order, colors, x_label, y_label)
+function plot_paired_against_score(lock_group, x_low, x_high, y_low, y_high, firing_rate, group_order, colors, x_label, y_label)
 hold on
 for g = 1:numel(group_order)
     idx = strcmp(lock_group, group_order{g});
     if ~any(idx)
         continue
     end
-    plot([x_low(idx), x_high(idx)]', [y_low(idx), y_high(idx)]', '-', ...
+    order = idx_high_rate_last(idx, firing_rate);
+    plot([x_low(order), x_high(order)]', [y_low(order), y_high(order)]', '-', ...
         'Color', [colors(g, :), 0.3], 'HandleVisibility', 'off')
-    scatter(x_low(idx), y_low(idx), 18, colors(g, :), 'filled', ...
+    scatter(x_low(order), y_low(order), 18, colors(g, :), 'filled', ...
         'MarkerFaceAlpha', 0.7, 'HandleVisibility', 'off')
-    scatter(x_high(idx), y_high(idx), 28, colors(g, :), 'filled', ...
+    scatter(x_high(order), y_high(order), 28, colors(g, :), 'filled', ...
         'MarkerFaceAlpha', 0.9, 'HandleVisibility', 'off')
 end
 xlabel(x_label)
@@ -765,21 +777,53 @@ for r = 1:2
     end
 end
 sgtitle({['Reference for the peak scatters, ', split_name], ...
-    'Grey band is the 0-50 ms burst. The stem is the prominence on the scatter plots.'})
+    'Higher firing rate is preferred. Grey band is the 0-50 ms burst. The stem is the prominence on the scatter plots.'})
+end
+
+
+function order = idx_high_rate_last(idx, firing_rate)
+positions = find(idx);
+rate = firing_rate(positions);
+rate(~isfinite(rate)) = -inf;
+[~, sort_idx] = sort(rate, 'ascend');
+order = positions(sort_idx);
 end
 
 
 function rows = select_strong_examples(neurons, group_order, kind)
 strength = example_strength(neurons, kind);
+if isfield(neurons, 'firing_rate')
+    rate = neurons.firing_rate(:);
+else
+    rate = nan(numel(strength), 1);
+end
 rows = zeros(0, 1);
 for g = 1:numel(group_order)
     idx = find(strcmp(neurons.lock_group, group_order{g}) & strength > 0);
     if isempty(idx)
         continue
     end
-    [~, pick] = max(strength(idx));
-    rows(end + 1, 1) = idx(pick); %#ok<AGROW>
+    rows(end + 1, 1) = pick_high_rate_example(idx, strength, rate); %#ok<AGROW>
 end
+end
+
+
+function pick = pick_high_rate_example(idx, strength, rate)
+peak = strength(idx);
+strong = peak >= median(peak);
+if ~any(strong)
+    strong = true(size(peak));
+end
+candidates = idx(strong);
+candidate_rate = rate(candidates);
+if ~any(isfinite(candidate_rate))
+    [~, local] = max(strength(candidates));
+    pick = candidates(local);
+    return
+end
+candidate_rate(~isfinite(candidate_rate)) = -inf;
+[~, local] = max(candidate_rate);
+pick = candidates(local);
 end
 
 
@@ -837,8 +881,9 @@ hit = find(strcmp(group_order, group_name), 1);
 if ~isempty(hit)
     group_name = group_title{hit};
 end
-title({kind_name, sprintf('%s, %s, id %g, %s', ...
-    group_name, neurons.session{row}, neurons.cluster_id(row), neurons.area{row})}, ...
+title({kind_name, sprintf('%s, %s, id %g, %s, %s', ...
+    group_name, neurons.session{row}, neurons.cluster_id(row), neurons.area{row}, ...
+    rate_label(neurons, row))}, ...
     'Interpreter', 'none')
 yl = ylim;
 burst = patch([0 0.05 0.05 0], [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
@@ -928,6 +973,33 @@ if exist(times_file, 'file') ~= 2 || exist(clusters_file, 'file') ~= 2
 end
 spike_times = double(readNPY(times_file)) / 30000;
 spike_clusters = double(readNPY(clusters_file));
+end
+
+
+function rate = neuron_run_rate(rt)
+% Spikes per second across firing runs. RunNumSpikes is the count stored
+% with each run.
+if ~ismember('RunNumSpikes', rt.Properties.VariableNames)
+    rate = NaN;
+    return
+end
+n_spikes = double(rt.RunNumSpikes(:));
+duration = acg_run_lengths(rt);
+ok = isfinite(n_spikes) & n_spikes >= 0 & isfinite(duration) & duration > 0;
+if ~any(ok)
+    rate = NaN;
+    return
+end
+rate = sum(n_spikes(ok)) / sum(duration(ok));
+end
+
+
+function label = rate_label(neurons, row)
+if ~isfield(neurons, 'firing_rate') || ~isfinite(neurons.firing_rate(row))
+    label = 'rate n/a';
+    return
+end
+label = sprintf('%.3g sp/s', neurons.firing_rate(row));
 end
 
 
