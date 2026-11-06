@@ -747,6 +747,7 @@ disp(['Paired tests, ', split_name, ': ', scale_label])
 n_col = 2 + isempty(unit_label);
 figure('Name', figure_name, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.02 0.05 0.96 0.9])
+sgtitle(scale_label)
 lag_measures = {'', 'first_lag', 'second_lag'};
 lag_labels = {'', 'First-peak latency (s)', 'Second-cycle latency (s)'};
 for m = 1:numel(measures)
