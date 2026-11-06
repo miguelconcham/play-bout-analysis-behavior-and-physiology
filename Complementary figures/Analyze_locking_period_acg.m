@@ -40,7 +40,9 @@
 % the firing rate of the runs.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
-% delta power goes with a bigger change in that measure.
+% delta power goes with a bigger change in that measure. The same paired
+% plots add a third column for the latency of the first peak and of the
+% second cycle, and test whether that lag shifts between the two tails.
 % A reference figure for each split shows the strongest t1-only neuron and
 % the strongest t1-and-t2 neuron in each lock group. The printed burst,
 % prominences, lags, and mean score are the values on the scatter plots.
@@ -585,23 +587,39 @@ if ~isempty(unit_label)
 else
     figure_name = ['Paired ACG peaks, ', split_name];
 end
+n_col = 2 + isempty(unit_label);
 figure('Name', figure_name, 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.05 0.05 0.9 0.9])
+    'Units', 'normalized', 'OuterPosition', [0.02 0.05 0.96 0.9])
+lag_measures = {'', 'first_lag', 'second_lag'};
+lag_labels = {'', 'First-peak latency (s)', 'Second-cycle latency (s)'};
 for m = 1:numel(measures)
     [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measures{m});
-    subplot(3, 2, 2 * m - 1)
+    subplot(3, n_col, n_col * (m - 1) + 1)
     plot_paired_categories(neurons.lock_group(ok), y_low(ok), y_high(ok), ...
         neurons.firing_rate(ok), group_order, colors, measure_labels{m})
     change = paired_change_stats(y_low(ok), y_high(ok), ...
         neurons.score_low(ok), neurons.score_high(ok));
     title(sprintf('Paired, n = %d\nmedian high-low %.3g, increase p = %.3g', ...
         change.n, change.median_delta, change.p_increase))
-    subplot(3, 2, 2 * m)
+    subplot(3, n_col, n_col * (m - 1) + 2)
     plot_paired_against_score(neurons.lock_group(ok), ...
         neurons.score_low(ok), neurons.score_high(ok), y_low(ok), y_high(ok), ...
         neurons.firing_rate(ok), group_order, colors, score_label, measure_labels{m})
     report_paired_increase(summary, neurons, group_order, group_title, ...
         measures{m}, measure_labels{m}, split_name, score_label);
+    if n_col == 3 && m > 1
+        [lag_low, lag_high, lag_ok] = paired_peak_values( ...
+            neurons.low_peaks, neurons.high_peaks, lag_measures{m});
+        subplot(3, n_col, n_col * m)
+        plot_paired_categories(neurons.lock_group(lag_ok), lag_low(lag_ok), lag_high(lag_ok), ...
+            neurons.firing_rate(lag_ok), group_order, colors, lag_labels{m})
+        lag_change = paired_change_stats(lag_low(lag_ok), lag_high(lag_ok), ...
+            neurons.score_low(lag_ok), neurons.score_high(lag_ok));
+        title(sprintf('Latency, n = %d\nmedian high-low %.3g s, p = %.3g', ...
+            lag_change.n, lag_change.median_delta, lag_change.p_two))
+        report_paired_latency(summary, neurons, group_order, group_title, ...
+            lag_measures{m}, lag_labels{m}, split_name, score_label);
+    end
 end
 legend_group_colors(group_order, group_title, colors)
 
@@ -621,6 +639,11 @@ if strcmp(measure_name, 'second_prominence')
     ok = ok & low_peaks.second_measurable & high_peaks.second_measurable;
 elseif strcmp(measure_name, 'first_prominence')
     ok = ok & low_peaks.first_measurable & high_peaks.first_measurable;
+elseif strcmp(measure_name, 'first_lag')
+    ok = ok & low_peaks.first_present & high_peaks.first_present;
+elseif strcmp(measure_name, 'second_lag')
+    ok = ok & low_peaks.second_present & high_peaks.second_present ...
+        & low_peaks.second_measurable & high_peaks.second_measurable;
 end
 end
 
@@ -683,6 +706,32 @@ for g = 1:numel(group_order)
     print_paired_increase(group_title{g}, g_low(g_ok), g_high(g_ok), ...
         block.score_low(g_ok), block.score_high(g_ok), score_label);
 end
+end
+
+
+function report_paired_latency(summary, neurons, group_order, group_title, measure_name, measure_label, split_name, score_label)
+disp(['Paired latency, ', split_name, ', ', measure_label])
+[y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measure_name);
+print_paired_shift('All neurons', y_low(ok), y_high(ok), ...
+    neurons.score_low(ok), neurons.score_high(ok), score_label);
+for g = 1:numel(group_order)
+    if ~isfield(summary, group_order{g}) || ~isfield(summary.(group_order{g}), 'low_peaks')
+        continue
+    end
+    block = summary.(group_order{g});
+    [g_low, g_high, g_ok] = paired_peak_values(block.low_peaks, block.high_peaks, measure_name);
+    print_paired_shift(group_title{g}, g_low(g_ok), g_high(g_ok), ...
+        block.score_low(g_ok), block.score_high(g_ok), score_label);
+end
+end
+
+
+function print_paired_shift(label, y_low, y_high, x_low, x_high, score_label)
+stats = paired_change_stats(y_low, y_high, x_low, x_high);
+disp(sprintf(['  %s: median high-low = %.3g s, later %d/%d, ' ...
+    'signrank p = %.3g, later p = %.3g, Spearman with %s change rho = %.3g p = %.3g'], ...
+    label, stats.median_delta, stats.n_increased, stats.n, ...
+    stats.p_two, stats.p_increase, score_label, stats.rho, stats.p_rho))
 end
 
 
