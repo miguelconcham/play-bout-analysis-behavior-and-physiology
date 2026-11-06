@@ -46,6 +46,8 @@
 % delta power goes with a bigger change in that measure. The same paired
 % plots add a third column for the latency of the first peak and of the
 % second cycle, and test whether that lag shifts between the two tails.
+% A separate figure shows the distribution of those first-peak latencies
+% in the low tail and the high tail, using the same paired neurons.
 % A reference figure for each split shows a t1-only neuron and a
 % t1-and-t2 neuron in each lock group. Among cells with that peak pattern,
 % the higher firing rate is chosen. The printed burst, prominences, lags,
@@ -635,6 +637,7 @@ if isempty(unit_label)
     figure('Name', ['ACG cycle counts, ', split_name], 'Color', 'w', ...
         'Units', 'normalized', 'OuterPosition', [0.2 0.2 0.55 0.45])
     plot_paired_cycle_counts(neurons, group_order, group_title, colors, split_name)
+    plot_first_latency_distributions(neurons, group_order, group_title, colors, split_name)
 end
 end
 
@@ -850,6 +853,63 @@ end
 
 function fraction = cycle_fraction(n_cycles)
 fraction = [mean(n_cycles == 0), mean(n_cycles == 1), mean(n_cycles == 2)];
+end
+
+
+function plot_first_latency_distributions(neurons, group_order, group_title, colors, split_name)
+% Same neurons as the paired first-peak latency test: a first peak in both tails.
+[lag_low, lag_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, 'first_lag');
+if ~any(ok)
+    return
+end
+figure('Name', ['First-peak latency, ', split_name], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.12 0.08 0.7 0.78])
+edges = 0.10:0.05:1.00;
+panel_idx = [{ok}, arrayfun(@(g) ok & strcmp(neurons.lock_group, group_order{g}), ...
+    1:numel(group_order), 'UniformOutput', false)];
+panel_title = [{'All neurons'}, group_title];
+for p = 1:numel(panel_idx)
+    subplot(2, 2, p)
+    idx = panel_idx{p};
+    low = lag_low(idx);
+    high = lag_high(idx);
+    if p == 1
+        low_color = [0.75 0.75 0.75];
+        high_color = [0.15 0.15 0.15];
+    else
+        low_color = 0.55 * colors(p - 1, :) + 0.45;
+        high_color = colors(p - 1, :);
+    end
+    hold on
+    if ~isempty(low)
+        histogram(low, edges, 'Normalization', 'probability', ...
+            'FaceColor', low_color, 'FaceAlpha', 0.45, 'EdgeColor', 'none')
+        histogram(high, edges, 'Normalization', 'probability', ...
+            'FaceColor', high_color, 'FaceAlpha', 0.45, 'EdgeColor', 'none')
+        mark_latency_median(median(low, 'omitnan'), low_color)
+        mark_latency_median(median(high, 'omitnan'), high_color)
+        change = paired_change_stats(low, high, zeros(size(low)), zeros(size(high)));
+        title(sprintf('%s, n = %d\nmedian high-low %.3g s, p = %.3g', ...
+            panel_title{p}, change.n, change.median_delta, change.p_two))
+    else
+        title(sprintf('%s, n = 0', panel_title{p}))
+    end
+    xlim(edges([1 end]))
+    xlabel('First-peak latency (s)')
+    ylabel('Fraction of neurons')
+    box off
+    if p == 1 && ~isempty(low)
+        legend({'Low 25%', 'High 25%'}, 'Location', 'northeast')
+    end
+end
+end
+
+
+function mark_latency_median(value, color)
+if ~isfinite(value)
+    return
+end
+plot([value value], ylim, '-', 'Color', color, 'LineWidth', 1.5, 'HandleVisibility', 'off')
 end
 
 
