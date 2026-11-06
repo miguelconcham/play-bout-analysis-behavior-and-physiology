@@ -5,7 +5,8 @@
 %
 % Each neuron is labeled from EntireSession in delta_all_neurons_v2.mat:
 % trough-locked, peak-locked (PPC p < alpha, split at +/- pi/2), or
-% non-entrained (PPC p >= 0.1). For each neuron the saved runs are split
+% non-entrained (PPC p >= 0.1). Delta-locked is the peak-locked and
+% trough-locked neurons together. For each neuron the saved runs are split
 % twice, each time at that neuron's own values: bottom 25% and top 25% of
 % PPC, and bottom 25% and top 25% of delta power. A neuron is plotted for
 % a split only when at least four of its runs have that score, so the two
@@ -115,8 +116,10 @@ reprint_stats_only = false;
 % summary does not already contain them.
 redraw_figures_only = false;
 
-group_order = {'trough', 'peak', 'nonentrained'};
-group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
+source_order = {'trough', 'peak', 'nonentrained'};
+source_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
+group_order = {'trough', 'peak', 'delta', 'nonentrained'};
+group_title = {'Trough-locked', 'Peak-locked', 'Delta-locked', 'Non-entrained'};
 
 if exist('diary_cleanup', 'var')
     delete(diary_cleanup)
@@ -177,10 +180,13 @@ for i = 1:n_cells
     in_area(i) = ~isempty(canonical_kept_area(cluster_area_char(all_neurons, i), areas_to_keep));
 end
 disp_block('Lock groups')
-for g = 1:numel(group_order)
-    disp([group_title{g}, ': ', num2str(sum(strcmp(lock_group, group_order{g}) & in_area)), ...
+for g = 1:numel(source_order)
+    disp([source_title{g}, ': ', num2str(sum(strcmp(lock_group, source_order{g}) & in_area)), ...
         ' / ', num2str(sum(in_area)), ' in ', strjoin(areas_to_keep, ', ')])
 end
+disp(['Delta-locked: ', num2str(sum(ismember(lock_group, {'trough', 'peak'}) & in_area)), ...
+    ' / ', num2str(sum(in_area)), ' in ', strjoin(areas_to_keep, ', '), ...
+    ' (peak-locked or trough-locked)'])
 
 %% One parsing file at a time
 parsing_files = list_parsing_mat_files(parsing_folder);
@@ -195,13 +201,13 @@ edges = [];
 centers = [];
 n_bins = [];
 bin_w = [];
-acg_raw = empty_group_store(group_order, 0);
-acg_power = empty_group_store(group_order, 0);
-n_in_parsing = zeros(1, numel(group_order));
-n_kept = zeros(1, numel(group_order));
-n_unsplit = zeros(1, numel(group_order));
-n_kept_power = zeros(1, numel(group_order));
-n_unsplit_power = zeros(1, numel(group_order));
+acg_raw = empty_group_store(source_order, 0);
+acg_power = empty_group_store(source_order, 0);
+n_in_parsing = zeros(1, numel(source_order));
+n_kept = zeros(1, numel(source_order));
+n_unsplit = zeros(1, numel(source_order));
+n_kept_power = zeros(1, numel(source_order));
+n_unsplit_power = zeros(1, numel(source_order));
 n_missing = 0;
 n_outside = 0;
 
@@ -236,8 +242,8 @@ for f = 1:numel(parsing_files)
             edges = (-acg_lag):bin_w:acg_lag;
             centers = edges(1:end - 1) + bin_w / 2;
             n_bins = numel(centers);
-            acg_raw = empty_group_store(group_order, n_bins);
-            acg_power = empty_group_store(group_order, n_bins);
+            acg_raw = empty_group_store(source_order, n_bins);
+            acg_power = empty_group_store(source_order, n_bins);
         end
         saved_covers = numel(saved_edges) == numel(edges) ...
             && max(abs(saved_edges - edges)) < 1e-6;
@@ -287,7 +293,7 @@ for f = 1:numel(parsing_files)
                 continue
             end
             this_group = lock_group{hit};
-            g = find(strcmp(group_order, this_group), 1);
+            g = find(strcmp(source_order, this_group), 1);
             if isempty(g)
                 continue
             end
@@ -331,8 +337,8 @@ for f = 1:numel(parsing_files)
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
                 this_ppc, this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
-                acg_raw.(group_order{g}) = append_pooled( ...
-                    acg_raw.(group_order{g}), pooled, animal_code, this_id, this_area, ...
+                acg_raw.(source_order{g}) = append_pooled( ...
+                    acg_raw.(source_order{g}), pooled, animal_code, this_id, this_area, ...
                     this_rate, tail_rate_struct(rt, pooled), run_means);
                 n_kept(g) = n_kept(g) + 1;
             else
@@ -342,8 +348,8 @@ for f = 1:numel(parsing_files)
             pooled_power = pool_locking_period_acgs(acg, edges, run_length, ...
                 this_power, this_corrected, low_percent, high_percent);
             if split_is_usable(pooled_power)
-                acg_power.(group_order{g}) = append_pooled( ...
-                    acg_power.(group_order{g}), pooled_power, animal_code, this_id, this_area, ...
+                acg_power.(source_order{g}) = append_pooled( ...
+                    acg_power.(source_order{g}), pooled_power, animal_code, this_id, this_area, ...
                     this_rate, tail_rate_struct(rt, pooled_power), run_means);
                 n_kept_power(g) = n_kept_power(g) + 1;
             else
@@ -392,11 +398,11 @@ power_labels = { ...
     sprintf('High %g%% delta power', 100 - high_percent), ...
     'All firing runs'};
 
-locking_acg = summarize_and_plot(acg_raw, group_order, group_title, ...
+locking_acg = summarize_and_plot(acg_raw, source_order, source_title, ...
     locking_labels, 'locking', centers, delta_lag, skip_abs_lag, smooth_n, ...
     acg_refractory_s, curve_colors, n_in_parsing, n_unsplit, ...
     acg_cluster_alpha, acg_cluster_perm);
-power_acg = summarize_and_plot(acg_power, group_order, group_title, ...
+power_acg = summarize_and_plot(acg_power, source_order, source_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     acg_refractory_s, curve_colors, n_in_parsing, n_unsplit_power, ...
     acg_cluster_alpha, acg_cluster_perm);
@@ -626,6 +632,16 @@ for g = 1:numel(group_order)
         skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 end
 
+summary = add_delta_locked_group(summary);
+if isfield(summary, 'delta') && isfield(summary.delta, 'low') && ~isempty(summary.delta.low)
+    disp_rule()
+    disp(['Delta-locked, ', split_name, ': ', num2str(size(summary.delta.low, 1)), ...
+        ' plotted (peak-locked or trough-locked)'])
+    summary.delta = record_delta_mass(summary.delta, curve_names, curve_labels, ...
+        ['Delta-locked, ', split_name], centers, delta_lag, split_name, ...
+        skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
+end
+
 summary.all_neurons = stack_plotted_neurons(summary, group_order);
 if summary.all_neurons.n < 1
     warning('Analyze_locking_period_acg:all', ...
@@ -697,6 +713,67 @@ for g = 1:numel(group_order)
     combined.mass_high = [combined.mass_high; summary.(name).mass_high]; %#ok<AGROW>
     combined.mass_all = [combined.mass_all; summary.(name).mass_all]; %#ok<AGROW>
     combined.n = combined.n + n;
+end
+end
+
+
+function summary = add_delta_locked_group(summary)
+% Peak-locked and trough-locked neurons as one extra condition.
+has_trough = isfield(summary, 'trough') && isfield(summary.trough, 'low') && ~isempty(summary.trough.low);
+has_peak = isfield(summary, 'peak') && isfield(summary.peak, 'low') && ~isempty(summary.peak.low);
+if has_trough && has_peak
+    summary.delta = concat_neuron_blocks(summary.trough, summary.peak);
+elseif has_trough
+    summary.delta = summary.trough;
+elseif has_peak
+    summary.delta = summary.peak;
+else
+    return
+end
+drop = {'low_high_clusters', 'low_delta_mass', 'high_delta_mass', 'all_delta_mass'};
+for k = 1:numel(drop)
+    if isfield(summary.delta, drop{k})
+        summary.delta = rmfield(summary.delta, drop{k});
+    end
+end
+end
+
+
+function group = concat_neuron_blocks(a, b)
+fn = fieldnames(a);
+group = struct();
+for i = 1:numel(fn)
+    name = fn{i};
+    if ~isfield(b, name)
+        continue
+    end
+    if strcmp(name, 'low_high_clusters') || endsWith(name, '_delta_mass')
+        continue
+    end
+    va = a.(name);
+    vb = b.(name);
+    if isstruct(va)
+        group.(name) = concat_struct_fields(va, vb);
+    elseif isnumeric(va) || islogical(va) || iscell(va)
+        group.(name) = [va; vb]; %#ok<AGROW>
+    end
+end
+end
+
+
+function out = concat_struct_fields(a, b)
+out = struct();
+fn = fieldnames(a);
+for i = 1:numel(fn)
+    name = fn{i};
+    if ~isfield(b, name)
+        continue
+    end
+    va = a.(name);
+    vb = b.(name);
+    if isnumeric(va) || islogical(va)
+        out.(name) = [va; vb]; %#ok<AGROW>
+    end
 end
 end
 
@@ -834,7 +911,11 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low_peaks'
     return
 end
 neurons = summary.all_neurons;
-colors = lock_group_colors();
+colors = lock_group_colors(group_order);
+point_keep = ~strcmp(group_order, 'delta');
+point_order = group_order(point_keep);
+point_title = group_title(point_keep);
+point_colors = colors(point_keep, :);
 measures = {'burst', 'first_prominence', 'second_prominence'};
 measure_labels = { ...
     'Burst level, 0-50 ms', ...
@@ -861,7 +942,7 @@ for m = 1:numel(measures)
     [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measures{m});
     subplot(3, n_col, n_col * (m - 1) + 1)
     plot_paired_categories(neurons.lock_group(ok), y_low(ok), y_high(ok), ...
-        neurons.firing_rate(ok), group_order, colors, measure_labels{m})
+        neurons.firing_rate(ok), point_order, point_colors, measure_labels{m})
     change = paired_change_stats(y_low(ok), y_high(ok), ...
         neurons.score_low(ok), neurons.score_high(ok));
     title(sprintf(['All neurons, n = %d\nmedian high-low %.3g\n' ...
@@ -870,7 +951,7 @@ for m = 1:numel(measures)
     subplot(3, n_col, n_col * (m - 1) + 2)
     plot_paired_against_score(neurons.lock_group(ok), ...
         neurons.score_low(ok), neurons.score_high(ok), y_low(ok), y_high(ok), ...
-        neurons.firing_rate(ok), group_order, colors, score_label, measure_labels{m})
+        neurons.firing_rate(ok), point_order, point_colors, score_label, measure_labels{m})
     title(sprintf('All neurons\nSpearman rho = %.3g, two-sided p = %.3g', ...
         change.rho, change.p_rho))
     if n_col == 3 && m > 1
@@ -878,7 +959,7 @@ for m = 1:numel(measures)
             neurons.low_peaks, neurons.high_peaks, lag_measures{m});
         subplot(3, n_col, n_col * m)
         plot_paired_categories(neurons.lock_group(lag_ok), lag_low(lag_ok), lag_high(lag_ok), ...
-            neurons.firing_rate(lag_ok), group_order, colors, lag_labels{m})
+            neurons.firing_rate(lag_ok), point_order, point_colors, lag_labels{m})
         lag_change = paired_change_stats(lag_low(lag_ok), lag_high(lag_ok), ...
             neurons.score_low(lag_ok), neurons.score_high(lag_ok));
         title(sprintf(['All neurons, n = %d\nmedian high-low %.3g s\n' ...
@@ -886,7 +967,7 @@ for m = 1:numel(measures)
             lag_change.n, lag_change.median_delta, lag_change.p_two, lag_change.p_increase))
     end
 end
-legend_group_colors(group_order, group_title, colors)
+legend_group_colors(point_order, point_title, point_colors)
 if isempty(unit_label)
     scale_tag = 'sum-to-1';
 else
@@ -923,7 +1004,7 @@ for c = 1:numel(panel_names)
     if strcmp(panel_names{c}, 'all')
         in_panel = true(numel(neurons.lock_group), 1);
     else
-        in_panel = strcmp(neurons.lock_group, panel_names{c});
+        in_panel = in_lock_group(neurons.lock_group, panel_names{c});
     end
     for r = 1:numel(row_measures)
         [y_low, y_high, ok] = paired_peak_values( ...
@@ -1122,6 +1203,8 @@ power_labels = { ...
     sprintf('High %g%% delta power', 100 - high_percent), ...
     'All firing runs'};
 curve_colors = [0.20 0.45 0.75; 0.85 0.25 0.20; 0.15 0.15 0.15];
+locking_acg = add_delta_locked_group(locking_acg);
+power_acg = add_delta_locked_group(power_acg);
 locking_acg = ensure_acg_clusters(locking_acg, group_order, group_title, ...
     'locking', centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 power_acg = ensure_acg_clusters(power_acg, group_order, group_title, ...
@@ -1146,6 +1229,11 @@ end
 if ~isfield(locking_acg, 'all_neurons') || ~isfield(locking_acg.all_neurons, 'low_peaks')
     locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order);
     power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order);
+elseif isfield(locking_acg, 'delta') && ~isfield(locking_acg.delta, 'low_peaks')
+    locking_acg.delta = score_condition_acgs(locking_acg.delta, centers, smooth_n);
+    if isfield(power_acg, 'delta')
+        power_acg.delta = score_condition_acgs(power_acg.delta, centers, smooth_n);
+    end
 end
 plot_paired_peak_scores(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking');
@@ -1161,8 +1249,11 @@ if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean delta power of the runs', 'delta power');
 end
+model_has_delta = isfield(locking_acg, 'delta_power_model') ...
+    && isfield(locking_acg.delta_power_model, 'groups') ...
+    && isfield(locking_acg.delta_power_model.groups, 'delta');
 if isfield(locking_acg, 'delta_power_model') && isfield(locking_acg.delta_power_model, 'all') ...
-        && locking_acg.delta_power_model.all.ok
+        && locking_acg.delta_power_model.all.ok && model_has_delta
     plot_power_contributions(locking_acg.delta_power_model, group_order, group_title, ...
         locking_acg.delta_power_model.all.names);
 else
@@ -1195,6 +1286,8 @@ end
 
 
 function reprint_saved_statistics(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, cluster_alpha, cluster_perm)
+locking_acg = add_delta_locked_group(locking_acg);
+power_acg = add_delta_locked_group(power_acg);
 params = locking_acg.parameters;
 centers = locking_acg.centers(:).';
 bin_w = median(diff(centers));
@@ -1234,6 +1327,9 @@ if plot_rate_scaled_peaks
 end
 if isfield(locking_acg, 'delta_power_model')
     model = locking_acg.delta_power_model;
+    if ~isfield(model, 'groups') || ~isfield(model.groups, 'delta')
+        model = fit_delta_power_contributions(locking_acg, group_order, group_title, false);
+    end
     if model.all.ok
         report_power_model(model.all);
     end
@@ -1367,7 +1463,7 @@ ok = classifiable_low & classifiable_high;
 fractions = zeros(numel(group_order), 3, 2);
 ns = zeros(numel(group_order), 1);
 for g = 1:numel(group_order)
-    idx = ok & strcmp(neurons.lock_group, group_order{g});
+    idx = ok & in_lock_group(neurons.lock_group, group_order{g});
     ns(g) = sum(idx);
     if ~any(idx)
         continue
@@ -1420,13 +1516,18 @@ if ~any(ok)
     return
 end
 figure('Name', ['First-peak latency, ', split_name], 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.12 0.08 0.7 0.78])
+    'Units', 'normalized', 'OuterPosition', [0.06 0.08 0.88 0.78])
 edges = 0.10:0.05:1.00;
-panel_idx = [{ok}, arrayfun(@(g) ok & strcmp(neurons.lock_group, group_order{g}), ...
-    1:numel(group_order), 'UniformOutput', false)];
+panel_idx = cell(1, 1 + numel(group_order));
+panel_idx{1} = ok;
+for g = 1:numel(group_order)
+    panel_idx{g + 1} = ok & in_lock_group(neurons.lock_group, group_order{g});
+end
 panel_title = [{'All neurons'}, group_title];
+n_col = min(3, numel(panel_idx));
+n_row = ceil(numel(panel_idx) / n_col);
 for p = 1:numel(panel_idx)
-    subplot(2, 2, p)
+    subplot(n_row, n_col, p)
     idx = panel_idx{p};
     low = lag_low(idx);
     high = lag_high(idx);
@@ -1470,8 +1571,27 @@ plot([value value], ylim, '-', 'Color', color, 'LineWidth', 1.5, 'HandleVisibili
 end
 
 
-function colors = lock_group_colors()
-colors = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45];
+function colors = lock_group_colors(group_order)
+palette.trough = [0.20 0.45 0.80];
+palette.peak = [0.85 0.25 0.20];
+palette.nonentrained = [0.45 0.45 0.45];
+palette.delta = [0.10 0.50 0.35];
+if nargin < 1 || isempty(group_order)
+    group_order = {'trough', 'peak', 'nonentrained'};
+end
+colors = zeros(numel(group_order), 3);
+for g = 1:numel(group_order)
+    colors(g, :) = palette.(group_order{g});
+end
+end
+
+
+function tf = in_lock_group(lock_group, name)
+if strcmp(name, 'delta')
+    tf = ismember(lock_group, {'trough', 'peak'});
+else
+    tf = strcmp(lock_group, name);
+end
 end
 
 
@@ -1495,11 +1615,11 @@ neurons = summary.all_neurons;
 disp_block(['Peak examples, ', split_name])
 t1_rows = select_strong_examples(neurons, group_order, 't1');
 both_rows = select_strong_examples(neurons, group_order, 'both');
-if isempty(t1_rows) && isempty(both_rows)
+if ~any(t1_rows) && ~any(both_rows)
     disp(['No peak examples for ', split_name])
     return
 end
-n_col = max(numel(t1_rows), numel(both_rows));
+n_col = numel(group_order);
 figure('Name', ['ACG peak examples, ', split_name], 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.04 0.05 0.92 0.88])
 row_rows = {t1_rows, both_rows};
@@ -1508,12 +1628,12 @@ for r = 1:2
     rows = row_rows{r};
     for c = 1:n_col
         subplot(2, n_col, (r - 1) * n_col + c)
-        if c > numel(rows)
+        if c > numel(rows) || rows(c) < 1
             axis off
             continue
         end
         draw_peak_example(neurons, rows(c), centers, smooth_n, ...
-            group_order, group_title, score_label, row_names{r}, split_name)
+            group_order, group_title, score_label, row_names{r}, split_name, group_title{c})
     end
 end
 sgtitle({['Reference for the peak scatters, ', split_name], ...
@@ -1537,13 +1657,13 @@ if isfield(neurons, 'firing_rate')
 else
     rate = nan(numel(strength), 1);
 end
-rows = zeros(0, 1);
+rows = zeros(numel(group_order), 1);
 for g = 1:numel(group_order)
-    idx = find(strcmp(neurons.lock_group, group_order{g}) & strength > 0);
+    idx = find(in_lock_group(neurons.lock_group, group_order{g}) & strength > 0);
     if isempty(idx)
         continue
     end
-    rows(end + 1, 1) = pick_high_rate_example(idx, strength, rate); %#ok<AGROW>
+    rows(g) = pick_high_rate_example(idx, strength, rate);
 end
 end
 
@@ -1601,7 +1721,10 @@ end
 end
 
 
-function draw_peak_example(neurons, row, centers, smooth_n, group_order, group_title, score_label, kind_name, split_name)
+function draw_peak_example(neurons, row, centers, smooth_n, group_order, group_title, score_label, kind_name, split_name, panel_group)
+if nargin < 10
+    panel_group = '';
+end
 low_color = [0.20 0.45 0.75];
 high_color = [0.85 0.25 0.20];
 low_pk = acg_delta_peaks(neurons.low(row, :), centers, smooth_n);
@@ -1620,6 +1743,9 @@ group_name = neurons.lock_group{row};
 hit = find(strcmp(group_order, group_name), 1);
 if ~isempty(hit)
     group_name = group_title{hit};
+end
+if ~isempty(panel_group)
+    group_name = panel_group;
 end
 title({kind_name, sprintf('%s, %s, id %g, %s, %s', ...
     group_name, neurons.session{row}, neurons.cluster_id(row), neurons.area{row}, ...
@@ -2251,7 +2377,10 @@ m = mean(values(idx));
 end
 
 
-function model = fit_delta_power_contributions(summary, group_order, group_title)
+function model = fit_delta_power_contributions(summary, group_order, group_title, do_plot)
+if nargin < 4
+    do_plot = true;
+end
 % Mean delta power of the runs in the all-runs autocorrelogram, predicted
 % by their mean firing rate, their mean PPC, the 0-50 ms burst, and the
 % two delta-peak prominences of that autocorrelogram. One row per neuron.
@@ -2266,11 +2395,13 @@ neurons = summary.all_neurons;
 model.all = fit_one_power_model(X, y, names, 'All neurons');
 model.groups = struct();
 for g = 1:numel(group_order)
-    in_group = strcmp(neurons.lock_group(kept), group_order{g});
+    in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
     model.groups.(group_order{g}) = fit_one_power_model( ...
         X(in_group, :), y(in_group), names, group_title{g});
 end
-plot_power_contributions(model, group_order, group_title, names);
+if do_plot
+    plot_power_contributions(model, group_order, group_title, names);
+end
 end
 
 
@@ -2446,7 +2577,7 @@ end
 figure('Name', 'Delta power contributions', 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.15 0.2 0.7 0.5])
 bar(pct)
-set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels)
+set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
 ylabel('Share of explained delta-power variance (%)')
 legend(names, 'Location', 'eastoutside')
 title(sprintf('All-runs autocorrelogram, R^2 = %.2f, n = %d', model.all.rsq, model.all.n))
