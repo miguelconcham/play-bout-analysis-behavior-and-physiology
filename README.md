@@ -348,6 +348,14 @@ Estimate_spike_train_parsing.m  →  GENERATE_SPIKE_TRAIN_PARSING  →  per-sess
 
 `GENERATE_SPIKE_TRAIN_PARSING` stores run tables with cycle PSTHs, sine fits, MVL/PPC vs circularly shifted trains, and count autocorrelograms. Analyze loads the pooled file plus later per-animal `.mat`s one session at a time (files are several GB). It keeps delta-locked cells from `delta_all_neurons_v2.mat`, splits runs into low vs high PPC, overlap-pools autocorrelograms (`sum counts / sum (T-|lag|)`), and compares them to session-unlocked cells (also split by run PPC). Paired signrank on lag-window mass.
 
+### Delta side peak of the autocorrelogram
+
+```
+Estimate_acg_delta_component_phase.m  →  GENERATE_ACG_DELTA_COMPONENT_PHASE  →  per-session .mat  →  Analyze_acg_delta_component_phase.m
+```
+
+`delta_component_lag` (default 0.2–0.5 s) is the side-peak window shaded on the locking-period autocorrelograms. It stays a time range until the peak lag is refit per neuron. Each within-run pair in that window is counted once: the symmetric autocorrelogram lists the pair twice, and a spike in the middle of a delta-spaced train is listed twice, so the phase sample keeps each spike once. Analyze tests whether those spikes lock to the trough in trough neurons and to the peak in peak neurons.
+
 ### Acute phase locking
 
 Green-window LFP and breathing phase locking on acute NPX sessions (`Data/Acute data/YYYYMMDD_N`).
