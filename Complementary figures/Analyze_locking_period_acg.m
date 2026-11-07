@@ -1294,6 +1294,17 @@ else
     locking_acg.delta_power_model = fit_delta_power_contributions( ...
         locking_acg, group_order, group_title);
 end
+beyond = [];
+if isfield(locking_acg, 'delta_power_model_beyond_rate')
+    beyond = locking_acg.delta_power_model_beyond_rate;
+end
+if ~isempty(beyond) && isfield(beyond, 'all') && beyond.all.ok ...
+        && isfield(beyond.all, 'beyond_rsq') && isfinite(beyond.all.beyond_rsq)
+    plot_beyond_rate_contributions(beyond, group_order, group_title, beyond.all.names);
+else
+    locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
+        locking_acg, group_order, group_title);
+end
 if isfield(locking_acg, 'power_strata')
     [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate] = ...
         fit_strata_power_models(locking_acg.power_strata, group_order, group_title, true);
