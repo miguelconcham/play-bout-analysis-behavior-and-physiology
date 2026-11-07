@@ -50,7 +50,11 @@
 % still connects the two tails of each neuron. A second
 % cycle that the runs are too short to measure is left out of the pair.
 % Delta-band power of the half-mirrored autocorrelogram after 100 ms is
-% paired in those same low-versus-high panels.
+% paired in those same low-versus-high panels. The mean spectrum of the
+% low tail and the mean spectrum of the high tail are drawn on one axis,
+% with the 2-5 Hz band shaded. Each example neuron shows that spectrum
+% under its autocorrelogram. A second example figure takes the next neuron
+% in each lock group.
 % The sum-to-1 scaling is not a division by firing rate. Set
 % plot_rate_scaled_peaks to also score the same peaks on
 % (pair counts / overlap) / (firing rate of those runs ^ 2 * bin width).
@@ -464,9 +468,13 @@ plot_paired_peak_scores(locking_acg, group_order, group_title, ...
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
     'Mean delta power of the runs', 'delta power');
 plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
-    'PPC', 'locking');
+    'PPC', 'locking', delta_lag);
 plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
-    'delta power', 'delta power');
+    'delta power', 'delta power', delta_lag);
+plot_tail_acg_spectra(locking_acg, centers, delta_lag, group_order, group_title, ...
+    'locking', '');
+plot_tail_acg_spectra(power_acg, centers, delta_lag, group_order, group_title, ...
+    'delta power', '');
 if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(locking_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean PPC of the runs', 'locking', delta_lag);
@@ -1322,9 +1330,13 @@ plot_paired_peak_scores(locking_acg, group_order, group_title, ...
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
     'Mean delta power of the runs', 'delta power');
 plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
-    'PPC', 'locking');
+    'PPC', 'locking', delta_lag);
 plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
-    'delta power', 'delta power');
+    'delta power', 'delta power', delta_lag);
+plot_tail_acg_spectra(locking_acg, centers, delta_lag, group_order, group_title, ...
+    'locking', '');
+plot_tail_acg_spectra(power_acg, centers, delta_lag, group_order, group_title, ...
+    'delta power', '');
 if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(locking_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean PPC of the runs', 'locking', delta_lag);
@@ -1703,38 +1715,168 @@ legend(handles, group_title, 'Location', 'eastoutside')
 end
 
 
-function plot_peak_examples(summary, centers, smooth_n, group_order, group_title, score_label, split_name)
+function plot_peak_examples(summary, centers, smooth_n, group_order, group_title, score_label, split_name, delta_lag)
+if nargin < 8 || isempty(delta_lag)
+    delta_lag = [0.2 0.5];
+end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
         || summary.all_neurons.n < 1
     return
 end
 neurons = summary.all_neurons;
 disp_block(['Peak examples, ', split_name])
-t1_rows = select_strong_examples(neurons, group_order, 't1');
-both_rows = select_strong_examples(neurons, group_order, 'both');
-if ~any(t1_rows) && ~any(both_rows)
+n_ranks = 2;
+t1_rows = select_strong_examples(neurons, group_order, 't1', n_ranks);
+both_rows = select_strong_examples(neurons, group_order, 'both', n_ranks);
+if ~any(t1_rows(:)) && ~any(both_rows(:))
     disp(['No peak examples for ', split_name])
     return
 end
 n_col = numel(group_order);
-figure('Name', ['ACG peak examples, ', split_name], 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.04 0.05 0.92 0.88])
 row_rows = {t1_rows, both_rows};
 row_names = {'Strong t1, no t2', 'Strong t1 and t2'};
-for r = 1:2
-    rows = row_rows{r};
-    for c = 1:n_col
-        subplot(2, n_col, (r - 1) * n_col + c)
-        if c > numel(rows) || rows(c) < 1
-            axis off
+for rank = 1:n_ranks
+    if ~any(t1_rows(rank, :)) && ~any(both_rows(rank, :))
+        continue
+    end
+    figure('Name', sprintf('ACG peak examples %d, %s', rank, split_name), ...
+        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.02 0.02 0.96 0.96])
+    for r = 1:2
+        rows = row_rows{r};
+        for c = 1:n_col
+            acg_slot = (r - 1) * 2 * n_col + c;
+            spectrum_slot = acg_slot + n_col;
+            subplot(4, n_col, acg_slot)
+            if c > size(rows, 2) || rows(rank, c) < 1
+                axis off
+                subplot(4, n_col, spectrum_slot)
+                axis off
+                continue
+            end
+            draw_peak_example(neurons, rows(rank, c), centers, smooth_n, ...
+                group_order, group_title, score_label, row_names{r}, split_name, group_title{c})
+            subplot(4, n_col, spectrum_slot)
+            draw_example_spectrum(neurons, rows(rank, c), centers, delta_lag)
+        end
+    end
+    sgtitle({sprintf('Reference for the peak scatters, %s, set %d', split_name, rank), ...
+        'Top of each pair: folded autocorrelogram. Bottom: its power spectrum after 100 ms. Gold band is 2-5 Hz.'})
+end
+end
+
+
+function plot_tail_acg_spectra(summary, centers, delta_lag, group_order, group_title, split_name, scale_tag)
+if nargin < 7 || isempty(scale_tag)
+    scale_tag = 'sum-to-1';
+end
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
+        || summary.all_neurons.n < 1
+    return
+end
+f_grid = 0.25:0.25:12;
+f_lo = 1 / delta_lag(2);
+f_hi = 1 / delta_lag(1);
+names = [{'all_neurons'}, group_order];
+titles = [{'All neurons'}, group_title];
+low_color = [0.20 0.45 0.75];
+high_color = [0.85 0.25 0.20];
+n_panel = numel(names);
+shown = cell(n_panel, 2);
+for p = 1:n_panel
+    if ~isfield(summary, names{p}) || ~isfield(summary.(names{p}), 'low')
+        continue
+    end
+    block = summary.(names{p});
+    shown{p, 1} = mean_spectrum(block.low, centers, delta_lag, f_grid);
+    shown{p, 2} = mean_spectrum(block.high, centers, delta_lag, f_grid);
+end
+top = 0;
+for p = 1:n_panel
+    for side = 1:2
+        curve = shown{p, side};
+        if isempty(curve)
             continue
         end
-        draw_peak_example(neurons, rows(c), centers, smooth_n, ...
-            group_order, group_title, score_label, row_names{r}, split_name, group_title{c})
+        top = max(top, max(curve.mu + curve.sem, [], 'omitnan'));
     end
 end
-sgtitle({['Reference for the peak scatters, ', split_name], ...
-    'Line is the Gaussian used to detect the peaks. Grey band is the 0-50 ms burst.'})
+if ~isfinite(top) || top <= 0
+    top = 1;
+end
+figure('Name', ['ACG spectra, low against high, ', split_name, ', ', scale_tag], ...
+    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.78])
+n_row = ceil(n_panel / 3);
+for p = 1:n_panel
+    subplot(n_row, 3, p)
+    hold on
+    band = patch([f_lo f_hi f_hi f_lo], [0 0 top * 1.08 top * 1.08], [0.95 0.85 0.40], ...
+        'FaceAlpha', 0.35, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    low_line = plot_spectrum_curve(f_grid, shown{p, 1}, low_color);
+    high_line = plot_spectrum_curve(f_grid, shown{p, 2}, high_color);
+    uistack(band, 'bottom')
+    xlim([0 f_grid(end)])
+    ylim([0 top * 1.08])
+    xlabel('Frequency (Hz)')
+    ylabel('Folded ACG power')
+    n_low = spectrum_n(shown{p, 1});
+    n_high = spectrum_n(shown{p, 2});
+    title(sprintf('%s\nlow n = %d, high n = %d', titles{p}, n_low, n_high))
+    if p == 1 && ~isempty(low_line) && ~isempty(high_line)
+        legend([low_line, high_line], {'Low 25%', 'High 25%'}, 'Location', 'northeast')
+    end
+    box off
+end
+sgtitle({['Low tail against high tail, ', split_name, ', ', scale_tag], ...
+    'Mean power spectrum of the folded autocorrelogram after 100 ms. Gold band is 2-5 Hz.'})
+end
+
+
+function curve = mean_spectrum(acg, centers, delta_lag, f_grid)
+curve = struct('mu', nan(size(f_grid)), 'sem', nan(size(f_grid)), 'n', 0);
+if isempty(acg)
+    return
+end
+[freq, spec] = folded_acg_spectrum(acg, centers, delta_lag);
+stack = nan(numel(freq), numel(f_grid));
+for row = 1:numel(freq)
+    if numel(freq{row}) < 2
+        continue
+    end
+    stack(row, :) = interp1(freq{row}, spec{row}, f_grid, 'linear', nan);
+end
+curve.mu = mean(stack, 1, 'omitnan');
+n_freq = sum(isfinite(stack), 1);
+curve.sem = nan(size(f_grid));
+enough = n_freq >= 2;
+if any(enough)
+    curve.sem(enough) = std(stack(:, enough), 0, 1, 'omitnan') ./ sqrt(n_freq(enough));
+end
+curve.n = sum(any(isfinite(stack), 2));
+end
+
+
+function n = spectrum_n(curve)
+if isempty(curve)
+    n = 0;
+else
+    n = curve.n;
+end
+end
+
+
+function line = plot_spectrum_curve(f_grid, curve, color)
+line = gobjects(0);
+if isempty(curve)
+    return
+end
+lo = curve.mu - curve.sem;
+hi = curve.mu + curve.sem;
+ok = isfinite(f_grid) & isfinite(lo) & isfinite(hi);
+if any(ok)
+    fill([f_grid(ok), fliplr(f_grid(ok))], [lo(ok), fliplr(hi(ok))], color, ...
+        'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off')
+end
+line = plot(f_grid, curve.mu, 'Color', color, 'LineWidth', 1.6);
 end
 
 
@@ -1747,25 +1889,31 @@ order = positions(sort_idx);
 end
 
 
-function rows = select_strong_examples(neurons, group_order, kind)
+function rows = select_strong_examples(neurons, group_order, kind, n_pick)
+if nargin < 4 || isempty(n_pick)
+    n_pick = 1;
+end
 strength = example_strength(neurons, kind);
 if isfield(neurons, 'firing_rate')
     rate = neurons.firing_rate(:);
 else
     rate = nan(numel(strength), 1);
 end
-rows = zeros(numel(group_order), 1);
+rows = zeros(n_pick, numel(group_order));
 for g = 1:numel(group_order)
     idx = find(in_lock_group(neurons.lock_group, group_order{g}) & strength > 0);
     if isempty(idx)
         continue
     end
-    rows(g) = pick_high_rate_example(idx, strength, rate);
+    rows(:, g) = pick_high_rate_example(idx, strength, rate, n_pick);
 end
 end
 
 
-function pick = pick_high_rate_example(idx, strength, rate)
+function pick = pick_high_rate_example(idx, strength, rate, n_pick)
+if nargin < 4 || isempty(n_pick)
+    n_pick = 1;
+end
 peak = strength(idx);
 strong = peak >= median(peak);
 if ~any(strong)
@@ -1774,13 +1922,15 @@ end
 candidates = idx(strong);
 candidate_rate = rate(candidates);
 if ~any(isfinite(candidate_rate))
-    [~, local] = max(strength(candidates));
-    pick = candidates(local);
-    return
+    score = strength(candidates);
+else
+    candidate_rate(~isfinite(candidate_rate)) = -inf;
+    score = candidate_rate;
 end
-candidate_rate(~isfinite(candidate_rate)) = -inf;
-[~, local] = max(candidate_rate);
-pick = candidates(local);
+[~, order] = sort(score, 'descend');
+pick = zeros(n_pick, 1);
+n_take = min(n_pick, numel(order));
+pick(1:n_take) = candidates(order(1:n_take));
 end
 
 
@@ -1863,6 +2013,45 @@ box off
 disp(sprintf('  example %s, %s: %s id %g\n%s', split_name, kind_name, ...
     neurons.session{row}, neurons.cluster_id(row), ...
     example_parameter_text(neurons, row, score_label)))
+end
+
+
+function draw_example_spectrum(neurons, row, centers, delta_lag)
+low_color = [0.20 0.45 0.75];
+high_color = [0.85 0.25 0.20];
+f_lo = 1 / delta_lag(2);
+f_hi = 1 / delta_lag(1);
+[freq_low, spec_low] = folded_acg_spectrum(neurons.low(row, :), centers, delta_lag);
+[freq_high, spec_high] = folded_acg_spectrum(neurons.high(row, :), centers, delta_lag);
+hold on
+band = patch([f_lo f_hi f_hi f_lo], [0 0 0 0], [0.95 0.85 0.40], ...
+    'FaceAlpha', 0.35, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+low_line = plot_one_spectrum(freq_low{1}, spec_low{1}, low_color);
+high_line = plot_one_spectrum(freq_high{1}, spec_high{1}, high_color);
+xlim([0 12])
+xlabel('Frequency (Hz)')
+ylabel('Power')
+title('Spectrum, lags > 100 ms')
+yl = ylim;
+if ~all(isfinite(yl)) || yl(2) <= 0
+    yl = [0 1];
+end
+ylim([0, yl(2)])
+set(band, 'YData', [0 0 yl(2) yl(2)])
+uistack(band, 'bottom')
+if ~isempty(low_line) && ~isempty(high_line)
+    legend([low_line, high_line], {'Low 25%', 'High 25%'}, 'Location', 'northeast')
+end
+box off
+end
+
+
+function line = plot_one_spectrum(freq, spec, color)
+line = gobjects(0);
+if isempty(freq) || isempty(spec) || ~any(isfinite(spec))
+    return
+end
+line = plot(freq, spec, 'Color', color, 'LineWidth', 1.4);
 end
 
 
@@ -1981,6 +2170,7 @@ function plot_rate_scaled_peaks_for(summary, bin_w, centers, smooth_n, group_ord
 scaled = rate_scale_summary(summary, bin_w, group_order);
 scaled = add_peak_scores(scaled, centers, smooth_n, group_order, delta_lag);
 plot_paired_peak_scores(scaled, group_order, group_title, score_label, split_name, 'ratio');
+plot_tail_acg_spectra(scaled, centers, delta_lag, group_order, group_title, split_name, 'rate ratio');
 end
 
 
