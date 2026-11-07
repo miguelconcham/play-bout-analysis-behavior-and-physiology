@@ -6,7 +6,9 @@
 % number of independent uniform times in that run. Intervals are not kept,
 % so the autocorrelogram of a rhythmic train is destroyed. The low 25% and
 % high 25% runs (PPC, and delta power) are then pooled and scored with the
-% same first-peak and second-cycle measures as the main script.
+% same first-peak and second-cycle measures as the main script. Every
+% firing run of that neuron is pooled as well, which is the all-runs
+% autocorrelogram. Spikes in the gaps between runs stay out.
 %
 % A peak is exceptional when its prominence is larger than the prominences
 % from those shuffles. The one-sided p-value is
@@ -17,7 +19,9 @@
 % The result file is rewritten after every neuron. resume is false, so
 % this run starts at neuron 0 and deletes a previous checkpoint. Set
 % resume to true only to continue a run that this script has already
-% started. Only runs that fall in a plotted tail are shuffled.
+% started. Every firing run of an included neuron is shuffled, so the
+% all-runs null contains the runs between the two tails. The low and high
+% nulls still pool only their own tails.
 % Only areas_to_keep are analyzed. SupCol is the superior-colliculus
 % label in the depth tables and is kept as SC. VLPAG and DLPAG are not
 % treated as LPAG.
@@ -40,7 +44,8 @@
 % At the end, each smoothed curve is also drawn with a shuffle-percentile
 % axis. One hundred means that lag is above every shuffle, so a high
 % autocorrelogram stays high. This is saved for every neuron and for the
-% grand mean of each cell type, on both scales.
+% grand mean of each cell type, on both scales, for the two tails and for
+% the all-runs curve.
 %
 % Run this file, not the unit test, to produce the figures:
 %   Analyze_locking_period_acg_shuffle
@@ -112,9 +117,11 @@ parameters = struct( ...
     'grand_average', true, ...
     'rate_ratio', true, ...
     'percentile_curves', true, ...
+    'all_runs', true, ...
     'null', 'uniform spike times inside each firing run');
 
-grand_bytes = 2 * numel(grand_order) * 2 * 2 * n_shuffles * n_bins * 8 * 2;
+grand_bytes = (2 * numel(grand_order) * 2 * 2 + 2 * numel(grand_order)) ...
+    * n_shuffles * n_bins * 8 * 2;
 disp(sprintf(['Grand-average accumulators are %.1f MB for sum-to-1 and rate ratio ' ...
     '(%d groups, %d shuffles, %d bins). Each neuron is still shuffled once.'], ...
     grand_bytes / 1e6, numel(grand_order), n_shuffles, n_bins))
@@ -302,6 +309,9 @@ for f = 1:numel(parsing_files)
             end
 
             use = false(height(rt), 1);
+            if numel(pooled.all_index) == height(rt)
+                use = pooled.all_index(:);
+            end
             if lock_ok
                 use = use | pooled.low_index(:) | pooled.high_index(:);
             end
@@ -317,6 +327,7 @@ for f = 1:numel(parsing_files)
             null_ratio = blank_null_curves(n_shuffles, n_bins);
             rate_lock = struct('low', NaN, 'high', NaN);
             rate_power = struct('low', NaN, 'high', NaN);
+            rate_all = tail_firing_rate(rt, pooled.all_index);
             if lock_ok
                 rate_lock.low = tail_firing_rate(rt, pooled.low_index);
                 rate_lock.high = tail_firing_rate(rt, pooled.high_index);
@@ -360,6 +371,17 @@ for f = 1:numel(parsing_files)
                     null_curves.power.high(s, :) = row;
                     null_ratio.power.high(s, :) = ratio;
                 end
+                if lock_ok
+                    all_acg = sh_lock.all;
+                else
+                    all_acg = sh_power.all;
+                end
+                [peaks, row, ratio] = score_tail_curves(all_acg, centers, smooth_n, ...
+                    acg_refractory_s, rate_all, bin_w);
+                nulls.all.first(s) = null_first_value(peaks);
+                nulls.all.second(s) = null_second_value(peaks);
+                null_curves.all(s, :) = row;
+                null_ratio.all(s, :) = ratio;
                 if mod(s, 25) == 0
                     disp(sprintf('    shuffle %d/%d (%.0f s)', s, n_shuffles, toc(t0)))
                 end
@@ -392,6 +414,10 @@ for f = 1:numel(parsing_files)
                 [~, obs_curves.power.high, obs_ratio.power.high] = score_tail_curves( ...
                     pooled_power.high, centers, smooth_n, acg_refractory_s, rate_power.high, bin_w);
             end
+            rec.all = pack_tail(pooled.all, centers, smooth_n, acg_refractory_s, ...
+                nulls.all.first, nulls.all.second);
+            [~, obs_curves.all, obs_ratio.all] = score_tail_curves( ...
+                pooled.all, centers, smooth_n, acg_refractory_s, rate_all, bin_w);
             grand = add_neuron_to_grand(grand, this_group, this_key, ...
                 obs_curves, null_curves, obs_ratio, null_ratio);
             rec = attach_percentile(rec, obs_curves, null_curves, ...
@@ -415,6 +441,7 @@ plot_shuffle_exception(records, group_order, group_title, 'locking', ...
     'Mean PPC of the runs');
 plot_shuffle_exception(records, group_order, group_title, 'power', ...
     'Mean delta power of the runs');
+plot_all_run_exception(records, group_order, group_title);
 report_grand_shuffle(grand, centers, smooth_n, grand_order, grand_title);
 plot_percentile_curves(records, grand, centers, smooth_n, grand_order, grand_title);
 
@@ -426,6 +453,7 @@ rec.area = '';
 rec.lock_group = '';
 rec.locking = blank_split(n_shuffles);
 rec.power = blank_split(n_shuffles);
+rec.all = blank_tail(n_shuffles);
 end
 
 
@@ -465,6 +493,8 @@ nulls.power.low.first = nan(n_shuffles, 1);
 nulls.power.low.second = nan(n_shuffles, 1);
 nulls.power.high.first = nan(n_shuffles, 1);
 nulls.power.high.second = nan(n_shuffles, 1);
+nulls.all.first = nan(n_shuffles, 1);
+nulls.all.second = nan(n_shuffles, 1);
 end
 
 
@@ -586,7 +616,7 @@ end
 names = {'n_shuffles', 'alpha', 'non_entrained_p', 'low_percent', 'high_percent', ...
     'acg_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s', 'delta_lag', ...
     'areas_to_keep', 'summary_edge_start', 'summary_edge_end', 'n_bins', ...
-    'bin_w', 'smooth_n'};
+    'bin_w', 'smooth_n', 'all_runs'};
 for i = 1:numel(names)
     name = names{i};
     if ~isfield(stored.parameters, name) ...
@@ -660,6 +690,55 @@ for g = 1:numel(group_order)
     handles(g) = plot(nan, nan, '-', 'Color', colors(g, :), 'LineWidth', 2.5);
 end
 legend(handles, group_title, 'Location', 'eastoutside')
+end
+
+
+function plot_all_run_exception(records, group_order, group_title)
+if isempty(records)
+    return
+end
+measures = {'first_p', 'second_p'};
+measure_labels = {'First-peak exceptionality', 'Second-cycle exceptionality'};
+colors = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45];
+n = numel(records);
+groups = cell(n, 1);
+for i = 1:n
+    groups{i} = records{i}.lock_group;
+end
+figure('Name', 'ACG peak shuffle, all firing runs', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.12 0.15 0.7 0.55])
+for m = 1:numel(measures)
+    p = nan(n, 1);
+    for i = 1:n
+        if ~isfield(records{i}, 'all')
+            continue
+        end
+        p(i) = records{i}.all.(measures{m});
+        if strcmp(measures{m}, 'second_p') && ~records{i}.all.second_measurable
+            p(i) = NaN;
+        end
+    end
+    ok = isfinite(p) & p > 0;
+    subplot(1, 2, m)
+    hold on
+    plot([0.5, numel(group_order) + 0.5], [-log10(0.05), -log10(0.05)], '--', ...
+        'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+    for g = 1:numel(group_order)
+        idx = ok & strcmp(groups, group_order{g});
+        if ~any(idx)
+            continue
+        end
+        plot(g * ones(sum(idx), 1), -log10(p(idx)), 'o', 'Color', colors(g, :), ...
+            'MarkerFaceColor', colors(g, :), 'MarkerSize', 5, 'HandleVisibility', 'off')
+        disp(sprintf('  %s, all firing runs, %s: p<0.05 = %d/%d', ...
+            group_title{g}, measure_labels{m}, sum(p(idx) < 0.05), sum(idx)))
+    end
+    xlim([0.5, numel(group_order) + 0.5])
+    set(gca, 'XTick', 1:numel(group_order), 'XTickLabel', group_title)
+    ylabel([measure_labels{m}, ', -log10 p'])
+    box off
+end
+sgtitle('All firing runs against shuffles of every firing run')
 end
 
 
@@ -1057,6 +1136,14 @@ for s = 1:numel(splits)
         end
     end
 end
+for g = 1:numel(group_order)
+    block.sum_obs = zeros(1, n_bins);
+    block.n_obs = zeros(1, n_bins);
+    block.sum_null = zeros(n_shuffles, n_bins);
+    block.n_null = zeros(n_shuffles, n_bins);
+    block.n_neurons = 0;
+    scale.all.(group_order{g}) = block;
+end
 end
 
 
@@ -1065,6 +1152,7 @@ curves.locking.low = nan(n_shuffles, n_bins);
 curves.locking.high = nan(n_shuffles, n_bins);
 curves.power.low = nan(n_shuffles, n_bins);
 curves.power.high = nan(n_shuffles, n_bins);
+curves.all = nan(n_shuffles, n_bins);
 end
 
 
@@ -1073,6 +1161,7 @@ curves.locking.low = nan(1, n_bins);
 curves.locking.high = nan(1, n_bins);
 curves.power.low = nan(1, n_bins);
 curves.power.high = nan(1, n_bins);
+curves.all = nan(1, n_bins);
 end
 
 
@@ -1102,6 +1191,10 @@ for g = 1:numel(targets)
                 null_curves.(splits{s}).(tails{t}));
         end
     end
+    if isfield(obs_curves, 'all') && any(isfinite(obs_curves.all))
+        scale.all.(targets{g}) = add_grand_curve( ...
+            scale.all.(targets{g}), obs_curves.all, null_curves.all);
+    end
 end
 end
 
@@ -1130,8 +1223,8 @@ tails = {'low', 'high'};
 tail_labels = {'Low 25%', 'High 25%'};
 disp(' ')
 disp('Grand-average shuffle. Peaks are scored on the Gaussian-smoothed mean autocorrelogram.')
-disp('Sum-to-1 gives every neuron the same weight. Rate ratio divides each curve by its own tail rate squared.')
-disp('The all-runs curve is not tested: runs between the two tails are not shuffled.')
+disp('Sum-to-1 gives every neuron the same weight. Rate ratio divides each curve by its own firing rate squared.')
+disp('The all-runs curve pools every firing run. Its null shuffles those runs, including the ones between the tails.')
 for k = 1:numel(scales)
     scale = grand.(scales{k});
     for s = 1:numel(splits)
@@ -1153,6 +1246,21 @@ for k = 1:numel(scales)
         sgtitle({['Grand mean versus shuffle, ', split_labels{s}, ', ', scale_labels{k}], ...
             'Black is the observed mean. Grey is the central 95% of shuffled means.'})
     end
+    figure('Name', ['Grand average shuffle, all firing runs, ', scale_labels{k}], ...
+        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.2 0.92 0.55])
+    for g = 1:numel(group_order)
+        block = scale.all.(group_order{g});
+        subplot(1, numel(group_order), g)
+        result = grand_peak_result(block, centers, smooth_n);
+        plot_grand_panel(result, [group_title{g}, ', all firing runs'], y_labels{k})
+        disp(sprintf(['  %s, %s, all firing runs: n = %d, first prom = %.3g, shuffle p = %.3g, ' ...
+            'second prom = %.3g, shuffle p = %.3g'], ...
+            scale_labels{k}, group_title{g}, result.n, ...
+            result.first_prominence, result.first_p, ...
+            result.second_prominence, result.second_p))
+    end
+    sgtitle({['Grand mean versus shuffle, all firing runs, ', scale_labels{k}], ...
+        'Black is the observed mean. Grey is the central 95% of shuffled means.'})
 end
 end
 
@@ -1248,6 +1356,12 @@ for s = 1:numel(splits)
             centers, smooth_n);
     end
 end
+if isfield(obs_sum, 'all') && any(isfinite(obs_sum.all))
+    [pctl, lag] = curve_percentile(obs_sum.all, null_sum.all, centers, smooth_n);
+    rec.all.pctl_lag = lag;
+    rec.all.sum_pctl = pctl;
+    rec.all.ratio_pctl = curve_percentile(obs_ratio.all, null_ratio.all, centers, smooth_n);
+end
 end
 
 
@@ -1327,6 +1441,70 @@ for k = 1:numel(scales)
             '100 means the mean autocorrelogram is above every shuffled mean.'})
     end
 end
+plot_all_run_percentiles(records, grand, centers, smooth_n, group_order, group_title);
+end
+
+
+function plot_all_run_percentiles(records, grand, centers, smooth_n, group_order, group_title)
+scales = {'sum_pctl', 'ratio_pctl'};
+scale_names = {'sum_to_one', 'rate_ratio'};
+scale_labels = {'sum-to-1', 'rate ratio (Poisson = 1)'};
+for k = 1:numel(scales)
+    figure('Name', ['Neuron shuffle percentile, all firing runs, ', scale_labels{k}], ...
+        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.18 0.92 0.5])
+    for g = 1:numel(group_order)
+        subplot(1, numel(group_order), g)
+        chosen = records_in_group(records, group_order{g});
+        plot_all_neuron_percentile(chosen, scales{k}, [group_title{g}, ', all firing runs'])
+    end
+    sgtitle({['Each neuron against its own shuffles, all firing runs, ', scale_labels{k}], ...
+        '100 means that lag is above every shuffle. The black line is the median neuron.'})
+    figure('Name', ['Grand-average shuffle percentile, all firing runs, ', scale_labels{k}], ...
+        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.18 0.92 0.5])
+    for g = 1:numel(group_order)
+        block = grand.(scale_names{k}).all.(group_order{g});
+        subplot(1, numel(group_order), g)
+        result = grand_peak_result(block, centers, smooth_n);
+        plot_grand_percentile(result, [group_title{g}, ', all firing runs'])
+    end
+    sgtitle({['Grand mean against shuffled means, all firing runs, ', scale_labels{k}], ...
+        '100 means the mean autocorrelogram is above every shuffled mean.'})
+end
+end
+
+
+function plot_all_neuron_percentile(records, field_name, panel_title)
+hold on
+drawn = 0;
+stack = [];
+lag = [];
+for i = 1:numel(records)
+    if ~isfield(records{i}, 'all')
+        continue
+    end
+    tail = records{i}.all;
+    if ~isfield(tail, field_name) || isempty(tail.(field_name)) || ~any(isfinite(tail.(field_name)))
+        continue
+    end
+    lag = tail.pctl_lag;
+    y = tail.(field_name);
+    plot(lag, y, 'Color', [0.25 0.45 0.75 0.28], 'LineWidth', 0.6, 'HandleVisibility', 'off')
+    stack(end + 1, :) = y; %#ok<AGROW>
+    drawn = drawn + 1;
+end
+if drawn < 1
+    title({panel_title, 'n = 0'})
+    axis off
+    return
+end
+plot(lag, median(stack, 1, 'omitnan'), 'k', 'LineWidth', 1.6)
+plot(lag([1 end]), [50 50], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+plot(lag([1 end]), [95 95], '--', 'Color', [0.7 0.25 0.25], 'HandleVisibility', 'off')
+ylim([0 100])
+xlabel('Lag (s)')
+ylabel('Shuffle percentile')
+title({panel_title, sprintf('n = %d', drawn)})
+box off
 end
 
 
