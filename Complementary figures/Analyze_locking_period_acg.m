@@ -39,11 +39,16 @@
 % survive. A cluster survives when that p-value is at or below acg_cluster_alpha.
 %
 % Each plotted autocorrelogram is also scored neuron by neuron. The burst
-% is the mean level from the first positive bin through 50 ms. Oscillatory
-% peaks are local maxima from 100 ms onward; height is findpeaks
-% prominence, the height above the higher neighboring valley. The first
-% peak is the earliest one. A second peak counts only near twice that lag,
-% and only when that window was observed. Low and high are the same
+% is the mean level from the first positive bin through 50 ms. A local
+% maximum from 100 ms onward is kept only when its half-prominence width
+% is at least 40 ms, its prominence is at least a fifth of that curve's
+% 10-90% range, and the curve does not climb above it on both sides
+% within 200 ms. That last check rejects a bump inside a trough. The
+% first peak is the earliest maximum between 200 and 500 ms. A maximum
+% before 200 ms is kept only when no maximum lies in that delta period,
+% so a peak near 200 ms is not labeled as the second cycle of a 100 ms
+% peak. A second peak counts only near twice the chosen lag, with the
+% same checks, and only when that window was observed. Low and high are the same
 % neuron. The low-versus-high panel is a scatter of the low tail against
 % the high tail, with the identity line as reference. The mean is a cross,
 % so an increase sits above that line. The panel against PPC or delta power
