@@ -58,12 +58,12 @@
 % ratio, with their own y limit and the same low-versus-high cluster test.
 % The same all-runs autocorrelogram is then used in a linear model of
 % mean delta power. Predictors are the mean firing rate of those runs,
-% their mean PPC, the 0-50 ms burst, the first-peak and second-cycle
-% prominences, and the delta-band power of the half-mirrored
-% autocorrelogram after 100 ms. A second model gives firing rate every
+% the 0-50 ms burst, the first-peak and second-cycle prominences, and
+% the delta-band power of the half-mirrored autocorrelogram after 100 ms.
+% PPC is left out: its estimate depends on delta power, so a coefficient
+% on PPC would reuse the outcome. A second model gives firing rate every
 % part of that variance it can explain, then splits only the remaining
-% R^2 among the other predictors. Both models are fit again without PPC,
-% on the same neurons.
+% R^2 among the other predictors.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -451,12 +451,8 @@ if plot_rate_scaled_peaks
 end
 locking_acg.delta_power_model = fit_delta_power_contributions( ...
     locking_acg, group_order, group_title);
-locking_acg.delta_power_model_no_ppc = fit_delta_power_contributions( ...
-    locking_acg, group_order, group_title, true, false);
 locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
     locking_acg, group_order, group_title);
-locking_acg.delta_power_model_beyond_rate_no_ppc = fit_delta_power_beyond_rate( ...
-    locking_acg, group_order, group_title, true, false);
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -1338,41 +1334,21 @@ if plot_rate_scaled_peaks
     report_peak_tests(power_hz, group_order, group_title, ...
         'Mean delta power of the runs', 'delta power', 'ratio');
 end
-if isfield(locking_acg, 'delta_power_model')
-    model = locking_acg.delta_power_model;
-    has_acg_delta = isfield(model, 'all') && isfield(model.all, 'names') ...
-        && any(strcmp(model.all.names, 'ACG delta power, >100 ms'));
-    if ~isfield(model, 'groups') || ~isfield(model.groups, 'delta') || ~has_acg_delta
-        model = fit_delta_power_contributions(locking_acg, group_order, group_title, false);
-    end
-    if model.all.ok
-        report_power_model(model.all);
-    end
-    for g = 1:numel(group_order)
-        if isfield(model, 'groups') && isfield(model.groups, group_order{g}) ...
-                && model.groups.(group_order{g}).ok
-            report_power_model(model.groups.(group_order{g}));
-        end
-    end
-end
-if isfield(locking_acg, 'delta_power_model_beyond_rate')
-    beyond = locking_acg.delta_power_model_beyond_rate;
-    if ~isfield(beyond, 'all') || ~isfield(beyond.all, 'beyond_rsq')
-        beyond = fit_delta_power_beyond_rate(locking_acg, group_order, group_title, false);
-    end
-    report_beyond_rate_block(beyond, group_order);
-end
-if ~isfield(locking_acg, 'delta_power_model_no_ppc')
-    locking_acg.delta_power_model_no_ppc = fit_delta_power_contributions( ...
-        locking_acg, group_order, group_title, false, false);
+if ~isfield(locking_acg, 'delta_power_model') || model_uses_ppc(locking_acg.delta_power_model) ...
+        || ~model_has_predictor(locking_acg.delta_power_model, 'ACG delta power, >100 ms')
+    locking_acg.delta_power_model = fit_delta_power_contributions( ...
+        locking_acg, group_order, group_title, false);
 else
-    report_power_model_block(locking_acg.delta_power_model_no_ppc, group_order);
+    report_power_model_block(locking_acg.delta_power_model, group_order);
 end
-if ~isfield(locking_acg, 'delta_power_model_beyond_rate_no_ppc')
-    locking_acg.delta_power_model_beyond_rate_no_ppc = fit_delta_power_beyond_rate( ...
-        locking_acg, group_order, group_title, false, false);
+if ~isfield(locking_acg, 'delta_power_model_beyond_rate') ...
+        || model_uses_ppc(locking_acg.delta_power_model_beyond_rate) ...
+        || ~isfield(locking_acg.delta_power_model_beyond_rate, 'all') ...
+        || ~isfield(locking_acg.delta_power_model_beyond_rate.all, 'beyond_rsq')
+    locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
+        locking_acg, group_order, group_title, false);
 else
-    report_beyond_rate_block(locking_acg.delta_power_model_beyond_rate_no_ppc, group_order);
+    report_beyond_rate_block(locking_acg.delta_power_model_beyond_rate, group_order);
 end
 end
 
@@ -2411,83 +2387,65 @@ m = mean(values(idx));
 end
 
 
-function model = fit_delta_power_contributions(summary, group_order, group_title, do_plot, include_ppc)
+function model = fit_delta_power_contributions(summary, group_order, group_title, do_plot)
 if nargin < 4
     do_plot = true;
 end
-if nargin < 5
-    include_ppc = true;
-end
 % Mean delta power of the runs in the all-runs autocorrelogram, predicted
-% by their mean firing rate, their mean PPC, the 0-50 ms burst, the two
-% delta-peak prominences, and the delta-band power of the half-mirrored
-% autocorrelogram after 100 ms. include_ppc false repeats the fit without
-% PPC, on the same neurons. One row per neuron.
-tag = '';
-figure_name = 'Delta power contributions';
-if ~include_ppc
-    tag = ', without PPC';
-    figure_name = 'Delta power contributions, without PPC';
-end
+% by their mean firing rate, the 0-50 ms burst, the two delta-peak
+% prominences, and the delta-band power of the half-mirrored
+% autocorrelogram after 100 ms. PPC is omitted because its estimate
+% depends on delta power. One row per neuron.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
-    model.all = empty_power_fit(['All neurons', tag]);
+    model.all = empty_power_fit('All neurons');
     return
 end
 neurons = summary.all_neurons;
 centers = summary.centers(:).';
 delta_lag = summary.parameters.delta_lag;
-[X, y, names, kept] = power_model_design(neurons, centers, delta_lag, include_ppc);
-model.all = fit_one_power_model(X, y, names, ['All neurons', tag]);
+[X, y, names, kept] = power_model_design(neurons, centers, delta_lag);
+model.all = fit_one_power_model(X, y, names, 'All neurons');
 model.groups = struct();
 for g = 1:numel(group_order)
     in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
     model.groups.(group_order{g}) = fit_one_power_model( ...
-        X(in_group, :), y(in_group), names, [group_title{g}, tag]);
+        X(in_group, :), y(in_group), names, group_title{g});
 end
 if do_plot
-    plot_power_contributions(model, group_order, group_title, names, figure_name);
+    plot_power_contributions(model, group_order, group_title, names);
 end
 end
 
 
-function model = fit_delta_power_beyond_rate(summary, group_order, group_title, do_plot, include_ppc)
+function model = fit_delta_power_beyond_rate(summary, group_order, group_title, do_plot)
 if nargin < 4
     do_plot = true;
-end
-if nargin < 5
-    include_ppc = true;
 end
 % Each predictor other than firing rate is replaced by its residual on
 % firing rate. Firing rate then receives all variance it shares with those
 % predictors. Their relative weights sum to the R^2 added beyond rate.
-% include_ppc false drops PPC before that residualizing, on the same neurons.
-tag = ', beyond firing rate';
-figure_name = 'Delta power beyond firing rate';
-if ~include_ppc
-    tag = ', beyond firing rate, without PPC';
-    figure_name = 'Delta power beyond firing rate, without PPC';
-end
+% PPC is not among the predictors.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
-    model.all = empty_power_fit(['All neurons', tag]);
+    model.all = empty_power_fit('All neurons, beyond firing rate');
     return
 end
 neurons = summary.all_neurons;
 centers = summary.centers(:).';
 delta_lag = summary.parameters.delta_lag;
-[X, y, names, kept] = power_model_design(neurons, centers, delta_lag, include_ppc);
-model.all = fit_beyond_rate_model(X, y, names, ['All neurons', tag]);
+[X, y, names, kept] = power_model_design(neurons, centers, delta_lag);
+model.all = fit_beyond_rate_model(X, y, names, 'All neurons, beyond firing rate');
 model.groups = struct();
 for g = 1:numel(group_order)
     in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
     model.groups.(group_order{g}) = fit_beyond_rate_model( ...
-        X(in_group, :), y(in_group), names, [group_title{g}, tag]);
+        X(in_group, :), y(in_group), names, [group_title{g}, ', beyond firing rate']);
 end
 if do_plot
-    plot_beyond_rate_contributions(model, group_order, group_title, names, figure_name);
+    plot_beyond_rate_contributions(model, group_order, group_title, names);
 end
 end
 
@@ -2546,10 +2504,7 @@ end
 end
 
 
-function plot_beyond_rate_contributions(model, group_order, group_title, names, figure_name)
-if nargin < 5 || isempty(figure_name)
-    figure_name = 'Delta power beyond firing rate';
-end
+function plot_beyond_rate_contributions(model, group_order, group_title, names)
 if ~model.all.ok || ~isfinite(model.all.beyond_rsq)
     return
 end
@@ -2567,7 +2522,7 @@ for i = 1:numel(keys)
     end
     weights(i, :) = fit.weight(:)';
 end
-figure('Name', figure_name, 'Color', 'w', ...
+figure('Name', 'Delta power beyond firing rate', 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.08 0.15 0.84 0.62])
 subplot(1, 2, 1)
 bar(model.all.weight(:))
@@ -2586,26 +2541,20 @@ box off
 end
 
 
-function [X, y, names, kept] = power_model_design(neurons, centers, delta_lag, include_ppc)
-if nargin < 4
-    include_ppc = true;
-end
-names = {'Firing rate', 'PPC', 'Burst, 0-50 ms', 'First-peak prominence', ...
+function [X, y, names, kept] = power_model_design(neurons, centers, delta_lag)
+% PPC is not a predictor. Its estimate depends on delta power, so it
+% would share variance with the outcome by construction.
+names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
     'Second-cycle prominence', 'ACG delta power, >100 ms'};
 peaks = neurons.all_peaks;
 acg_delta = folded_acg_delta_power(neurons.all, centers, delta_lag);
 y_all = neurons.model_power(:);
-X_all = [neurons.model_fr(:), neurons.model_ppc(:), peaks.burst(:), ...
+X_all = [neurons.model_fr(:), peaks.burst(:), ...
     peaks.first_prominence(:), peaks.second_prominence(:), acg_delta(:)];
 kept = isfinite(y_all) & all(isfinite(X_all), 2) ...
     & peaks.first_measurable(:) & peaks.second_measurable(:);
 X = X_all(kept, :);
 y = y_all(kept);
-if ~include_ppc
-    drop = strcmp(names, 'PPC');
-    names = names(~drop);
-    X = X(:, ~drop);
-end
 end
 
 
@@ -2760,10 +2709,21 @@ end
 end
 
 
-function plot_power_contributions(model, group_order, group_title, names, figure_name)
-if nargin < 5 || isempty(figure_name)
-    figure_name = 'Delta power contributions';
+function tf = model_uses_ppc(model)
+tf = false;
+if isfield(model, 'all') && isfield(model.all, 'names')
+    tf = any(strcmp(model.all.names, 'PPC'));
 end
+end
+
+
+function tf = model_has_predictor(model, predictor)
+tf = isfield(model, 'all') && isfield(model.all, 'names') ...
+    && any(strcmp(model.all.names, predictor));
+end
+
+
+function plot_power_contributions(model, group_order, group_title, names)
 if ~model.all.ok
     return
 end
@@ -2781,7 +2741,7 @@ for i = 1:numel(keys)
     end
     pct(i, :) = fit.percent_of_rsq(:)';
 end
-figure('Name', figure_name, 'Color', 'w', ...
+figure('Name', 'Delta power contributions', 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.15 0.2 0.7 0.5])
 bar(pct)
 set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
