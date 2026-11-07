@@ -63,6 +63,7 @@ all_idx = usable & any(isfinite(acg), 2);
 [pooled.low, pooled.n_low] = pool_selected(acg, bin_edges, run_length, low_idx, already_corrected);
 [pooled.high, pooled.n_high] = pool_selected(acg, bin_edges, run_length, high_idx, already_corrected);
 [pooled.all, pooled.n_all] = pool_selected(acg, bin_edges, run_length, all_idx, already_corrected);
+pooled.all_index = all_idx;
 pooled.score_low = mean(score(low_idx), 'omitnan');
 pooled.score_high = mean(score(high_idx), 'omitnan');
 pooled.score_all = mean(score(score_ok), 'omitnan');
@@ -109,4 +110,5 @@ pooled.score_high = NaN;
 pooled.score_all = NaN;
 pooled.low_index = false(0, 1);
 pooled.high_index = false(0, 1);
+pooled.all_index = false(0, 1);
 end

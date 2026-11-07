@@ -67,7 +67,8 @@ assert(pooled.n_low == 2 && pooled.n_high == 2, ...
     'A run with no PPC entered a locking quartile.');
 assert(abs(pooled.low - 10) < 1e-9, 'Low-quartile pool did not keep the weak runs.');
 assert(abs(pooled.high - 40) < 1e-9, 'High-quartile pool did not keep the strong runs.');
-assert(pooled.n_all == 9, 'The run with no PPC was dropped from the all-runs pool.');
+assert(pooled.n_all == 9 && numel(pooled.all_index) == 9 && all(pooled.all_index), ...
+    'The run with no PPC was dropped from the all-runs pool.');
 assert(pooled.all > 40, 'The unlabeled run did not enter the all-runs pool.');
 
 power = [1 2 3 4 40 50 60 70]';
