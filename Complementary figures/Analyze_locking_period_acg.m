@@ -60,7 +60,9 @@
 % mean delta power. Predictors are the mean firing rate of those runs,
 % their mean PPC, the 0-50 ms burst, the first-peak and second-cycle
 % prominences, and the delta-band power of the half-mirrored
-% autocorrelogram after 100 ms.
+% autocorrelogram after 100 ms. A second model gives firing rate every
+% part of that variance it can explain, then splits only the remaining
+% R^2 among the other predictors.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -447,6 +449,8 @@ if plot_rate_scaled_peaks
         group_order, group_title, 'Mean delta power of the runs', 'delta power');
 end
 locking_acg.delta_power_model = fit_delta_power_contributions( ...
+    locking_acg, group_order, group_title);
+locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
     locking_acg, group_order, group_title);
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
@@ -1345,6 +1349,13 @@ if isfield(locking_acg, 'delta_power_model')
             report_power_model(model.groups.(group_order{g}));
         end
     end
+end
+if isfield(locking_acg, 'delta_power_model_beyond_rate')
+    beyond = locking_acg.delta_power_model_beyond_rate;
+    if ~isfield(beyond, 'all') || ~isfield(beyond.all, 'beyond_rsq')
+        beyond = fit_delta_power_beyond_rate(locking_acg, group_order, group_title, false);
+    end
+    report_beyond_rate_block(beyond, group_order);
 end
 end
 
@@ -2411,6 +2422,120 @@ end
 if do_plot
     plot_power_contributions(model, group_order, group_title, names);
 end
+end
+
+
+function model = fit_delta_power_beyond_rate(summary, group_order, group_title, do_plot)
+if nargin < 4
+    do_plot = true;
+end
+% Each predictor other than firing rate is replaced by its residual on
+% firing rate. Firing rate then receives all variance it shares with those
+% predictors. Their relative weights sum to the R^2 added beyond rate.
+model = struct();
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
+        || ~isfield(summary.all_neurons, 'model_power')
+    model.all = empty_power_fit('All neurons, beyond firing rate');
+    return
+end
+neurons = summary.all_neurons;
+centers = summary.centers(:).';
+delta_lag = summary.parameters.delta_lag;
+[X, y, names, kept] = power_model_design(neurons, centers, delta_lag);
+model.all = fit_beyond_rate_model(X, y, names, 'All neurons, beyond firing rate');
+model.groups = struct();
+for g = 1:numel(group_order)
+    in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
+    model.groups.(group_order{g}) = fit_beyond_rate_model( ...
+        X(in_group, :), y(in_group), names, [group_title{g}, ', beyond firing rate']);
+end
+if do_plot
+    plot_beyond_rate_contributions(model, group_order, group_title, names(2:end));
+end
+end
+
+
+function fit = fit_beyond_rate_model(X, y, names, label)
+if size(X, 2) < 2
+    fit = empty_power_fit(label);
+    return
+end
+rate = X(:, 1);
+[~, rate_rsq] = standardized_ols(rate, y);
+X_free = X;
+X_free(:, 2:end) = residualize_on(X(:, 2:end), rate);
+fit = fit_one_power_model(X_free, y, names, label);
+fit.rate_rsq = rate_rsq;
+fit.beyond_rsq = fit.rsq - rate_rsq;
+if fit.ok
+    report_beyond_rate(fit);
+end
+end
+
+
+function Z = residualize_on(X, rate)
+rate = rate(:);
+A = [ones(numel(rate), 1), rate];
+Z = X - A * (A \ X);
+end
+
+
+function report_beyond_rate(fit)
+disp(sprintf('  Firing rate alone R^2 = %.3g', fit.rate_rsq))
+disp(sprintf('  R^2 added beyond firing rate = %.3g', fit.beyond_rsq))
+disp('  Share of that added R^2, after removing the linear firing-rate part:')
+if ~isfinite(fit.beyond_rsq) || fit.beyond_rsq <= 0
+    return
+end
+for k = 2:numel(fit.names)
+    disp(sprintf('    %s: weight = %.3g (%.1f%% of the R^2 beyond rate)', ...
+        fit.names{k}, fit.weight(k), 100 * fit.weight(k) / fit.beyond_rsq))
+end
+end
+
+
+function report_beyond_rate_block(model, group_order)
+if isfield(model, 'all') && model.all.ok
+    report_power_model(model.all);
+    report_beyond_rate(model.all);
+end
+for g = 1:numel(group_order)
+    if isfield(model, 'groups') && isfield(model.groups, group_order{g}) ...
+            && model.groups.(group_order{g}).ok
+        report_power_model(model.groups.(group_order{g}));
+        report_beyond_rate(model.groups.(group_order{g}));
+    end
+end
+end
+
+
+function plot_beyond_rate_contributions(model, group_order, group_title, names)
+if ~model.all.ok || ~isfinite(model.all.beyond_rsq) || model.all.beyond_rsq <= 0
+    return
+end
+labels = [{'All neurons'}, group_title];
+keys = [{'all'}, group_order];
+pct = nan(numel(keys), numel(names));
+for i = 1:numel(keys)
+    if i == 1
+        fit = model.all;
+    else
+        fit = model.groups.(keys{i});
+    end
+    if ~fit.ok || ~isfinite(fit.beyond_rsq) || fit.beyond_rsq <= 0
+        continue
+    end
+    pct(i, :) = 100 * fit.weight(2:end)' / fit.beyond_rsq;
+end
+figure('Name', 'Delta power beyond firing rate', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.15 0.2 0.7 0.5])
+bar(pct)
+set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
+ylabel('Share of R^2 beyond firing rate (%)')
+legend(names, 'Location', 'eastoutside')
+title(sprintf('Rate-free contribution, added R^2 = %.2f, n = %d', ...
+    model.all.beyond_rsq, model.all.n))
+box off
 end
 
 
