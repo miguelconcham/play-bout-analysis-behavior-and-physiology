@@ -178,6 +178,21 @@ assert(abs(found.clusters(1).x0 - 0.195) < 1e-9 && abs(found.clusters(1).x1 - 0.
 assert(found.clusters(1).survives && found.clusters(1).p <= 0.05, ...
     'The planted cluster did not survive the sign-flip test.');
 
+centers = -1:0.01:1;
+osc = cos(2 * pi * 4 * centers);
+burst_only = zeros(size(centers));
+burst_only(abs(centers) <= 0.05) = 5;
+flat = ones(size(centers));
+fast = cos(2 * pi * 10 * centers);
+p_osc = folded_acg_delta_power(osc, centers, [0.2 0.5]);
+p_burst = folded_acg_delta_power(burst_only, centers, [0.2 0.5]);
+p_flat = folded_acg_delta_power(flat, centers, [0.2 0.5]);
+p_fast = folded_acg_delta_power(fast, centers, [0.2 0.5]);
+assert(p_flat < 1e-8, 'A flat autocorrelogram had delta-band power.');
+assert(p_burst < 1e-8, 'A burst inside 100 ms entered the delta-band power.');
+assert(p_osc > 0.2 && p_osc > 5 * p_fast, ...
+    'A 4 Hz autocorrelogram did not carry more 2-5 Hz power than a 10 Hz one.');
+
 disp('test_locking_period_acg passed')
 end
 

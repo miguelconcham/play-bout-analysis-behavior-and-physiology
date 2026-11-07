@@ -58,8 +58,9 @@
 % ratio, with their own y limit and the same low-versus-high cluster test.
 % The same all-runs autocorrelogram is then used in a linear model of
 % mean delta power. Predictors are the mean firing rate of those runs,
-% their mean PPC, the 0-50 ms burst, and the first-peak and second-cycle
-% prominences.
+% their mean PPC, the 0-50 ms burst, the first-peak and second-cycle
+% prominences, and the delta-band power of the half-mirrored
+% autocorrelogram after 100 ms.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -1330,7 +1331,9 @@ if plot_rate_scaled_peaks
 end
 if isfield(locking_acg, 'delta_power_model')
     model = locking_acg.delta_power_model;
-    if ~isfield(model, 'groups') || ~isfield(model.groups, 'delta')
+    has_acg_delta = isfield(model, 'all') && isfield(model.all, 'names') ...
+        && any(strcmp(model.all.names, 'ACG delta power, >100 ms'));
+    if ~isfield(model, 'groups') || ~isfield(model.groups, 'delta') || ~has_acg_delta
         model = fit_delta_power_contributions(locking_acg, group_order, group_title, false);
     end
     if model.all.ok
@@ -2385,8 +2388,9 @@ if nargin < 4
     do_plot = true;
 end
 % Mean delta power of the runs in the all-runs autocorrelogram, predicted
-% by their mean firing rate, their mean PPC, the 0-50 ms burst, and the
-% two delta-peak prominences of that autocorrelogram. One row per neuron.
+% by their mean firing rate, their mean PPC, the 0-50 ms burst, the two
+% delta-peak prominences, and the delta-band power of the half-mirrored
+% autocorrelogram after 100 ms. One row per neuron.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
@@ -2394,7 +2398,9 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks'
     return
 end
 neurons = summary.all_neurons;
-[X, y, names, kept] = power_model_design(neurons);
+centers = summary.centers(:).';
+delta_lag = summary.parameters.delta_lag;
+[X, y, names, kept] = power_model_design(neurons, centers, delta_lag);
 model.all = fit_one_power_model(X, y, names, 'All neurons');
 model.groups = struct();
 for g = 1:numel(group_order)
@@ -2408,12 +2414,14 @@ end
 end
 
 
-function [X, y, names, kept] = power_model_design(neurons)
-names = {'Firing rate', 'PPC', 'Burst, 0-50 ms', 'First-peak prominence', 'Second-cycle prominence'};
+function [X, y, names, kept] = power_model_design(neurons, centers, delta_lag)
+names = {'Firing rate', 'PPC', 'Burst, 0-50 ms', 'First-peak prominence', ...
+    'Second-cycle prominence', 'ACG delta power, >100 ms'};
 peaks = neurons.all_peaks;
+acg_delta = folded_acg_delta_power(neurons.all, centers, delta_lag);
 y_all = neurons.model_power(:);
 X_all = [neurons.model_fr(:), neurons.model_ppc(:), peaks.burst(:), ...
-    peaks.first_prominence(:), peaks.second_prominence(:)];
+    peaks.first_prominence(:), peaks.second_prominence(:), acg_delta(:)];
 kept = isfinite(y_all) & all(isfinite(X_all), 2) ...
     & peaks.first_measurable(:) & peaks.second_measurable(:);
 X = X_all(kept, :);
