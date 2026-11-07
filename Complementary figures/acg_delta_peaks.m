@@ -3,16 +3,23 @@ function peaks = acg_delta_peaks(acg_row, centers, smooth_n)
 %
 % The positive and negative lags are averaged. The burst is the mean level
 % from the first positive bin through 50 ms, measured before smoothing.
-% Oscillatory peaks are found with findpeaks on the Gaussian-smoothed
-% curve from 100 ms onward. smooth_n is the moving-average width in bins.
-% The Gaussian standard deviation is one quarter of that width, so the
-% center of a peak keeps more of its height than it did under a flat
-% average. Prominence is the height above the higher neighboring
-% valley, which keeps a bump on the decay and ignores a smooth shoulder.
-% The first peak is the earliest one. A second peak counts only when it
-% lies near twice that lag and the whole search window was observed.
-% Peaks within 50 ms of the right edge are left out, because findpeaks
-% treats the endpoint as a valley.
+% Oscillatory peaks are local maxima of the Gaussian-smoothed curve from
+% 100 ms onward. smooth_n is the moving-average width in bins. The
+% Gaussian standard deviation is one quarter of that width.
+%
+% A local maximum is a peak only when all three of these hold:
+%   the width at half-prominence is at least 40 ms, so a one-bin
+%   deflection is ignored;
+%   the prominence is at least a fifth of the 10-90% range of the
+%   smoothed curve in the search window;
+%   the curve does not rise above the maximum on both sides within
+%   200 ms. A bump inside a trough fails that last check, because both
+%   shoulders of the trough are higher. A peak on a decaying tail does
+%   not: only the side toward zero is higher.
+% The first peak is the earliest maximum that passes. A second peak
+% counts only when it lies near twice that lag, passes the same checks,
+% and the whole search window was observed. Peaks within 50 ms of the
+% right edge are left out, because findpeaks treats the endpoint as a valley.
 
 if nargin < 3 || isempty(smooth_n)
     smooth_n = 1;
@@ -21,6 +28,9 @@ burst_end = 0.05;
 search_start = 0.10;
 edge_margin = 0.05;
 min_distance = 0.15;
+min_width = 0.04;
+shoulder_window = 0.20;
+prominence_fraction = 0.20;
 second_scale = [1.7 2.3];
 
 peaks = empty_peaks();
@@ -52,8 +62,11 @@ if numel(y_seg) < 5
     return
 end
 peaks.first_measurable = true;
+level = y_seg(isfinite(y_seg));
+scale = prctile(level, 90) - prctile(level, 10);
 
-[pk, locs, ~, prom] = findpeaks(y_seg, t_seg, 'MinPeakDistance', min_distance);
+[pk, locs, ~, prom] = findpeaks(y_seg, t_seg, ...
+    'MinPeakDistance', min_distance, 'MinPeakWidth', min_width);
 if isempty(locs)
     peaks.first_prominence = 0;
     peaks.n_cycles = 0;
@@ -62,6 +75,19 @@ end
 [locs, order] = sort(locs(:));
 pk = pk(order);
 prom = prom(order);
+keep = false(numel(locs), 1);
+for i = 1:numel(locs)
+    keep(i) = peak_is_reliable(t_seg, y_seg, locs(i), pk(i), prom(i), ...
+        scale, shoulder_window, prominence_fraction);
+end
+locs = locs(keep);
+pk = pk(keep);
+prom = prom(keep);
+if isempty(locs)
+    peaks.first_prominence = 0;
+    peaks.n_cycles = 0;
+    return
+end
 peaks.first_present = true;
 peaks.first_lag = locs(1);
 peaks.first_height = pk(1);
@@ -89,6 +115,21 @@ peaks.second_lag = second_locs(pick);
 peaks.second_height = second_pk(pick);
 peaks.second_prominence = second_prom(pick);
 peaks.n_cycles = 2;
+end
+
+
+function keep = peak_is_reliable(t, y, loc, height, prom, scale, shoulder_window, prominence_fraction)
+if ~isfinite(prom) || ~isfinite(height) || ~isfinite(scale) || scale <= 0
+    keep = false;
+    return
+end
+if prom < prominence_fraction * scale
+    keep = false;
+    return
+end
+left = t < loc & t >= loc - shoulder_window;
+right = t > loc & t <= loc + shoulder_window;
+keep = ~(any(y(left) > height) && any(y(right) > height));
 end
 
 

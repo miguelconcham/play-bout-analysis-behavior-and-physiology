@@ -125,6 +125,18 @@ assert(quiet.first_measurable && ~quiet.first_present && quiet.first_prominence 
 assert(isnan(quiet.n_cycles) || quiet.n_cycles == 0, ...
     'A smooth decay was given two cycles.');
 
+t = abs(centers);
+trough = 0.15 * exp(-t / 0.35) + exp(-((t - 0.02) / 0.035) .^ 2);
+trough = trough - 0.10 * exp(-((t - 0.45) / 0.08) .^ 2);
+trough = trough + 0.025 * exp(-((t - 0.45) / 0.015) .^ 2);
+buried = acg_delta_peaks(trough, centers, 1);
+assert(buried.first_measurable && ~buried.first_present && buried.first_prominence == 0, ...
+    'A bump inside a trough was called a delta peak.');
+trough = trough + 0.45 * exp(-((t - 0.75) / 0.035) .^ 2);
+late = acg_delta_peaks(trough, centers, 1);
+assert(late.first_present && late.first_lag > 0.68 && late.first_lag < 0.82, ...
+    'A real peak after a trough bump was missed.');
+
 slow = synthetic_acg(centers, [0.02 0.70], [0.4 0.5]);
 one_cycle = acg_delta_peaks(slow, centers, 1);
 assert(one_cycle.first_present && one_cycle.first_lag > 0.60 && one_cycle.first_lag < 0.80, ...
