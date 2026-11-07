@@ -16,10 +16,14 @@ function peaks = acg_delta_peaks(acg_row, centers, smooth_n)
 %   200 ms. A bump inside a trough fails that last check, because both
 %   shoulders of the trough are higher. A peak on a decaying tail does
 %   not: only the side toward zero is higher.
-% The first peak is the earliest maximum that passes. A second peak
-% counts only when it lies near twice that lag, passes the same checks,
-% and the whole search window was observed. Peaks within 50 ms of the
-% right edge are left out, because findpeaks treats the endpoint as a valley.
+% The first peak is the earliest maximum in the delta period, 200-500 ms.
+% A maximum before 200 ms is a faster event. It is kept as the first peak
+% only when no maximum lies in that delta period; otherwise the delta
+% maximum is the first peak and the early one is not its second cycle.
+% A second peak counts only when it lies near twice the chosen lag, passes
+% the same checks, and the whole search window was observed. Peaks within
+% 50 ms of the right edge are left out, because findpeaks treats the
+% endpoint as a valley.
 
 if nargin < 3 || isempty(smooth_n)
     smooth_n = 1;
@@ -31,6 +35,7 @@ min_distance = 0.15;
 min_width = 0.04;
 shoulder_window = 0.20;
 prominence_fraction = 0.20;
+delta_period = [0.20 0.50];
 second_scale = [1.7 2.3];
 
 peaks = empty_peaks();
@@ -88,11 +93,17 @@ if isempty(locs)
     peaks.n_cycles = 0;
     return
 end
+in_delta = locs >= delta_period(1) & locs <= delta_period(2);
+if any(in_delta)
+    first_pick = find(in_delta, 1, 'first');
+else
+    first_pick = 1;
+end
 peaks.first_present = true;
-peaks.first_lag = locs(1);
-peaks.first_height = pk(1);
-peaks.first_prominence = prom(1);
-tau = locs(1);
+peaks.first_lag = locs(first_pick);
+peaks.first_height = pk(first_pick);
+peaks.first_prominence = prom(first_pick);
+tau = locs(first_pick);
 second_lo = second_scale(1) * tau;
 second_hi = second_scale(2) * tau;
 peaks.second_measurable = second_hi <= t_seg(end);
