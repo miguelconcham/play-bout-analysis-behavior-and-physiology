@@ -49,6 +49,8 @@
 % so an increase sits above that line. The panel against PPC or delta power
 % still connects the two tails of each neuron. A second
 % cycle that the runs are too short to measure is left out of the pair.
+% Delta-band power of the half-mirrored autocorrelogram after 100 ms is
+% paired in those same low-versus-high panels.
 % The sum-to-1 scaling is not a division by firing rate. Set
 % plot_rate_scaled_peaks to also score the same peaks on
 % (pair counts / overlap) / (firing rate of those runs ^ 2 * bin width).
@@ -455,8 +457,8 @@ if plot_rate_scaled_peaks
         group_order, group_title, locking_labels, power_labels, delta_lag, ...
         skip_abs_lag, smooth_n, curve_colors, acg_cluster_alpha, acg_cluster_perm);
 end
-locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order);
-power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order);
+locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order, delta_lag);
+power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order, delta_lag);
 plot_paired_peak_scores(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking');
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
@@ -467,9 +469,9 @@ plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
     'delta power', 'delta power');
 if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(locking_acg, bin_w, centers, smooth_n, ...
-        group_order, group_title, 'Mean PPC of the runs', 'locking');
+        group_order, group_title, 'Mean PPC of the runs', 'locking', delta_lag);
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
-        group_order, group_title, 'Mean delta power of the runs', 'delta power');
+        group_order, group_title, 'Mean delta power of the runs', 'delta power', delta_lag);
 end
 locking_acg.delta_power_model = fit_delta_power_contributions( ...
     locking_acg, group_order, group_title);
@@ -888,27 +890,66 @@ box off
 end
 
 
-function summary = add_peak_scores(summary, centers, smooth_n, group_order)
+function summary = add_peak_scores(summary, centers, smooth_n, group_order, delta_lag)
+if nargin < 5 || isempty(delta_lag)
+    delta_lag = [0.2 0.5];
+end
 names = [group_order, {'all_neurons'}];
 for k = 1:numel(names)
     if ~isfield(summary, names{k}) || ~isfield(summary.(names{k}), 'low')
         continue
     end
-    summary.(names{k}) = score_condition_acgs(summary.(names{k}), centers, smooth_n);
+    summary.(names{k}) = score_condition_acgs(summary.(names{k}), centers, smooth_n, delta_lag);
 end
 end
 
 
-function group = score_condition_acgs(group, centers, smooth_n)
+function summary = attach_missing_acg_delta(summary, centers, group_order, delta_lag)
+if nargin < 4 || isempty(delta_lag)
+    delta_lag = [0.2 0.5];
+end
+names = [group_order, {'all_neurons'}];
+for k = 1:numel(names)
+    if ~isfield(summary, names{k})
+        continue
+    end
+    summary.(names{k}) = attach_group_acg_delta(summary.(names{k}), centers, delta_lag);
+end
+end
+
+
+function group = attach_group_acg_delta(group, centers, delta_lag)
+curve_names = {'low', 'high', 'all'};
+for c = 1:numel(curve_names)
+    peaks_name = [curve_names{c}, '_peaks'];
+    if ~isfield(group, peaks_name) || ~isfield(group, curve_names{c})
+        continue
+    end
+    if isfield(group.(peaks_name), 'acg_delta')
+        continue
+    end
+    group.(peaks_name).acg_delta = folded_acg_delta_power( ...
+        group.(curve_names{c}), centers, delta_lag);
+end
+end
+
+
+function group = score_condition_acgs(group, centers, smooth_n, delta_lag)
+if nargin < 4 || isempty(delta_lag)
+    delta_lag = [0.2 0.5];
+end
 curve_names = {'low', 'high', 'all'};
 for c = 1:numel(curve_names)
     group.([curve_names{c}, '_peaks']) = score_acg_matrix( ...
-        group.(curve_names{c}), centers, smooth_n);
+        group.(curve_names{c}), centers, smooth_n, delta_lag);
 end
 end
 
 
-function scores = score_acg_matrix(acg, centers, smooth_n)
+function scores = score_acg_matrix(acg, centers, smooth_n, delta_lag)
+if nargin < 4 || isempty(delta_lag)
+    delta_lag = [0.2 0.5];
+end
 n = size(acg, 1);
 scores.burst = nan(n, 1);
 scores.first_measurable = false(n, 1);
@@ -920,6 +961,7 @@ scores.second_present = false(n, 1);
 scores.second_lag = nan(n, 1);
 scores.second_prominence = nan(n, 1);
 scores.n_cycles = nan(n, 1);
+scores.acg_delta = folded_acg_delta_power(acg, centers, delta_lag);
 for row = 1:n
     peaks = acg_delta_peaks(acg(row, :), centers, smooth_n);
     scores.burst(row) = peaks.burst;
@@ -950,19 +992,12 @@ point_keep = ~strcmp(group_order, 'delta');
 point_order = group_order(point_keep);
 point_title = group_title(point_keep);
 point_colors = colors(point_keep, :);
-measures = {'burst', 'first_prominence', 'second_prominence'};
-measure_labels = { ...
-    'Burst level, 0-50 ms', ...
-    'First-peak prominence', ...
-    'Second-cycle prominence'};
+[measures, measure_labels] = paired_level_measures(unit_label);
 if isempty(unit_label)
     scale_label = 'sum-to-1 normalized autocorrelogram';
     figure_name = ['Paired ACG peaks, ', split_name, ', sum-to-1'];
 else
     scale_label = 'rate ratio (Poisson = 1)';
-    for m = 1:numel(measure_labels)
-        measure_labels{m} = [measure_labels{m}, ' (ratio)'];
-    end
     figure_name = ['Paired ACG peaks, ', split_name, ', rate ratio'];
 end
 report_peak_tests(summary, group_order, group_title, score_label, split_name, unit_label);
@@ -974,7 +1009,7 @@ lag_measures = {'', 'first_lag', 'second_lag'};
 lag_labels = {'', 'First-peak latency (s)', 'Second-cycle latency (s)'};
 for m = 1:numel(measures)
     [y_low, y_high, ok] = paired_peak_values(neurons.low_peaks, neurons.high_peaks, measures{m});
-    subplot(3, n_col, n_col * (m - 1) + 1)
+    subplot(numel(measures), n_col, n_col * (m - 1) + 1)
     plot_paired_categories(neurons.lock_group(ok), y_low(ok), y_high(ok), ...
         neurons.firing_rate(ok), point_order, point_colors, measure_labels{m})
     change = paired_change_stats(y_low(ok), y_high(ok), ...
@@ -982,16 +1017,16 @@ for m = 1:numel(measures)
     title(sprintf(['All neurons, n = %d\nmedian high-low %.3g\n' ...
         'two-sided signrank p = %.3g\none-sided increase p = %.3g'], ...
         change.n, change.median_delta, change.p_two, change.p_increase))
-    subplot(3, n_col, n_col * (m - 1) + 2)
+    subplot(numel(measures), n_col, n_col * (m - 1) + 2)
     plot_paired_against_score(neurons.lock_group(ok), ...
         neurons.score_low(ok), neurons.score_high(ok), y_low(ok), y_high(ok), ...
         neurons.firing_rate(ok), point_order, point_colors, score_label, measure_labels{m})
     title(sprintf('All neurons\nSpearman rho = %.3g, two-sided p = %.3g', ...
         change.rho, change.p_rho))
-    if n_col == 3 && m > 1
+    if n_col == 3 && m > 1 && m <= numel(lag_measures)
         [lag_low, lag_high, lag_ok] = paired_peak_values( ...
             neurons.low_peaks, neurons.high_peaks, lag_measures{m});
-        subplot(3, n_col, n_col * m)
+        subplot(numel(measures), n_col, n_col * m)
         plot_paired_categories(neurons.lock_group(lag_ok), lag_low(lag_ok), lag_high(lag_ok), ...
             neurons.firing_rate(lag_ok), point_order, point_colors, lag_labels{m})
         lag_change = paired_change_stats(lag_low(lag_ok), lag_high(lag_ok), ...
@@ -1019,17 +1054,16 @@ end
 
 
 function plot_paired_by_lock_group(neurons, group_order, group_title, colors, split_name, scale_label, scale_tag)
-row_measures = {'burst', 'first_prominence', 'second_prominence', 'first_lag', 'second_lag'};
-row_labels = { ...
-    'Burst level, 0-50 ms', ...
-    'First-peak prominence', ...
-    'Second-cycle prominence', ...
-    'First-peak latency (s)', ...
-    'Second-cycle latency (s)'};
-side_names = { ...
-    'one-sided increase p', 'one-sided increase p', 'one-sided increase p', ...
-    'one-sided later p', 'one-sided later p'};
-units = {'', '', '', ' s', ' s'};
+if strcmp(scale_tag, 'rate ratio')
+    ratio_label = 'ratio';
+else
+    ratio_label = '';
+end
+[level_measures, level_labels, level_sides, level_units] = paired_level_measures(ratio_label);
+row_measures = [level_measures, {'first_lag', 'second_lag'}];
+row_labels = [level_labels, {'First-peak latency (s)', 'Second-cycle latency (s)'}];
+side_names = [level_sides, {'one-sided later p', 'one-sided later p'}];
+units = [level_units, {' s', ' s'}];
 panel_names = [group_order, {'all'}];
 panel_titles = [group_title, {'All neurons'}];
 for c = 1:numel(panel_names)
@@ -1101,6 +1135,23 @@ if show_xlabel
     xlabel('Low 25%')
 end
 box off
+end
+
+
+function [measures, labels, side_names, units] = paired_level_measures(unit_label)
+measures = {'burst', 'first_prominence', 'second_prominence', 'acg_delta'};
+labels = { ...
+    'Burst level, 0-50 ms', ...
+    'First-peak prominence', ...
+    'Second-cycle prominence', ...
+    'ACG delta power, >100 ms'};
+side_names = repmat({'one-sided increase p'}, 1, numel(measures));
+units = repmat({''}, 1, numel(measures));
+if nargin >= 1 && ~isempty(unit_label)
+    for m = 1:numel(labels)
+        labels{m} = [labels{m}, ' (', unit_label, ')'];
+    end
+end
 end
 
 
@@ -1194,23 +1245,18 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low_peaks'
     return
 end
 neurons = summary.all_neurons;
-measures = {'burst', 'first_prominence', 'second_prominence'};
-measure_labels = { ...
-    'Burst level, 0-50 ms', ...
-    'First-peak prominence', ...
-    'Second-cycle prominence'};
+if isempty(unit_label)
+    [measures, measure_labels] = paired_level_measures('');
+else
+    [measures, measure_labels] = paired_level_measures('ratio');
+end
 lag_measures = {'first_lag', 'second_lag'};
 lag_labels = {'First-peak latency (s)', 'Second-cycle latency (s)'};
-if ~isempty(unit_label)
-    for m = 1:numel(measure_labels)
-        measure_labels{m} = [measure_labels{m}, ' (ratio)'];
-    end
-end
 disp_block(['Paired tests, ', split_name, ': ', scale_label])
 for m = 1:numel(measures)
     report_paired_increase(summary, neurons, group_order, group_title, ...
         measures{m}, measure_labels{m}, split_name, score_label, scale_label);
-    if isempty(unit_label) && m > 1
+    if isempty(unit_label) && m > 1 && (m - 1) <= numel(lag_measures)
         report_paired_latency(summary, neurons, group_order, group_title, ...
             lag_measures{m - 1}, lag_labels{m - 1}, split_name, score_label, scale_label);
     end
@@ -1261,14 +1307,16 @@ if plot_rate_scaled_peaks
         skip_abs_lag, smooth_n, curve_colors, cluster_alpha, cluster_perm);
 end
 if ~isfield(locking_acg, 'all_neurons') || ~isfield(locking_acg.all_neurons, 'low_peaks')
-    locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order);
-    power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order);
+    locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order, delta_lag);
+    power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order, delta_lag);
 elseif isfield(locking_acg, 'delta') && ~isfield(locking_acg.delta, 'low_peaks')
-    locking_acg.delta = score_condition_acgs(locking_acg.delta, centers, smooth_n);
+    locking_acg.delta = score_condition_acgs(locking_acg.delta, centers, smooth_n, delta_lag);
     if isfield(power_acg, 'delta')
-        power_acg.delta = score_condition_acgs(power_acg.delta, centers, smooth_n);
+        power_acg.delta = score_condition_acgs(power_acg.delta, centers, smooth_n, delta_lag);
     end
 end
+locking_acg = attach_missing_acg_delta(locking_acg, centers, group_order, delta_lag);
+power_acg = attach_missing_acg_delta(power_acg, centers, group_order, delta_lag);
 plot_paired_peak_scores(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking');
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
@@ -1279,9 +1327,9 @@ plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
     'delta power', 'delta power');
 if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(locking_acg, bin_w, centers, smooth_n, ...
-        group_order, group_title, 'Mean PPC of the runs', 'locking');
+        group_order, group_title, 'Mean PPC of the runs', 'locking', delta_lag);
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
-        group_order, group_title, 'Mean delta power of the runs', 'delta power');
+        group_order, group_title, 'Mean delta power of the runs', 'delta power', delta_lag);
 end
 model_has_delta = isfield(locking_acg, 'delta_power_model') ...
     && isfield(locking_acg.delta_power_model, 'groups') ...
@@ -1360,15 +1408,17 @@ if plot_rate_scaled_peaks
         power_labels, 'delta power', centers, params.delta_lag, skip_abs_lag, ...
         smooth_n, cluster_alpha, cluster_perm);
 end
+locking_acg = attach_missing_acg_delta(locking_acg, centers, group_order, params.delta_lag);
+power_acg = attach_missing_acg_delta(power_acg, centers, group_order, params.delta_lag);
 report_peak_tests(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking', '');
 report_peak_tests(power_acg, group_order, group_title, ...
     'Mean delta power of the runs', 'delta power', '');
 if plot_rate_scaled_peaks
     locking_hz = add_peak_scores(rate_scale_summary(locking_acg, bin_w, group_order), ...
-        centers, smooth_n, group_order);
+        centers, smooth_n, group_order, params.delta_lag);
     power_hz = add_peak_scores(rate_scale_summary(power_acg, bin_w, group_order), ...
-        centers, smooth_n, group_order);
+        centers, smooth_n, group_order, params.delta_lag);
     report_peak_tests(locking_hz, group_order, group_title, ...
         'Mean PPC of the runs', 'locking', 'ratio');
     report_peak_tests(power_hz, group_order, group_title, ...
@@ -1927,9 +1977,9 @@ end
 end
 
 
-function plot_rate_scaled_peaks_for(summary, bin_w, centers, smooth_n, group_order, group_title, score_label, split_name)
+function plot_rate_scaled_peaks_for(summary, bin_w, centers, smooth_n, group_order, group_title, score_label, split_name, delta_lag)
 scaled = rate_scale_summary(summary, bin_w, group_order);
-scaled = add_peak_scores(scaled, centers, smooth_n, group_order);
+scaled = add_peak_scores(scaled, centers, smooth_n, group_order, delta_lag);
 plot_paired_peak_scores(scaled, group_order, group_title, score_label, split_name, 'ratio');
 end
 
