@@ -2766,39 +2766,10 @@ if ~isempty(model.all.names)
     names = model.all.names;
 end
 labels = [{'All neurons'}, group_title];
-keys = [{'all'}, group_order];
-weights = nan(numel(keys), numel(names));
-for i = 1:numel(keys)
-    if i == 1
-        fit = model.all;
-    else
-        fit = model.groups.(keys{i});
-    end
-    if ~fit.ok
-        continue
-    end
-    weights(i, :) = values_in_name_order(fit, names, 'weight');
-end
-figure('Name', figure_name, 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.08 0.15 0.84 0.62])
-subplot(1, 2, 1)
-bar(model.all.weight(:))
-set(gca, 'XTick', 1:numel(names), 'XTickLabel', names, 'XTickLabelRotation', 30)
-ylabel('Contribution to delta-power R^2')
-title(sprintf('All neurons, n = %d\nrate R^2 = %.2f, added R^2 = %.2f', ...
-    model.all.n, model.all.rate_rsq, model.all.beyond_rsq))
-box off
-subplot(1, 2, 2)
-bar(weights)
-set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
-ylabel('Contribution to delta-power R^2')
-legend(names, 'Location', 'eastoutside')
-factor_name = category_name(model.all);
-if isempty(factor_name)
-    factor_name = 'category';
-end
-title(['Firing rate, ', lower(factor_name), ', then the rate-free predictors'])
-box off
+panel_title = sprintf('Predictors, n = %d, rate R^2 = %.2f, added R^2 = %.2f', ...
+    model.all.n, model.all.rate_rsq, model.all.beyond_rsq);
+plot_split_contributions(model, group_order, labels, names, 'weight', ...
+    'Contribution to delta-power R^2', figure_name, panel_title);
 end
 
 
@@ -3146,25 +3117,127 @@ if ~isempty(model.all.names)
     names = model.all.names;
 end
 labels = [{'All neurons'}, group_title];
+panel_title = sprintf('Predictors, R^2 = %.2f, n = %d', model.all.rsq, model.all.n);
+plot_split_contributions(model, group_order, labels, names, 'percent_of_rsq', ...
+    'Share of explained delta-power variance (%)', figure_name, panel_title);
+end
+
+
+function plot_split_contributions(model, group_order, labels, names, value_field, y_label, figure_name, panel_title)
 keys = [{'all'}, group_order];
-pct = nan(numel(keys), numel(names));
+[values, pvals] = contribution_matrix(model, keys, names, value_field);
+category = category_name(model.all);
+is_category = strcmp(names, category);
+predictors = names(~is_category);
+if isempty(category)
+    n_panels = 1;
+else
+    n_panels = 2;
+end
+figure('Name', figure_name, 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.06 0.16 0.88 0.58])
+subplot(1, n_panels, 1)
+bar_with_stars(values(:, ~is_category), pvals(:, ~is_category), labels)
+ylabel(y_label)
+title(panel_title)
+if ~isempty(predictors)
+    legend(predictors, 'Location', 'northeast')
+end
+if isempty(category)
+    return
+end
+subplot(1, n_panels, 2)
+bar_with_stars(values(:, is_category), pvals(:, is_category), labels)
+ylabel(y_label)
+title(category)
+end
+
+
+function [values, pvals] = contribution_matrix(model, keys, names, value_field)
+values = nan(numel(keys), numel(names));
+pvals = nan(numel(keys), numel(names));
 for i = 1:numel(keys)
     if i == 1
         fit = model.all;
-    else
+    elseif isfield(model, 'groups') && isfield(model.groups, keys{i})
         fit = model.groups.(keys{i});
-    end
-    if ~fit.ok
+    else
         continue
     end
-    pct(i, :) = values_in_name_order(fit, names, 'percent_of_rsq');
+    if ~isfield(fit, 'ok') || ~fit.ok
+        continue
+    end
+    values(i, :) = values_in_name_order(fit, names, value_field);
+    pvals(i, :) = contribution_p_in_order(fit, names);
 end
-figure('Name', figure_name, 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.15 0.2 0.7 0.5])
-bar(pct)
-set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
-ylabel('Share of explained delta-power variance (%)')
-legend(names, 'Location', 'eastoutside')
-title(sprintf('All-runs autocorrelogram, R^2 = %.2f, n = %d', model.all.rsq, model.all.n))
+end
+
+
+function row = contribution_p_in_order(fit, names)
+row = nan(1, numel(names));
+for k = 1:numel(names)
+    if strcmp(names{k}, 'Session') || strcmp(names{k}, 'Neuron')
+        if isfield(fit, 'p_factor')
+            row(k) = fit.p_factor;
+        end
+        continue
+    end
+    hit = find(strcmp(fit.names, names{k}), 1);
+    if ~isempty(hit) && isfield(fit, 'p_beta') && hit <= numel(fit.p_beta)
+        row(k) = fit.p_beta(hit);
+    end
+end
+end
+
+
+function bar_with_stars(values, pvals, x_labels)
+if isempty(values)
+    return
+end
+bars = bar(values);
+set(gca, 'XTick', 1:numel(x_labels), 'XTickLabel', x_labels, 'XTickLabelRotation', 20)
 box off
+n_groups = size(values, 1);
+n_series = numel(bars);
+group_width = 0.8;
+for s = 1:n_series
+    if isprop(bars(s), 'XEndPoints')
+        xs = bars(s).XEndPoints;
+    else
+        offset = ((s - 1) - (n_series - 1) / 2) * (group_width / max(n_series, 1));
+        xs = (1:n_groups) + offset;
+    end
+    for i = 1:n_groups
+        mark = significance_stars(pvals(i, s));
+        height = values(i, s);
+        if isempty(mark) || ~isfinite(height)
+            continue
+        end
+        text(xs(i), height, mark, 'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', 'bottom', 'FontSize', 9)
+    end
+end
+finite_heights = values(isfinite(values));
+if isempty(finite_heights)
+    top = 1;
+else
+    top = max(finite_heights);
+end
+if ~isfinite(top) || top <= 0
+    top = 1;
+end
+ylim([0, top * 1.22])
+end
+
+
+function mark = significance_stars(p)
+if ~isfinite(p) || p >= 0.05
+    mark = '';
+elseif p < 0.001
+    mark = '***';
+elseif p < 0.01
+    mark = '**';
+else
+    mark = '*';
+end
 end
