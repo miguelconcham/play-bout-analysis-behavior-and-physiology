@@ -61,12 +61,12 @@
 % the 0-50 ms burst, the first-peak and second-cycle prominences, and
 % the delta-band power of the half-mirrored autocorrelogram after 100 ms.
 % PPC is left out: its estimate depends on delta power, so a coefficient
-% on PPC would reuse the outcome. One session-by-channel factor absorbs
-% the LFP level of each recording channel. Session and channel are not
-% separate terms: a channel number repeats across recordings, and the
-% session mean is already contained in its channels. A second model gives
-% firing rate every part of that variance it can explain, then splits only
-% the remaining R^2 among the other predictors.
+% on PPC would reuse the outcome. A session factor absorbs the power
+% level shared by every neuron in a recording. Channel and neuron are
+% not factors: channel gain is not the comparison of interest, and one
+% row per neuron cannot also carry a neuron intercept. A second model
+% gives firing rate every part of that variance it can explain, then
+% splits only the remaining R^2 among the other predictors.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -340,14 +340,13 @@ for f = 1:numel(parsing_files)
             this_rate = neuron_run_rate(rt);
             this_ppc = rt.phase_entrainment(:, ppc_col);
             this_power = run_delta_power(rt);
-            this_channel = neuron_channel(ci, nn);
             run_means = all_run_means(rt, acg, run_length, this_ppc, this_power);
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
                 this_ppc, this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
                 acg_raw.(source_order{g}) = append_pooled( ...
                     acg_raw.(source_order{g}), pooled, animal_code, this_id, this_area, ...
-                    this_rate, tail_rate_struct(rt, pooled), run_means, this_channel);
+                    this_rate, tail_rate_struct(rt, pooled), run_means);
                 n_kept(g) = n_kept(g) + 1;
             else
                 n_unsplit(g) = n_unsplit(g) + 1;
@@ -358,7 +357,7 @@ for f = 1:numel(parsing_files)
             if split_is_usable(pooled_power)
                 acg_power.(source_order{g}) = append_pooled( ...
                     acg_power.(source_order{g}), pooled_power, animal_code, this_id, this_area, ...
-                    this_rate, tail_rate_struct(rt, pooled_power), run_means, this_channel);
+                    this_rate, tail_rate_struct(rt, pooled_power), run_means);
                 n_kept_power(g) = n_kept_power(g) + 1;
             else
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
@@ -551,7 +550,6 @@ for g = 1:numel(group_order)
     block.model_fr = zeros(0, 1);
     block.model_ppc = zeros(0, 1);
     block.model_power = zeros(0, 1);
-    block.channel = zeros(0, 1);
     block.session = {};
     block.cluster_id = zeros(0, 1);
     block.area = {};
@@ -567,7 +565,7 @@ ok = pooled.n_low >= 1 && pooled.n_high >= 1 ...
 end
 
 
-function block = append_pooled(block, pooled, animal_code, this_id, this_area, firing_rate, tail_rates, run_means, this_channel)
+function block = append_pooled(block, pooled, animal_code, this_id, this_area, firing_rate, tail_rates, run_means)
 row = block.n + 1;
 block.n = row;
 block.low(row, :) = pooled.low;
@@ -586,7 +584,6 @@ block.rate_all(row, 1) = tail_rates.all;
 block.model_fr(row, 1) = run_means.fr;
 block.model_ppc(row, 1) = run_means.ppc;
 block.model_power(row, 1) = run_means.power;
-block.channel(row, 1) = this_channel;
 block.session{row, 1} = animal_code;
 block.cluster_id(row, 1) = this_id;
 block.area{row, 1} = this_area;
@@ -642,7 +639,6 @@ for g = 1:numel(group_order)
     summary.(name).model_fr = acg_raw.(name).model_fr(keep);
     summary.(name).model_ppc = acg_raw.(name).model_ppc(keep);
     summary.(name).model_power = acg_raw.(name).model_power(keep);
-    summary.(name).channel = acg_raw.(name).channel(keep);
     summary.(name) = record_delta_mass(summary.(name), curve_names, curve_labels, ...
         [group_title{g}, ', ', split_name], centers, delta_lag, split_name, ...
         skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
@@ -696,7 +692,6 @@ combined.rate_all = zeros(0, 1);
 combined.model_fr = zeros(0, 1);
 combined.model_ppc = zeros(0, 1);
 combined.model_power = zeros(0, 1);
-combined.channel = zeros(0, 1);
 combined.mass_low = zeros(0, 1);
 combined.mass_high = zeros(0, 1);
 combined.mass_all = zeros(0, 1);
@@ -726,7 +721,6 @@ for g = 1:numel(group_order)
     combined.model_fr = [combined.model_fr; summary.(name).model_fr]; %#ok<AGROW>
     combined.model_ppc = [combined.model_ppc; summary.(name).model_ppc]; %#ok<AGROW>
     combined.model_power = [combined.model_power; summary.(name).model_power]; %#ok<AGROW>
-    combined.channel = [combined.channel; summary.(name).channel]; %#ok<AGROW>
     combined.mass_low = [combined.mass_low; summary.(name).mass_low]; %#ok<AGROW>
     combined.mass_high = [combined.mass_high; summary.(name).mass_high]; %#ok<AGROW>
     combined.mass_all = [combined.mass_all; summary.(name).mass_all]; %#ok<AGROW>
@@ -2065,22 +2059,6 @@ end
 end
 
 
-function ch = neuron_channel(ci, nn)
-ch = NaN;
-if ~ismember('ch', ci.Properties.VariableNames)
-    return
-end
-ch = ci.ch(nn, :);
-if iscell(ch)
-    ch = ch{1};
-end
-ch = double(ch);
-if numel(ch) ~= 1
-    ch = NaN;
-end
-end
-
-
 function a = cluster_area_char(ci, nn)
 if ~ismember('area', ci.Properties.VariableNames)
     a = '';
@@ -2416,8 +2394,8 @@ end
 % by their mean firing rate, the 0-50 ms burst, the two delta-peak
 % prominences, and the delta-band power of the half-mirrored
 % autocorrelogram after 100 ms. PPC is omitted because its estimate
-% depends on delta power. Session and channel enter as one factor,
-% session-by-channel. One row per neuron.
+% depends on delta power. A session factor absorbs the power level
+% shared by the neurons in one recording. One row per neuron.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
@@ -2448,7 +2426,7 @@ end
 % Each predictor other than firing rate is replaced by its residual on
 % firing rate. Firing rate then receives all variance it shares with those
 % predictors. Their relative weights sum to the R^2 added beyond rate
-% and the session-by-channel factor. PPC is not among the predictors.
+% and the session factor. PPC is not among the predictors.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
@@ -2507,9 +2485,9 @@ end
 function report_beyond_rate(fit)
 disp(sprintf('  Firing rate alone R^2 = %.3g', fit.rate_rsq))
 if isfield(fit, 'factor_df') && fit.factor_df > 0 && isfinite(fit.control_rsq)
-    disp(sprintf(['  Firing rate plus session x channel R^2 = %.3g'], fit.control_rsq))
+    disp(sprintf(['  Firing rate plus session R^2 = %.3g'], fit.control_rsq))
     disp(sprintf(['  R^2 added by the rhythm predictors beyond firing rate ' ...
-        'and session x channel = %.3g'], fit.beyond_rsq))
+        'and session = %.3g'], fit.beyond_rsq))
 else
     disp(sprintf('  R^2 added beyond firing rate = %.3g', fit.beyond_rsq))
 end
@@ -2521,7 +2499,7 @@ if ~isfinite(fit.beyond_rsq) || fit.beyond_rsq <= 0
     return
 end
 for k = 2:numel(fit.names)
-    if strcmp(fit.names{k}, 'Session x channel')
+    if strcmp(fit.names{k}, 'Session')
         continue
     end
     disp(sprintf('    %s: weight = %.3g (%.1f%% of the added R^2)', ...
@@ -2580,7 +2558,7 @@ bar(weights)
 set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
 ylabel('Contribution to delta-power R^2')
 legend(names, 'Location', 'eastoutside')
-title('Firing rate, session x channel, then the rate-free predictors')
+title('Firing rate, session, then the rate-free predictors')
 box off
 end
 
@@ -2599,31 +2577,28 @@ kept = isfinite(y_all) & all(isfinite(X_all), 2) ...
     & peaks.first_measurable(:) & peaks.second_measurable(:);
 X = X_all(kept, :);
 y = y_all(kept);
-groups = session_channel_labels(neurons, kept);
+groups = session_labels(neurons, kept);
 end
 
 
-function groups = session_channel_labels(neurons, kept)
-if ~isfield(neurons, 'channel') || ~isfield(neurons, 'session')
+function groups = session_labels(neurons, kept)
+if ~isfield(neurons, 'session')
     groups = {};
     return
 end
 session = neurons.session(kept);
-channel = neurons.channel(kept);
-cluster_id = neurons.cluster_id(kept);
-n = numel(channel);
+n = numel(session);
 groups = cell(n, 1);
 for i = 1:n
     if iscell(session)
-        sess = char(string(session{i}));
+        value = session{i};
+        if iscell(value)
+            value = value{1};
+        end
     else
-        sess = char(string(session(i)));
+        value = session(i);
     end
-    if isfinite(channel(i))
-        groups{i} = sprintf('%s|ch%g', sess, channel(i));
-    else
-        groups{i} = sprintf('%s|neuron%g', sess, cluster_id(i));
-    end
+    groups{i} = char(string(value));
 end
 end
 
@@ -2640,7 +2615,7 @@ end
 groups = groups(:);
 if numel(groups) ~= n_rows
     error('Analyze_locking_period_acg:factor', ...
-        'Session-by-channel labels do not match the model rows.');
+        'Session labels do not match the model rows.');
 end
 [levels, ~, idx] = unique(groups, 'stable');
 n_levels = numel(levels);
@@ -2668,7 +2643,7 @@ n_dum = size(D, 2);
 if n_dum > 0 && fit.n < n_cont + n_dum + 2
     disp_block(['Delta power model, ', label])
     disp(['Delta power model, ', label, ': ', num2str(n_levels), ...
-        ' session-by-channel levels leave too few residual degrees of freedom. ', ...
+        ' session levels leave too few residual degrees of freedom. ', ...
         'The factor is omitted in this fit.'])
     D = zeros(fit.n, 0);
     n_dum = 0;
@@ -2678,7 +2653,7 @@ if fit.n < n_cont + n_dum + 2
     disp_block(['Delta power model, ', label])
     disp(['Delta power model, ', label, ': n = ', num2str(fit.n), ...
         ' is too small for ', num2str(n_cont), ' predictors and ', ...
-        num2str(n_dum), ' session-by-channel terms.'])
+        num2str(n_dum), ' session terms.'])
     return
 end
 sd = std(X, 0, 1);
@@ -2719,7 +2694,7 @@ if n_dum > 0
     fit.beta(end + 1, 1) = NaN;
     fit.t_beta(end + 1, 1) = NaN;
     fit.p_beta(end + 1, 1) = NaN;
-    fit.names{end + 1} = 'Session x channel';
+    fit.names{end + 1} = 'Session';
     df1 = n_dum;
     df2 = fit.n - n_cont - n_dum - 1;
     if df2 >= 1 && isfinite(fit.rsq) && fit.rsq < 1 && factor_unique >= 0
@@ -2829,12 +2804,12 @@ function report_power_model(fit)
 disp_block(['Delta power model, ', fit.label])
 disp(['Delta power model, ', fit.label, ', n = ', num2str(fit.n)])
 disp(sprintf('  Full R^2 = %.3g, F = %.3g, p = %.3g', fit.rsq, fit.F, fit.p_model))
-cont = ~strcmp(fit.names, 'Session x channel');
+cont = ~strcmp(fit.names, 'Session');
 disp(['  Predictor correlations (', strjoin(fit.names(cont), ', '), ')'])
 disp(fit.predictor_corr)
 for k = 1:numel(fit.names)
-    if strcmp(fit.names{k}, 'Session x channel')
-        disp(sprintf(['  Session x channel: %d levels, %d terms, ' ...
+    if strcmp(fit.names{k}, 'Session')
+        disp(sprintf(['  Session: %d levels, %d terms, ' ...
             'unique dR^2 = %.3g, relative weight = %.3g (%.1f%% of R^2), p = %.3g'], ...
             fit.n_factor_levels, fit.factor_df, fit.unique_rsq(k), ...
             fit.weight(k), fit.percent_of_rsq(k), fit.p_factor))
@@ -2898,8 +2873,8 @@ if strcmp(field_name, 'delta_power_model_beyond_rate') ...
         && ~isfield(model.all, 'beyond_rsq')
     return
 end
-has_channel = isfield(summary, 'all_neurons') && isfield(summary.all_neurons, 'channel');
-if has_channel && ~model_has_predictor(model, 'Session x channel')
+has_session = isfield(summary, 'all_neurons') && isfield(summary.all_neurons, 'session');
+if has_session && ~model_has_predictor(model, 'Session')
     return
 end
 tf = false;
