@@ -2450,7 +2450,7 @@ for g = 1:numel(group_order)
         X(in_group, :), y(in_group), names, [group_title{g}, ', beyond firing rate']);
 end
 if do_plot
-    plot_beyond_rate_contributions(model, group_order, group_title, names(2:end));
+    plot_beyond_rate_contributions(model, group_order, group_title, names);
 end
 end
 
@@ -2510,31 +2510,38 @@ end
 
 
 function plot_beyond_rate_contributions(model, group_order, group_title, names)
-if ~model.all.ok || ~isfinite(model.all.beyond_rsq) || model.all.beyond_rsq <= 0
+if ~model.all.ok || ~isfinite(model.all.beyond_rsq)
     return
 end
 labels = [{'All neurons'}, group_title];
 keys = [{'all'}, group_order];
-pct = nan(numel(keys), numel(names));
+weights = nan(numel(keys), numel(names));
 for i = 1:numel(keys)
     if i == 1
         fit = model.all;
     else
         fit = model.groups.(keys{i});
     end
-    if ~fit.ok || ~isfinite(fit.beyond_rsq) || fit.beyond_rsq <= 0
+    if ~fit.ok || numel(fit.weight) ~= numel(names)
         continue
     end
-    pct(i, :) = 100 * fit.weight(2:end)' / fit.beyond_rsq;
+    weights(i, :) = fit.weight(:)';
 end
 figure('Name', 'Delta power beyond firing rate', 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.15 0.2 0.7 0.5])
-bar(pct)
+    'Units', 'normalized', 'OuterPosition', [0.08 0.15 0.84 0.62])
+subplot(1, 2, 1)
+bar(model.all.weight(:))
+set(gca, 'XTick', 1:numel(names), 'XTickLabel', names, 'XTickLabelRotation', 30)
+ylabel('Contribution to delta-power R^2')
+title(sprintf('All neurons, n = %d\nrate R^2 = %.2f, added R^2 = %.2f', ...
+    model.all.n, model.all.rate_rsq, model.all.beyond_rsq))
+box off
+subplot(1, 2, 2)
+bar(weights)
 set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
-ylabel('Share of R^2 beyond firing rate (%)')
+ylabel('Contribution to delta-power R^2')
 legend(names, 'Location', 'eastoutside')
-title(sprintf('Rate-free contribution, added R^2 = %.2f, n = %d', ...
-    model.all.beyond_rsq, model.all.n))
+title('Firing rate, then the rate-free part of each predictor')
 box off
 end
 
