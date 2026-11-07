@@ -3,7 +3,7 @@ function test_locking_period_acg()
 %
 % Delta-lock labels, within-neuron locking quartiles, overlap-weighted
 % pooling, per-neuron ACG normalization, delta-cycle peak scores, and
-% within-run spike shuffles.
+% within-run spike shuffles, and power strata with equal spike counts.
 % Run this file by name after
 % add_repo_paths.
 
@@ -192,6 +192,26 @@ assert(p_flat < 1e-8, 'A flat autocorrelogram had delta-band power.');
 assert(p_burst < 1e-8, 'A burst inside 100 ms entered the delta-band power.');
 assert(p_osc > 0.2 && p_osc > 5 * p_fast, ...
     'A 4 Hz autocorrelogram did not carry more 2-5 Hz power than a 10 Hz one.');
+
+power = (1:4)';
+spikes = 50 * ones(4, 1);
+duration = ones(4, 1);
+plan = power_run_strata(power, spikes, duration, 50, 0.5);
+assert(plan.k == 4, 'Four equal runs were not four strata.');
+assert(isequal(plan.index, (1:4)'), 'Power order did not set the stratum index.');
+
+spikes = [30; 30; 30; 30];
+plan = power_run_strata(power, spikes, duration, 50, 0.5);
+assert(plan.k == 2, 'Runs of 30 spikes were not collapsed to two strata.');
+assert(sum(plan.index == 1) == 2 && sum(plan.index == 2) == 2, ...
+    'The two strata did not split the spike count in half.');
+
+plan = power_run_strata(power, 100 * ones(4, 1), 0.2 * ones(4, 1), 50, 0.5);
+assert(plan.k == 0, 'Runs shorter than 0.5 s still formed a stratum.');
+
+plan = power_run_strata([1; 2; 3], [80; 10; 10], [1; 1; 1], 50, 0.5);
+assert(plan.k == 1, 'A spike mass carried by one run was split across empty strata.');
+assert(all(plan.index == 1), 'The single stratum did not keep every run.');
 
 disp('test_locking_period_acg passed')
 end
