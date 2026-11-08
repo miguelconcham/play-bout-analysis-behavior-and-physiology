@@ -104,6 +104,9 @@
 % outcome after both have been adjusted for the other predictors and for
 % the category. The line is that model's prediction across the adjusted
 % range. The partial R^2 is marked with *, **, ***, or ns.
+% Before each fit, a row is removed when any predictor or the outcome
+% has a modified z-score above 3.5. That keeps one distant point from
+% inflating R^2 or stretching the scatter.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -2871,20 +2874,13 @@ end
 if do_plot && beyond.all.ok
     plot_beyond_rate_contributions(beyond, group_order, group_title, beyond.all.names, ...
         'Delta power strata beyond firing rate');
-    X_free = X;
-    X_free(:, 2:end) = residualize_on(X(:, 2:end), X(:, 1));
-    plot_ceteris_paribus(X_free, y, names, groups, 'Neuron', beyond.all);
+    plot_one_session_ceteris(X, y, names, groups, beyond.all, true, 'Neuron');
 end
 if do_plot
     for g = 1:numel(group_order)
         in_group = stratum_group_rows(lock_group, groups, group_order{g});
-        Xg = X(in_group, :);
-        if isempty(Xg)
-            continue
-        end
-        Xg(:, 2:end) = residualize_on(Xg(:, 2:end), Xg(:, 1));
-        plot_ceteris_paribus(Xg, y(in_group), names, ...
-            subset_groups(groups, in_group), 'Neuron', beyond.groups.(group_order{g}));
+        plot_one_session_ceteris(X(in_group, :), y(in_group), names, ...
+            subset_groups(groups, in_group), beyond.groups.(group_order{g}), true, 'Neuron');
     end
 end
 if do_plot && sequential.all.ok
@@ -3147,11 +3143,15 @@ end
 end
 
 
-function plot_one_session_ceteris(X, y, names, groups, fit, beyond_rate)
+function plot_one_session_ceteris(X, y, names, groups, fit, beyond_rate, factor_name)
+if nargin < 7 || isempty(factor_name)
+    factor_name = 'Session';
+end
+[X, y, groups] = drop_clear_outliers(X, y, groups);
 if beyond_rate && size(X, 2) >= 2 && ~isempty(X)
     X(:, 2:end) = residualize_on(X(:, 2:end), X(:, 1));
 end
-plot_ceteris_paribus(X, y, names, groups, 'Session', fit);
+plot_ceteris_paribus(X, y, names, groups, factor_name, fit);
 end
 
 
@@ -3165,6 +3165,10 @@ end
 use_override = nargin >= 7;
 if ~use_override
     D_override = [];
+end
+[X, y, groups, ~, keep] = drop_clear_outliers(X, y, groups);
+if use_override && ~isempty(D_override)
+    D_override = D_override(keep, :);
 end
 [Xs, ys, ready] = standardized_power_design(X, y, names, groups, factor_name, D_override, use_override);
 if ~ready
@@ -3499,13 +3503,14 @@ if size(X, 2) < 2
     fit = empty_power_fit(label);
     return
 end
+[X, y, groups, n_pre] = drop_clear_outliers(X, y, groups);
 rate = X(:, 1);
 [~, rate_rsq] = standardized_ols(rate, y);
 [D, ~] = factor_dummies(groups, size(X, 1));
 [~, control_rsq] = standardized_ols([rate, D], y);
 X_free = X;
 X_free(:, 2:end) = residualize_on(X(:, 2:end), rate);
-fit = fit_one_power_model(X_free, y, names, label, groups, factor_name);
+fit = fit_one_power_model(X_free, y, names, label, groups, factor_name, D, n_pre);
 fit.rate_rsq = rate_rsq;
 fit.control_rsq = control_rsq;
 fit.beyond_rsq = fit.rsq - control_rsq;
@@ -3519,6 +3524,7 @@ function fit = fit_sequential_strata_model(X, y, names, label, groups)
 % Gram-Schmidt order: firing rate, neuron, burst, ACG delta power,
 % first-peak prominence, second-cycle prominence. Each later block is
 % replaced by its residual on the current block.
+[X, y, groups, n_pre] = drop_clear_outliers(X, y, groups);
 order = {'Firing rate', 'Neuron', 'Burst, 0-50 ms', ...
     'ACG delta power, >100 ms', 'First-peak prominence', 'Second-cycle prominence'};
 cont_order = order(~strcmp(order, 'Neuron'));
@@ -3559,7 +3565,7 @@ if ~any(kept)
     fit = empty_power_fit(label);
     return
 end
-fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{2});
+fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{2}, n_pre);
 if ~fit.ok
     return
 end
@@ -3781,15 +3787,23 @@ D = D(:, std(D, 0, 1) > 0);
 end
 
 
-function fit = fit_one_power_model(X, y, names, label, groups, factor_name, D_override)
+function fit = fit_one_power_model(X, y, names, label, groups, factor_name, D_override, n_already_dropped)
 if nargin < 5
     groups = {};
 end
 if nargin < 6 || isempty(factor_name)
     factor_name = 'Session';
 end
+if nargin < 8 || isempty(n_already_dropped)
+    n_already_dropped = 0;
+end
 fit = empty_power_fit(label);
+[X, y, groups, n_dropped, keep] = drop_clear_outliers(X, y, groups);
 fit.n = size(X, 1);
+fit.n_outliers = n_already_dropped + n_dropped;
+if nargin >= 7 && ~isempty(D_override)
+    D_override = D_override(keep, :);
+end
 n_cont = numel(names);
 [D, n_levels] = factor_dummies(groups, fit.n);
 if nargin >= 7
@@ -3894,12 +3908,67 @@ fit.n_factor_levels = 0;
 fit.factor_df = 0;
 fit.p_factor = NaN;
 fit.control_rsq = NaN;
+fit.n_outliers = 0;
+end
+
+
+function [X, y, groups, n_dropped, keep] = drop_clear_outliers(X, y, groups)
+y = y(:);
+n = size(X, 1);
+if nargin < 3
+    groups = {};
+end
+keep = true(n, 1);
+if n >= 5
+    keep = ~clear_outlier_rows([X, y]);
+end
+keep = keep & all(isfinite(X), 2) & isfinite(y);
+n_dropped = nnz(~keep);
+X = X(keep, :);
+y = y(keep);
+if ~isempty(groups)
+    groups = groups(keep);
+end
+end
+
+
+function bad = clear_outlier_rows(M)
+bad = false(size(M, 1), 1);
+for k = 1:size(M, 2)
+    col = M(:, k);
+    ok = isfinite(col);
+    if nnz(ok) < 5
+        continue
+    end
+    sample = col(ok);
+    center = median(sample);
+    mad = median(abs(sample - center));
+    if mad > 0
+        modified_z = 0.6745 * (col - center) / mad;
+        bad = bad | (ok & abs(modified_z) > 3.5);
+        continue
+    end
+    q = quantile(sample, [0.25 0.75]);
+    spread = q(2) - q(1);
+    if spread > 0
+        bad = bad | (ok & (col < q(1) - 3 * spread | col > q(2) + 3 * spread));
+    end
+end
 end
 
 
 function [beta, rsq, Fstat, p_model, t_beta, p_beta] = standardized_ols(X, y)
 n = size(X, 1);
 k = size(X, 2);
+beta = nan(k, 1);
+t_beta = nan(k, 1);
+p_beta = nan(k, 1);
+rsq = NaN;
+Fstat = NaN;
+p_model = NaN;
+if n < 2
+    return
+end
 A = [ones(n, 1), X];
 coef = pinv(A) * y;
 beta = coef(2:end);
@@ -3965,6 +4034,11 @@ end
 function report_power_model(fit)
 disp_block(['Delta power model, ', fit.label])
 disp(['Delta power model, ', fit.label, ', n = ', num2str(fit.n)])
+if isfield(fit, 'n_outliers') && fit.n_outliers > 0
+    disp(sprintf(['  Removed %d clear outlier rows before the fit ' ...
+        '(modified z-score above 3.5 on a predictor or on the outcome).'], ...
+        fit.n_outliers))
+end
 disp(sprintf('  Full R^2 = %.3g, F = %.3g, p = %.3g', fit.rsq, fit.F, fit.p_model))
 report_sequential_added(fit)
 report_partial_r2(fit)
