@@ -94,6 +94,13 @@
 % At each step every later predictor is replaced by its residual on the
 % current one, so each keeps only variance the earlier predictors do
 % not explain. The one-row session model is unchanged.
+% The same predictors are fit again with mean PPC as the outcome. PPC is
+% the locking value, so it is not a predictor in that fit. The one-row
+% model keeps the session factor. The stratum model keeps the neuron
+% factor, including the beyond-rate and sequential versions. Those
+% figures open only when show_ppc_models is true. The one-row PPC model
+% can be drawn from the saved summary. Stratum PPC is stored only by a
+% full run, so the within-neuron PPC model needs that run once.
 % A reverse strata fit asks how much LFP delta power predicts entrainment.
 % The outcomes are folded autocorrelogram delta power and first-peak
 % prominence. Neuron is the category, firing rate is a covariate, and
@@ -163,6 +170,7 @@ show_neuron_examples = true;     % example neuron autocorrelograms and spectra
 show_acg_spectra = true;         % low tail against high tail spectra
 show_model_figures = true;       % contribution bars and partial-R^2 bars
 show_model_scatters = true;      % ceteris-paribus predictor scatters for each all-neuron model
+show_ppc_models = true;          % PPC contribution bars and ceteris-paribus scatters
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG, and each statistics block is written
@@ -193,7 +201,8 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'neuron_examples', show_neuron_examples, ...
     'acg_spectra', show_acg_spectra, ...
     'model_figures', show_model_figures, ...
-    'model_scatters', show_model_scatters));
+    'model_scatters', show_model_scatters, ...
+    'ppc_models', show_ppc_models));
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -414,7 +423,8 @@ for f = 1:numel(parsing_files)
             strata_rows = append_neuron_power_strata(strata_rows, acg, edges, centers, ...
                 run_length, this_power, rt, this_corrected, ...
                 max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
-                stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group);
+                stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
+                this_ppc);
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
                 this_ppc, this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
@@ -542,6 +552,13 @@ locking_acg.power_strata = strata_rows;
     fit_strata_power_models(strata_rows, group_order, group_title);
 locking_acg.power_to_entrainment = fit_power_to_entrainment( ...
     strata_rows, group_order, group_title);
+locking_acg.ppc_model = fit_ppc_contributions( ...
+    locking_acg, group_order, group_title);
+locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
+    locking_acg, group_order, group_title);
+[locking_acg.strata_ppc_model, locking_acg.strata_ppc_model_beyond_rate, ...
+    locking_acg.strata_ppc_model_sequential] = ...
+    fit_strata_ppc_models(strata_rows, group_order, group_title);
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -1446,7 +1463,14 @@ if isfield(locking_acg, 'power_strata')
         fit_strata_power_models(locking_acg.power_strata, group_order, group_title, true);
     locking_acg.power_to_entrainment = fit_power_to_entrainment( ...
         locking_acg.power_strata, group_order, group_title, true);
+    [locking_acg.strata_ppc_model, locking_acg.strata_ppc_model_beyond_rate, ...
+        locking_acg.strata_ppc_model_sequential] = ...
+        fit_strata_ppc_models(locking_acg.power_strata, group_order, group_title, true);
 end
+locking_acg.ppc_model = fit_ppc_contributions( ...
+    locking_acg, group_order, group_title);
+locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
+    locking_acg, group_order, group_title);
 end
 
 
@@ -1528,6 +1552,7 @@ else
 end
 report_or_fit_strata_models(locking_acg, group_order, group_title, false);
 report_or_fit_power_to_entrainment(locking_acg, group_order, group_title, false);
+report_or_fit_ppc_models(locking_acg, group_order, group_title, false);
 end
 
 
@@ -2890,6 +2915,131 @@ end
 end
 
 
+function [model, beyond, sequential] = fit_strata_ppc_models(strata, group_order, group_title, do_plot)
+if nargin < 4
+    do_plot = true;
+end
+model = struct();
+beyond = struct();
+sequential = struct();
+if ~isfield(strata, 'ppc')
+    disp_block('PPC model, All neurons, strata')
+    disp(['Stratum PPC is not in this summary. Run once with ' ...
+        'redraw_figures_only = false so each stratum stores its PPC.'])
+    model.all = empty_power_fit('All neurons, strata');
+    beyond.all = empty_power_fit('All neurons, strata, beyond firing rate');
+    sequential.all = empty_power_fit('All neurons, strata, sequential');
+    return
+end
+[X, y, groups, lock_group, names] = strata_regression_rows(strata, 'ppc');
+model.all = fit_one_power_model(X, y, names, 'All neurons, strata', groups, 'Neuron', [], 0, 'PPC');
+beyond.all = fit_beyond_rate_model(X, y, names, ...
+    'All neurons, strata, beyond firing rate', groups, 'Neuron', 'PPC');
+sequential.all = fit_sequential_strata_model(X, y, names, ...
+    'All neurons, strata, sequential', groups, 'PPC');
+model.groups = struct();
+beyond.groups = struct();
+sequential.groups = struct();
+for g = 1:numel(group_order)
+    in_group = stratum_group_rows(lock_group, groups, group_order{g});
+    local_groups = subset_groups(groups, in_group);
+    model.groups.(group_order{g}) = fit_one_power_model( ...
+        X(in_group, :), y(in_group), names, ...
+        [group_title{g}, ', strata'], local_groups, 'Neuron', [], 0, 'PPC');
+    beyond.groups.(group_order{g}) = fit_beyond_rate_model( ...
+        X(in_group, :), y(in_group), names, ...
+        [group_title{g}, ', strata, beyond firing rate'], ...
+        local_groups, 'Neuron', 'PPC');
+    sequential.groups.(group_order{g}) = fit_sequential_strata_model( ...
+        X(in_group, :), y(in_group), names, ...
+        [group_title{g}, ', strata, sequential'], local_groups, 'PPC');
+end
+model = tag_ppc_figures(model);
+beyond = tag_ppc_figures(beyond);
+sequential = tag_ppc_figures(sequential);
+if do_plot && model.all.ok
+    plot_power_contributions(model, group_order, group_title, model.all.names, 'PPC strata');
+    plot_ceteris_paribus(X, y, names, groups, 'Neuron', model.all);
+end
+if do_plot
+    for g = 1:numel(group_order)
+        in_group = stratum_group_rows(lock_group, groups, group_order{g});
+        plot_ceteris_paribus(X(in_group, :), y(in_group), names, ...
+            subset_groups(groups, in_group), 'Neuron', model.groups.(group_order{g}));
+    end
+end
+if do_plot && beyond.all.ok
+    plot_beyond_rate_contributions(beyond, group_order, group_title, beyond.all.names, ...
+        'PPC strata beyond firing rate');
+    plot_one_session_ceteris(X, y, names, groups, beyond.all, true, 'Neuron');
+end
+if do_plot
+    for g = 1:numel(group_order)
+        in_group = stratum_group_rows(lock_group, groups, group_order{g});
+        plot_one_session_ceteris(X(in_group, :), y(in_group), names, ...
+            subset_groups(groups, in_group), beyond.groups.(group_order{g}), true, 'Neuron');
+    end
+end
+if do_plot && sequential.all.ok
+    plot_power_contributions(sequential, group_order, group_title, sequential.all.names, ...
+        'PPC strata sequential');
+end
+end
+
+
+function model = tag_ppc_figures(model)
+if isfield(model, 'all')
+    model.all.figure_kind = 'ppc_models';
+end
+if ~isfield(model, 'groups')
+    return
+end
+fields = fieldnames(model.groups);
+for i = 1:numel(fields)
+    model.groups.(fields{i}).figure_kind = 'ppc_models';
+end
+end
+
+
+function report_or_fit_ppc_models(summary, group_order, group_title, do_plot)
+if ppc_family_ready(summary, 'ppc_model') && ~do_plot
+    report_power_model_block(summary.ppc_model, group_order);
+else
+    fit_ppc_contributions(summary, group_order, group_title, do_plot);
+end
+if ppc_family_ready(summary, 'ppc_model_beyond_rate') ...
+        && isfield(summary.ppc_model_beyond_rate.all, 'beyond_rsq') && ~do_plot
+    report_beyond_rate_block(summary.ppc_model_beyond_rate, group_order);
+else
+    fit_ppc_beyond_rate(summary, group_order, group_title, do_plot);
+end
+if ~isfield(summary, 'power_strata')
+    disp_block('PPC model, All neurons, strata')
+    disp('Power strata are not in this summary. Run the full script once.')
+    return
+end
+ready = ppc_family_ready(summary, 'strata_ppc_model') ...
+    && ppc_family_ready(summary, 'strata_ppc_model_beyond_rate') ...
+    && ppc_family_ready(summary, 'strata_ppc_model_sequential') ...
+    && isfield(summary.strata_ppc_model_sequential.all, 'sequential_added');
+if ready && ~do_plot
+    report_power_model_block(summary.strata_ppc_model, group_order);
+    report_beyond_rate_block(summary.strata_ppc_model_beyond_rate, group_order);
+    report_power_model_block(summary.strata_ppc_model_sequential, group_order);
+    return
+end
+fit_strata_ppc_models(summary.power_strata, group_order, group_title, do_plot);
+end
+
+
+function tf = ppc_family_ready(summary, field_name)
+tf = isfield(summary, field_name) && isfield(summary.(field_name), 'all') ...
+    && isfield(summary.(field_name).all, 'outcome_name') ...
+    && strcmp(summary.(field_name).all.outcome_name, 'PPC') ...
+    && isfield(summary.(field_name).all, 'ok');
+end
+
+
 function report_or_fit_strata_models(summary, group_order, group_title, do_plot)
 if ~isfield(summary, 'power_strata') || ~isfield(summary.power_strata, 'n') ...
         || summary.power_strata.n < 1
@@ -2916,20 +3066,23 @@ fit_strata_power_models(summary.power_strata, group_order, group_title, do_plot)
 end
 
 
-function [X, y, groups, lock_group, names] = strata_regression_rows(strata)
+function [X, y, groups, lock_group, names] = strata_regression_rows(strata, outcome_field)
+if nargin < 2 || isempty(outcome_field)
+    outcome_field = 'power';
+end
 names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
     'Second-cycle prominence', 'ACG delta power, >100 ms'};
 X = zeros(0, numel(names));
 y = zeros(0, 1);
 groups = {};
 lock_group = {};
-if ~isfield(strata, 'neuron') || isempty(strata.neuron)
+if ~isfield(strata, 'neuron') || isempty(strata.neuron) || ~isfield(strata, outcome_field)
     return
 end
 keep = rows_of_repeated_groups(strata.neuron, 2);
 X = [strata.rate(keep), strata.burst(keep), strata.first_prominence(keep), ...
     strata.second_prominence(keep), strata.acg_delta(keep)];
-y = strata.power(keep);
+y = strata.(outcome_field)(keep);
 groups = strata.neuron(keep);
 lock_group = strata.lock_group(keep);
 finite_row = isfinite(y) & all(isfinite(X), 2);
@@ -3156,7 +3309,7 @@ end
 
 
 function plot_ceteris_paribus(X, y, names, groups, factor_name, fit, D_override)
-if ~figure_selected('model_scatters') || ~isfield(fit, 'ok') || ~fit.ok
+if ~figure_selected(model_figure_kind(fit, 'model_scatters')) || ~isfield(fit, 'ok') || ~fit.ok
     return
 end
 if ~isfield(fit, 'label') || isempty(fit.label)
@@ -3180,7 +3333,7 @@ coef = pinv(A) * ys;
 beta = coef(2:end);
 n_col = min(3, n_cont);
 n_row = ceil(n_cont / n_col);
-figure('Name', ['Ceteris paribus, ', fit.label], 'Color', 'w', ...
+figure('Name', ['Ceteris paribus, ', ceteris_figure_label(fit)], 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.78])
 for k = 1:n_cont
     subplot(n_row, n_col, k)
@@ -3208,8 +3361,24 @@ for k = 1:n_cont
     ylabel('Adjusted outcome')
     box off
 end
-sgtitle({['Ceteris paribus, ', fit.label], ...
+sgtitle({['Ceteris paribus, ', ceteris_figure_label(fit)], ...
     'Other predictors and the category are held fixed. The line is the model prediction.'})
+end
+
+
+function label = ceteris_figure_label(fit)
+label = fit.label;
+if isfield(fit, 'outcome_name') && strcmp(fit.outcome_name, 'PPC')
+    label = ['PPC, ', fit.label];
+end
+end
+
+
+function kind = model_figure_kind(fit, default_kind)
+kind = default_kind;
+if isstruct(fit) && isfield(fit, 'figure_kind') && ~isempty(fit.figure_kind)
+    kind = fit.figure_kind;
+end
 end
 
 
@@ -3329,7 +3498,7 @@ keep = counts(idx) >= min_count;
 end
 
 
-function store = append_neuron_power_strata(store, acg, edges, centers, run_length, power, rt, already_corrected, smooth_n, delta_lag, refractory_s, min_spikes, min_lag_s, animal_code, cluster_id, lock_group)
+function store = append_neuron_power_strata(store, acg, edges, centers, run_length, power, rt, already_corrected, smooth_n, delta_lag, refractory_s, min_spikes, min_lag_s, animal_code, cluster_id, lock_group, ppc)
 if ~ismember('RunNumSpikes', rt.Properties.VariableNames) ...
         || size(acg, 1) ~= numel(run_length) || numel(power) ~= numel(run_length)
     store.n_at_k(1) = store.n_at_k(1) + 1;
@@ -3359,6 +3528,11 @@ for b = 1:plan.k
     duration = run_length(in);
     these_spikes = spikes(in);
     these_power = power(in);
+    these_ppc = nan(sum(in), 1);
+    if nargin >= 17 && numel(ppc) == numel(power)
+        taken = ppc(in);
+        these_ppc = taken(:);
+    end
     timed = isfinite(duration) & duration > 0 & isfinite(these_spikes) & these_spikes >= 0;
     powered = timed & isfinite(these_power);
     if ~any(powered) || sum(duration(timed)) <= 0
@@ -3370,6 +3544,12 @@ for b = 1:plan.k
     store.session{row, 1} = animal_code;
     store.lock_group{row, 1} = lock_group;
     store.power(row, 1) = sum(these_power(powered) .* duration(powered)) / sum(duration(powered));
+    ppc_ok = powered & isfinite(these_ppc);
+    if any(ppc_ok)
+        store.ppc(row, 1) = sum(these_ppc(ppc_ok) .* duration(ppc_ok)) / sum(duration(ppc_ok));
+    else
+        store.ppc(row, 1) = NaN;
+    end
     store.rate(row, 1) = sum(these_spikes(timed)) / sum(duration(timed));
     store.burst(row, 1) = peaks.burst;
     store.first_prominence(row, 1) = peaks.first_prominence;
@@ -3388,6 +3568,7 @@ store.neuron = {};
 store.session = {};
 store.lock_group = {};
 store.power = zeros(0, 1);
+store.ppc = zeros(0, 1);
 store.rate = zeros(0, 1);
 store.burst = zeros(0, 1);
 store.first_prominence = zeros(0, 1);
@@ -3410,6 +3591,91 @@ for i = 1:numel(candidates)
     if any(strcmp(fit.names, candidates{i}))
         name = candidates{i};
         return
+    end
+end
+end
+
+
+function model = fit_ppc_contributions(summary, group_order, group_title, do_plot)
+if nargin < 4
+    do_plot = true;
+end
+% Mean PPC of the runs in the all-runs autocorrelogram, predicted by
+% their mean firing rate, the 0-50 ms burst, the two delta-peak
+% prominences, and the delta-band power of the half-mirrored
+% autocorrelogram after 100 ms. The session factor absorbs the PPC
+% level shared by the neurons in one recording. One row per neuron.
+model = struct();
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
+        || ~isfield(summary.all_neurons, 'model_ppc')
+    disp_block('PPC model, All neurons')
+    disp('Mean PPC is not in this summary. Run the full script once.')
+    model.all = empty_power_fit('All neurons');
+    return
+end
+neurons = summary.all_neurons;
+centers = summary.centers(:).';
+delta_lag = summary.parameters.delta_lag;
+[X, y, names, kept, groups] = power_model_design(neurons, centers, delta_lag, 'model_ppc');
+model.all = fit_one_power_model(X, y, names, 'All neurons', groups, 'Session', [], 0, 'PPC');
+model.groups = struct();
+for g = 1:numel(group_order)
+    in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
+    model.groups.(group_order{g}) = fit_one_power_model( ...
+        X(in_group, :), y(in_group), names, group_title{g}, ...
+        subset_groups(groups, in_group), 'Session', [], 0, 'PPC');
+end
+model = tag_ppc_figures(model);
+if do_plot
+    plot_power_contributions(model, group_order, group_title, model.all.names, ...
+        'PPC contributions');
+    plot_ceteris_paribus(X, y, names, groups, 'Session', model.all);
+    for g = 1:numel(group_order)
+        in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
+        plot_ceteris_paribus(X(in_group, :), y(in_group), names, ...
+            subset_groups(groups, in_group), 'Session', model.groups.(group_order{g}));
+    end
+end
+end
+
+
+function model = fit_ppc_beyond_rate(summary, group_order, group_title, do_plot)
+if nargin < 4
+    do_plot = true;
+end
+% Each predictor other than firing rate is replaced by its residual on
+% firing rate. Their relative weights sum to the R^2 added beyond rate
+% and the session factor. The outcome is mean PPC.
+model = struct();
+if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
+        || ~isfield(summary.all_neurons, 'model_ppc')
+    disp_block('PPC model, All neurons, beyond firing rate')
+    disp('Mean PPC is not in this summary. Run the full script once.')
+    model.all = empty_power_fit('All neurons, beyond firing rate');
+    return
+end
+neurons = summary.all_neurons;
+centers = summary.centers(:).';
+delta_lag = summary.parameters.delta_lag;
+[X, y, names, kept, groups] = power_model_design(neurons, centers, delta_lag, 'model_ppc');
+model.all = fit_beyond_rate_model(X, y, names, 'All neurons, beyond firing rate', ...
+    groups, 'Session', 'PPC');
+model.groups = struct();
+for g = 1:numel(group_order)
+    in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
+    model.groups.(group_order{g}) = fit_beyond_rate_model( ...
+        X(in_group, :), y(in_group), names, [group_title{g}, ', beyond firing rate'], ...
+        subset_groups(groups, in_group), 'Session', 'PPC');
+end
+model = tag_ppc_figures(model);
+if do_plot
+    plot_beyond_rate_contributions(model, group_order, group_title, model.all.names, ...
+        'PPC beyond firing rate');
+    plot_one_session_ceteris(X, y, names, groups, model.all, true);
+    for g = 1:numel(group_order)
+        in_group = in_lock_group(neurons.lock_group(kept), group_order{g});
+        plot_one_session_ceteris(X(in_group, :), y(in_group), names, ...
+            subset_groups(groups, in_group), model.groups.(group_order{g}), true);
     end
 end
 end
@@ -3492,12 +3758,15 @@ end
 end
 
 
-function fit = fit_beyond_rate_model(X, y, names, label, groups, factor_name)
+function fit = fit_beyond_rate_model(X, y, names, label, groups, factor_name, outcome_name)
 if nargin < 5
     groups = {};
 end
 if nargin < 6 || isempty(factor_name)
     factor_name = 'Session';
+end
+if nargin < 7
+    outcome_name = '';
 end
 if size(X, 2) < 2
     fit = empty_power_fit(label);
@@ -3510,7 +3779,7 @@ rate = X(:, 1);
 [~, control_rsq] = standardized_ols([rate, D], y);
 X_free = X;
 X_free(:, 2:end) = residualize_on(X(:, 2:end), rate);
-fit = fit_one_power_model(X_free, y, names, label, groups, factor_name, D, n_pre);
+fit = fit_one_power_model(X_free, y, names, label, groups, factor_name, D, n_pre, outcome_name);
 fit.rate_rsq = rate_rsq;
 fit.control_rsq = control_rsq;
 fit.beyond_rsq = fit.rsq - control_rsq;
@@ -3520,10 +3789,13 @@ end
 end
 
 
-function fit = fit_sequential_strata_model(X, y, names, label, groups)
+function fit = fit_sequential_strata_model(X, y, names, label, groups, outcome_name)
 % Gram-Schmidt order: firing rate, neuron, burst, ACG delta power,
 % first-peak prominence, second-cycle prominence. Each later block is
 % replaced by its residual on the current block.
+if nargin < 6
+    outcome_name = '';
+end
 [X, y, groups, n_pre] = drop_clear_outliers(X, y, groups);
 order = {'Firing rate', 'Neuron', 'Burst, 0-50 ms', ...
     'ACG delta power, >100 ms', 'First-peak prominence', 'Second-cycle prominence'};
@@ -3565,9 +3837,12 @@ if ~any(kept)
     fit = empty_power_fit(label);
     return
 end
-fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{2}, n_pre);
+fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{2}, n_pre, outcome_name);
 if ~fit.ok
     return
+end
+if strcmp(outcome_name, 'PPC')
+    fit.figure_kind = 'ppc_models';
 end
 plot_ceteris_paribus(X_orth(:, kept), y, cont_order(kept), groups, 'Neuron', fit, blocks{2});
 fit = align_predictor_names(fit, cont_order);
@@ -3705,7 +3980,7 @@ function plot_beyond_rate_contributions(model, group_order, group_title, names, 
 if nargin < 5 || isempty(figure_name)
     figure_name = 'Delta power beyond firing rate';
 end
-if ~figure_selected('model_figures') || ~model.all.ok || ~isfinite(model.all.beyond_rsq)
+if ~figure_selected(model_figure_kind(model.all, 'model_figures')) || ~model.all.ok || ~isfinite(model.all.beyond_rsq)
     return
 end
 if ~isempty(model.all.names)
@@ -3715,18 +3990,30 @@ labels = [{'All neurons'}, group_title];
 panel_title = sprintf('Predictors, n = %d, rate R^2 = %.2f, added R^2 = %.2f', ...
     model.all.n, model.all.rate_rsq, model.all.beyond_rsq);
 plot_split_contributions(model, group_order, labels, names, 'weight', ...
-    'Contribution to delta-power R^2', figure_name, panel_title);
+    beyond_rate_axis_label(model.all), figure_name, panel_title);
 end
 
 
-function [X, y, names, kept, groups] = power_model_design(neurons, centers, delta_lag)
-% PPC is not a predictor. Its estimate depends on delta power, so it
-% would share variance with the outcome by construction.
+function label = beyond_rate_axis_label(fit)
+label = 'Contribution to delta-power R^2';
+if isfield(fit, 'outcome_name') && strcmp(fit.outcome_name, 'PPC')
+    label = 'Contribution to PPC R^2';
+end
+end
+
+
+function [X, y, names, kept, groups] = power_model_design(neurons, centers, delta_lag, outcome_field)
+% PPC is not a predictor of delta power. Its estimate depends on delta
+% power, so a coefficient on PPC would reuse that outcome. When the
+% outcome is PPC, the same predictors are used and PPC stays out of X.
+if nargin < 4 || isempty(outcome_field)
+    outcome_field = 'model_power';
+end
 names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
     'Second-cycle prominence', 'ACG delta power, >100 ms'};
 peaks = neurons.all_peaks;
 acg_delta = folded_acg_delta_power(neurons.all, centers, delta_lag);
-y_all = neurons.model_power(:);
+y_all = neurons.(outcome_field)(:);
 X_all = [neurons.model_fr(:), peaks.burst(:), ...
     peaks.first_prominence(:), peaks.second_prominence(:), acg_delta(:)];
 kept = isfinite(y_all) & all(isfinite(X_all), 2) ...
@@ -3787,7 +4074,7 @@ D = D(:, std(D, 0, 1) > 0);
 end
 
 
-function fit = fit_one_power_model(X, y, names, label, groups, factor_name, D_override, n_already_dropped)
+function fit = fit_one_power_model(X, y, names, label, groups, factor_name, D_override, n_already_dropped, outcome_name)
 if nargin < 5
     groups = {};
 end
@@ -3797,7 +4084,11 @@ end
 if nargin < 8 || isempty(n_already_dropped)
     n_already_dropped = 0;
 end
+if nargin < 9 || isempty(outcome_name)
+    outcome_name = 'Delta power';
+end
 fit = empty_power_fit(label);
+fit.outcome_name = outcome_name;
 [X, y, groups, n_dropped, keep] = drop_clear_outliers(X, y, groups);
 fit.n = size(X, 1);
 fit.n_outliers = n_already_dropped + n_dropped;
@@ -3806,19 +4097,15 @@ if nargin >= 7 && ~isempty(D_override)
 end
 n_cont = numel(names);
 [D, n_levels] = factor_dummies(groups, fit.n);
-if nargin >= 7
-    if isempty(D_override)
-        D = zeros(fit.n, 0);
-    else
-        D = D_override;
-    end
+if nargin >= 7 && ~isempty(D_override)
+    D = D_override;
     spread = std(D, 0, 1);
     D = D(:, isfinite(spread) & spread > 1e-10);
 end
 n_dum = size(D, 2);
 if n_dum > 0 && fit.n < n_cont + n_dum + 2
-    disp_block(['Delta power model, ', label])
-    disp(['Delta power model, ', label, ': ', num2str(n_levels), ...
+    disp_block(model_report_name(fit))
+    disp([model_report_name(fit), ': ', num2str(n_levels), ...
         ' ', factor_name, ' levels leave too few residual ', ...
         'degrees of freedom. The factor is omitted in this fit.'])
     D = zeros(fit.n, 0);
@@ -3826,16 +4113,16 @@ if n_dum > 0 && fit.n < n_cont + n_dum + 2
     n_levels = 0;
 end
 if fit.n < n_cont + n_dum + 2
-    disp_block(['Delta power model, ', label])
-    disp(['Delta power model, ', label, ': n = ', num2str(fit.n), ...
+    disp_block(model_report_name(fit))
+    disp([model_report_name(fit), ': n = ', num2str(fit.n), ...
         ' is too small for ', num2str(n_cont), ' predictors and ', ...
         num2str(n_dum), ' ', factor_name, ' terms.'])
     return
 end
 sd = std(X, 0, 1);
 if any(~isfinite(sd) | sd <= 0) || ~isfinite(std(y)) || std(y) <= 0
-    disp_block(['Delta power model, ', label])
-    disp(['Delta power model, ', label, ': a variable has no spread.'])
+    disp_block(model_report_name(fit))
+    disp([model_report_name(fit), ': a variable has no spread.'])
     return
 end
 fit.ok = true;
@@ -4031,9 +4318,19 @@ rsq = sum(weight);
 end
 
 
+function name = model_report_name(fit)
+if isfield(fit, 'outcome_name') && ~isempty(fit.outcome_name)
+    name = [fit.outcome_name, ' model, ', fit.label];
+else
+    name = ['Delta power model, ', fit.label];
+end
+end
+
+
 function report_power_model(fit)
-disp_block(['Delta power model, ', fit.label])
-disp(['Delta power model, ', fit.label, ', n = ', num2str(fit.n)])
+name = model_report_name(fit);
+disp_block(name)
+disp([name, ', n = ', num2str(fit.n)])
 if isfield(fit, 'n_outliers') && fit.n_outliers > 0
     disp(sprintf(['  Removed %d clear outlier rows before the fit ' ...
         '(modified z-score above 3.5 on a predictor or on the outcome).'], ...
@@ -4135,7 +4432,7 @@ function plot_power_contributions(model, group_order, group_title, names, figure
 if nargin < 5 || isempty(figure_name)
     figure_name = 'Delta power contributions';
 end
-if ~figure_selected('model_figures') || ~model.all.ok
+if ~figure_selected(model_figure_kind(model.all, 'model_figures')) || ~model.all.ok
     return
 end
 if ~isempty(model.all.names)
@@ -4144,7 +4441,15 @@ end
 labels = [{'All neurons'}, group_title];
 panel_title = sprintf('Predictors, R^2 = %.2f, n = %d', model.all.rsq, model.all.n);
 plot_split_contributions(model, group_order, labels, names, 'percent_of_rsq', ...
-    'Share of explained delta-power variance (%)', figure_name, panel_title);
+    contribution_axis_label(model.all), figure_name, panel_title);
+end
+
+
+function label = contribution_axis_label(fit)
+label = 'Share of explained delta-power variance (%)';
+if isfield(fit, 'outcome_name') && strcmp(fit.outcome_name, 'PPC')
+    label = 'Share of explained PPC variance (%)';
+end
 end
 
 
