@@ -87,12 +87,9 @@
 % still meets both minimums. Before those autocorrelograms are built, the
 % script plots spikes per neuron and, for minimums of 100, 200, 300, 400,
 % and 500 spikes, how many neurons would receive each stratum count.
-% One panel is the exact count. Neurons with more spikes sit further
-% right, so the point at one stratum is only the neurons that cannot be
-% split again. The other panel counts neurons with at least that many
-% strata, which is the number to compare with the spike curve and with
-% the 4-then-2-then-1 model. strata_preview_only stops after those two
-% figures. The 4-then-2-then-1
+% Beside that exact count is the cumulative: how many neurons have at
+% least that many strata. strata_preview_only stops after those figures.
+% The 4-then-2-then-1
 % rule is saved as locking_period_acg_summary.mat. The maximized rule is
 % saved as locking_period_acg_summary_max_strata.mat. A reprint or a
 % figures-only redraw loads the file that matches the current switch.
@@ -3591,15 +3588,14 @@ for i = 1:n
     legacy_k(i) = plan.k;
 end
 k_cap = max([k_cap, max([chosen_k; legacy_k; 0])]);
-plot_spike_counts(spike_counts, thresholds, min_lag_s);
-plot_stratum_count_lines(stratum_k, fixed_k, legacy_k, thresholds, k_cap, ...
-    spike_counts, has_long, min_lag_s, chosen_min_spikes);
+plot_spike_counts(spike_counts);
+plot_stratum_count_lines(stratum_k, thresholds, k_cap);
 report_stratum_preview(spike_counts, has_long, stratum_k, fixed_k, legacy_k, thresholds, ...
     chosen_k, chosen_min_spikes, maximize, min_lag_s, k_cap);
 end
 
 
-function plot_spike_counts(spike_counts, thresholds, min_lag_s)
+function plot_spike_counts(spike_counts)
 if ~figure_selected('strata_preview')
     return
 end
@@ -3610,108 +3606,62 @@ if isempty(spike_counts)
     text(0.5, 0.5, 'No neurons', 'HorizontalAlignment', 'center')
     axis off
 else
-    xmax = max([spike_counts(:); thresholds(:); 1]);
-    xs = linspace(0, xmax, 500);
-    ys = zeros(size(xs));
-    for i = 1:numel(xs)
-        ys(i) = sum(spike_counts >= xs(i));
-    end
-    plot(xs, ys, 'Color', [0.25 0.38 0.62], 'LineWidth', 1.6)
-    hold on
-    for t = 1:numel(thresholds)
-        xline(thresholds(t), ':', 'Color', [0.45 0.45 0.45])
-    end
+    histogram(spike_counts, 40, 'FaceColor', [0.25 0.38 0.62])
     xlabel('Spikes in runs that can enter a stratum')
-    ylabel('Neurons with at least this many spikes')
+    ylabel('Neurons')
     box off
 end
-title('Neurons above each spike count')
+title('Spikes per neuron')
 subplot(1, 2, 2)
 if ~isempty(spike_counts)
     plot(1:numel(spike_counts), sort(spike_counts), '.', ...
         'Color', [0.25 0.38 0.62], 'MarkerSize', 8)
-    hold on
-    for t = 1:numel(thresholds)
-        yline(thresholds(t), ':', 'Color', [0.45 0.45 0.45])
-    end
     xlabel('Neuron, fewest spikes to most')
     ylabel('Spikes')
     box off
 end
-title(sprintf('Sorted spike count. A stratum also needs a run longer than %g s.', min_lag_s))
+title('Sorted spike count')
 end
 
 
-function plot_stratum_count_lines(stratum_k, fixed_k, legacy_k, thresholds, k_cap, spike_counts, has_long, min_lag_s, chosen_min_spikes)
+function plot_stratum_count_lines(stratum_k, thresholds, k_cap)
 if ~figure_selected('strata_preview')
     return
 end
 x = 0:k_cap;
 n_thresholds = numel(thresholds);
 colors = lines(n_thresholds);
-figure('Name', 'Neurons by stratum count', 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.06 0.12 0.9 0.7])
 labels = cell(1, n_thresholds);
+exact = zeros(n_thresholds, numel(x));
+for t = 1:n_thresholds
+    for k = x
+        exact(t, k + 1) = sum(stratum_k(:, t) == k);
+    end
+    labels{t} = sprintf('%d spikes minimum', thresholds(t));
+end
+figure('Name', 'Neurons by stratum count', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.06 0.14 0.88 0.66])
 subplot(1, 2, 1)
 hold on
 for t = 1:n_thresholds
-    y = zeros(size(x));
-    for k = x
-        y(k + 1) = sum(stratum_k(:, t) == k);
-    end
-    plot(x, y, '-o', 'Color', colors(t, :), 'LineWidth', 1.4, 'MarkerSize', 5)
-    labels{t} = sprintf('%d spikes minimum', thresholds(t));
+    plot(x, exact(t, :), '-o', 'Color', colors(t, :), 'LineWidth', 1.4, 'MarkerSize', 5)
 end
-y_legacy = zeros(size(x));
-for k = x
-    y_legacy(k + 1) = sum(legacy_k == k);
-end
-plot(x, y_legacy, 'k--', 'LineWidth', 1.6)
-labels{end + 1} = sprintf('%d spikes, 4 then 2 then 1', chosen_min_spikes);
 xlabel('Strata per neuron')
-ylabel('Neurons with exactly this many')
+ylabel('Neurons')
 legend(labels, 'Location', 'northeast')
-title({'Maximum split', 'Neurons with more spikes move right'})
+title('Neurons with this many strata')
 box off
 subplot(1, 2, 2)
 hold on
-drawn = gobjects(n_thresholds, 1);
 for t = 1:n_thresholds
-    y = zeros(size(x));
-    for k = x
-        y(k + 1) = sum(stratum_k(:, t) >= k);
-    end
-    drawn(t) = plot(x, y, '-o', 'Color', colors(t, :), 'LineWidth', 1.4, 'MarkerSize', 5);
+    at_least = fliplr(cumsum(fliplr(exact(t, :))));
+    plot(x, at_least, '-o', 'Color', colors(t, :), 'LineWidth', 1.4, 'MarkerSize', 5)
 end
-for t = 1:n_thresholds
-    y_fixed = zeros(size(x));
-    for k = x
-        y_fixed(k + 1) = sum(fixed_k(:, t) >= k);
-    end
-    plot(x, y_fixed, '--', 'Color', colors(t, :), 'LineWidth', 1.2)
-end
-y_legacy = zeros(size(x));
-for k = x
-    y_legacy(k + 1) = sum(legacy_k >= k);
-end
-plot(x, y_legacy, 'k--', 'LineWidth', 1.6)
 xlabel('Strata per neuron')
 ylabel('Neurons with at least this many')
-if n_thresholds > 0
-    legend(drawn, labels(1:n_thresholds), 'Location', 'northeast')
-end
-title({'Solid: largest count. Dashed: 4, then 2, then 1.', ...
-    sprintf('Compare 1 stratum with neurons above that spike count. A run longer than %g s is required.', min_lag_s)})
+legend(labels, 'Location', 'northeast')
+title('Cumulative of the left panel')
 box off
-if ~isempty(thresholds) && ~isempty(spike_counts)
-    t0 = thresholds(1);
-    n_above = sum(spike_counts >= t0);
-    n_ready = sum(spike_counts >= t0 & has_long);
-    n_one = sum(stratum_k(:, 1) >= 1);
-    text(0.02, 0.02, sprintf(['%d spikes: %d neurons have the spikes, %d also have a run longer than %g s, %d get at least 1 stratum.'], ...
-        t0, n_above, n_ready, min_lag_s, n_one), ...
-        'Units', 'normalized', 'VerticalAlignment', 'bottom', 'FontSize', 8)
-end
 end
 
 
