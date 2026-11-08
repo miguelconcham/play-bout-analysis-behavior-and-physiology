@@ -3858,7 +3858,11 @@ if nargin < 18 || isempty(maximize)
     maximize = false;
 end
 plan = power_run_strata(power, spikes, run_length, min_spikes, min_lag_s, maximize);
-store.n_at_k(plan.k + 1) = store.n_at_k(plan.k + 1) + 1;
+slot = plan.k + 1;
+if numel(store.n_at_k) < slot
+    store.n_at_k(slot) = 0;
+end
+store.n_at_k(slot) = store.n_at_k(slot) + 1;
 if plan.k < 1
     return
 end
