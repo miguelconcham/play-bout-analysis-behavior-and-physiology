@@ -94,13 +94,16 @@
 % At each step every later predictor is replaced by its residual on the
 % current one, so each keeps only variance the earlier predictors do
 % not explain. The one-row session model is unchanged.
-% The same predictors are fit again with mean PPC as the outcome. PPC is
-% the locking value, so it is not a predictor in that fit. The one-row
-% model keeps the session factor. The stratum model keeps the neuron
-% factor, including the beyond-rate and sequential versions. Those
-% figures open only when show_ppc_models is true. The one-row PPC model
-% can be drawn from the saved summary. Stratum PPC is stored only by a
-% full run, so the within-neuron PPC model needs that run once.
+% The same predictors are fit again with mean PPC as the outcome, and
+% LFP delta power is added as a predictor. PPC is the locking value, so
+% it is not a predictor in that fit. The one-row model keeps the session
+% factor. The stratum model keeps the neuron factor, including the
+% beyond-rate and sequential versions. In the sequential fit, LFP delta
+% power is orthogonalized first, so every later predictor keeps only the
+% variance that power does not explain. Those figures open only when
+% show_ppc_models is true. The one-row PPC model can be drawn from the
+% saved summary. Stratum PPC is stored only by a full run, so the
+% within-neuron PPC model needs that run once.
 % A reverse strata fit asks how much LFP delta power predicts entrainment.
 % The outcomes are folded autocorrelogram delta power and first-peak
 % prominence. Neuron is the category, firing rate is a covariate, and
@@ -3036,7 +3039,8 @@ function tf = ppc_family_ready(summary, field_name)
 tf = isfield(summary, field_name) && isfield(summary.(field_name), 'all') ...
     && isfield(summary.(field_name).all, 'outcome_name') ...
     && strcmp(summary.(field_name).all.outcome_name, 'PPC') ...
-    && isfield(summary.(field_name).all, 'ok');
+    && isfield(summary.(field_name).all, 'ok') ...
+    && model_has_predictor(summary.(field_name), 'LFP delta power');
 end
 
 
@@ -3072,6 +3076,10 @@ if nargin < 2 || isempty(outcome_field)
 end
 names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
     'Second-cycle prominence', 'ACG delta power, >100 ms'};
+include_lfp = strcmp(outcome_field, 'ppc');
+if include_lfp
+    names{end + 1} = 'LFP delta power'; %#ok<AGROW>
+end
 X = zeros(0, numel(names));
 y = zeros(0, 1);
 groups = {};
@@ -3079,9 +3087,15 @@ lock_group = {};
 if ~isfield(strata, 'neuron') || isempty(strata.neuron) || ~isfield(strata, outcome_field)
     return
 end
+if include_lfp && ~isfield(strata, 'power')
+    return
+end
 keep = rows_of_repeated_groups(strata.neuron, 2);
 X = [strata.rate(keep), strata.burst(keep), strata.first_prominence(keep), ...
     strata.second_prominence(keep), strata.acg_delta(keep)];
+if include_lfp
+    X = [X, strata.power(keep)];
+end
 y = strata.(outcome_field)(keep);
 groups = strata.neuron(keep);
 lock_group = strata.lock_group(keep);
@@ -3601,13 +3615,14 @@ if nargin < 4
     do_plot = true;
 end
 % Mean PPC of the runs in the all-runs autocorrelogram, predicted by
-% their mean firing rate, the 0-50 ms burst, the two delta-peak
-% prominences, and the delta-band power of the half-mirrored
+% their mean firing rate, LFP delta power, the 0-50 ms burst, the two
+% delta-peak prominences, and the delta-band power of the half-mirrored
 % autocorrelogram after 100 ms. The session factor absorbs the PPC
 % level shared by the neurons in one recording. One row per neuron.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
-        || ~isfield(summary.all_neurons, 'model_ppc')
+        || ~isfield(summary.all_neurons, 'model_ppc') ...
+        || ~isfield(summary.all_neurons, 'model_power')
     disp_block('PPC model, All neurons')
     disp('Mean PPC is not in this summary. Run the full script once.')
     model.all = empty_power_fit('All neurons');
@@ -3644,11 +3659,13 @@ if nargin < 4
     do_plot = true;
 end
 % Each predictor other than firing rate is replaced by its residual on
-% firing rate. Their relative weights sum to the R^2 added beyond rate
-% and the session factor. The outcome is mean PPC.
+% firing rate. LFP delta power is one of those predictors. Their
+% relative weights sum to the R^2 added beyond rate and the session
+% factor. The outcome is mean PPC.
 model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
-        || ~isfield(summary.all_neurons, 'model_ppc')
+        || ~isfield(summary.all_neurons, 'model_ppc') ...
+        || ~isfield(summary.all_neurons, 'model_power')
     disp_block('PPC model, All neurons, beyond firing rate')
     disp('Mean PPC is not in this summary. Run the full script once.')
     model.all = empty_power_fit('All neurons, beyond firing rate');
@@ -3790,31 +3807,42 @@ end
 
 
 function fit = fit_sequential_strata_model(X, y, names, label, groups, outcome_name)
-% Gram-Schmidt order: firing rate, neuron, burst, ACG delta power,
-% first-peak prominence, second-cycle prominence. Each later block is
-% replaced by its residual on the current block.
+% Gram-Schmidt order for delta power: firing rate, neuron, burst, ACG
+% delta power, first-peak prominence, second-cycle prominence. For PPC,
+% LFP delta power is first, so every later predictor is residualized on
+% it before the same sequence continues. Each later block is replaced by
+% its residual on the current block.
 if nargin < 6
     outcome_name = '';
 end
 [X, y, groups, n_pre] = drop_clear_outliers(X, y, groups);
-order = {'Firing rate', 'Neuron', 'Burst, 0-50 ms', ...
-    'ACG delta power, >100 ms', 'First-peak prominence', 'Second-cycle prominence'};
-cont_order = order(~strcmp(order, 'Neuron'));
-X_seq = zeros(size(X, 1), numel(cont_order));
-for k = 1:numel(cont_order)
-    hit = strcmp(names, cont_order{k});
+if strcmp(outcome_name, 'PPC')
+    order = {'LFP delta power', 'Firing rate', 'Neuron', 'Burst, 0-50 ms', ...
+        'ACG delta power, >100 ms', 'First-peak prominence', 'Second-cycle prominence'};
+else
+    order = {'Firing rate', 'Neuron', 'Burst, 0-50 ms', ...
+        'ACG delta power, >100 ms', 'First-peak prominence', 'Second-cycle prominence'};
+end
+[D, ~] = factor_dummies(groups, size(X, 1));
+n_cont = nnz(~strcmp(order, 'Neuron'));
+blocks = cell(1, numel(order));
+cont_order = cell(1, n_cont);
+neuron_at = 0;
+cont_k = 0;
+for k = 1:numel(order)
+    if strcmp(order{k}, 'Neuron')
+        blocks{k} = D;
+        neuron_at = k;
+        continue
+    end
+    hit = strcmp(names, order{k});
     if ~any(hit)
         fit = empty_power_fit(label);
         return
     end
-    X_seq(:, k) = X(:, hit);
-end
-[D, ~] = factor_dummies(groups, size(X, 1));
-blocks = cell(1, numel(cont_order) + 1);
-blocks{1} = X_seq(:, 1);
-blocks{2} = D;
-for k = 2:numel(cont_order)
-    blocks{k + 1} = X_seq(:, k);
+    cont_k = cont_k + 1;
+    cont_order{cont_k} = order{k};
+    blocks{k} = X(:, hit);
 end
 for k = 1:numel(blocks) - 1
     if isempty(blocks{k})
@@ -3827,8 +3855,11 @@ for k = 1:numel(blocks) - 1
         blocks{j} = residualize_on(blocks{j}, blocks{k});
     end
 end
-X_orth = blocks{1};
-for k = 3:numel(blocks)
+X_orth = zeros(size(X, 1), 0);
+for k = 1:numel(blocks)
+    if k == neuron_at
+        continue
+    end
     X_orth = [X_orth, blocks{k}]; %#ok<AGROW>
 end
 spread = std(X_orth, 0, 1);
@@ -3837,14 +3868,14 @@ if ~any(kept)
     fit = empty_power_fit(label);
     return
 end
-fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{2}, n_pre, outcome_name);
+fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{neuron_at}, n_pre, outcome_name);
 if ~fit.ok
     return
 end
 if strcmp(outcome_name, 'PPC')
     fit.figure_kind = 'ppc_models';
 end
-plot_ceteris_paribus(X_orth(:, kept), y, cont_order(kept), groups, 'Neuron', fit, blocks{2});
+plot_ceteris_paribus(X_orth(:, kept), y, cont_order(kept), groups, 'Neuron', fit, blocks{neuron_at});
 fit = align_predictor_names(fit, cont_order);
 fit.predictor_corr = corr(X_orth);
 fit.sequential_order = order;
@@ -4005,17 +4036,24 @@ end
 function [X, y, names, kept, groups] = power_model_design(neurons, centers, delta_lag, outcome_field)
 % PPC is not a predictor of delta power. Its estimate depends on delta
 % power, so a coefficient on PPC would reuse that outcome. When the
-% outcome is PPC, the same predictors are used and PPC stays out of X.
+% outcome is PPC, LFP delta power is a predictor and PPC stays out of X.
 if nargin < 4 || isempty(outcome_field)
     outcome_field = 'model_power';
 end
 names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
     'Second-cycle prominence', 'ACG delta power, >100 ms'};
+include_lfp = strcmp(outcome_field, 'model_ppc');
+if include_lfp
+    names{end + 1} = 'LFP delta power'; %#ok<AGROW>
+end
 peaks = neurons.all_peaks;
 acg_delta = folded_acg_delta_power(neurons.all, centers, delta_lag);
 y_all = neurons.(outcome_field)(:);
 X_all = [neurons.model_fr(:), peaks.burst(:), ...
     peaks.first_prominence(:), peaks.second_prominence(:), acg_delta(:)];
+if include_lfp
+    X_all = [X_all, neurons.model_power(:)];
+end
 kept = isfinite(y_all) & all(isfinite(X_all), 2) ...
     & peaks.first_measurable(:) & peaks.second_measurable(:);
 X = X_all(kept, :);
