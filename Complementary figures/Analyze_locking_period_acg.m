@@ -94,6 +94,11 @@
 % At each step every later predictor is replaced by its residual on the
 % current one, so each keeps only variance the earlier predictors do
 % not explain. The one-row session model is unchanged.
+% A reverse strata fit asks how much LFP delta power predicts entrainment.
+% The outcomes are folded autocorrelogram delta power and first-peak
+% prominence. Neuron is the category, firing rate is a covariate, and
+% burst is a covariate of the first peak. The reported amount is the
+% partial R^2 of LFP delta power.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -109,11 +114,14 @@
 % on the axes. In the paired plots, higher-rate neurons are drawn in front.
 % The mean curve still gives every neuron the same weight.
 % figure_folder, at the top of the script, is where figures are written
-% as SVG and JPG and where statistics.txt collects the command-window
-% tests. Leave it empty to save nothing. Set reprint_stats_only to reload
-% the saved summary and print those tests again without reloading spikes
-% or opening figures. Set redraw_figures_only to reload that summary and
-% draw the figures, including cluster bars computed from the saved curves.
+% as SVG and JPG. Each statistics block is written there as its own text
+% file, named from the block title. Leave figure_folder empty to save
+% nothing. The show_* switches at the top choose which figure types open.
+% Tests are still printed when a figure type is off. Set
+% reprint_stats_only to reload the saved summary and print those tests
+% again without reloading spikes or opening figures. Set
+% redraw_figures_only to reload that summary and draw the selected
+% figures, including cluster bars computed from the saved curves.
 % Spikes are not reloaded.
 
 %% Paths and parameters
@@ -140,13 +148,20 @@ stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
 n_example_neurons = 20;     % example neurons drawn per split, four per figure
 plot_rate_scaled_peaks = true;  % false: sum-to-1 autocorrelograms only
                                  % true: also the rate-ratio autocorrelograms (Poisson = 1), their cluster tests, and the peak figures
+show_mean_acg = true;            % mean sum-to-1 autocorrelograms
+show_rate_ratio_acg = true;      % mean rate-ratio autocorrelograms
+show_paired_tests = true;        % paired low-versus-high scatters, cycle counts, and latency
+show_neuron_examples = true;     % example neuron autocorrelograms and spectra
+show_acg_spectra = true;         % low tail against high tail spectra
+show_model_figures = true;       % contribution bars and partial-R^2 bars
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
-% written there as SVG and JPG, and statistics.txt gets the command window.
+% written there as SVG and JPG, and each statistics block is written
+% there as its own text file.
 figure_folder = '';
 % true reloads locking_period_acg_summary.mat and reprints the tests.
 % Spikes are not reloaded and no figures are opened. A non-empty
-% figure_folder still receives a new statistics.txt.
+% figure_folder receives one text file per statistics block.
 reprint_stats_only = false;
 % true reloads the same summary and draws the figures. Spike files are
 % not read. Cluster bars are computed from the saved curves when the
@@ -162,6 +177,13 @@ if exist('diary_cleanup', 'var')
     delete(diary_cleanup)
     clear diary_cleanup
 end
+setappdata(0, 'locking_acg_figures', struct( ...
+    'mean_acg', show_mean_acg, ...
+    'rate_ratio_acg', show_rate_ratio_acg, ...
+    'paired_tests', show_paired_tests, ...
+    'neuron_examples', show_neuron_examples, ...
+    'acg_spectra', show_acg_spectra, ...
+    'model_figures', show_model_figures));
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -502,6 +524,8 @@ locking_acg.power_strata = strata_rows;
 [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate, ...
     locking_acg.strata_power_model_sequential] = ...
     fit_strata_power_models(strata_rows, group_order, group_title);
+locking_acg.power_to_entrainment = fit_power_to_entrainment( ...
+    strata_rows, group_order, group_title);
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -513,29 +537,34 @@ stop_statistics_diary()
 
 
 function start_statistics_diary(folder)
-% A script keeps variables in the base workspace. An onCleanup left there
-% runs when the next run replaces it, and that call turns diary off before
-% any line is printed, so statistics.txt stays empty.
+% Each disp_block opens its own text file. A single diary started here
+% would be replaced before any block is printed.
 if strcmp(get(0, 'Diary'), 'on')
     diary('off')
 end
 if isempty(folder)
+    if isappdata(0, 'locking_acg_stats_folder')
+        rmappdata(0, 'locking_acg_stats_folder')
+    end
     return
 end
 if exist(folder, 'dir') ~= 7
     mkdir(folder)
 end
-stats_path = fullfile(folder, 'statistics.txt');
-if exist(stats_path, 'file') == 2
-    delete(stats_path)
+setappdata(0, 'locking_acg_stats_folder', folder)
+old_stats = fullfile(folder, 'statistics.txt');
+if exist(old_stats, 'file') == 2
+    delete(old_stats)
 end
-diary(stats_path)
 end
 
 
 function stop_statistics_diary()
 if strcmp(get(0, 'Diary'), 'on')
     diary('off')
+end
+if isappdata(0, 'locking_acg_stats_folder')
+    rmappdata(0, 'locking_acg_stats_folder')
 end
 end
 
@@ -843,6 +872,14 @@ end
 if nargin < 13
     name_suffix = '';
 end
+if isempty(name_suffix)
+    figure_kind = 'mean_acg';
+else
+    figure_kind = 'rate_ratio_acg';
+end
+if ~figure_selected(figure_kind)
+    return
+end
 curve_names = {'low', 'high', 'all'};
 for g = 1:numel(group_order)
     name = group_order{g};
@@ -1023,6 +1060,9 @@ else
     figure_name = ['Paired ACG peaks, ', split_name, ', rate ratio'];
 end
 report_peak_tests(summary, group_order, group_title, score_label, split_name, unit_label);
+if ~figure_selected('paired_tests')
+    return
+end
 n_col = 2 + isempty(unit_label);
 figure('Name', figure_name, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.02 0.05 0.96 0.9])
@@ -1386,6 +1426,8 @@ if isfield(locking_acg, 'power_strata')
     [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate, ...
         locking_acg.strata_power_model_sequential] = ...
         fit_strata_power_models(locking_acg.power_strata, group_order, group_title, true);
+    locking_acg.power_to_entrainment = fit_power_to_entrainment( ...
+        locking_acg.power_strata, group_order, group_title, true);
 end
 end
 
@@ -1467,6 +1509,7 @@ else
     report_beyond_rate_block(locking_acg.delta_power_model_beyond_rate, group_order);
 end
 report_or_fit_strata_models(locking_acg, group_order, group_title, false);
+report_or_fit_power_to_entrainment(locking_acg, group_order, group_title, false);
 end
 
 
@@ -1488,8 +1531,45 @@ end
 
 
 function disp_block(title)
+open_statistics_block(title)
 disp_rule()
-disp(title)
+disp(upper(title))
+end
+
+
+function open_statistics_block(title)
+if ~isappdata(0, 'locking_acg_stats_folder')
+    return
+end
+folder = getappdata(0, 'locking_acg_stats_folder');
+if isempty(folder)
+    return
+end
+if strcmp(get(0, 'Diary'), 'on')
+    diary('off')
+end
+token = upper(regexprep(char(title), '[^\w]+', '_'));
+token = regexprep(token, '^_|_$', '');
+if isempty(token)
+    token = 'STATISTICS';
+end
+stats_path = fullfile(folder, [token '.txt']);
+if exist(stats_path, 'file') == 2
+    delete(stats_path)
+end
+diary(stats_path)
+end
+
+
+function tf = figure_selected(kind)
+tf = true;
+if ~isappdata(0, 'locking_acg_figures')
+    return
+end
+flags = getappdata(0, 'locking_acg_figures');
+if isstruct(flags) && isfield(flags, kind)
+    tf = logical(flags.(kind));
+end
 end
 
 
@@ -1751,6 +1831,14 @@ if isempty(rows)
     disp(['No peak examples for ', split_name])
     return
 end
+if ~figure_selected('neuron_examples')
+    for i = 1:numel(rows)
+        disp(sprintf('  example %s, %s: %s id %g\n%s', split_name, labels{i}, ...
+            neurons.session{rows(i)}, neurons.cluster_id(rows(i)), ...
+            example_parameter_text(neurons, rows(i), score_label)))
+    end
+    return
+end
 n_per_figure = 4;
 n_fig = ceil(numel(rows) / n_per_figure);
 for f = 1:n_fig
@@ -1806,6 +1894,9 @@ end
 function plot_tail_acg_spectra(summary, centers, delta_lag, group_order, group_title, split_name, scale_tag)
 if nargin < 7 || isempty(scale_tag)
     scale_tag = 'sum-to-1';
+end
+if ~figure_selected('acg_spectra')
+    return
 end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
         || summary.all_neurons.n < 1
@@ -2727,24 +2818,7 @@ if ~isfield(strata, 'n') || strata.n < 2
     sequential.all = empty_power_fit('All neurons, power strata, sequential');
     return
 end
-keep = rows_of_repeated_groups(strata.neuron, 2);
-names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
-    'Second-cycle prominence', 'ACG delta power, >100 ms'};
-X = [strata.rate(keep), strata.burst(keep), strata.first_prominence(keep), ...
-    strata.second_prominence(keep), strata.acg_delta(keep)];
-y = strata.power(keep);
-groups = strata.neuron(keep);
-lock_group = strata.lock_group(keep);
-finite_row = isfinite(y) & all(isfinite(X), 2);
-X = X(finite_row, :);
-y = y(finite_row);
-groups = groups(finite_row);
-lock_group = lock_group(finite_row);
-keep_again = rows_of_repeated_groups(groups, 2);
-X = X(keep_again, :);
-y = y(keep_again);
-groups = groups(keep_again);
-lock_group = lock_group(keep_again);
+[X, y, groups, lock_group, names] = strata_regression_rows(strata);
 model.all = fit_one_power_model(X, y, names, 'All neurons, power strata', groups, 'Neuron');
 beyond.all = fit_beyond_rate_model(X, y, names, ...
     'All neurons, power strata, beyond firing rate', groups, 'Neuron');
@@ -2808,6 +2882,189 @@ if has_model && has_beyond && has_sequential && ~do_plot
     return
 end
 fit_strata_power_models(summary.power_strata, group_order, group_title, do_plot);
+end
+
+
+function [X, y, groups, lock_group, names] = strata_regression_rows(strata)
+names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
+    'Second-cycle prominence', 'ACG delta power, >100 ms'};
+X = zeros(0, numel(names));
+y = zeros(0, 1);
+groups = {};
+lock_group = {};
+if ~isfield(strata, 'neuron') || isempty(strata.neuron)
+    return
+end
+keep = rows_of_repeated_groups(strata.neuron, 2);
+X = [strata.rate(keep), strata.burst(keep), strata.first_prominence(keep), ...
+    strata.second_prominence(keep), strata.acg_delta(keep)];
+y = strata.power(keep);
+groups = strata.neuron(keep);
+lock_group = strata.lock_group(keep);
+finite_row = isfinite(y) & all(isfinite(X), 2);
+X = X(finite_row, :);
+y = y(finite_row);
+groups = groups(finite_row);
+lock_group = lock_group(finite_row);
+keep_again = rows_of_repeated_groups(groups, 2);
+X = X(keep_again, :);
+y = y(keep_again);
+groups = groups(keep_again);
+lock_group = lock_group(keep_again);
+end
+
+
+function model = fit_power_to_entrainment(strata, group_order, group_title, do_plot)
+if nargin < 4
+    do_plot = true;
+end
+model = struct();
+model.acg_delta = struct();
+model.first_peak = struct();
+if ~isfield(strata, 'n') || strata.n < 2
+    model.acg_delta.all = empty_power_fit('LFP delta power to ACG delta power');
+    model.first_peak.all = empty_power_fit('LFP delta power to first-peak prominence');
+    return
+end
+[X, power, groups, lock_group] = strata_regression_rows(strata);
+model.acg_delta = fit_partial_outcome(power, X(:, 1), X(:, 5), ...
+    {'Firing rate'}, groups, lock_group, group_order, group_title, ...
+    'ACG delta power');
+model.first_peak = fit_partial_outcome(power, [X(:, 1), X(:, 2)], X(:, 3), ...
+    {'Firing rate', 'Burst, 0-50 ms'}, groups, lock_group, ...
+    group_order, group_title, 'First-peak prominence');
+if do_plot
+    plot_entrainment_partial_r2(model, group_order, group_title);
+end
+end
+
+
+function block = fit_partial_outcome(power, covariates, outcome, covariate_names, groups, lock_group, group_order, group_title, outcome_name)
+predictor = 'LFP delta power';
+names = [{predictor}, covariate_names];
+X = [power, covariates];
+block.all = attach_partial_r2(fit_one_power_model(X, outcome, names, ...
+    ['All neurons, LFP power to ', outcome_name], groups, 'Neuron'), predictor);
+block.groups = struct();
+for g = 1:numel(group_order)
+    in_group = in_lock_group(lock_group, group_order{g});
+    selected = find(in_group);
+    keep_local = rows_of_repeated_groups(groups(in_group), 2);
+    in_group(selected(~keep_local)) = false;
+    block.groups.(group_order{g}) = attach_partial_r2(fit_one_power_model( ...
+        X(in_group, :), outcome(in_group), names, ...
+        [group_title{g}, ', LFP power to ', outcome_name], ...
+        subset_groups(groups, in_group), 'Neuron'), predictor);
+end
+end
+
+
+function fit = attach_partial_r2(fit, predictor)
+fit.partial_rsq = NaN;
+fit.reduced_rsq = NaN;
+fit.p_power = NaN;
+fit.beta_power = NaN;
+if ~isfield(fit, 'ok') || ~fit.ok
+    return
+end
+hit = find(strcmp(fit.names, predictor), 1);
+if isempty(hit) || hit > numel(fit.unique_rsq)
+    return
+end
+fit.beta_power = fit.beta(hit);
+fit.p_power = fit.p_beta(hit);
+fit.reduced_rsq = fit.rsq - fit.unique_rsq(hit);
+denom = 1 - fit.reduced_rsq;
+if isfinite(denom) && denom > 0 && isfinite(fit.unique_rsq(hit))
+    fit.partial_rsq = fit.unique_rsq(hit) / denom;
+end
+report_partial_r2(fit)
+end
+
+
+function report_partial_r2(fit)
+if ~isfield(fit, 'partial_rsq')
+    return
+end
+disp(sprintf(['  Partial R^2 of LFP delta power = %.3g ' ...
+    '(unique dR^2 = %.3g, reduced R^2 = %.3g, beta = %.3g, p = %.3g)'], ...
+    fit.partial_rsq, partial_unique_rsq(fit), fit.reduced_rsq, ...
+    fit.beta_power, fit.p_power))
+end
+
+
+function value = partial_unique_rsq(fit)
+value = NaN;
+if ~isfield(fit, 'names') || ~isfield(fit, 'unique_rsq')
+    return
+end
+hit = find(strcmp(fit.names, 'LFP delta power'), 1);
+if ~isempty(hit) && hit <= numel(fit.unique_rsq)
+    value = fit.unique_rsq(hit);
+end
+end
+
+
+function report_or_fit_power_to_entrainment(summary, group_order, group_title, do_plot)
+if ~isfield(summary, 'power_strata') || ~isfield(summary.power_strata, 'n') ...
+        || summary.power_strata.n < 1
+    disp('Power-to-entrainment model is not in this summary. Run the full script once.')
+    return
+end
+saved = [];
+if isfield(summary, 'power_to_entrainment')
+    saved = summary.power_to_entrainment;
+end
+has_acg = isstruct(saved) && isfield(saved, 'acg_delta') ...
+    && isfield(saved.acg_delta, 'all') && isfield(saved.acg_delta.all, 'partial_rsq');
+has_peak = isstruct(saved) && isfield(saved, 'first_peak') ...
+    && isfield(saved.first_peak, 'all') && isfield(saved.first_peak.all, 'partial_rsq');
+if has_acg && has_peak && ~do_plot
+    report_power_model_block(saved.acg_delta, group_order);
+    report_power_model_block(saved.first_peak, group_order);
+    return
+end
+fit_power_to_entrainment(summary.power_strata, group_order, group_title, do_plot);
+end
+
+
+function plot_entrainment_partial_r2(model, group_order, group_title)
+if ~figure_selected('model_figures')
+    return
+end
+acg_ok = isfield(model, 'acg_delta') && isfield(model.acg_delta, 'all') && model.acg_delta.all.ok;
+peak_ok = isfield(model, 'first_peak') && isfield(model.first_peak, 'all') && model.first_peak.all.ok;
+if ~acg_ok && ~peak_ok
+    return
+end
+keys = [{'all'}, group_order];
+labels = [{'All neurons'}, group_title];
+outcomes = {'acg_delta', 'first_peak'};
+series_names = {'ACG delta power', 'First-peak prominence'};
+values = nan(numel(keys), numel(outcomes));
+pvals = nan(numel(keys), numel(outcomes));
+for o = 1:numel(outcomes)
+    block = model.(outcomes{o});
+    for i = 1:numel(keys)
+        if i == 1
+            fit = block.all;
+        elseif isfield(block, 'groups') && isfield(block.groups, keys{i})
+            fit = block.groups.(keys{i});
+        else
+            continue
+        end
+        if isfield(fit, 'ok') && fit.ok && isfield(fit, 'partial_rsq')
+            values(i, o) = fit.partial_rsq;
+            pvals(i, o) = fit.p_power;
+        end
+    end
+end
+figure('Name', 'Partial R2 of LFP delta power', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.08 0.18 0.8 0.55])
+bar_with_stars(values, pvals, labels)
+ylabel('Partial R^2 of LFP delta power')
+title('Within neuron, after firing rate and neuron identity')
+legend(series_names, 'Location', 'northeast')
 end
 
 
@@ -3205,7 +3462,7 @@ function plot_beyond_rate_contributions(model, group_order, group_title, names, 
 if nargin < 5 || isempty(figure_name)
     figure_name = 'Delta power beyond firing rate';
 end
-if ~model.all.ok || ~isfinite(model.all.beyond_rsq)
+if ~figure_selected('model_figures') || ~model.all.ok || ~isfinite(model.all.beyond_rsq)
     return
 end
 if ~isempty(model.all.names)
@@ -3473,6 +3730,7 @@ disp_block(['Delta power model, ', fit.label])
 disp(['Delta power model, ', fit.label, ', n = ', num2str(fit.n)])
 disp(sprintf('  Full R^2 = %.3g, F = %.3g, p = %.3g', fit.rsq, fit.F, fit.p_model))
 report_sequential_added(fit)
+report_partial_r2(fit)
 cont = ~strcmp(fit.names, 'Session') & ~strcmp(fit.names, 'Neuron');
 disp(['  Predictor correlations (', strjoin(fit.names(cont), ', '), ')'])
 disp(fit.predictor_corr)
@@ -3566,7 +3824,7 @@ function plot_power_contributions(model, group_order, group_title, names, figure
 if nargin < 5 || isempty(figure_name)
     figure_name = 'Delta power contributions';
 end
-if ~model.all.ok
+if ~figure_selected('model_figures') || ~model.all.ok
     return
 end
 if ~isempty(model.all.names)
