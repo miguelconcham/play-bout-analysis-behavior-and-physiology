@@ -87,7 +87,13 @@
 % folded autocorrelogram delta power are recomputed in the stratum. The
 % category is the neuron, and a neuron with fewer than two usable strata
 % does not enter. That model is fit again with every predictor except
-% firing rate residualized on firing rate.
+% firing rate residualized on firing rate. A third strata fit, and only
+% that fit, orthogonalizes the predictors one at a time. The order is
+% firing rate, neuron, burst (0-50 ms), autocorrelogram delta power
+% after 100 ms, first-peak prominence, then second-cycle prominence.
+% At each step every later predictor is replaced by its residual on the
+% current one, so each keeps only variance the earlier predictors do
+% not explain. The one-row session model is unchanged.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -96,11 +102,11 @@
 % second cycle, and test whether that lag shifts between the two tails.
 % A separate figure shows the distribution of those first-peak latencies
 % in the low tail and the high tail, using the same paired neurons.
-% A reference figure for each split shows the strongest t1-only neuron and
-% the strongest t1-and-t2 neuron in each lock group. The printed burst,
-% prominences, lags, and mean score are the values on the scatter plots.
-% Example neurons are the higher-firing-rate cells among those with that
-% peak pattern. In the paired plots, higher-rate neurons are drawn in front.
+% Example figures show n_example_neurons neurons per split, four per
+% figure, chosen as the higher-firing-rate cells among strong t1-only
+% and t1-and-t2 patterns. Blue is the low tail and red is the high tail.
+% The long burst, prominence, lag, and score lines are printed, not drawn
+% on the axes. In the paired plots, higher-rate neurons are drawn in front.
 % The mean curve still gives every neuron the same weight.
 % figure_folder, at the top of the script, is where figures are written
 % as SVG and JPG and where statistics.txt collects the command-window
@@ -131,6 +137,7 @@ acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutof
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
 stratum_min_spikes = 50;    % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
+n_example_neurons = 20;     % example neurons drawn per split, four per figure
 plot_rate_scaled_peaks = true;  % false: sum-to-1 autocorrelograms only
                                  % true: also the rate-ratio autocorrelograms (Poisson = 1), their cluster tests, and the peak figures
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
@@ -183,7 +190,8 @@ if redraw_figures_only
     smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
     [locking_acg, power_acg] = redraw_saved_figures(loaded.locking_acg, loaded.power_acg, ...
         group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
-        skip_abs_lag, delta_lag, acg_cluster_alpha, acg_cluster_perm);
+        skip_abs_lag, delta_lag, acg_cluster_alpha, acg_cluster_perm, ...
+        n_example_neurons);
     save(summary_path, 'locking_acg', 'power_acg');
     disp(['Drew figures from ', summary_path])
     if ~isempty(figure_folder)
@@ -473,9 +481,9 @@ plot_paired_peak_scores(locking_acg, group_order, group_title, ...
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
     'Mean delta power of the runs', 'delta power');
 plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
-    'PPC', 'locking', delta_lag);
+    'PPC', 'locking', delta_lag, n_example_neurons);
 plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
-    'delta power', 'delta power', delta_lag);
+    'delta power', 'delta power', delta_lag, n_example_neurons);
 plot_tail_acg_spectra(locking_acg, centers, delta_lag, group_order, group_title, ...
     'locking', '');
 plot_tail_acg_spectra(power_acg, centers, delta_lag, group_order, group_title, ...
@@ -491,7 +499,8 @@ locking_acg.delta_power_model = fit_delta_power_contributions( ...
 locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
     locking_acg, group_order, group_title);
 locking_acg.power_strata = strata_rows;
-[locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate] = ...
+[locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate, ...
+    locking_acg.strata_power_model_sequential] = ...
     fit_strata_power_models(strata_rows, group_order, group_title);
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
@@ -1277,7 +1286,10 @@ end
 end
 
 
-function [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, cluster_alpha, cluster_perm)
+function [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, cluster_alpha, cluster_perm, n_example_neurons)
+if nargin < 11 || isempty(n_example_neurons)
+    n_example_neurons = 20;
+end
 centers = locking_acg.centers(:).';
 bin_w = median(diff(centers));
 if isfield(locking_acg, 'parameters') && isfield(locking_acg.parameters, 'low_percent')
@@ -1335,9 +1347,9 @@ plot_paired_peak_scores(locking_acg, group_order, group_title, ...
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
     'Mean delta power of the runs', 'delta power');
 plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
-    'PPC', 'locking', delta_lag);
+    'PPC', 'locking', delta_lag, n_example_neurons);
 plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
-    'delta power', 'delta power', delta_lag);
+    'delta power', 'delta power', delta_lag, n_example_neurons);
 plot_tail_acg_spectra(locking_acg, centers, delta_lag, group_order, group_title, ...
     'locking', '');
 plot_tail_acg_spectra(power_acg, centers, delta_lag, group_order, group_title, ...
@@ -1371,7 +1383,8 @@ else
         locking_acg, group_order, group_title);
 end
 if isfield(locking_acg, 'power_strata')
-    [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate] = ...
+    [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate, ...
+        locking_acg.strata_power_model_sequential] = ...
         fit_strata_power_models(locking_acg.power_strata, group_order, group_title, true);
 end
 end
@@ -1720,9 +1733,12 @@ legend(handles, group_title, 'Location', 'eastoutside')
 end
 
 
-function plot_peak_examples(summary, centers, smooth_n, group_order, group_title, score_label, split_name, delta_lag)
+function plot_peak_examples(summary, centers, smooth_n, group_order, group_title, score_label, split_name, delta_lag, n_examples)
 if nargin < 8 || isempty(delta_lag)
     delta_lag = [0.2 0.5];
+end
+if nargin < 9 || isempty(n_examples)
+    n_examples = 20;
 end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
         || summary.all_neurons.n < 1
@@ -1730,42 +1746,59 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
 end
 neurons = summary.all_neurons;
 disp_block(['Peak examples, ', split_name])
-n_ranks = 2;
-t1_rows = select_strong_examples(neurons, group_order, 't1', n_ranks);
-both_rows = select_strong_examples(neurons, group_order, 'both', n_ranks);
-if ~any(t1_rows(:)) && ~any(both_rows(:))
+[rows, labels] = list_example_neurons(neurons, group_order, group_title, n_examples);
+if isempty(rows)
     disp(['No peak examples for ', split_name])
     return
 end
-n_col = numel(group_order);
-row_rows = {t1_rows, both_rows};
-row_names = {'Strong t1, no t2', 'Strong t1 and t2'};
-for rank = 1:n_ranks
-    if ~any(t1_rows(rank, :)) && ~any(both_rows(rank, :))
-        continue
+n_per_figure = 4;
+n_fig = ceil(numel(rows) / n_per_figure);
+for f = 1:n_fig
+    pick = (f - 1) * n_per_figure + (1:n_per_figure);
+    pick = pick(pick <= numel(rows));
+    figure('Name', sprintf('ACG peak examples %d, %s', f, split_name), ...
+        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.06 0.92 0.84])
+    n_col = numel(pick);
+    for c = 1:n_col
+        subplot(2, n_col, c)
+        draw_peak_example(neurons, rows(pick(c)), centers, smooth_n, ...
+            score_label, labels{pick(c)}, split_name)
+        subplot(2, n_col, n_col + c)
+        draw_example_spectrum(neurons, rows(pick(c)), centers, delta_lag)
     end
-    figure('Name', sprintf('ACG peak examples %d, %s', rank, split_name), ...
-        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.02 0.02 0.96 0.96])
-    for r = 1:2
-        rows = row_rows{r};
-        for c = 1:n_col
-            acg_slot = (r - 1) * 2 * n_col + c;
-            spectrum_slot = acg_slot + n_col;
-            subplot(4, n_col, acg_slot)
-            if c > size(rows, 2) || rows(rank, c) < 1
-                axis off
-                subplot(4, n_col, spectrum_slot)
-                axis off
+    sgtitle(sprintf('%s examples %d-%d of %d. Blue low, red high. Gold band 2-5 Hz.', ...
+        split_name, pick(1), pick(end), numel(rows)))
+end
+end
+
+
+function [rows, labels] = list_example_neurons(neurons, group_order, group_title, n_total)
+keep_group = ~strcmp(group_order, 'delta');
+groups = group_order(keep_group);
+titles = group_title(keep_group);
+n_pick = max(n_total, 1);
+t1_rows = select_strong_examples(neurons, groups, 't1', n_pick);
+both_rows = select_strong_examples(neurons, groups, 'both', n_pick);
+kind_name = {'t1', 't1+t2'};
+kind_rows = {t1_rows, both_rows};
+rows = zeros(0, 1);
+labels = {};
+seen = zeros(0, 1);
+for rank = 1:n_pick
+    for kind = 1:2
+        for g = 1:numel(groups)
+            row = kind_rows{kind}(rank, g);
+            if row < 1 || any(seen == row)
                 continue
             end
-            draw_peak_example(neurons, rows(rank, c), centers, smooth_n, ...
-                group_order, group_title, score_label, row_names{r}, split_name, group_title{c})
-            subplot(4, n_col, spectrum_slot)
-            draw_example_spectrum(neurons, rows(rank, c), centers, delta_lag)
+            seen(end + 1, 1) = row; %#ok<AGROW>
+            rows(end + 1, 1) = row; %#ok<AGROW>
+            labels{end + 1, 1} = sprintf('%s %s', titles{g}, kind_name{kind}); %#ok<AGROW>
+            if numel(rows) >= n_total
+                return
+            end
         end
     end
-    sgtitle({sprintf('Reference for the peak scatters, %s, set %d', split_name, rank), ...
-        'Top of each pair: folded autocorrelogram. Bottom: its power spectrum after 100 ms. Gold band is 2-5 Hz.'})
 end
 end
 
@@ -1973,47 +2006,30 @@ end
 end
 
 
-function draw_peak_example(neurons, row, centers, smooth_n, group_order, group_title, score_label, kind_name, split_name, panel_group)
-if nargin < 10
-    panel_group = '';
-end
+function draw_peak_example(neurons, row, centers, smooth_n, score_label, kind_name, split_name)
 low_color = [0.20 0.45 0.75];
 high_color = [0.85 0.25 0.20];
 low_pk = acg_delta_peaks(neurons.low(row, :), centers, smooth_n);
 high_pk = acg_delta_peaks(neurons.high(row, :), centers, smooth_n);
 hold on
-low_line = plot(low_pk.fold_t, low_pk.fold_y, 'Color', low_color, 'LineWidth', 1.6);
-high_line = plot(high_pk.fold_t, high_pk.fold_y, 'Color', high_color, 'LineWidth', 1.6);
+plot(low_pk.fold_t, low_pk.fold_y, 'Color', low_color, 'LineWidth', 1.6);
+plot(high_pk.fold_t, high_pk.fold_y, 'Color', high_color, 'LineWidth', 1.6);
 mark_scored_peak(low_pk, 'first', low_color);
 mark_scored_peak(low_pk, 'second', low_color);
 mark_scored_peak(high_pk, 'first', high_color);
 mark_scored_peak(high_pk, 'second', high_color);
 xlim([0 1])
 xlabel('Lag (s)')
-ylabel('Folded normalized ACG')
-group_name = neurons.lock_group{row};
-hit = find(strcmp(group_order, group_name), 1);
-if ~isempty(hit)
-    group_name = group_title{hit};
-end
-if ~isempty(panel_group)
-    group_name = panel_group;
-end
-title({kind_name, sprintf('%s, %s, id %g, %s, %s', ...
-    group_name, neurons.session{row}, neurons.cluster_id(row), neurons.area{row}, ...
-    rate_label(neurons, row))}, ...
-    'Interpreter', 'none')
+ylabel('Folded ACG')
+title({sprintf('%s  id %g  %s  %s', kind_name, neurons.cluster_id(row), ...
+    neurons.area{row}, rate_label(neurons, row)), ...
+    short_example_line(neurons, row)}, ...
+    'Interpreter', 'none', 'FontSize', 8)
 yl = ylim;
 burst = patch([0 0.05 0.05 0], [yl(1) yl(1) yl(2) yl(2)], [0.75 0.75 0.75], ...
     'FaceAlpha', 0.28, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 ylim(yl)
 uistack(burst, 'bottom')
-if ~isempty(low_line) && ~isempty(high_line)
-    legend([low_line, high_line], {'Low 25%', 'High 25%'}, 'Location', 'southeast')
-end
-text(0.98, 0.98, example_parameter_text(neurons, row, score_label), ...
-    'Units', 'normalized', 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', ...
-    'FontSize', 8, 'BackgroundColor', 'w', 'Margin', 3, 'Interpreter', 'none')
 box off
 disp(sprintf('  example %s, %s: %s id %g\n%s', split_name, kind_name, ...
     neurons.session{row}, neurons.cluster_id(row), ...
@@ -2031,12 +2047,12 @@ f_hi = 1 / delta_lag(1);
 hold on
 band = patch([f_lo f_hi f_hi f_lo], [0 0 0 0], [0.95 0.85 0.40], ...
     'FaceAlpha', 0.35, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-low_line = plot_one_spectrum(freq_low{1}, spec_low{1}, low_color);
-high_line = plot_one_spectrum(freq_high{1}, spec_high{1}, high_color);
+plot_one_spectrum(freq_low{1}, spec_low{1}, low_color);
+plot_one_spectrum(freq_high{1}, spec_high{1}, high_color);
 xlim([0 12])
 xlabel('Frequency (Hz)')
 ylabel('Power')
-title('Spectrum, lags > 100 ms')
+title('Spectrum')
 yl = ylim;
 if ~all(isfinite(yl)) || yl(2) <= 0
     yl = [0 1];
@@ -2044,9 +2060,6 @@ end
 ylim([0, yl(2)])
 set(band, 'YData', [0 0 yl(2) yl(2)])
 uistack(band, 'bottom')
-if ~isempty(low_line) && ~isempty(high_line)
-    legend([low_line, high_line], {'Low 25%', 'High 25%'}, 'Location', 'northeast')
-end
 box off
 end
 
@@ -2085,6 +2098,37 @@ plot(lag, y, 'o', 'Color', color, 'MarkerFaceColor', color, ...
     'MarkerSize', 5, 'HandleVisibility', 'off')
 text(lag, y, ['  ' label], 'Color', color, 'FontSize', 8, ...
     'VerticalAlignment', 'bottom', 'Interpreter', 'none', 'HandleVisibility', 'off')
+end
+
+
+function line = short_example_line(neurons, row)
+line = sprintf('L %s/%s   H %s/%s', ...
+    short_peak(neurons.low_peaks, row, 'first'), ...
+    short_peak(neurons.low_peaks, row, 'second'), ...
+    short_peak(neurons.high_peaks, row, 'first'), ...
+    short_peak(neurons.high_peaks, row, 'second'));
+end
+
+
+function phrase = short_peak(peaks, row, which)
+if strcmp(which, 'first')
+    present = peaks.first_present(row);
+    measurable = peaks.first_measurable(row);
+    lag = peaks.first_lag(row);
+else
+    present = peaks.second_present(row);
+    measurable = peaks.second_measurable(row);
+    lag = peaks.second_lag(row);
+end
+if present && isfinite(lag)
+    phrase = sprintf('%dms', round(1000 * lag));
+    return
+end
+if measurable
+    phrase = '0';
+    return
+end
+phrase = '-';
 end
 
 
@@ -2669,16 +2713,18 @@ m = mean(values(idx));
 end
 
 
-function [model, beyond] = fit_strata_power_models(strata, group_order, group_title, do_plot)
+function [model, beyond, sequential] = fit_strata_power_models(strata, group_order, group_title, do_plot)
 if nargin < 4
     do_plot = true;
 end
 model = struct();
 beyond = struct();
+sequential = struct();
 report_stratum_counts(strata);
 if ~isfield(strata, 'n') || strata.n < 2
     model.all = empty_power_fit('All neurons, power strata');
     beyond.all = empty_power_fit('All neurons, power strata, beyond firing rate');
+    sequential.all = empty_power_fit('All neurons, power strata, sequential');
     return
 end
 keep = rows_of_repeated_groups(strata.neuron, 2);
@@ -2702,20 +2748,27 @@ lock_group = lock_group(keep_again);
 model.all = fit_one_power_model(X, y, names, 'All neurons, power strata', groups, 'Neuron');
 beyond.all = fit_beyond_rate_model(X, y, names, ...
     'All neurons, power strata, beyond firing rate', groups, 'Neuron');
+sequential.all = fit_sequential_strata_model(X, y, names, ...
+    'All neurons, power strata, sequential', groups);
 model.groups = struct();
 beyond.groups = struct();
+sequential.groups = struct();
 for g = 1:numel(group_order)
     in_group = in_lock_group(lock_group, group_order{g});
     selected = find(in_group);
     keep_local = rows_of_repeated_groups(groups(in_group), 2);
     in_group(selected(~keep_local)) = false;
+    local_groups = subset_groups(groups, in_group);
     model.groups.(group_order{g}) = fit_one_power_model( ...
         X(in_group, :), y(in_group), names, ...
-        [group_title{g}, ', power strata'], subset_groups(groups, in_group), 'Neuron');
+        [group_title{g}, ', power strata'], local_groups, 'Neuron');
     beyond.groups.(group_order{g}) = fit_beyond_rate_model( ...
         X(in_group, :), y(in_group), names, ...
         [group_title{g}, ', power strata, beyond firing rate'], ...
-        subset_groups(groups, in_group), 'Neuron');
+        local_groups, 'Neuron');
+    sequential.groups.(group_order{g}) = fit_sequential_strata_model( ...
+        X(in_group, :), y(in_group), names, ...
+        [group_title{g}, ', power strata, sequential'], local_groups);
 end
 if do_plot && model.all.ok
     plot_power_contributions(model, group_order, group_title, model.all.names, ...
@@ -2724,6 +2777,10 @@ end
 if do_plot && beyond.all.ok
     plot_beyond_rate_contributions(beyond, group_order, group_title, beyond.all.names, ...
         'Delta power strata beyond firing rate');
+end
+if do_plot && sequential.all.ok
+    plot_power_contributions(sequential, group_order, group_title, sequential.all.names, ...
+        'Delta power strata sequential');
 end
 end
 
@@ -2741,9 +2798,13 @@ has_model = isfield(summary, 'strata_power_model') ...
 has_beyond = isfield(summary, 'strata_power_model_beyond_rate') ...
     && isfield(summary.strata_power_model_beyond_rate, 'all') ...
     && isfield(summary.strata_power_model_beyond_rate.all, 'beyond_rsq');
-if has_model && has_beyond && ~do_plot
+has_sequential = isfield(summary, 'strata_power_model_sequential') ...
+    && isfield(summary.strata_power_model_sequential, 'all') ...
+    && isfield(summary.strata_power_model_sequential.all, 'sequential_added');
+if has_model && has_beyond && has_sequential && ~do_plot
     report_power_model_block(summary.strata_power_model, group_order);
     report_beyond_rate_block(summary.strata_power_model_beyond_rate, group_order);
+    report_power_model_block(summary.strata_power_model_sequential, group_order);
     return
 end
 fit_strata_power_models(summary.power_strata, group_order, group_title, do_plot);
@@ -2961,9 +3022,138 @@ end
 end
 
 
-function Z = residualize_on(X, rate)
-rate = rate(:);
-A = [ones(numel(rate), 1), rate];
+function fit = fit_sequential_strata_model(X, y, names, label, groups)
+% Gram-Schmidt order: firing rate, neuron, burst, ACG delta power,
+% first-peak prominence, second-cycle prominence. Each later block is
+% replaced by its residual on the current block.
+order = {'Firing rate', 'Neuron', 'Burst, 0-50 ms', ...
+    'ACG delta power, >100 ms', 'First-peak prominence', 'Second-cycle prominence'};
+cont_order = order(~strcmp(order, 'Neuron'));
+X_seq = zeros(size(X, 1), numel(cont_order));
+for k = 1:numel(cont_order)
+    hit = strcmp(names, cont_order{k});
+    if ~any(hit)
+        fit = empty_power_fit(label);
+        return
+    end
+    X_seq(:, k) = X(:, hit);
+end
+[D, ~] = factor_dummies(groups, size(X, 1));
+blocks = cell(1, numel(cont_order) + 1);
+blocks{1} = X_seq(:, 1);
+blocks{2} = D;
+for k = 2:numel(cont_order)
+    blocks{k + 1} = X_seq(:, k);
+end
+for k = 1:numel(blocks) - 1
+    if isempty(blocks{k})
+        continue
+    end
+    for j = k + 1:numel(blocks)
+        if isempty(blocks{j})
+            continue
+        end
+        blocks{j} = residualize_on(blocks{j}, blocks{k});
+    end
+end
+X_orth = blocks{1};
+for k = 3:numel(blocks)
+    X_orth = [X_orth, blocks{k}]; %#ok<AGROW>
+end
+spread = std(X_orth, 0, 1);
+kept = isfinite(spread) & spread > 1e-10;
+if ~any(kept)
+    fit = empty_power_fit(label);
+    return
+end
+fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{2});
+if ~fit.ok
+    return
+end
+fit = align_predictor_names(fit, cont_order);
+fit.predictor_corr = corr(X_orth);
+fit.sequential_order = order;
+added = zeros(numel(order), 1);
+for k = 1:numel(order)
+    hit = strcmp(fit.names, order{k});
+    if any(hit)
+        added(k) = fit.weight(hit);
+    end
+end
+fit.sequential_added = added;
+report_sequential_added(fit);
+end
+
+
+function fit = align_predictor_names(fit, cont_order)
+has_neuron = any(strcmp(fit.names, 'Neuron'));
+n = numel(cont_order);
+beta = zeros(n, 1);
+t_beta = nan(n, 1);
+p_beta = nan(n, 1);
+unique_rsq = zeros(n, 1);
+weight = zeros(n, 1);
+for k = 1:n
+    hit = find(strcmp(fit.names, cont_order{k}), 1);
+    if isempty(hit)
+        continue
+    end
+    beta(k) = fit.beta(hit);
+    t_beta(k) = fit.t_beta(hit);
+    p_beta(k) = fit.p_beta(hit);
+    unique_rsq(k) = fit.unique_rsq(hit);
+    weight(k) = fit.weight(hit);
+end
+names = cont_order;
+if has_neuron
+    hit = find(strcmp(fit.names, 'Neuron'), 1);
+    beta(end + 1, 1) = NaN;
+    t_beta(end + 1, 1) = NaN;
+    p_beta(end + 1, 1) = NaN;
+    unique_rsq(end + 1, 1) = fit.unique_rsq(hit);
+    weight(end + 1, 1) = fit.weight(hit);
+    names{end + 1} = 'Neuron';
+end
+fit.beta = beta;
+fit.t_beta = t_beta;
+fit.p_beta = p_beta;
+fit.unique_rsq = unique_rsq;
+fit.weight = weight;
+fit.names = names;
+if fit.rsq > 0
+    fit.percent_of_rsq = 100 * fit.weight / fit.rsq;
+else
+    fit.percent_of_rsq = nan(numel(names), 1);
+end
+end
+
+
+function report_sequential_added(fit)
+if ~isfield(fit, 'sequential_added') || isempty(fit.sequential_added)
+    return
+end
+disp('  Sequential added R^2, each predictor orthogonal to those above:')
+cumulative = 0;
+for k = 1:numel(fit.sequential_order)
+    cumulative = cumulative + fit.sequential_added(k);
+    disp(sprintf('    %d. %s adds %.3g (cumulative %.3g)', ...
+        k, fit.sequential_order{k}, fit.sequential_added(k), cumulative))
+end
+end
+
+
+function Z = residualize_on(X, controls)
+n = size(X, 1);
+if isempty(controls)
+    A = ones(n, 1);
+else
+    if size(controls, 1) ~= n
+        controls = controls(:);
+    end
+    spread = std(controls, 0, 1);
+    controls = controls(:, isfinite(spread) & spread > 0);
+    A = [ones(n, 1), controls];
+end
 Z = X - A * (A \ X);
 end
 
@@ -3097,7 +3287,7 @@ D = D(:, std(D, 0, 1) > 0);
 end
 
 
-function fit = fit_one_power_model(X, y, names, label, groups, factor_name)
+function fit = fit_one_power_model(X, y, names, label, groups, factor_name, D_override)
 if nargin < 5
     groups = {};
 end
@@ -3108,6 +3298,15 @@ fit = empty_power_fit(label);
 fit.n = size(X, 1);
 n_cont = numel(names);
 [D, n_levels] = factor_dummies(groups, fit.n);
+if nargin >= 7
+    if isempty(D_override)
+        D = zeros(fit.n, 0);
+    else
+        D = D_override;
+    end
+    spread = std(D, 0, 1);
+    D = D(:, isfinite(spread) & spread > 1e-10);
+end
 n_dum = size(D, 2);
 if n_dum > 0 && fit.n < n_cont + n_dum + 2
     disp_block(['Delta power model, ', label])
@@ -3273,6 +3472,7 @@ function report_power_model(fit)
 disp_block(['Delta power model, ', fit.label])
 disp(['Delta power model, ', fit.label, ', n = ', num2str(fit.n)])
 disp(sprintf('  Full R^2 = %.3g, F = %.3g, p = %.3g', fit.rsq, fit.F, fit.p_model))
+report_sequential_added(fit)
 cont = ~strcmp(fit.names, 'Session') & ~strcmp(fit.names, 'Neuron');
 disp(['  Predictor correlations (', strjoin(fit.names(cont), ', '), ')'])
 disp(fit.predictor_corr)
