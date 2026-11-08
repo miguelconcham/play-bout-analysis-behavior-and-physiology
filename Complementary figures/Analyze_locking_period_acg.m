@@ -104,6 +104,12 @@
 % show_ppc_models is true. The one-row PPC model can be drawn from the
 % saved summary. Stratum PPC is stored only by a full run, so the
 % within-neuron PPC model needs that run once.
+% Each firing run is also kept. Delta power of the run is predicted by
+% the firing rate of that run. Neuron identity supplies an intercept for
+% every neuron. Neuron type, the trough-locked, peak-locked, or
+% non-entrained label, has its own intercept and its own slope. Those
+% figures open only when show_run_rate_power is true. The rows are stored
+% only by a full run.
 % A reverse strata fit asks how much LFP delta power predicts entrainment.
 % The outcomes are folded autocorrelogram delta power and first-peak
 % prominence. Neuron is the category, firing rate is a covariate, and
@@ -174,6 +180,7 @@ show_acg_spectra = true;         % low tail against high tail spectra
 show_model_figures = true;       % contribution bars and partial-R^2 bars
 show_model_scatters = true;      % ceteris-paribus predictor scatters for each all-neuron model
 show_ppc_models = true;          % PPC contribution bars and ceteris-paribus scatters
+show_run_rate_power = true;      % run-level firing rate versus delta power
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG, and each statistics block is written
@@ -205,7 +212,8 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'acg_spectra', show_acg_spectra, ...
     'model_figures', show_model_figures, ...
     'model_scatters', show_model_scatters, ...
-    'ppc_models', show_ppc_models));
+    'ppc_models', show_ppc_models, ...
+    'run_rate_power', show_run_rate_power));
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -299,6 +307,7 @@ n_unsplit_power = zeros(1, numel(source_order));
 n_missing = 0;
 n_outside = 0;
 strata_rows = empty_power_strata();
+run_rows = empty_run_rate_rows();
 
 for f = 1:numel(parsing_files)
     disp(['Loading ', parsing_files(f).name, ' ...'])
@@ -428,6 +437,8 @@ for f = 1:numel(parsing_files)
                 max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
                 stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
                 this_ppc);
+            run_rows = append_run_rate_rows(run_rows, run_length, this_power, rt, ...
+                animal_code, this_id, this_group);
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
                 this_ppc, this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
@@ -562,6 +573,8 @@ locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
 [locking_acg.strata_ppc_model, locking_acg.strata_ppc_model_beyond_rate, ...
     locking_acg.strata_ppc_model_sequential] = ...
     fit_strata_ppc_models(strata_rows, group_order, group_title);
+locking_acg.run_rate_power = run_rows;
+locking_acg = fit_saved_run_rate_power(locking_acg, true);
 
 summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
 save(summary_path, 'locking_acg', 'power_acg');
@@ -1474,6 +1487,7 @@ locking_acg.ppc_model = fit_ppc_contributions( ...
     locking_acg, group_order, group_title);
 locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
     locking_acg, group_order, group_title);
+locking_acg = fit_saved_run_rate_power(locking_acg, true);
 end
 
 
@@ -1556,6 +1570,7 @@ end
 report_or_fit_strata_models(locking_acg, group_order, group_title, false);
 report_or_fit_power_to_entrainment(locking_acg, group_order, group_title, false);
 report_or_fit_ppc_models(locking_acg, group_order, group_title, false);
+fit_saved_run_rate_power(locking_acg, false);
 end
 
 
@@ -3607,6 +3622,406 @@ for i = 1:numel(candidates)
         return
     end
 end
+end
+
+
+function summary = fit_saved_run_rate_power(summary, do_plot)
+type_order = {'trough', 'peak', 'nonentrained'};
+type_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
+if ~isfield(summary, 'run_rate_power') || ~isfield(summary.run_rate_power, 'n') ...
+        || summary.run_rate_power.n < 2
+    disp_block('Run firing rate and delta power')
+    disp(['Run-level rows are not in this summary. Run once with ' ...
+        'redraw_figures_only = false.'])
+    summary.run_rate_model = empty_run_rate_model();
+    return
+end
+summary.run_rate_model = fit_run_rate_power(summary.run_rate_power, ...
+    type_order, type_title, do_plot);
+end
+
+
+function model = fit_run_rate_power(rows, type_order, type_title, do_plot)
+if nargin < 4
+    do_plot = true;
+end
+model = empty_run_rate_model();
+model.type_order = type_order;
+model.type_title = type_title;
+if ~isfield(rows, 'n') || rows.n < 2
+    disp_block('Run firing rate and delta power')
+    disp('No run had both a firing rate and a delta power.')
+    return
+end
+rate = rows.rate(:);
+power = rows.power(:);
+neuron = rows.neuron(:);
+neuron_type = rows.neuron_type(:);
+keep = isfinite(rate) & isfinite(power) & ~cellfun(@isempty, neuron);
+rate = rate(keep);
+power = power(keep);
+neuron = neuron(keep);
+neuron_type = neuron_type(keep);
+keep = rows_of_repeated_groups(neuron, 2);
+rate = rate(keep);
+power = power(keep);
+neuron = neuron(keep);
+neuron_type = neuron_type(keep);
+[rate, power, neuron, n_outliers, keep] = drop_clear_outliers(rate, power, neuron);
+neuron_type = neuron_type(keep);
+keep = rows_of_repeated_groups(neuron, 2);
+rate = rate(keep);
+power = power(keep);
+neuron = neuron(keep);
+neuron_type = neuron_type(keep);
+n = numel(power);
+n_neurons = numel(unique(neuron));
+if n < n_neurons + 3
+    disp_block('Run firing rate and delta power')
+    disp(['Too few runs remain after removing outliers: n = ', num2str(n), '.'])
+    return
+end
+mean_rate = mean(rate);
+rate_c = rate - mean_rate;
+[D, n_levels] = factor_dummies(neuron, n);
+common = ols_fit([ones(n, 1), rate_c, D], power);
+rate_only = ols_fit([ones(n, 1), rate_c], power);
+[neuron_F, neuron_p] = nested_rsq_test(common.rsq, rate_only.rsq, ...
+    common.rank - rate_only.rank, common.df);
+design = run_type_design(rate_c, neuron, neuron_type, type_order);
+full = ols_fit(design.A, power);
+slope_keep = true(1, size(design.A, 2));
+used_slopes = design.slope_col(isfinite(design.slope_col));
+slope_keep(used_slopes) = false;
+equal_slope = ols_fit([design.A(:, slope_keep), rate_c], power);
+intercept_keep = true(1, size(design.A, 2));
+used_intercepts = design.intercept_col(design.intercept_col >= 1);
+intercept_keep(used_intercepts) = false;
+equal_intercept = ols_fit([ones(n, 1), design.A(:, intercept_keep)], power);
+[slope_F, slope_contrast_p] = nested_rsq_test(full.rsq, equal_slope.rsq, ...
+    full.rank - equal_slope.rank, full.df);
+[intercept_F, intercept_contrast_p] = nested_rsq_test(full.rsq, equal_intercept.rsq, ...
+    full.rank - equal_intercept.rank, full.df);
+n_type = numel(type_order);
+intercept = nan(1, n_type);
+intercept_se = nan(1, n_type);
+intercept_p = nan(1, n_type);
+slope = nan(1, n_type);
+slope_se = nan(1, n_type);
+slope_t = nan(1, n_type);
+slope_p = nan(1, n_type);
+for t = 1:n_type
+    ic = design.intercept_col(t);
+    if ic >= 1 && ic <= numel(full.beta)
+        intercept(t) = full.beta(ic);
+        intercept_se(t) = full.se(ic);
+        intercept_p(t) = full.p(ic);
+    end
+    sc = design.slope_col(t);
+    if isfinite(sc) && sc >= 1 && sc <= numel(full.beta)
+        slope(t) = full.beta(sc);
+        slope_se(t) = full.se(sc);
+        slope_t(t) = full.t(sc);
+        slope_p(t) = full.p(sc);
+    end
+end
+model.ok = isfinite(common.rsq) && isfinite(full.rsq);
+model.n_runs = n;
+model.n_neurons = n_neurons;
+model.n_neuron_levels = n_levels;
+model.n_outliers = n_outliers;
+model.mean_rate = mean_rate;
+model.common_slope = common.beta(2);
+model.common_se = common.se(2);
+model.common_t = common.t(2);
+model.common_p = common.p(2);
+model.common_rsq = common.rsq;
+model.neuron_F = neuron_F;
+model.neuron_p = neuron_p;
+model.intercept = intercept;
+model.intercept_se = intercept_se;
+model.intercept_p = intercept_p;
+model.slope = slope;
+model.slope_se = slope_se;
+model.slope_t = slope_t;
+model.slope_p = slope_p;
+model.slope_F = slope_F;
+model.slope_contrast_p = slope_contrast_p;
+model.rsq = full.rsq;
+model.intercept_F = intercept_F;
+model.intercept_contrast_p = intercept_contrast_p;
+report_run_rate_power(model);
+if do_plot && model.ok
+    plot_run_rate_types(model);
+    plot_run_rate_scatters(rate_c, power, neuron, neuron_type, model);
+end
+end
+
+
+function model = empty_run_rate_model()
+model.ok = false;
+model.n_runs = 0;
+model.n_neurons = 0;
+model.n_outliers = 0;
+model.mean_rate = NaN;
+model.common_slope = NaN;
+model.common_p = NaN;
+model.common_rsq = NaN;
+model.type_order = {};
+model.type_title = {};
+model.intercept = [];
+model.slope = [];
+model.slope_p = [];
+model.rsq = NaN;
+end
+
+
+function report_run_rate_power(model)
+disp_block('Run firing rate and delta power')
+disp(sprintf('Runs = %d, neurons = %d', model.n_runs, model.n_neurons))
+if model.n_outliers > 0
+    disp(sprintf(['  Removed %d clear outlier runs before the fit ' ...
+        '(modified z-score above 3.5 on firing rate or delta power).'], ...
+        model.n_outliers))
+end
+disp(sprintf(['  Firing rate is centered at its mean, %.4g spikes/s. ' ...
+    'An intercept is delta power at that rate.'], model.mean_rate))
+disp(sprintf(['  Common slope, with a neuron intercept: %.4g delta power ' ...
+    'per spike/s, t = %.3g, p = %.3g, R^2 = %.3g'], ...
+    model.common_slope, model.common_t, model.common_p, model.common_rsq))
+disp(sprintf('  Neuron intercepts: F = %.3g, p = %.3g', model.neuron_F, model.neuron_p))
+disp(sprintf(['  Type model R^2 = %.3g. Slopes differ by neuron type: ' ...
+    'F = %.3g, p = %.3g'], model.rsq, model.slope_F, model.slope_contrast_p))
+disp(sprintf('  Intercepts differ by neuron type: F = %.3g, p = %.3g', ...
+    model.intercept_F, model.intercept_contrast_p))
+for t = 1:numel(model.type_title)
+    disp(sprintf(['  %s: intercept = %.4g (p = %.3g), slope = %.4g ' ...
+        'per spike/s, t = %.3g, p = %.3g %s'], ...
+        model.type_title{t}, model.intercept(t), model.intercept_p(t), ...
+        model.slope(t), model.slope_t(t), model.slope_p(t), ...
+        significance_mark(model.slope_p(t))))
+end
+end
+
+
+function design = run_type_design(rate_c, neuron, neuron_type, type_order)
+n = numel(rate_c);
+n_type = numel(type_order);
+A = zeros(n, 0);
+intercept_col = zeros(1, n_type);
+slope_col = nan(1, n_type);
+contrast = false(1, 0);
+for t = 1:n_type
+    in_t = strcmp(neuron_type, type_order{t});
+    if ~any(in_t)
+        continue
+    end
+    members = unique(neuron(in_t), 'stable');
+    n_contrast = max(numel(members) - 1, 0);
+    has_slope = nnz(in_t) >= 3 && std(rate_c(in_t)) > 0;
+    block = zeros(n, 1 + double(has_slope) + n_contrast);
+    block(:, 1) = double(in_t);
+    intercept_col(t) = size(A, 2) + 1;
+    cursor = 1;
+    if has_slope
+        cursor = 2;
+        block(:, 2) = rate_c .* double(in_t);
+        slope_col(t) = size(A, 2) + 2;
+    end
+    for j = 1:n_contrast
+        cursor = cursor + 1;
+        block(strcmp(neuron, members{j}), cursor) = 1;
+        block(strcmp(neuron, members{end}), cursor) = -1;
+    end
+    contrast = [contrast, false(1, 1 + double(has_slope)), true(1, n_contrast)]; %#ok<AGROW>
+    A = [A, block]; %#ok<AGROW>
+end
+design.A = A;
+design.intercept_col = intercept_col;
+design.slope_col = slope_col;
+design.contrast = contrast;
+end
+
+
+function fit = ols_fit(A, y)
+n = size(A, 1);
+k = size(A, 2);
+fit.beta = nan(k, 1);
+fit.se = nan(k, 1);
+fit.t = nan(k, 1);
+fit.p = nan(k, 1);
+fit.rsq = NaN;
+fit.rank = 0;
+fit.df = NaN;
+if n < 3 || k < 1
+    return
+end
+fit.rank = rank(A);
+fit.df = n - fit.rank;
+if fit.df < 1
+    return
+end
+beta = pinv(A) * y;
+resid = y - A * beta;
+ss_res = sum(resid .^ 2);
+ss_tot = sum((y - mean(y)) .^ 2);
+if ss_tot <= 0
+    return
+end
+fit.beta = beta;
+fit.rsq = 1 - ss_res / ss_tot;
+mse = ss_res / fit.df;
+covb = mse * pinv(A' * A);
+fit.se = sqrt(max(real(diag(covb)), 0));
+fit.t = fit.beta ./ fit.se;
+fit.t(~isfinite(fit.se) | fit.se <= 0) = NaN;
+fit.p = t_two_tailed(fit.t, fit.df);
+end
+
+
+function [Fstat, p] = nested_rsq_test(rsq_full, rsq_red, df1, df2)
+Fstat = NaN;
+p = NaN;
+if df1 < 1 || df2 < 1 || ~isfinite(rsq_full) || ~isfinite(rsq_red) || rsq_full >= 1
+    return
+end
+if rsq_full < rsq_red
+    rsq_full = rsq_red;
+end
+Fstat = ((rsq_full - rsq_red) / df1) / ((1 - rsq_full) / df2);
+if ~isfinite(Fstat) || Fstat < 0
+    Fstat = NaN;
+    return
+end
+p = betainc(df2 / (df2 + df1 * Fstat), df2 / 2, df1 / 2);
+end
+
+
+function plot_run_rate_types(model)
+if ~figure_selected('run_rate_power') || ~model.ok
+    return
+end
+figure('Name', 'Run firing rate and delta power', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.08 0.16 0.84 0.62])
+subplot(1, 2, 1)
+plot_signed_bars(model.slope, model.slope_se, model.slope_p, model.type_title)
+ylabel('Delta power per spike/s')
+title(sprintf('Slope, common slope p = %.3g', model.common_p))
+subplot(1, 2, 2)
+plot_signed_bars(model.intercept, model.intercept_se, model.intercept_p, model.type_title)
+ylabel('Delta power at mean firing rate')
+title(sprintf('Intercept, type difference p = %.3g', model.intercept_contrast_p))
+end
+
+
+function plot_signed_bars(values, se, pvals, labels)
+hold on
+bar(values, 'FaceColor', [0.25 0.38 0.62])
+if numel(se) == numel(values)
+    errorbar(1:numel(values), values, se, 'k.', 'LineWidth', 1)
+end
+for i = 1:numel(values)
+    if ~isfinite(values(i)) || ~isfinite(pvals(i))
+        continue
+    end
+    mark = significance_mark(pvals(i));
+    pad = 0.04 * max(abs(values(isfinite(values))));
+    if ~isfinite(pad) || pad <= 0
+        pad = 0.01;
+    end
+    if values(i) >= 0
+        text(i, values(i) + pad, mark, 'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', 'bottom')
+    else
+        text(i, values(i) - pad, mark, 'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', 'top')
+    end
+end
+set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels, 'XTickLabelRotation', 20)
+box off
+show = isfinite(values);
+if ~any(show)
+    return
+end
+extent = abs(values(show));
+if numel(se) == numel(values)
+    extent = max(extent, abs(values(show)) + abs(se(show)));
+end
+span = max(extent);
+if ~isfinite(span) || span <= 0
+    span = 1;
+end
+ylim([-span, span] * 1.35)
+end
+
+
+function plot_run_rate_scatters(rate_c, power, neuron, neuron_type, model)
+if ~figure_selected('run_rate_power') || ~model.ok
+    return
+end
+[~, ~, idx] = unique(neuron, 'stable');
+rate_dm = rate_c;
+power_dm = power;
+for i = 1:max(idx)
+    in = idx == i;
+    rate_dm(in) = rate_c(in) - mean(rate_c(in));
+    power_dm(in) = power(in) - mean(power(in));
+end
+n_type = numel(model.type_order);
+figure('Name', 'Run rate versus power by neuron type', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.06 0.14 0.88 0.58])
+for t = 1:n_type
+    subplot(1, n_type, t)
+    in = strcmp(neuron_type, model.type_order{t});
+    hold on
+    plot(rate_dm(in), power_dm(in), '.', 'Color', [0.25 0.38 0.62], 'MarkerSize', 8)
+    if any(in) && isfinite(model.slope(t))
+        x_line = [min(rate_dm(in)), max(rate_dm(in))];
+        plot(x_line, model.slope(t) * x_line, '-', 'Color', [0.75 0.12 0.14], 'LineWidth', 1.6)
+    end
+    title(sprintf('%s\nslope = %.3g %s', model.type_title{t}, model.slope(t), ...
+        significance_mark(model.slope_p(t))), 'Interpreter', 'none')
+    xlabel('Firing rate within neuron')
+    ylabel('Delta power within neuron')
+    box off
+end
+sgtitle('Neuron intercept removed. The line is that neuron type''s slope.')
+end
+
+
+function store = empty_run_rate_rows()
+store.n = 0;
+store.neuron = {};
+store.neuron_type = {};
+store.rate = zeros(0, 1);
+store.power = zeros(0, 1);
+end
+
+
+function store = append_run_rate_rows(store, run_length, power, rt, animal_code, cluster_id, neuron_type)
+if ~ismember('RunNumSpikes', rt.Properties.VariableNames)
+    return
+end
+spikes = double(rt.RunNumSpikes(:));
+duration = run_length(:);
+power = double(power(:));
+n_run = numel(duration);
+if numel(spikes) ~= n_run || numel(power) ~= n_run
+    return
+end
+ok = isfinite(spikes) & spikes >= 0 & isfinite(duration) & duration > 0 & isfinite(power);
+if ~any(ok)
+    return
+end
+rate = spikes(ok) ./ duration(ok);
+n_add = numel(rate);
+idx = store.n + (1:n_add);
+store.n = store.n + n_add;
+neuron_key = sprintf('%s|%g', animal_code, cluster_id);
+store.rate(idx, 1) = rate;
+store.power(idx, 1) = power(ok);
+store.neuron(idx, 1) = repmat({neuron_key}, n_add, 1);
+store.neuron_type(idx, 1) = repmat({neuron_type}, n_add, 1);
 end
 
 
