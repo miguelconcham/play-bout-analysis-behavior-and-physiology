@@ -87,7 +87,11 @@
 % still meets both minimums. Before those autocorrelograms are built, the
 % script plots spikes per neuron and, for minimums of 100, 200, 300, 400,
 % and 500 spikes, how many neurons would receive each stratum count.
-% strata_preview_only stops after those two figures. Stratum power is the
+% strata_preview_only stops after those two figures. The 4-then-2-then-1
+% rule is saved as locking_period_acg_summary.mat. The maximized rule is
+% saved as locking_period_acg_summary_max_strata.mat. A reprint or a
+% figures-only redraw loads the file that matches the current switch.
+% Stratum power is the
 % duration-weighted mean. Burst, both prominences, firing rate, and the
 % folded autocorrelogram delta power are recomputed in the stratum. The
 % category is the neuron, and a neuron with fewer than two usable strata
@@ -189,11 +193,11 @@ areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % written there as SVG and JPG, and each statistics block is written
 % there as its own text file.
 figure_folder = '';
-% true reloads locking_period_acg_summary.mat and reprints the tests.
-% Spikes are not reloaded and no figures are opened. A non-empty
-% figure_folder receives one text file per statistics block.
+% true reloads the summary that matches maximize_strata_number and
+% reprints the tests. Spikes are not reloaded and no figures are opened.
+% A non-empty figure_folder receives one text file per statistics block.
 reprint_stats_only = false;
-% true reloads the same summary and draws the figures. Spike files are
+% true reloads that same summary and draws the figures. Spike files are
 % not read. Cluster bars are computed from the saved curves when the
 % summary does not already contain them.
 redraw_figures_only = false;
@@ -226,12 +230,10 @@ if reprint_stats_only
         flags.(flag_names{i}) = false;
     end
     setappdata(0, 'locking_acg_figures', flags);
-    summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
-    if exist(summary_path, 'file') ~= 2
-        error('Analyze_locking_period_acg:nosummary', ...
-            'No saved summary at %s. Run once with reprint_stats_only = false.', summary_path);
-    end
+    summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
+    require_saved_summary(summary_path, maximize_strata_number, 'reprint_stats_only');
     loaded = load(summary_path, 'locking_acg', 'power_acg');
+    assert_summary_strata_rule(loaded.locking_acg, maximize_strata_number, summary_path);
     smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
     reprint_saved_statistics(loaded.locking_acg, loaded.power_acg, ...
         group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
@@ -242,12 +244,10 @@ if reprint_stats_only
 end
 
 if redraw_figures_only
-    summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
-    if exist(summary_path, 'file') ~= 2
-        error('Analyze_locking_period_acg:nosummary', ...
-            'No saved summary at %s. Run once with redraw_figures_only = false.', summary_path);
-    end
+    summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
+    require_saved_summary(summary_path, maximize_strata_number, 'redraw_figures_only');
     loaded = load(summary_path, 'locking_acg', 'power_acg');
+    assert_summary_strata_rule(loaded.locking_acg, maximize_strata_number, summary_path);
     smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
     [locking_acg, power_acg] = redraw_saved_figures(loaded.locking_acg, loaded.power_acg, ...
         group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
@@ -586,13 +586,56 @@ locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
     locking_acg.strata_ppc_model_sequential] = ...
     fit_strata_ppc_models(strata_rows, group_order, group_title);
 
-summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
+summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
 save(summary_path, 'locking_acg', 'power_acg');
 disp(['Saved ', summary_path])
 if ~isempty(figure_folder)
     save_open_figures(figure_folder)
 end
 stop_statistics_diary()
+
+
+function summary_path = locking_summary_path(parsing_folder, maximize_strata_number)
+if maximize_strata_number
+    file_name = 'locking_period_acg_summary_max_strata.mat';
+else
+    file_name = 'locking_period_acg_summary.mat';
+end
+summary_path = fullfile(parsing_folder, file_name);
+end
+
+
+function require_saved_summary(summary_path, maximize_strata_number, switch_name)
+if exist(summary_path, 'file') == 2
+    return
+end
+if maximize_strata_number
+    rule = 'maximize_strata_number = true';
+else
+    rule = 'maximize_strata_number = false';
+end
+error('Analyze_locking_period_acg:nosummary', ...
+    'No saved summary at %s. Run once with %s and %s = false.', ...
+    summary_path, rule, switch_name);
+end
+
+
+function assert_summary_strata_rule(locking_acg, maximize_strata_number, summary_path)
+has_flag = isstruct(locking_acg) && isfield(locking_acg, 'parameters') ...
+    && isfield(locking_acg.parameters, 'maximize_strata_number');
+if has_flag
+    saved = logical(locking_acg.parameters.maximize_strata_number);
+else
+    saved = false;
+end
+if saved == logical(maximize_strata_number)
+    return
+end
+error('Analyze_locking_period_acg:summaryrule', ...
+    ['%s was built with maximize_strata_number = %d. ' ...
+     'The current switch is %d.'], ...
+    summary_path, saved, logical(maximize_strata_number));
+end
 
 
 function start_statistics_diary(folder)
