@@ -1,18 +1,22 @@
-function plan = power_run_strata(power, spikes, duration, min_spikes, min_lag_s)
+function plan = power_run_strata(power, spikes, duration, min_spikes, min_lag_s, maximize)
 %POWER_RUN_STRATA  Contiguous power strata with about equal spike counts.
 %
 % Runs are ordered from low to high delta power. The cut points divide the
-% cumulative spike count into equal shares. A run is never split. The
-% result uses 4 strata, then 2, then 1, and keeps the first partition in
-% which every stratum has at least min_spikes spikes and at least one run
-% longer than min_lag_s. plan.k is 0 when no partition qualifies.
-% plan.index is 0 for a run left out, and 1..k for a run in a stratum.
+% cumulative spike count into equal shares. A run is never split. Without
+% maximize, the result tries 4 strata, then 2, then 1. With maximize, it
+% keeps the largest count in which every stratum has at least min_spikes
+% spikes and at least one run longer than min_lag_s. plan.k is 0 when no
+% partition qualifies. plan.index is 0 for a run left out, and 1..k for a
+% run in a stratum.
 
 if nargin < 4 || isempty(min_spikes)
     min_spikes = 50;
 end
 if nargin < 5 || isempty(min_lag_s)
     min_lag_s = 0.5;
+end
+if nargin < 6 || isempty(maximize)
+    maximize = false;
 end
 power = double(power(:));
 spikes = double(spikes(:));
@@ -28,7 +32,7 @@ usable = isfinite(power) & isfinite(spikes) & spikes > 0 ...
 if ~any(usable)
     return
 end
-for k = [4 2 1]
+for k = stratum_candidate_counts(spikes, duration, usable, min_spikes, min_lag_s, maximize)
     index = zeros(n, 1);
     index(usable) = bins_by_spike_mass(power(usable), spikes(usable), k);
     if partition_is_usable(index, spikes, duration, k, min_spikes, min_lag_s)
@@ -37,6 +41,27 @@ for k = [4 2 1]
         return
     end
 end
+end
+
+
+function ks = stratum_candidate_counts(spikes, duration, usable, min_spikes, min_lag_s, maximize)
+if ~maximize
+    ks = [4 2 1];
+    return
+end
+long_run = usable & duration > min_lag_s;
+total = sum(spikes(usable));
+if min_spikes <= 0
+    k_max = nnz(usable);
+else
+    k_max = floor(total / min_spikes);
+end
+k_max = min([k_max, nnz(usable), nnz(long_run)]);
+if k_max < 1
+    ks = [];
+    return
+end
+ks = k_max:-1:1;
 end
 
 
