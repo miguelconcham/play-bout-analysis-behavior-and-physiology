@@ -99,6 +99,10 @@
 % prominence. Neuron is the category, firing rate is a covariate, and
 % burst is a covariate of the first peak. The reported amount is the
 % partial R^2 of LFP delta power.
+% Each all-neuron model also draws one ceteris-paribus figure. Every
+% continuous predictor is plotted against the outcome after both have
+% been adjusted for the other predictors and for the category. The line
+% is that model's prediction across the adjusted range.
 % Relative weights give each predictor's share of the explained variance.
 % For each measure the script tests whether the high tail is larger than
 % the low tail in the same neuron, and whether a bigger change in PPC or
@@ -154,6 +158,7 @@ show_paired_tests = true;        % paired low-versus-high scatters, cycle counts
 show_neuron_examples = true;     % example neuron autocorrelograms and spectra
 show_acg_spectra = true;         % low tail against high tail spectra
 show_model_figures = true;       % contribution bars and partial-R^2 bars
+show_model_scatters = true;      % ceteris-paribus predictor scatters for each all-neuron model
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG, and each statistics block is written
@@ -183,10 +188,17 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'paired_tests', show_paired_tests, ...
     'neuron_examples', show_neuron_examples, ...
     'acg_spectra', show_acg_spectra, ...
-    'model_figures', show_model_figures));
+    'model_figures', show_model_figures, ...
+    'model_scatters', show_model_scatters));
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
+    flags = getappdata(0, 'locking_acg_figures');
+    flag_names = fieldnames(flags);
+    for i = 1:numel(flag_names)
+        flags.(flag_names{i}) = false;
+    end
+    setappdata(0, 'locking_acg_figures', flags);
     summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
     if exist(summary_path, 'file') ~= 2
         error('Analyze_locking_period_acg:nosummary', ...
@@ -1407,6 +1419,7 @@ if isfield(locking_acg, 'delta_power_model') && isfield(locking_acg.delta_power_
         && locking_acg.delta_power_model.all.ok && model_has_delta
     plot_power_contributions(locking_acg.delta_power_model, group_order, group_title, ...
         locking_acg.delta_power_model.all.names);
+    plot_session_ceteris_paribus(locking_acg, false);
 else
     locking_acg.delta_power_model = fit_delta_power_contributions( ...
         locking_acg, group_order, group_title);
@@ -1418,6 +1431,7 @@ end
 if ~isempty(beyond) && isfield(beyond, 'all') && beyond.all.ok ...
         && isfield(beyond.all, 'beyond_rsq') && isfinite(beyond.all.beyond_rsq)
     plot_beyond_rate_contributions(beyond, group_order, group_title, beyond.all.names);
+    plot_session_ceteris_paribus(locking_acg, true);
 else
     locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
         locking_acg, group_order, group_title);
@@ -2847,10 +2861,14 @@ end
 if do_plot && model.all.ok
     plot_power_contributions(model, group_order, group_title, model.all.names, ...
         'Delta power strata');
+    plot_ceteris_paribus(X, y, names, groups, 'Neuron', model.all);
 end
 if do_plot && beyond.all.ok
     plot_beyond_rate_contributions(beyond, group_order, group_title, beyond.all.names, ...
         'Delta power strata beyond firing rate');
+    X_free = X;
+    X_free(:, 2:end) = residualize_on(X(:, 2:end), X(:, 1));
+    plot_ceteris_paribus(X_free, y, names, groups, 'Neuron', beyond.all);
 end
 if do_plot && sequential.all.ok
     plot_power_contributions(sequential, group_order, group_title, sequential.all.names, ...
@@ -2929,22 +2947,28 @@ end
 [X, power, groups, lock_group] = strata_regression_rows(strata);
 model.acg_delta = fit_partial_outcome(power, X(:, 1), X(:, 5), ...
     {'Firing rate'}, groups, lock_group, group_order, group_title, ...
-    'ACG delta power');
+    'ACG delta power', do_plot);
 model.first_peak = fit_partial_outcome(power, [X(:, 1), X(:, 2)], X(:, 3), ...
     {'Firing rate', 'Burst, 0-50 ms'}, groups, lock_group, ...
-    group_order, group_title, 'First-peak prominence');
+    group_order, group_title, 'First-peak prominence', do_plot);
 if do_plot
     plot_entrainment_partial_r2(model, group_order, group_title);
 end
 end
 
 
-function block = fit_partial_outcome(power, covariates, outcome, covariate_names, groups, lock_group, group_order, group_title, outcome_name)
+function block = fit_partial_outcome(power, covariates, outcome, covariate_names, groups, lock_group, group_order, group_title, outcome_name, do_plot)
+if nargin < 10
+    do_plot = false;
+end
 predictor = 'LFP delta power';
 names = [{predictor}, covariate_names];
 X = [power, covariates];
 block.all = attach_partial_r2(fit_one_power_model(X, outcome, names, ...
     ['All neurons, LFP power to ', outcome_name], groups, 'Neuron'), predictor);
+if do_plot
+    plot_ceteris_paribus(X, outcome, names, groups, 'Neuron', block.all);
+end
 block.groups = struct();
 for g = 1:numel(group_order)
     in_group = in_lock_group(lock_group, group_order{g});
@@ -3065,6 +3089,136 @@ bar_with_stars(values, pvals, labels)
 ylabel('Partial R^2 of LFP delta power')
 title('Within neuron, after firing rate and neuron identity')
 legend(series_names, 'Location', 'northeast')
+end
+
+
+function plot_session_ceteris_paribus(summary, beyond_rate)
+if ~figure_selected('model_scatters')
+    return
+end
+if ~isfield(summary, 'all_neurons') || ~isfield(summary, 'centers') ...
+        || ~isfield(summary, 'parameters')
+    return
+end
+neurons = summary.all_neurons;
+[X, y, names, ~, groups] = power_model_design( ...
+    neurons, summary.centers(:).', summary.parameters.delta_lag);
+if beyond_rate
+    if ~isfield(summary, 'delta_power_model_beyond_rate')
+        return
+    end
+    X(:, 2:end) = residualize_on(X(:, 2:end), X(:, 1));
+    fit = summary.delta_power_model_beyond_rate.all;
+else
+    if ~isfield(summary, 'delta_power_model')
+        return
+    end
+    fit = summary.delta_power_model.all;
+end
+plot_ceteris_paribus(X, y, names, groups, 'Session', fit);
+end
+
+
+function plot_ceteris_paribus(X, y, names, groups, factor_name, fit, D_override)
+if ~figure_selected('model_scatters') || ~isfield(fit, 'ok') || ~fit.ok
+    return
+end
+if ~isfield(fit, 'label') || isempty(fit.label) || ~strncmp(fit.label, 'All neurons', 11)
+    return
+end
+use_override = nargin >= 7;
+if ~use_override
+    D_override = [];
+end
+[Xs, ys, ready] = standardized_power_design(X, y, names, groups, factor_name, D_override, use_override);
+if ~ready
+    return
+end
+n_cont = numel(names);
+A = [ones(size(Xs, 1), 1), Xs];
+coef = pinv(A) * ys;
+beta = coef(2:end);
+n_col = min(3, n_cont);
+n_row = ceil(n_cont / n_col);
+figure('Name', ['Ceteris paribus, ', fit.label], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.78])
+for k = 1:n_cont
+    subplot(n_row, n_col, k)
+    others = true(1, numel(beta));
+    others(k) = false;
+    if any(others)
+        x_adj = residualize_on(Xs(:, k), Xs(:, others));
+        y_adj = residualize_on(ys, Xs(:, others));
+    else
+        x_adj = Xs(:, k);
+        y_adj = ys;
+    end
+    x_adj = x_adj(:);
+    y_adj = y_adj(:);
+    hold on
+    plot(x_adj, y_adj, '.', 'Color', [0.25 0.38 0.62], 'MarkerSize', 8)
+    if any(isfinite(x_adj))
+        x_line = [min(x_adj) max(x_adj)];
+        plot(x_line, beta(k) * x_line, '-', 'Color', [0.75 0.12 0.14], 'LineWidth', 1.6)
+    end
+    partial = predictor_partial_rsq(fit, k);
+    title(sprintf('%s\npartial R^2 = %.2f', names{k}, partial), 'Interpreter', 'none')
+    xlabel('Adjusted predictor')
+    ylabel('Adjusted outcome')
+    box off
+end
+sgtitle({['Ceteris paribus, ', fit.label], ...
+    'Other predictors and the category are held fixed. The line is the model prediction.'})
+end
+
+
+function [Xs, ys, ready] = standardized_power_design(X, y, names, groups, factor_name, D_override, use_override) %#ok<INUSD>
+ready = false;
+Xs = [];
+ys = [];
+n = size(X, 1);
+n_cont = numel(names);
+[D, ~] = factor_dummies(groups, n);
+if use_override
+    if isempty(D_override)
+        D = zeros(n, 0);
+    else
+        D = D_override;
+    end
+    spread = std(D, 0, 1);
+    D = D(:, isfinite(spread) & spread > 1e-10);
+end
+n_dum = size(D, 2);
+if n_dum > 0 && n < n_cont + n_dum + 2
+    D = zeros(n, 0);
+    n_dum = 0;
+end
+if n < n_cont + n_dum + 2
+    return
+end
+sd = std(X, 0, 1);
+if any(~isfinite(sd) | sd <= 0) || ~isfinite(std(y, 0)) || std(y, 0) <= 0
+    return
+end
+Xs = (X - mean(X, 1)) ./ sd;
+if n_dum > 0
+    Xs = [Xs, (D - mean(D, 1)) ./ std(D, 0, 1)];
+end
+ys = (y - mean(y)) / std(y, 0);
+ready = true;
+end
+
+
+function partial = predictor_partial_rsq(fit, index)
+partial = NaN;
+if ~isfield(fit, 'unique_rsq') || ~isfield(fit, 'rsq') || index > numel(fit.unique_rsq)
+    return
+end
+reduced = fit.rsq - fit.unique_rsq(index);
+denom = 1 - reduced;
+if isfinite(denom) && denom > 0 && isfinite(fit.unique_rsq(index))
+    partial = fit.unique_rsq(index) / denom;
+end
 end
 
 
@@ -3216,6 +3370,7 @@ for g = 1:numel(group_order)
 end
 if do_plot
     plot_power_contributions(model, group_order, group_title, model.all.names);
+    plot_ceteris_paribus(X, y, names, groups, 'Session', model.all);
 end
 end
 
@@ -3248,6 +3403,9 @@ for g = 1:numel(group_order)
 end
 if do_plot
     plot_beyond_rate_contributions(model, group_order, group_title, model.all.names);
+    X_free = X;
+    X_free(:, 2:end) = residualize_on(X(:, 2:end), X(:, 1));
+    plot_ceteris_paribus(X_free, y, names, groups, 'Session', model.all);
 end
 end
 
@@ -3327,6 +3485,7 @@ fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, '
 if ~fit.ok
     return
 end
+plot_ceteris_paribus(X_orth(:, kept), y, cont_order(kept), groups, 'Neuron', fit, blocks{2});
 fit = align_predictor_names(fit, cont_order);
 fit.predictor_corr = corr(X_orth);
 fit.sequential_order = order;
