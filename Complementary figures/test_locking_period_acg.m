@@ -237,6 +237,12 @@ plan = power_run_strata([1; 2; 3], [80; 10; 10], [1; 1; 1], 50, 0.5);
 assert(plan.k == 1, 'A spike mass carried by one run was split across empty strata.');
 assert(all(plan.index == 1), 'The single stratum did not keep every run.');
 
+plan = power_run_strata((1:3)', 50 * ones(3, 1), ones(3, 1), 50, 0.5);
+assert(plan.k == 2, 'Three runs of 50 spikes did not fall back from four strata to two.');
+plan = power_run_strata((1:3)', 50 * ones(3, 1), ones(3, 1), 50, 0.5, true);
+assert(plan.k == 3, 'Maximizing strata did not keep one stratum per run.');
+assert(isequal(plan.index, (1:3)'), 'The maximized strata did not follow power order.');
+
 disp('test_locking_period_acg passed')
 end
 

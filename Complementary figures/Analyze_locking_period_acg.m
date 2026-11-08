@@ -78,11 +78,22 @@
 % row per neuron cannot also carry a neuron intercept. The same predictors
 % are fit again after each one except firing rate is replaced by its
 % residual on firing rate.
-% Each neuron is also cut into up to four power strata. Runs are ordered
-% from low to high delta power and divided so the strata have about the
-% same spike count. A stratum with fewer than stratum_min_spikes spikes,
-% or with no run longer than stratum_min_lag_s, is rejected and the neuron
-% is retried with two strata or with one. Stratum power is the
+% Each neuron is also cut into power strata. Runs are ordered from low to
+% high delta power and divided so the strata have about the same spike
+% count. A stratum with fewer than stratum_min_spikes spikes, or with no
+% run longer than stratum_min_lag_s, is rejected. With
+% maximize_strata_number false, the neuron is tried at four strata, then
+% two, then one. With it true, the neuron keeps the largest count that
+% still meets both minimums. Before those autocorrelograms are built, the
+% script plots spikes per neuron and, for minimums of 100, 200, 300, 400,
+% and 500 spikes, how many neurons would receive each stratum count.
+% Beside that exact count is the cumulative: how many neurons have at
+% least that many strata. strata_preview_only stops after those figures.
+% The 4-then-2-then-1
+% rule is saved as locking_period_acg_summary.mat. The maximized rule is
+% saved as locking_period_acg_summary_max_strata.mat. A reprint or a
+% figures-only redraw loads the file that matches the current switch.
+% Stratum power is the
 % duration-weighted mean. Burst, both prominences, firing rate, and the
 % folded autocorrelogram delta power are recomputed in the stratum. The
 % category is the neuron, and a neuron with fewer than two usable strata
@@ -169,6 +180,10 @@ acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutof
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
 stratum_min_spikes = 50;    % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
+maximize_strata_number = false; % true: largest valid stratum count for each neuron
+                                 % false: try 4, then 2, then 1
+strata_preview_min_spikes = [100 200 300 400 500];
+strata_preview_only = false; % true: plot the stratum preview and stop
 n_example_neurons = 20;     % example neurons drawn per split, four per figure
 plot_rate_scaled_peaks = true;  % false: sum-to-1 autocorrelograms only
                                  % true: also the rate-ratio autocorrelograms (Poisson = 1), their cluster tests, and the peak figures
@@ -181,16 +196,17 @@ show_model_figures = true;       % contribution bars and partial-R^2 bars
 show_model_scatters = true;      % ceteris-paribus predictor scatters for each all-neuron model
 show_ppc_models = true;          % PPC contribution bars and ceteris-paribus scatters
 show_run_rate_power = true;      % run-level firing rate versus delta power
+show_strata_preview = true;      % spikes per neuron, and neurons by stratum count
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG, and each statistics block is written
 % there as its own text file.
 figure_folder = '';
-% true reloads locking_period_acg_summary.mat and reprints the tests.
-% Spikes are not reloaded and no figures are opened. A non-empty
-% figure_folder receives one text file per statistics block.
+% true reloads the summary that matches maximize_strata_number and
+% reprints the tests. Spikes are not reloaded and no figures are opened.
+% A non-empty figure_folder receives one text file per statistics block.
 reprint_stats_only = false;
-% true reloads the same summary and draws the figures. Spike files are
+% true reloads that same summary and draws the figures. Spike files are
 % not read. Cluster bars are computed from the saved curves when the
 % summary does not already contain them.
 redraw_figures_only = false;
@@ -213,7 +229,8 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'model_figures', show_model_figures, ...
     'model_scatters', show_model_scatters, ...
     'ppc_models', show_ppc_models, ...
-    'run_rate_power', show_run_rate_power));
+    'run_rate_power', show_run_rate_power, ...
+    'strata_preview', show_strata_preview));
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -223,12 +240,10 @@ if reprint_stats_only
         flags.(flag_names{i}) = false;
     end
     setappdata(0, 'locking_acg_figures', flags);
-    summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
-    if exist(summary_path, 'file') ~= 2
-        error('Analyze_locking_period_acg:nosummary', ...
-            'No saved summary at %s. Run once with reprint_stats_only = false.', summary_path);
-    end
+    summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
+    require_saved_summary(summary_path, maximize_strata_number, 'reprint_stats_only');
     loaded = load(summary_path, 'locking_acg', 'power_acg');
+    assert_summary_strata_rule(loaded.locking_acg, maximize_strata_number, summary_path);
     smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
     reprint_saved_statistics(loaded.locking_acg, loaded.power_acg, ...
         group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
@@ -239,12 +254,10 @@ if reprint_stats_only
 end
 
 if redraw_figures_only
-    summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
-    if exist(summary_path, 'file') ~= 2
-        error('Analyze_locking_period_acg:nosummary', ...
-            'No saved summary at %s. Run once with redraw_figures_only = false.', summary_path);
-    end
+    summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
+    require_saved_summary(summary_path, maximize_strata_number, 'redraw_figures_only');
     loaded = load(summary_path, 'locking_acg', 'power_acg');
+    assert_summary_strata_rule(loaded.locking_acg, maximize_strata_number, summary_path);
     smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
     [locking_acg, power_acg] = redraw_saved_figures(loaded.locking_acg, loaded.power_acg, ...
         group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
@@ -290,6 +303,17 @@ if isempty(parsing_files)
     error('Analyze_locking_period_acg:empty', ...
         'No spike-train parsing files in %s. Run Estimate_spike_train_parsing first.', ...
         parsing_folder);
+end
+
+preview_stratum_choices(parsing_folder, all_neurons, id_all, lock_group, ...
+    source_order, areas_to_keep, stratum_min_lag_s, stratum_min_spikes, ...
+    maximize_strata_number, strata_preview_min_spikes);
+if strata_preview_only
+    if ~isempty(figure_folder)
+        save_open_figures(figure_folder)
+    end
+    stop_statistics_diary()
+    return
 end
 
 loaded_codes = {};
@@ -436,7 +460,7 @@ for f = 1:numel(parsing_files)
                 run_length, this_power, rt, this_corrected, ...
                 max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
                 stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
-                this_ppc);
+                this_ppc, maximize_strata_number);
             run_rows = append_run_rate_rows(run_rows, run_length, this_power, rt, ...
                 animal_code, this_id, this_group);
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
@@ -497,6 +521,7 @@ parameters = struct( ...
     'acg_cluster_perm', acg_cluster_perm, ...
     'stratum_min_spikes', stratum_min_spikes, ...
     'stratum_min_lag_s', stratum_min_lag_s, ...
+    'maximize_strata_number', maximize_strata_number, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
 
 locking_labels = { ...
@@ -576,13 +601,56 @@ locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
 locking_acg.run_rate_power = run_rows;
 locking_acg = fit_saved_run_rate_power(locking_acg, true);
 
-summary_path = fullfile(parsing_folder, 'locking_period_acg_summary.mat');
+summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
 save(summary_path, 'locking_acg', 'power_acg');
 disp(['Saved ', summary_path])
 if ~isempty(figure_folder)
     save_open_figures(figure_folder)
 end
 stop_statistics_diary()
+
+
+function summary_path = locking_summary_path(parsing_folder, maximize_strata_number)
+if maximize_strata_number
+    file_name = 'locking_period_acg_summary_max_strata.mat';
+else
+    file_name = 'locking_period_acg_summary.mat';
+end
+summary_path = fullfile(parsing_folder, file_name);
+end
+
+
+function require_saved_summary(summary_path, maximize_strata_number, switch_name)
+if exist(summary_path, 'file') == 2
+    return
+end
+if maximize_strata_number
+    rule = 'maximize_strata_number = true';
+else
+    rule = 'maximize_strata_number = false';
+end
+error('Analyze_locking_period_acg:nosummary', ...
+    'No saved summary at %s. Run once with %s and %s = false.', ...
+    summary_path, rule, switch_name);
+end
+
+
+function assert_summary_strata_rule(locking_acg, maximize_strata_number, summary_path)
+has_flag = isstruct(locking_acg) && isfield(locking_acg, 'parameters') ...
+    && isfield(locking_acg.parameters, 'maximize_strata_number');
+if has_flag
+    saved = logical(locking_acg.parameters.maximize_strata_number);
+else
+    saved = false;
+end
+if saved == logical(maximize_strata_number)
+    return
+end
+error('Analyze_locking_period_acg:summaryrule', ...
+    ['%s was built with maximize_strata_number = %d. ' ...
+     'The current switch is %d.'], ...
+    summary_path, saved, logical(maximize_strata_number));
+end
 
 
 function start_statistics_diary(folder)
@@ -3494,12 +3562,279 @@ end
 end
 
 
+function preview_stratum_choices(parsing_folder, all_neurons, id_all, lock_group, source_order, areas_to_keep, min_lag_s, chosen_min_spikes, maximize, thresholds)
+runs = collect_stratum_runs(parsing_folder, all_neurons, id_all, lock_group, ...
+    source_order, areas_to_keep);
+n = numel(runs);
+spike_counts = zeros(n, 1);
+for i = 1:n
+    spike_counts(i) = runs(i).n_spikes;
+end
+thresholds = thresholds(:)';
+n_thresholds = numel(thresholds);
+has_long = false(n, 1);
+for i = 1:n
+    has_long(i) = neuron_has_long_run(runs(i), min_lag_s);
+end
+stratum_k = zeros(n, n_thresholds);
+fixed_k = zeros(n, n_thresholds);
+k_cap = 0;
+for t = 1:n_thresholds
+    for i = 1:n
+        plan = power_run_strata(runs(i).power, runs(i).spikes, runs(i).duration, ...
+            thresholds(t), min_lag_s, true);
+        stratum_k(i, t) = plan.k;
+        plan = power_run_strata(runs(i).power, runs(i).spikes, runs(i).duration, ...
+            thresholds(t), min_lag_s, false);
+        fixed_k(i, t) = plan.k;
+    end
+    if n > 0
+        k_cap = max([k_cap, max(stratum_k(:, t)), max(fixed_k(:, t))]);
+    end
+end
+chosen_k = zeros(n, 1);
+legacy_k = zeros(n, 1);
+for i = 1:n
+    plan = power_run_strata(runs(i).power, runs(i).spikes, runs(i).duration, ...
+        chosen_min_spikes, min_lag_s, maximize);
+    chosen_k(i) = plan.k;
+    plan = power_run_strata(runs(i).power, runs(i).spikes, runs(i).duration, ...
+        chosen_min_spikes, min_lag_s, false);
+    legacy_k(i) = plan.k;
+end
+k_cap = max([k_cap, max([chosen_k; legacy_k; 0])]);
+plot_spike_counts(spike_counts);
+plot_stratum_count_lines(stratum_k, thresholds, k_cap);
+report_stratum_preview(spike_counts, has_long, stratum_k, fixed_k, legacy_k, thresholds, ...
+    chosen_k, chosen_min_spikes, maximize, min_lag_s, k_cap);
+end
+
+
+function plot_spike_counts(spike_counts)
+if ~figure_selected('strata_preview')
+    return
+end
+figure('Name', 'Spikes per neuron', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.08 0.16 0.84 0.62])
+subplot(1, 2, 1)
+if isempty(spike_counts)
+    text(0.5, 0.5, 'No neurons', 'HorizontalAlignment', 'center')
+    axis off
+else
+    histogram(spike_counts, 40, 'FaceColor', [0.25 0.38 0.62])
+    xlabel('Spikes in runs that can enter a stratum')
+    ylabel('Neurons')
+    box off
+end
+title('Spikes per neuron')
+subplot(1, 2, 2)
+if ~isempty(spike_counts)
+    plot(1:numel(spike_counts), sort(spike_counts), '.', ...
+        'Color', [0.25 0.38 0.62], 'MarkerSize', 8)
+    xlabel('Neuron, fewest spikes to most')
+    ylabel('Spikes')
+    box off
+end
+title('Sorted spike count')
+end
+
+
+function plot_stratum_count_lines(stratum_k, thresholds, k_cap)
+if ~figure_selected('strata_preview')
+    return
+end
+x = 0:k_cap;
+n_thresholds = numel(thresholds);
+colors = lines(n_thresholds);
+labels = cell(1, n_thresholds);
+exact = zeros(n_thresholds, numel(x));
+for t = 1:n_thresholds
+    for k = x
+        exact(t, k + 1) = sum(stratum_k(:, t) == k);
+    end
+    labels{t} = sprintf('%d spikes minimum', thresholds(t));
+end
+figure('Name', 'Neurons by stratum count', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.06 0.14 0.88 0.66])
+subplot(1, 2, 1)
+hold on
+for t = 1:n_thresholds
+    plot(x, exact(t, :), '-o', 'Color', colors(t, :), 'LineWidth', 1.4, 'MarkerSize', 5)
+end
+xlabel('Strata per neuron')
+ylabel('Neurons')
+legend(labels, 'Location', 'northeast')
+title('Neurons with this many strata')
+box off
+subplot(1, 2, 2)
+hold on
+for t = 1:n_thresholds
+    at_least = fliplr(cumsum(fliplr(exact(t, :))));
+    plot(x, at_least, '-o', 'Color', colors(t, :), 'LineWidth', 1.4, 'MarkerSize', 5)
+end
+xlabel('Strata per neuron')
+ylabel('Neurons with at least this many')
+legend(labels, 'Location', 'northeast')
+title('Cumulative of the left panel')
+box off
+end
+
+
+function report_stratum_preview(spike_counts, has_long, stratum_k, fixed_k, legacy_k, thresholds, chosen_k, chosen_min_spikes, maximize, min_lag_s, k_cap)
+disp_block('Stratum count preview')
+disp(sprintf('Neurons = %d', numel(spike_counts)))
+if isempty(spike_counts)
+    disp('  No neuron had runs that can enter a stratum.')
+    return
+end
+disp(sprintf('  Spikes per neuron: median %.4g, min %.4g, max %.4g', ...
+    median(spike_counts), min(spike_counts), max(spike_counts)))
+disp(['  A neuron with enough spikes and no run longer than ', num2str(min_lag_s), ...
+    ' s stays at 0 strata. Its spikes are still in the spike plot.'])
+disp('  Exactly one stratum means the neuron could not be split any further.')
+disp('  At least one stratum is the count to compare with neurons above that spike count.')
+for t = 1:numel(thresholds)
+    thr = thresholds(t);
+    n_above = sum(spike_counts >= thr);
+    n_ready = sum(spike_counts >= thr & has_long);
+    n_band = sum(spike_counts >= thr & spike_counts < 2 * thr);
+    n_band_ready = sum(spike_counts >= thr & spike_counts < 2 * thr & has_long);
+    disp(sprintf('  %d spikes minimum', thr))
+    disp(sprintf('    Neurons with at least %d spikes: %d', thr, n_above))
+    disp(sprintf('    Of those, with a run longer than %g s: %d', min_lag_s, n_ready))
+    disp(sprintf('    Spike count allows only 1 stratum (%d to %d spikes): %d neurons, %d with a long run', ...
+        thr, 2 * thr - 1, n_band, n_band_ready))
+    disp(sprintf('    Largest split, exactly 1 stratum: %d. At least 1: %d. At least 2: %d.', ...
+        sum(stratum_k(:, t) == 1), sum(stratum_k(:, t) >= 1), sum(stratum_k(:, t) >= 2)))
+    disp(sprintf('    4 then 2 then 1, exactly 1: %d, exactly 2: %d, exactly 4: %d, at least 2: %d.', ...
+        sum(fixed_k(:, t) == 1), sum(fixed_k(:, t) == 2), sum(fixed_k(:, t) == 4), ...
+        sum(fixed_k(:, t) >= 2)))
+    parts = cell(1, k_cap + 1);
+    for k = 0:k_cap
+        parts{k + 1} = sprintf('%d:%d', k, sum(stratum_k(:, t) == k));
+    end
+    disp(sprintf('    Largest split, neurons by stratum count (%s)', strjoin(parts, ', ')))
+end
+if maximize
+    rule = 'largest valid count';
+else
+    rule = '4, then 2, then 1';
+end
+disp(sprintf('  Chosen for the estimate: %d spikes minimum, %s.', ...
+    chosen_min_spikes, rule))
+disp(sprintf('    Neurons with at least %d spikes: %d, with a long run: %d', ...
+    chosen_min_spikes, sum(spike_counts >= chosen_min_spikes), ...
+    sum(spike_counts >= chosen_min_spikes & has_long)))
+parts = cell(1, k_cap + 1);
+for k = 0:k_cap
+    parts{k + 1} = sprintf('%d:%d', k, sum(chosen_k == k));
+end
+disp(sprintf('  Chosen rule, neurons by stratum count (%s)', strjoin(parts, ', ')))
+disp(sprintf('    At least 2 strata: %d neurons', sum(chosen_k >= 2)))
+disp(sprintf(['  4 then 2 then 1 at %d spikes, the rule used by the earlier strata models: ' ...
+    'exactly 1: %d, exactly 2: %d, exactly 4: %d, at least 2: %d.'], ...
+    chosen_min_spikes, sum(legacy_k == 1), sum(legacy_k == 2), sum(legacy_k == 4), ...
+    sum(legacy_k >= 2)))
+disp('  The fitted strata model is smaller than this partition count. A stratum is kept only when both prominences can be measured.')
+end
+
+
+function tf = neuron_has_long_run(run, min_lag_s)
+d = run.duration(:);
+s = run.spikes(:);
+p = run.power(:);
+if numel(d) ~= numel(s) || numel(p) ~= numel(s)
+    tf = false;
+    return
+end
+usable = isfinite(p) & isfinite(s) & s > 0 & isfinite(d) & d > 0;
+tf = any(usable & d > min_lag_s);
+end
+
+
+function runs = collect_stratum_runs(parsing_folder, all_neurons, id_all, lock_group, source_order, areas_to_keep)
+runs = struct('spikes', {}, 'duration', {}, 'power', {}, 'n_spikes', {});
+parsing_files = list_parsing_mat_files(parsing_folder);
+loaded_codes = {};
+for f = 1:numel(parsing_files)
+    S = load(parsing_files(f).path, 'parsing_struct');
+    if ~isfield(S, 'parsing_struct')
+        clear S
+        continue
+    end
+    while ~isempty(S.parsing_struct)
+        ps = S.parsing_struct(1);
+        S.parsing_struct(1) = [];
+        if isfield(ps, 'ALL_TABLES')
+            ps = rmfield(ps, 'ALL_TABLES');
+        end
+        animal_code = char(string(ps.animal_code));
+        if ismember(animal_code, loaded_codes)
+            clear ps
+            continue
+        end
+        loaded_codes{end + 1} = animal_code; %#ok<AGROW>
+        ppc_col = ppc_column_index(ps);
+        if isempty(ppc_col)
+            clear ps
+            continue
+        end
+        ci = ps.cluster_info;
+        id_col = double(cluster_id_column(ci));
+        run_cell = ps.run_events_table_per_cell;
+        for nn = 1:height(ci)
+            this_id = id_col(nn);
+            hit = find(session_matches(all_neurons.session, animal_code) & id_all == this_id, 1);
+            if isempty(hit)
+                continue
+            end
+            this_area = cluster_area_char(ci, nn);
+            if isempty(strtrim(this_area))
+                this_area = cluster_area_char(all_neurons, hit);
+            end
+            if isempty(canonical_kept_area(this_area, areas_to_keep))
+                continue
+            end
+            this_group = lock_group{hit};
+            if ~any(strcmp(source_order, this_group))
+                continue
+            end
+            rt = run_cell{nn};
+            if isempty(rt) || ~istable(rt) ...
+                    || ~ismember('autoccorrelograms', rt.Properties.VariableNames) ...
+                    || ~ismember('RunNumSpikes', rt.Properties.VariableNames)
+                continue
+            end
+            if size(rt.phase_entrainment, 2) < ppc_col
+                continue
+            end
+            spikes = double(rt.RunNumSpikes(:));
+            duration = acg_run_lengths(rt);
+            power = run_delta_power(rt);
+            if numel(spikes) ~= numel(duration) || numel(power) ~= numel(duration)
+                continue
+            end
+            usable = isfinite(power) & isfinite(spikes) & spikes > 0 ...
+                & isfinite(duration) & duration > 0;
+            item.spikes = spikes;
+            item.duration = duration;
+            item.power = power;
+            item.n_spikes = sum(spikes(usable));
+            runs(end + 1) = item; %#ok<AGROW>
+        end
+        clear ps ci run_cell
+    end
+    clear S
+end
+end
+
+
 function report_stratum_counts(strata)
 if ~isfield(strata, 'n_at_k')
     return
 end
 disp_block('Power strata')
-for k = 0:4
+for k = 0:numel(strata.n_at_k) - 1
     disp(sprintf('  Neurons whose spike partition has %d strata: %d', ...
         k, strata.n_at_k(k + 1)))
 end
@@ -3527,15 +3862,22 @@ keep = counts(idx) >= min_count;
 end
 
 
-function store = append_neuron_power_strata(store, acg, edges, centers, run_length, power, rt, already_corrected, smooth_n, delta_lag, refractory_s, min_spikes, min_lag_s, animal_code, cluster_id, lock_group, ppc)
+function store = append_neuron_power_strata(store, acg, edges, centers, run_length, power, rt, already_corrected, smooth_n, delta_lag, refractory_s, min_spikes, min_lag_s, animal_code, cluster_id, lock_group, ppc, maximize)
 if ~ismember('RunNumSpikes', rt.Properties.VariableNames) ...
         || size(acg, 1) ~= numel(run_length) || numel(power) ~= numel(run_length)
     store.n_at_k(1) = store.n_at_k(1) + 1;
     return
 end
 spikes = double(rt.RunNumSpikes(:));
-plan = power_run_strata(power, spikes, run_length, min_spikes, min_lag_s);
-store.n_at_k(plan.k + 1) = store.n_at_k(plan.k + 1) + 1;
+if nargin < 18 || isempty(maximize)
+    maximize = false;
+end
+plan = power_run_strata(power, spikes, run_length, min_spikes, min_lag_s, maximize);
+slot = plan.k + 1;
+if numel(store.n_at_k) < slot
+    store.n_at_k(slot) = 0;
+end
+store.n_at_k(slot) = store.n_at_k(slot) + 1;
 if plan.k < 1
     return
 end
