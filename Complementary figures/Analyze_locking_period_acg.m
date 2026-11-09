@@ -128,8 +128,9 @@
 % 13, 14, or 15 is listed in models_to_plot. Each neuron is demeaned, so the slope
 % is within the neuron, and the uncertainty is clustered by neuron.
 % Model13 gives every neuron the same total weight. Model14 gives every
-% stratum the same weight. Model15 gives the firing rate, the burst, and
-% the three oscillatory predictors their own slope in trough-locked,
+% stratum the same weight. Both are fit for all neurons and again inside
+% each lock group. Model15 gives the firing rate, the burst, and the
+% three oscillatory predictors their own slope in trough-locked,
 % peak-locked, and non-entrained neurons, and tests whether those
 % oscillatory slopes differ. The formulas are in locking_acg_models.txt.
 % Figure titles and statistics files use the same ModelN name. Every
@@ -619,7 +620,8 @@ locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
     fit_strata_ppc_models(strata_rows, group_order, group_title);
 locking_acg.run_rate_power = run_rows;
 locking_acg = fit_saved_run_rate_power(locking_acg, true);
-locking_acg.oscillation_models = fit_oscillation_power_models(strata_rows, true);
+locking_acg.oscillation_models = fit_oscillation_power_models( ...
+    strata_rows, true, group_order, group_title);
 
 summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
 save(summary_path, 'locking_acg', 'power_acg');
@@ -1635,7 +1637,7 @@ locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
 locking_acg = fit_saved_run_rate_power(locking_acg, true);
 if isfield(locking_acg, 'power_strata')
     locking_acg.oscillation_models = fit_oscillation_power_models( ...
-        locking_acg.power_strata, true);
+        locking_acg.power_strata, true, group_order, group_title);
 end
 end
 
@@ -1723,7 +1725,7 @@ report_or_fit_power_to_entrainment(locking_acg, group_order, group_title, false)
 report_or_fit_ppc_models(locking_acg, group_order, group_title, false);
 fit_saved_run_rate_power(locking_acg, false);
 if isfield(locking_acg, 'power_strata')
-    fit_oscillation_power_models(locking_acg.power_strata, false);
+    fit_oscillation_power_models(locking_acg.power_strata, false, group_order, group_title);
 end
 end
 
@@ -3207,13 +3209,18 @@ end
 end
 
 
-function result = fit_oscillation_power_models(strata, do_plot)
+function result = fit_oscillation_power_models(strata, do_plot, group_order, group_title)
 % Within-neuron partial slopes of the oscillatory predictors. Model13
 % gives each neuron total weight 1. Model14 gives each stratum weight 1.
-% Model15 lets those slopes, and the firing-rate and burst slopes, differ
-% for trough-locked, peak-locked, and non-entrained neurons.
-if nargin < 2
+% Each of those two models is fit for all neurons and again inside each
+% lock group. Model15 lets those slopes, and the firing-rate and burst
+% slopes, differ for trough-locked, peak-locked, and non-entrained neurons.
+if nargin < 2 || isempty(do_plot)
     do_plot = true;
+end
+if nargin < 3 || isempty(group_order)
+    group_order = {'trough', 'peak', 'delta', 'nonentrained'};
+    group_title = {'Trough-locked', 'Peak-locked', 'Delta-locked', 'Non-entrained'};
 end
 names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
     'Second-cycle prominence', 'ACG delta power, >100 ms'};
@@ -3234,8 +3241,8 @@ if ~isfield(strata, 'n') || strata.n < 2
         'Power strata are not in this summary. Run the full script once.');
     return
 end
-[X, y, neuron, lock_group, row_names] = strata_regression_rows(strata);
-if isempty(y) || size(X, 2) ~= numel(names)
+[X0, y0, neuron0, lock0, row_names] = strata_regression_rows(strata);
+if isempty(y0) || size(X0, 2) ~= numel(names)
     note_oscillation_model('Model13 equal neuron', ...
         'Too few neurons have two strata for this model.');
     note_oscillation_model('Model14 row weight', ...
@@ -3246,30 +3253,29 @@ if isempty(y) || size(X, 2) ~= numel(names)
 end
 names = row_names;
 osc_names = names(3:5);
-[X, y, neuron, n_outliers, keep] = drop_clear_outliers(X, y, neuron);
-lock_group = lock_group(keep);
-[X, y, neuron, lock_group] = keep_neuron_rows(X, y, neuron, lock_group, 2);
-weights = neuron_stratum_weights(neuron);
-result.equal = fit_weighted_cluster(X, y, neuron, weights, names, ...
-    'Model13 equal neuron', n_outliers);
-result.equal.short_names = short_labels_for(result.equal.names, names, short_names);
-result.equal.joint_name = ['first-peak prominence, second-cycle prominence, ' ...
-    'and ACG delta power'];
-[result.equal.joint_F, result.equal.joint_p, result.equal.joint_df1] = ...
-    wald_zero(result.equal.beta, result.equal.V, ...
-    oscillation_columns(result.equal.names, osc_names), result.equal.df);
-report_common_oscillation(result.equal, ...
-    ['Weight of each stratum is 1 over the number of strata of its neuron. ' ...
-    'Every neuron has total weight 1.']);
-result.row = fit_weighted_cluster(X, y, neuron, ones(size(y)), names, ...
-    'Model14 row weight', n_outliers);
-result.row.short_names = short_labels_for(result.row.names, names, short_names);
-result.row.joint_name = result.equal.joint_name;
-[result.row.joint_F, result.row.joint_p, result.row.joint_df1] = ...
-    wald_zero(result.row.beta, result.row.V, ...
-    oscillation_columns(result.row.names, osc_names), result.row.df);
-report_common_oscillation(result.row, ...
-    'Weight of each stratum is 1. A neuron with more strata pulls the slope more.');
+equal_sentence = ['Weight of each stratum is 1 over the number of strata of its neuron. ' ...
+    'Every neuron has total weight 1.'];
+row_sentence = ['Weight of each stratum is 1. A neuron with more strata ' ...
+    'pulls the slope more.'];
+[result.equal, X, y, neuron, lock_group] = fit_common_sample( ...
+    X0, y0, neuron0, lock0, true, names, short_names, osc_names, ...
+    'Model13 equal neuron', 'All neurons', equal_sentence);
+[result.row, ~, ~, ~, ~] = fit_common_sample( ...
+    X0, y0, neuron0, lock0, false, names, short_names, osc_names, ...
+    'Model14 row weight', 'All neurons', row_sentence);
+result.equal.groups = struct();
+result.row.groups = struct();
+for g = 1:numel(group_order)
+    in_group = stratum_group_rows(lock0, neuron0, group_order{g});
+    result.equal.groups.(group_order{g}) = fit_common_sample( ...
+        X0(in_group, :), y0(in_group), neuron0(in_group), lock0(in_group), ...
+        true, names, short_names, osc_names, ...
+        'Model13 equal neuron', group_title{g}, equal_sentence);
+    result.row.groups.(group_order{g}) = fit_common_sample( ...
+        X0(in_group, :), y0(in_group), neuron0(in_group), lock0(in_group), ...
+        false, names, short_names, osc_names, ...
+        'Model14 row weight', group_title{g}, row_sentence);
+end
 in_type = false(numel(lock_group), 1);
 for t = 1:numel(type_order)
     in_type = in_type | strcmp(lock_group(:), type_order{t});
@@ -3278,7 +3284,7 @@ end
     X(in_type, :), names, lock_group(in_type), type_order, type_title);
 result.group = fit_weighted_cluster(Z, y(in_type), neuron(in_type), ...
     neuron_stratum_weights(neuron(in_type)), long_names, ...
-    'Model15 group slopes', n_outliers);
+    'Model15 group slopes', result.equal.n_outliers);
 result.group.type_order = used_types;
 result.group.type_title = used_titles;
 result.group.short_names = short_names;
@@ -3290,9 +3296,31 @@ R = type_difference_contrasts(result.group.names, osc_names);
 report_group_oscillation(result.group);
 if do_plot
     plot_common_oscillation(result.equal);
+    plot_lock_group_slopes(result.equal, group_order, group_title);
     plot_common_oscillation(result.row);
+    plot_lock_group_slopes(result.row, group_order, group_title);
     plot_group_oscillation(result.group);
 end
+end
+
+
+function [fit, X, y, neuron, lock_group] = fit_common_sample(X, y, neuron, lock_group, equal_weight, names, short_names, osc_names, tag, label, weight_sentence)
+[X, y, neuron, n_outliers, keep] = drop_clear_outliers(X, y, neuron);
+lock_group = lock_group(keep);
+[X, y, neuron, lock_group] = keep_neuron_rows(X, y, neuron, lock_group, 2);
+if equal_weight
+    weights = neuron_stratum_weights(neuron);
+else
+    weights = ones(size(y));
+end
+fit = fit_weighted_cluster(X, y, neuron, weights, names, tag, n_outliers);
+fit.label = label;
+fit.short_names = short_labels_for(fit.names, names, short_names);
+fit.joint_name = ['first-peak prominence, second-cycle prominence, ' ...
+    'and ACG delta power'];
+[fit.joint_F, fit.joint_p, fit.joint_df1] = wald_zero( ...
+    fit.beta, fit.V, oscillation_columns(fit.names, osc_names), fit.df);
+report_common_oscillation(fit, weight_sentence);
 end
 
 
@@ -3567,7 +3595,11 @@ end
 
 function report_common_oscillation(fit, weight_sentence)
 open_model_statistics(fit.tag, fit.tag);
-disp(upper(fit.tag))
+heading = fit.tag;
+if isfield(fit, 'label') && ~isempty(fit.label)
+    heading = [fit.tag, ', ', fit.label];
+end
+disp(upper(heading))
 if ~fit.ok
     if isempty(fit.reason)
         disp('This model could not be fit.')
@@ -3654,6 +3686,68 @@ plot_signed_bars(fit.beta(:)', fit.se(:)', fit.p(:)', labels)
 ylabel('Standardized partial slope')
 title(sprintf('Joint oscillation test, p = %.3g, %d neurons', ...
     fit.joint_p, fit.n_neurons))
+end
+
+
+function plot_lock_group_slopes(fit, group_order, group_title)
+if ~model_selected(fit) || ~isfield(fit, 'groups')
+    return
+end
+if ~isfield(fit, 'short_names') || isempty(fit.short_names)
+    predictor_names = fit.names;
+else
+    predictor_names = fit.short_names;
+end
+n_pred = numel(predictor_names);
+if n_pred < 1
+    return
+end
+series_fits = [{fit}, cell(1, numel(group_order))];
+series_titles = [{'All neurons'}, group_title];
+for g = 1:numel(group_order)
+    if isfield(fit.groups, group_order{g})
+        series_fits{g + 1} = fit.groups.(group_order{g});
+    else
+        series_fits{g + 1} = empty_oscillation_fit(fit.tag);
+    end
+end
+n_series = numel(series_fits);
+beta = nan(n_pred, n_series);
+se = beta;
+for s = 1:n_series
+    one = series_fits{s};
+    if ~isfield(one, 'ok') || ~one.ok
+        continue
+    end
+    for k = 1:n_pred
+        hit = find(strcmp(one.names, predictor_names{k}), 1);
+        if isempty(hit) && isfield(one, 'short_names')
+            hit = find(strcmp(one.short_names, predictor_names{k}), 1);
+        end
+        if isempty(hit) || hit > numel(one.beta)
+            continue
+        end
+        beta(k, s) = one.beta(hit);
+        se(k, s) = one.se(hit);
+    end
+end
+if ~any(isfinite(beta(:)))
+    return
+end
+figure('Name', [fit.tag, ', slopes by lock group'], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.06 0.14 0.88 0.64])
+bar(beta, 'grouped')
+hold on
+group_width = min(0.8, n_series / (n_series + 1.5));
+for s = 1:n_series
+    x = (1:n_pred) - group_width / 2 + (2 * s - 1) * group_width / (2 * n_series);
+    errorbar(x, beta(:, s), se(:, s), 'k.', 'LineWidth', 1, 'HandleVisibility', 'off')
+end
+set(gca, 'XTick', 1:n_pred, 'XTickLabel', predictor_names, 'XTickLabelRotation', 20)
+legend(series_titles, 'Location', 'northeast')
+ylabel('Standardized partial slope')
+title('Separate within-neuron fits for each lock group')
+box off
 end
 
 

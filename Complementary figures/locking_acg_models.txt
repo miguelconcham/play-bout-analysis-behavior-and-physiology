@@ -249,8 +249,9 @@ The joint test is
 
 Firing rate and burst stay in the model, so a significant joint test is
 not the firing-rate association and not the 0-50 ms burst. The same file
-contains the all-neuron result only; lock groups are not separate copies
-of this model. Model15 is the type comparison.
+contains the all-neuron fit and a separate copy for each lock group:
+trough-locked, peak-locked, delta-locked, and non-entrained. Model15 is
+the comparison of those slopes inside one equation.
 
 
 Model14 row weight
@@ -263,7 +264,10 @@ test as Model13. The only change is the weight:
 Every stratum has an equal vote, so a neuron with many strata pulls the
 slope more than a neuron with two. The difference between the Model13
 and Model14 coefficients is the pull of those many-strata neurons. This
-is the check beside Model13, not a second primary result.
+is the check beside Model13, not a second primary result. It is fit for
+all neurons and again inside each lock group, the same divisions as
+Model13. Model15 is the model that puts cell type in the equation, so
+that one is not copied by group.
 
 
 Model15 group slopes
