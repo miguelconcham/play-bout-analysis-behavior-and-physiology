@@ -32,8 +32,9 @@
 % Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz side peak sits at the
 % edge of this window. The shading does not set the vertical scale. Each
 % mean autocorrelogram is scaled to its own 95% confidence interval, so
-% the curves fill the axis. The paired difference is symmetric about zero,
-% and both axes use a short decimal step.
+% the curves fill the axis instead of sitting on a scale that starts at
+% zero. The paired difference is symmetric about zero. Tick labels are
+% short rounded numbers, such as 1.4 or 1.5.
 % Each mean autocorrelogram is two panels. The left panel is the low tail,
 % the high tail, and all runs, with a 95% confidence interval. The right
 % panel is the paired difference, high minus low, with its own 95%
@@ -3477,75 +3478,76 @@ for c = 1:numel(curves)
         hi = max(hi, max(band_hi));
     end
 end
-if ~isfinite(lo) || ~isfinite(hi) || hi <= lo
+if ~isfinite(lo) || ~isfinite(hi)
     y_lim = [0 0.01];
     return
 end
-if lo >= 0
-    lo = 0;
+span = hi - lo;
+if span <= 0
+    span = max(abs(hi), eps);
 end
-span = max(hi - lo, eps);
-target_hi = hi + 0.22 * span;
-target_lo = lo;
-if lo < 0
-    target_lo = lo - 0.08 * span;
-end
-y_lim = snapped_span_limits(target_lo, target_hi, lo, hi);
-end
-
-
-function y_lim = snapped_symmetric_limits(extent)
-target = extent * 1.35;
-step = nice_decimal(target / 2, 'ceil');
-if step <= 0
-    y_lim = [-1 1];
-    return
-end
-top = step * ceil(target / step - 1e-9);
-y_lim = [-top, top];
-end
-
-
-function y_lim = snapped_span_limits(target_lo, target_hi, data_lo, data_hi)
-span = max(target_hi - target_lo, eps);
-step = nice_decimal(span / 4, 'ceil');
-if step <= 0
-    y_lim = [target_lo, target_hi];
-    return
-end
-bottom = step * floor(target_lo / step + 1e-9);
-top = step * ceil(target_hi / step - 1e-9);
-if top <= data_hi
+% A little room under the curve and a little more above it for the
+% cluster marks. The limits stay next to the data, so a curve from 1 to
+% 1.5 is not drawn from 0 to 2.
+step = fine_step(span);
+bottom = step * floor(lo / step + 1e-6);
+top = step * ceil((hi + 0.12 * span) / step - 1e-6);
+if top <= hi
     top = top + step;
 end
-if bottom >= data_lo && data_lo < 0
+if bottom >= lo
     bottom = bottom - step;
 end
 y_lim = [bottom, top];
 end
 
 
+function y_lim = snapped_symmetric_limits(extent)
+target = extent * 1.2;
+step = fine_step(target);
+if step <= 0
+    y_lim = [-1 1];
+    return
+end
+top = step * ceil(target / step - 1e-6);
+y_lim = [-top, top];
+end
+
+
+function step = fine_step(span)
+% A short step, about one fifth of the data span: 1, 2, 2.5, or 5 times
+% a power of ten. That gives labels such as 1.4 or 1.5, not 1.47982.
+if ~isfinite(span) || span <= 0
+    step = 1;
+    return
+end
+raw = span / 5;
+exp10 = floor(log10(raw));
+base = 10 ^ exp10;
+mantissa = raw / base;
+grid = [1 2 2.5 5 10];
+pick = find(grid + 1e-9 >= mantissa, 1, 'first');
+if isempty(pick)
+    pick = numel(grid);
+end
+step = grid(pick) * base;
+end
+
+
 function ticks = rounded_axis_ticks(y_lim)
 span = y_lim(2) - y_lim(1);
-step = nice_decimal(span / 4, 'ceil');
-if step <= 0 || span / step < 2
-    step = nice_decimal(span / 4, 'floor');
-end
+step = fine_step(span);
 if step <= 0
     ticks = y_lim;
     return
 end
-first = step * ceil(y_lim(1) / step - 1e-9);
-last = step * floor(y_lim(2) / step + 1e-9);
-if last < first
+first = step * ceil(y_lim(1) / step - 1e-6);
+last = step * floor(y_lim(2) / step + 1e-6);
+if last + step * 1e-6 < first
     ticks = y_lim;
     return
 end
 ticks = first:step:last;
-ticks = ticks(ticks >= y_lim(1) - step * 1e-6 & ticks <= y_lim(2) + step * 1e-6);
-if isempty(ticks)
-    ticks = y_lim;
-end
 end
 
 
@@ -3557,8 +3559,12 @@ if isempty(d)
     return
 end
 step = min(d);
-places = max(0, ceil(-log10(step) - 1e-9));
-places = min(places, 6);
+places = 0;
+scale = step;
+while places < 6 && abs(scale - round(scale)) > 1e-6 * max(1, abs(scale))
+    scale = scale * 10;
+    places = places + 1;
+end
 fmt = sprintf('%%.%df', places);
 end
 
