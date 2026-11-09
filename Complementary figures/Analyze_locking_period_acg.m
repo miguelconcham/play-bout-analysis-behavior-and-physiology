@@ -161,11 +161,16 @@
 % The long burst, prominence, lag, and score lines are printed, not drawn
 % on the axes. In the paired plots, higher-rate neurons are drawn in front.
 % The mean curve still gives every neuron the same weight.
-% figure_folder, at the top of the script, is where figures are written
-% as SVG and JPG. Each statistics block is written there as its own text
-% file, named from the block title. Leave figure_folder empty to save
-% nothing. The show_* switches at the top choose which figure types open.
-% Tests are still printed when a figure type is off. Set
+% figure_folder, at the top of the script, is the main save folder.
+% Statistics text files stay in that folder. Figures go into a subfolder
+% named by theme and the day the run created them: PPC_yyyy-mm-dd and
+% Power_yyyy-mm-dd hold the autocorrelograms, paired comparisons, examples,
+% and spectra for those two outcomes. Each model gets its own subfolder,
+% ModelN plus the short reminder, with the same day at the end. The
+% statistics file names end with that same day. Leave figure_folder empty
+% to save nothing. models_to_plot chooses which model figures open. The
+% other show_* switches choose the remaining figure types. Tests are still
+% printed when a figure type is off. Set
 % reprint_stats_only to reload the saved summary and print those tests
 % again without reloading spikes or opening figures. Set
 % redraw_figures_only to reload that summary and draw the selected
@@ -213,10 +218,10 @@ models_to_plot = 1:15;           % which model figures to draw. Statistics are a
                                  % 9 PPC strata, 10 PPC strata residual, 11 PPC sequential,
                                  % 12 run rate, 13 equal neuron, 14 row weight, 15 group slopes
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
-% Leave empty to keep figures on screen only. Otherwise every figure is
-% written there as SVG and JPG. Each model type is written as one
-% statistics text file, with every lock group inside that file. The
-% other plots keep a text file of their own.
+% Leave empty to keep figures on screen only. Otherwise statistics text
+% files are written here, and figures are written in dated subfolders.
+% PPC and Power hold the autocorrelograms, paired comparisons, and the
+% related example and spectrum figures. Each model has its own subfolder.
 figure_folder = '';
 % true reloads the summary that matches maximize_strata_number and
 % reprints the tests. Spikes are not reloaded and no figures are opened.
@@ -711,32 +716,71 @@ if isempty(figs)
     disp(['No figures to save in ', folder])
     return
 end
+if exist(folder, 'dir') ~= 7
+    mkdir(folder)
+end
+day = run_day_stamp();
 [~, order] = sort([figs.Number]);
 figs = figs(order);
 for i = 1:numel(figs)
-    name = strtrim(figs(i).Name);
-    if isempty(name)
-        name = sprintf('figure_%d', figs(i).Number);
+    raw_name = strtrim(figs(i).Name);
+    if isempty(raw_name)
+        raw_name = sprintf('figure_%d', figs(i).Number);
     end
-    name = regexprep(name, '[^\w]+', '_');
+    name = regexprep(raw_name, '[^\w]+', '_');
     name = regexprep(name, '^_|_$', '');
     if isempty(name)
         name = sprintf('figure_%d', figs(i).Number);
     end
+    dest = fullfile(folder, figure_theme_folder(raw_name, day));
+    if exist(dest, 'dir') ~= 7
+        mkdir(dest)
+    end
     base = name;
     suffix = 1;
-    while exist(fullfile(folder, [base '.svg']), 'file') == 2
+    while exist(fullfile(dest, [base '.svg']), 'file') == 2
         suffix = suffix + 1;
         base = sprintf('%s_%d', name, suffix);
     end
     set(figs(i), 'PaperPositionMode', 'auto')
-    svg_path = fullfile(folder, [base '.svg']);
-    jpg_path = fullfile(folder, [base '.jpg']);
+    svg_path = fullfile(dest, [base '.svg']);
+    jpg_path = fullfile(dest, [base '.jpg']);
     print(figs(i), svg_path, '-dsvg')
     print(figs(i), jpg_path, '-djpeg', '-r200')
     disp(['Saved ', svg_path])
     disp(['Saved ', jpg_path])
 end
+end
+
+
+function folder_name = figure_theme_folder(figure_name, day)
+model = regexp(figure_name, '^(Model\d+\s+[^,]*)', 'tokens', 'once');
+if ~isempty(model)
+    theme = strtrim(model{1});
+elseif ~isempty(regexpi(figure_name, 'spike|stratum|strata', 'once'))
+    theme = 'Strata preview';
+elseif ~isempty(regexpi(figure_name, 'delta power', 'once'))
+    theme = 'Power';
+elseif ~isempty(regexpi(figure_name, 'locking|ppc|autocorrelogram|paired|spectrum|spectra|latency|example', 'once'))
+    theme = 'PPC';
+else
+    theme = 'Other';
+end
+theme = regexprep(theme, '[\\/:*?"<>|]+', ' ');
+theme = strtrim(regexprep(theme, '\s+', ' '));
+folder_name = [theme, '_', day];
+end
+
+
+function day = run_day_stamp()
+if isappdata(0, 'locking_acg_run_day')
+    day = getappdata(0, 'locking_acg_run_day');
+    if ~isempty(day)
+        return
+    end
+end
+day = datestr(now, 'yyyy-mm-dd');
+setappdata(0, 'locking_acg_run_day', day);
 end
 
 
@@ -1257,39 +1301,47 @@ if strcmp(scale_tag, 'rate ratio')
 else
     ratio_label = '';
 end
-[level_measures, level_labels, level_sides, level_units] = paired_level_measures(ratio_label);
+[level_measures, level_labels, ~, level_units] = paired_level_measures(ratio_label);
 row_measures = [level_measures, {'first_lag', 'second_lag'}];
 row_labels = [level_labels, {'First-peak latency (s)', 'Second-cycle latency (s)'}];
-side_names = [level_sides, {'one-sided later p', 'one-sided later p'}];
 units = [level_units, {' s', ' s'}];
 panel_names = [group_order, {'all'}];
 panel_titles = [group_title, {'All neurons'}];
-for c = 1:numel(panel_names)
-    figure('Name', ['Paired, ', panel_titles{c}, ', ', split_name, ', ', scale_tag], ...
-        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.18 0.04 0.42 0.92])
+n_row = numel(row_measures);
+n_col = numel(panel_names);
+figure('Name', ['Paired mesh, ', split_name, ', ', scale_tag], ...
+    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.02 0.03 0.96 0.94])
+for c = 1:n_col
     if strcmp(panel_names{c}, 'all')
         in_panel = true(numel(neurons.lock_group), 1);
     else
         in_panel = in_lock_group(neurons.lock_group, panel_names{c});
     end
-    for r = 1:numel(row_measures)
+    for r = 1:n_row
         [y_low, y_high, ok] = paired_peak_values( ...
             neurons.low_peaks, neurons.high_peaks, row_measures{r});
         in = ok & in_panel;
-        subplot(numel(row_measures), 1, r)
+        subplot(n_row, n_col, (r - 1) * n_col + c)
         lim = paired_cloud_limits(y_low(in), y_high(in));
         plot_one_paired_cloud(neurons.lock_group(in), y_low(in), y_high(in), ...
-            neurons.firing_rate(in), group_order, colors, lim, true)
-        ylabel({'High 25%', row_labels{r}})
+            neurons.firing_rate(in), group_order, colors, lim, r == n_row, 12)
+        if c == 1
+            ylabel(row_labels{r}, 'Interpreter', 'none')
+        end
         change = paired_change_stats(y_low(in), y_high(in), ...
             neurons.score_low(in), neurons.score_high(in));
-        title(sprintf(['n = %d, median high-low %.3g%s\n' ...
-            'two-sided signrank p = %.3g, %s = %.3g'], ...
-            change.n, change.median_delta, units{r}, ...
-            change.p_two, side_names{r}, change.p_increase))
+        if r == 1
+            heading = panel_titles{c};
+        else
+            heading = '';
+        end
+        title(sprintf('%s\nn = %d, median %.3g%s, p = %.3g', ...
+            heading, change.n, change.median_delta, units{r}, change.p_two), ...
+            'Interpreter', 'none')
     end
-    sgtitle({[panel_titles{c}, ', ', split_name], scale_label})
 end
+sgtitle({['Paired mesh, ', split_name], scale_label, ...
+    'Columns are lock groups. Rows are measures. p is the two-sided sign rank.'})
 end
 
 
@@ -1310,7 +1362,10 @@ lim = [lo - 0.08 * span, hi + 0.08 * span];
 end
 
 
-function plot_one_paired_cloud(lock_group, y_low, y_high, firing_rate, group_order, colors, lim, show_xlabel)
+function plot_one_paired_cloud(lock_group, y_low, y_high, firing_rate, group_order, colors, lim, show_xlabel, marker_size)
+if nargin < 9 || isempty(marker_size)
+    marker_size = 36;
+end
 hold on
 plot(lim, lim, '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1, 'HandleVisibility', 'off')
 for g = 1:numel(group_order)
@@ -1319,7 +1374,7 @@ for g = 1:numel(group_order)
         continue
     end
     order = idx_high_rate_last(idx, firing_rate);
-    scatter(y_low(order), y_high(order), 36, colors(g, :), 'filled', ...
+    scatter(y_low(order), y_high(order), marker_size, colors(g, :), 'filled', ...
         'MarkerFaceAlpha', 0.75, 'HandleVisibility', 'off')
 end
 if ~isempty(y_low)
@@ -1776,7 +1831,7 @@ token = regexprep(token, '^_|_$', '');
 if isempty(token)
     token = 'STATISTICS';
 end
-stats_path = fullfile(folder, [token '.txt']);
+stats_path = fullfile(folder, [token, '_', run_day_stamp(), '.txt']);
 if ~append_file && exist(stats_path, 'file') == 2
     delete(stats_path)
 end
