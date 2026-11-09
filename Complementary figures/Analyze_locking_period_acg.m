@@ -38,15 +38,19 @@
 % panel is the paired difference, high minus low, with its own 95%
 % confidence interval and a dashed line at zero. A second figure folds
 % each autocorrelogram about zero before the test and draws only the
-% positive lags. Open squares mark runs where the same t interval drawn
-% on the paired difference excludes zero, but the sign-flip cluster test
-% does not. Filled grey squares mark runs that survive. The cluster
-% probability is the sign-flip probability of that t score, so it does
-% not assume the differences are normal. The bars sit
+% positive lags. The search is split into 0-200 ms, 200-400 ms, and
+% 400-600 ms, so the burst does not set the null for a peak. Each window
+% has its own sign-flip cluster test. Bonferroni then corrects those
+% three tests. Open squares mark runs where the t interval excludes zero
+% but the corrected cluster test does not. Filled grey squares mark runs
+% that survive. The number on a square is that cluster's uncorrected
+% p-value. The cluster probability is the sign-flip probability of that
+% t score, so it does not assume the differences are normal. The bars sit
 % in the top tenth of each axis. On the unfolded figure they are mirrored
 % because the autocorrelogram is. The statistics report lists every
-% cluster, with its positive-lag range and cluster p-value. A cluster
-% survives when that p-value is at or below acg_cluster_alpha.
+% cluster, with its window, positive-lag range, uncorrected p-value, and
+% Bonferroni p-value. A cluster survives when the Bonferroni p-value is
+% at or below acg_cluster_alpha.
 % Set tail_percent and run the script again to write the same figures
 % for another split. A run at 25 and a run at 10 keep separate folders
 % and separate statistics files.
@@ -216,7 +220,7 @@ acg_lag          = 1;       % s, half-width of the autocorrelogram axis
 smooth_half      = 0.06;        % s, full smooth width; Gaussian sigma is a quarter of this (15 ms)
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
-acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutoff
+acg_cluster_alpha = 0.05;  % t interval and Bonferroni cluster cutoff
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
 stratum_min_spikes = 200;   % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
@@ -1453,7 +1457,7 @@ if ~isempty(clusters)
 end
 box off
 sgtitle({figure_label, sprintf( ...
-    'n = %d    band: 2-5 Hz    filled bars survive, open bars do not', n_neurons)})
+    'n = %d    labels: uncorrected p    filled bars survive Bonferroni across 3 windows', n_neurons)})
 end
 
 
@@ -2003,6 +2007,11 @@ end
 end
 
 
+function ok = cluster_result_is_windowed(result)
+ok = isstruct(result) && isfield(result, 'n_tests');
+end
+
+
 function summary = ensure_acg_clusters(summary, group_order, group_title, split_name, centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm)
 names = [group_order, {'all_neurons'}];
 titles = [group_title, {'All neurons'}];
@@ -2014,15 +2023,19 @@ for g = 1:numel(names)
     group = summary.(names{g});
     low_s = [];
     high_s = [];
-    if ~isfield(group, 'low_high_clusters') || ~isfield(group, 'mirrored_clusters')
+    need_low = ~isfield(group, 'low_high_clusters') ...
+        || ~cluster_result_is_windowed(group.low_high_clusters);
+    need_mirror = ~isfield(group, 'mirrored_clusters') ...
+        || ~cluster_result_is_windowed(group.mirrored_clusters);
+    if need_low || need_mirror
         low_s = smooth_acg_away_from_zero(group.low, centers, skip_abs_lag, smooth_n);
         high_s = smooth_acg_away_from_zero(group.high, centers, skip_abs_lag, smooth_n);
     end
-    if ~isfield(group, 'low_high_clusters')
+    if need_low
         group.low_high_clusters = paired_acg_clusters( ...
             low_s, high_s, centers, cluster_alpha, cluster_perm);
     end
-    if ~isfield(group, 'mirrored_clusters')
+    if need_mirror
         [low_f, high_f, pos_centers] = mirror_average_pair(low_s, high_s, centers);
         group.mirrored_centers = pos_centers;
         group.mirrored_clusters = paired_acg_clusters( ...
@@ -3307,11 +3320,16 @@ end
 
 
 function report_acg_clusters(result, figure_label, split_name)
+n_tests = 3;
+if isfield(result, 'n_tests') && isfinite(result.n_tests)
+    n_tests = result.n_tests;
+end
 disp(sprintf(['  %s cluster test, high vs low %s, positive lags: ' ...
-    't interval excludes 0 at alpha %.3g, %d sign flips'], ...
-    figure_label, split_name, result.alpha, result.n_perm))
+    'separate sign flips in 0-200, 200-400, and 400-600 ms, ' ...
+    't interval excludes 0 at alpha %.3g, %d sign flips, Bonferroni across %d windows'], ...
+    figure_label, split_name, result.alpha, result.n_perm, n_tests))
 if isempty(result.clusters)
-    disp('  No contiguous uncorrected difference.')
+    disp('  No contiguous uncorrected difference in those windows.')
     return
 end
 for k = 1:numel(result.clusters)
@@ -3321,11 +3339,20 @@ for k = 1:numel(result.clusters)
     else
         fate = 'does not survive';
     end
-    disp(sprintf('  Cluster %.3g-%.3g s, cluster p = %.3g, %s', ...
-        cluster.x0, cluster.x1, cluster.p, fate))
+    window_name = '';
+    if isfield(cluster, 'window')
+        window_name = cluster.window;
+    end
+    p_corrected = cluster.p;
+    if isfield(cluster, 'p_corrected')
+        p_corrected = cluster.p_corrected;
+    end
+    disp(sprintf(['  %s cluster %.3g-%.3g s, mass %.3g, uncorrected p = %.3g, ' ...
+        'Bonferroni p = %.3g, %s'], ...
+        window_name, cluster.x0, cluster.x1, cluster.mass, cluster.p, p_corrected, fate))
 end
-disp(['  Filled squares survive the sign-flip cluster test. Open squares are ' ...
-    'lags where the t interval excludes 0 but the cluster does not.'])
+disp(['  The number on each square is the uncorrected cluster p. Filled squares ' ...
+    'survive Bonferroni across the three windows. Open squares do not.'])
 end
 
 
@@ -3343,10 +3370,28 @@ for k = 1:numel(result.clusters)
     x0 = result.clusters(k).x0;
     x1 = result.clusters(k).x1;
     draw_cluster_patch(x0, x1, y0, y1, result.clusters(k).survives);
+    draw_cluster_p(x0, x1, y1, result.clusters(k).p);
     if mirror_negative
         draw_cluster_patch(-x1, -x0, y0, y1, result.clusters(k).survives);
+        draw_cluster_p(-x1, -x0, y1, result.clusters(k).p);
     end
 end
+end
+
+
+function draw_cluster_p(x0, x1, y_top, p)
+if ~isfinite(p)
+    return
+end
+if p < 0.001
+    label = 'p<0.001';
+else
+    label = sprintf('p=%.3f', p);
+end
+text((x0 + x1) / 2, y_top, label, ...
+    'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
+    'FontSize', 8, 'Color', [0.1 0.1 0.1], ...
+    'Clipping', 'on', 'HandleVisibility', 'off');
 end
 
 
