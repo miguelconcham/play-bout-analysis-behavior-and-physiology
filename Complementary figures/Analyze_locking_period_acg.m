@@ -121,6 +121,16 @@
 % non-entrained label, has its own intercept and its own slope. Those
 % figures open only when show_run_rate_power is true. The rows are stored
 % only by a full run.
+% Three more power models use the same strata and open when
+% show_oscillation_models is true. Each neuron is demeaned, so the slope
+% is within the neuron, and the uncertainty is clustered by neuron.
+% Model13 gives every neuron the same total weight. Model14 gives every
+% stratum the same weight. Model15 gives the firing rate, the burst, and
+% the three oscillatory predictors their own slope in trough-locked,
+% peak-locked, and non-entrained neurons, and tests whether those
+% oscillatory slopes differ. The formulas are in locking_acg_models.txt.
+% Figure titles and statistics files use the same ModelN name. Every
+% lock group of one model is written into that model's one text file.
 % A reverse strata fit asks how much LFP delta power predicts entrainment.
 % The outcomes are folded autocorrelogram delta power and first-peak
 % prominence. Neuron is the category, firing rate is a covariate, and
@@ -173,12 +183,12 @@ low_percent      = 25;
 high_percent     = 75;
 delta_lag        = [0.2 0.5];   % s, 5 Hz to 2 Hz
 acg_lag          = 1;       % s, half-width of the autocorrelogram axis
-smooth_half      = 0.04;        % s, full smooth width; Gaussian sigma is a quarter of this
+smooth_half      = 0.06;        % s, full smooth width; Gaussian sigma is a quarter of this (15 ms)
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
 acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutoff
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
-stratum_min_spikes = 50;    % spikes required in each power stratum
+stratum_min_spikes = 200;   % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
 maximize_strata_number = false; % true: largest valid stratum count for each neuron
                                  % false: try 4, then 2, then 1
@@ -197,14 +207,16 @@ show_model_scatters = true;      % ceteris-paribus predictor scatters for each a
 show_ppc_models = true;          % PPC contribution bars and ceteris-paribus scatters
 show_run_rate_power = true;      % run-level firing rate versus delta power
 show_strata_preview = true;      % spikes per neuron, and neurons by stratum count
+show_oscillation_models = true;  % partial oscillation slopes, equal-neuron and by type
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
-% written there as SVG and JPG, and each statistics block is written
-% there as its own text file.
+% written there as SVG and JPG. Each model type is written as one
+% statistics text file, with every lock group inside that file. The
+% other plots keep a text file of their own.
 figure_folder = '';
 % true reloads the summary that matches maximize_strata_number and
 % reprints the tests. Spikes are not reloaded and no figures are opened.
-% A non-empty figure_folder receives one text file per statistics block.
+% A non-empty figure_folder receives one text file per model type.
 reprint_stats_only = false;
 % true reloads that same summary and draws the figures. Spike files are
 % not read. Cluster bars are computed from the saved curves when the
@@ -230,7 +242,8 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'model_scatters', show_model_scatters, ...
     'ppc_models', show_ppc_models, ...
     'run_rate_power', show_run_rate_power, ...
-    'strata_preview', show_strata_preview));
+    'strata_preview', show_strata_preview, ...
+    'oscillation_models', show_oscillation_models));
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -600,6 +613,7 @@ locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
     fit_strata_ppc_models(strata_rows, group_order, group_title);
 locking_acg.run_rate_power = run_rows;
 locking_acg = fit_saved_run_rate_power(locking_acg, true);
+locking_acg.oscillation_models = fit_oscillation_power_models(strata_rows, true);
 
 summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
 save(summary_path, 'locking_acg', 'power_acg');
@@ -654,10 +668,14 @@ end
 
 
 function start_statistics_diary(folder)
-% Each disp_block opens its own text file. A single diary started here
-% would be replaced before any block is printed.
+% Model statistics for one model type share one text file. Other plots
+% still open a file of their own. A diary is not started until a block asks.
 if strcmp(get(0, 'Diary'), 'on')
     diary('off')
+end
+setappdata(0, 'locking_acg_stats_started', {})
+if isappdata(0, 'locking_acg_stats_token')
+    rmappdata(0, 'locking_acg_stats_token')
 end
 if isempty(folder)
     if isappdata(0, 'locking_acg_stats_folder')
@@ -1522,6 +1540,7 @@ model_has_delta = isfield(locking_acg, 'delta_power_model') ...
     && isfield(locking_acg.delta_power_model.groups, 'delta');
 if isfield(locking_acg, 'delta_power_model') && isfield(locking_acg.delta_power_model, 'all') ...
         && locking_acg.delta_power_model.all.ok && model_has_delta
+    locking_acg.delta_power_model = tag_model(locking_acg.delta_power_model, 'Model1 session');
     plot_power_contributions(locking_acg.delta_power_model, group_order, group_title, ...
         locking_acg.delta_power_model.all.names);
     plot_session_ceteris_paribus(locking_acg, false, group_order, group_title);
@@ -1535,6 +1554,8 @@ if isfield(locking_acg, 'delta_power_model_beyond_rate')
 end
 if ~isempty(beyond) && isfield(beyond, 'all') && beyond.all.ok ...
         && isfield(beyond.all, 'beyond_rsq') && isfinite(beyond.all.beyond_rsq)
+    beyond = tag_model(beyond, 'Model2 beyond rate');
+    locking_acg.delta_power_model_beyond_rate = beyond;
     plot_beyond_rate_contributions(beyond, group_order, group_title, beyond.all.names);
     plot_session_ceteris_paribus(locking_acg, true, group_order, group_title);
 else
@@ -1556,6 +1577,10 @@ locking_acg.ppc_model = fit_ppc_contributions( ...
 locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
     locking_acg, group_order, group_title);
 locking_acg = fit_saved_run_rate_power(locking_acg, true);
+if isfield(locking_acg, 'power_strata')
+    locking_acg.oscillation_models = fit_oscillation_power_models( ...
+        locking_acg.power_strata, true);
+end
 end
 
 
@@ -1627,18 +1652,23 @@ if power_model_is_stale(locking_acg, 'delta_power_model')
     locking_acg.delta_power_model = fit_delta_power_contributions( ...
         locking_acg, group_order, group_title, false);
 else
-    report_power_model_block(locking_acg.delta_power_model, group_order);
+    use_model_tag('Model1 session');
+    report_power_model_block(tag_model(locking_acg.delta_power_model, 'Model1 session'), group_order);
 end
 if power_model_is_stale(locking_acg, 'delta_power_model_beyond_rate')
     locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
         locking_acg, group_order, group_title, false);
 else
-    report_beyond_rate_block(locking_acg.delta_power_model_beyond_rate, group_order);
+    use_model_tag('Model2 beyond rate');
+    report_beyond_rate_block(tag_model(locking_acg.delta_power_model_beyond_rate, 'Model2 beyond rate'), group_order);
 end
 report_or_fit_strata_models(locking_acg, group_order, group_title, false);
 report_or_fit_power_to_entrainment(locking_acg, group_order, group_title, false);
 report_or_fit_ppc_models(locking_acg, group_order, group_title, false);
 fit_saved_run_rate_power(locking_acg, false);
+if isfield(locking_acg, 'power_strata')
+    fit_oscillation_power_models(locking_acg.power_strata, false);
+end
 end
 
 
@@ -1660,13 +1690,76 @@ end
 
 
 function disp_block(title)
-open_statistics_block(title)
+open_statistics_block(title, false)
+setappdata(0, 'locking_acg_stats_token', char(title))
 disp_rule()
 disp(upper(title))
 end
 
 
-function open_statistics_block(title)
+function open_model_statistics(tag, fallback)
+if nargin < 1 || isempty(tag)
+    tag = '';
+end
+if nargin < 2 || isempty(fallback)
+    fallback = 'Statistics';
+end
+key = tag;
+if isempty(key)
+    key = fallback;
+end
+current = '';
+if isappdata(0, 'locking_acg_stats_token')
+    current = getappdata(0, 'locking_acg_stats_token');
+end
+if strcmp(current, key) && strcmp(get(0, 'Diary'), 'on')
+    disp_rule()
+    return
+end
+started = {};
+if isappdata(0, 'locking_acg_stats_started')
+    started = getappdata(0, 'locking_acg_stats_started');
+end
+reopen = any(strcmp(started, key));
+if ~reopen || ~isappdata(0, 'locking_acg_stats_folder')
+    open_statistics_block(key, false)
+    if ~reopen
+        started{end + 1} = key; %#ok<AGROW>
+        setappdata(0, 'locking_acg_stats_started', started)
+    end
+else
+    open_statistics_block(key, true)
+end
+setappdata(0, 'locking_acg_stats_token', key)
+disp_rule()
+if ~strcmp(key, fallback)
+    disp(upper(key))
+    disp_rule()
+end
+end
+
+
+function tag = active_model_tag(fit)
+tag = '';
+if isstruct(fit) && isfield(fit, 'model_tag') && ~isempty(fit.model_tag)
+    tag = char(fit.model_tag);
+    return
+end
+if isappdata(0, 'locking_acg_model_tag')
+    tag = char(getappdata(0, 'locking_acg_model_tag'));
+end
+end
+
+
+function use_model_tag(tag)
+setappdata(0, 'locking_acg_model_tag', tag)
+end
+
+
+function open_statistics_block(title, append_file)
+if nargin < 2
+    append_file = false;
+end
 if ~isappdata(0, 'locking_acg_stats_folder')
     return
 end
@@ -1683,7 +1776,7 @@ if isempty(token)
     token = 'STATISTICS';
 end
 stats_path = fullfile(folder, [token '.txt']);
-if exist(stats_path, 'file') == 2
+if ~append_file && exist(stats_path, 'file') == 2
     delete(stats_path)
 end
 diary(stats_path)
@@ -2948,9 +3041,12 @@ if ~isfield(strata, 'n') || strata.n < 2
     return
 end
 [X, y, groups, lock_group, names] = strata_regression_rows(strata);
+use_model_tag('Model3 strata');
 model.all = fit_one_power_model(X, y, names, 'All neurons, power strata', groups, 'Neuron');
+use_model_tag('Model4 strata residual');
 beyond.all = fit_beyond_rate_model(X, y, names, ...
     'All neurons, power strata, beyond firing rate', groups, 'Neuron');
+use_model_tag('Model5 sequential');
 sequential.all = fit_sequential_strata_model(X, y, names, ...
     'All neurons, power strata, sequential', groups);
 model.groups = struct();
@@ -2959,17 +3055,23 @@ sequential.groups = struct();
 for g = 1:numel(group_order)
     in_group = stratum_group_rows(lock_group, groups, group_order{g});
     local_groups = subset_groups(groups, in_group);
+    use_model_tag('Model3 strata');
     model.groups.(group_order{g}) = fit_one_power_model( ...
         X(in_group, :), y(in_group), names, ...
         [group_title{g}, ', power strata'], local_groups, 'Neuron');
+    use_model_tag('Model4 strata residual');
     beyond.groups.(group_order{g}) = fit_beyond_rate_model( ...
         X(in_group, :), y(in_group), names, ...
         [group_title{g}, ', power strata, beyond firing rate'], ...
         local_groups, 'Neuron');
+    use_model_tag('Model5 sequential');
     sequential.groups.(group_order{g}) = fit_sequential_strata_model( ...
         X(in_group, :), y(in_group), names, ...
         [group_title{g}, ', power strata, sequential'], local_groups);
 end
+model = tag_model(model, 'Model3 strata');
+beyond = tag_model(beyond, 'Model4 strata residual');
+sequential = tag_model(sequential, 'Model5 sequential');
 if do_plot && model.all.ok
     plot_power_contributions(model, group_order, group_title, model.all.names, ...
         'Delta power strata');
@@ -3001,6 +3103,486 @@ end
 end
 
 
+function result = fit_oscillation_power_models(strata, do_plot)
+% Within-neuron partial slopes of the oscillatory predictors. Model13
+% gives each neuron total weight 1. Model14 gives each stratum weight 1.
+% Model15 lets those slopes, and the firing-rate and burst slopes, differ
+% for trough-locked, peak-locked, and non-entrained neurons.
+if nargin < 2
+    do_plot = true;
+end
+names = {'Firing rate', 'Burst, 0-50 ms', 'First-peak prominence', ...
+    'Second-cycle prominence', 'ACG delta power, >100 ms'};
+osc_names = names(3:5);
+type_order = {'trough', 'peak', 'nonentrained'};
+type_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
+short_names = {'Firing rate', 'Burst 0-50 ms', 'First peak', ...
+    'Second cycle', 'ACG delta'};
+result = struct('equal', empty_oscillation_fit('Model13 equal neuron'), ...
+    'row', empty_oscillation_fit('Model14 row weight'), ...
+    'group', empty_oscillation_fit('Model15 group slopes'));
+if ~isfield(strata, 'n') || strata.n < 2
+    note_oscillation_model('Model13 equal neuron', ...
+        'Power strata are not in this summary. Run the full script once.');
+    note_oscillation_model('Model14 row weight', ...
+        'Power strata are not in this summary. Run the full script once.');
+    note_oscillation_model('Model15 group slopes', ...
+        'Power strata are not in this summary. Run the full script once.');
+    return
+end
+[X, y, neuron, lock_group, row_names] = strata_regression_rows(strata);
+if isempty(y) || size(X, 2) ~= numel(names)
+    note_oscillation_model('Model13 equal neuron', ...
+        'Too few neurons have two strata for this model.');
+    note_oscillation_model('Model14 row weight', ...
+        'Too few neurons have two strata for this model.');
+    note_oscillation_model('Model15 group slopes', ...
+        'Too few neurons have two strata for this model.');
+    return
+end
+names = row_names;
+osc_names = names(3:5);
+[X, y, neuron, n_outliers, keep] = drop_clear_outliers(X, y, neuron);
+lock_group = lock_group(keep);
+[X, y, neuron, lock_group] = keep_neuron_rows(X, y, neuron, lock_group, 2);
+weights = neuron_stratum_weights(neuron);
+result.equal = fit_weighted_cluster(X, y, neuron, weights, names, ...
+    'Model13 equal neuron', n_outliers);
+result.equal.short_names = short_labels_for(result.equal.names, names, short_names);
+result.equal.joint_name = ['first-peak prominence, second-cycle prominence, ' ...
+    'and ACG delta power'];
+[result.equal.joint_F, result.equal.joint_p, result.equal.joint_df1] = ...
+    wald_zero(result.equal.beta, result.equal.V, ...
+    oscillation_columns(result.equal.names, osc_names), result.equal.df);
+report_common_oscillation(result.equal, ...
+    ['Weight of each stratum is 1 over the number of strata of its neuron. ' ...
+    'Every neuron has total weight 1.']);
+result.row = fit_weighted_cluster(X, y, neuron, ones(size(y)), names, ...
+    'Model14 row weight', n_outliers);
+result.row.short_names = short_labels_for(result.row.names, names, short_names);
+result.row.joint_name = result.equal.joint_name;
+[result.row.joint_F, result.row.joint_p, result.row.joint_df1] = ...
+    wald_zero(result.row.beta, result.row.V, ...
+    oscillation_columns(result.row.names, osc_names), result.row.df);
+report_common_oscillation(result.row, ...
+    'Weight of each stratum is 1. A neuron with more strata pulls the slope more.');
+in_type = false(numel(lock_group), 1);
+for t = 1:numel(type_order)
+    in_type = in_type | strcmp(lock_group(:), type_order{t});
+end
+[Z, long_names, used_types, used_titles] = type_slope_design( ...
+    X(in_type, :), names, lock_group(in_type), type_order, type_title);
+result.group = fit_weighted_cluster(Z, y(in_type), neuron(in_type), ...
+    neuron_stratum_weights(neuron(in_type)), long_names, ...
+    'Model15 group slopes', n_outliers);
+result.group.type_order = used_types;
+result.group.type_title = used_titles;
+result.group.short_names = short_names;
+[result.group.beta_matrix, result.group.se_matrix, result.group.p_matrix] = ...
+    slope_matrix(result.group, names, used_titles);
+R = type_difference_contrasts(result.group.names, osc_names);
+[result.group.joint_F, result.group.joint_p, result.group.joint_df1] = ...
+    wald_contrasts(result.group.beta, result.group.V, R, result.group.df);
+report_group_oscillation(result.group);
+if do_plot
+    plot_common_oscillation(result.equal);
+    plot_common_oscillation(result.row);
+    plot_group_oscillation(result.group);
+end
+end
+
+
+function fit = empty_oscillation_fit(tag)
+fit.ok = false;
+fit.tag = tag;
+fit.names = {};
+fit.short_names = {};
+fit.beta = [];
+fit.se = [];
+fit.t = [];
+fit.p = [];
+fit.V = [];
+fit.df = NaN;
+fit.n = 0;
+fit.n_neurons = 0;
+fit.n_outliers = 0;
+fit.rsq = NaN;
+fit.joint_F = NaN;
+fit.joint_p = NaN;
+fit.joint_df1 = 0;
+fit.joint_name = '';
+fit.reason = '';
+fit.beta_matrix = [];
+fit.se_matrix = [];
+fit.p_matrix = [];
+fit.type_title = {};
+fit.type_order = {};
+end
+
+
+function note_oscillation_model(tag, message)
+use_model_tag(tag);
+open_model_statistics(tag, tag);
+disp(upper(tag))
+disp(message)
+end
+
+
+function [X, y, neuron, lock_group] = keep_neuron_rows(X, y, neuron, lock_group, min_count)
+keep = rows_of_repeated_groups(neuron, min_count);
+X = X(keep, :);
+y = y(keep);
+neuron = neuron(keep);
+lock_group = lock_group(keep);
+end
+
+
+function w = neuron_stratum_weights(neuron)
+w = ones(numel(neuron), 1);
+if isempty(neuron)
+    return
+end
+[~, ~, idx] = unique(neuron(:), 'stable');
+counts = accumarray(idx, 1);
+w = 1 ./ counts(idx);
+end
+
+
+function fit = fit_weighted_cluster(X, y, neuron, w, names, tag, n_outliers)
+fit = empty_oscillation_fit(tag);
+fit.n_outliers = n_outliers;
+fit.names = names;
+if isempty(y) || size(X, 1) < 4
+    fit.reason = 'Too few strata remain.';
+    return
+end
+[Xc, yc, neuron] = demean_within_neuron(X, y, neuron);
+w = w(:);
+if numel(w) ~= numel(yc)
+    w = ones(numel(yc), 1);
+end
+sd = std(Xc, 0, 1);
+keep = isfinite(sd) & sd > 1e-12;
+if ~any(keep)
+    fit.reason = 'No predictor varies within a neuron.';
+    return
+end
+Xc = Xc(:, keep) ./ sd(keep);
+names = names(keep);
+sy = std(yc);
+if ~isfinite(sy) || sy <= 0
+    fit.reason = 'Delta power does not vary within a neuron.';
+    return
+end
+yc = yc / sy;
+sw = sqrt(max(w, 0));
+Xw = Xc .* sw;
+beta = pinv(Xw) * (yc .* sw);
+resid = yc - Xc * beta;
+ids = unique(neuron(:), 'stable');
+G = numel(ids);
+p = numel(beta);
+bread = pinv(Xw' * Xw);
+meat = zeros(p, p);
+for i = 1:G
+    in = strcmp(neuron(:), ids{i});
+    score = Xc(in, :)' * (w(in) .* resid(in));
+    meat = meat + score * score';
+end
+if G > 1
+    meat = meat * (G / (G - 1));
+end
+V = bread * meat * bread;
+V = (V + V') / 2;
+se = sqrt(max(real(diag(V)), 0));
+df2 = G - p;
+tstat = beta ./ se;
+tstat(~isfinite(se) | se <= 0) = NaN;
+ss_tot = sum(w .* yc .^ 2);
+fit.ok = true;
+fit.beta = beta;
+fit.se = se;
+fit.t = tstat;
+fit.p = t_two_tailed(tstat, df2);
+fit.names = names;
+fit.V = V;
+fit.df = df2;
+fit.n = numel(yc);
+fit.n_neurons = G;
+fit.rsq = NaN;
+if ss_tot > 0
+    fit.rsq = 1 - sum(w .* resid .^ 2) / ss_tot;
+end
+end
+
+
+function [Xc, yc, neuron] = demean_within_neuron(X, y, neuron)
+Xc = X;
+yc = y(:);
+neuron = neuron(:);
+ids = unique(neuron, 'stable');
+for i = 1:numel(ids)
+    in = strcmp(neuron, ids{i});
+    Xc(in, :) = X(in, :) - mean(X(in, :), 1);
+    yc(in) = yc(in) - mean(yc(in));
+end
+end
+
+
+function labels = short_labels_for(full_names, full_list, short_list)
+labels = full_names;
+for i = 1:numel(full_names)
+    hit = find(strcmp(full_list, full_names{i}), 1);
+    if ~isempty(hit) && hit <= numel(short_list)
+        labels{i} = short_list{hit};
+    end
+end
+end
+
+
+function cols = oscillation_columns(names, osc_names)
+cols = [];
+for i = 1:numel(osc_names)
+    hit = find(strcmp(names, osc_names{i}));
+    cols = [cols, hit(:)']; %#ok<AGROW>
+end
+end
+
+
+function [Fstat, p, q] = wald_zero(beta, V, cols, df2)
+Fstat = NaN;
+p = NaN;
+q = numel(cols);
+if q < 1 || isempty(beta) || isempty(V)
+    q = 0;
+    return
+end
+R = zeros(q, numel(beta));
+for i = 1:q
+    R(i, cols(i)) = 1;
+end
+[Fstat, p, q] = wald_contrasts(beta, V, R, df2);
+end
+
+
+function [Fstat, p, q] = wald_contrasts(beta, V, R, df2)
+Fstat = NaN;
+p = NaN;
+q = 0;
+if isempty(beta) || isempty(V) || isempty(R)
+    return
+end
+q = rank(R);
+d = R * beta(:);
+VR = R * V * R';
+if q < 1 || ~all(isfinite(d))
+    q = 0;
+    return
+end
+stat = real(d' * pinv(VR) * d);
+Fstat = stat / q;
+if ~isfinite(Fstat) || ~isfinite(df2) || df2 < 1
+    return
+end
+p = betainc(df2 / (df2 + q * Fstat), df2 / 2, q / 2);
+end
+
+
+function [Z, long_names, used_types, used_titles] = type_slope_design(X, names, lock_group, type_order, type_title)
+Z = zeros(size(X, 1), 0);
+long_names = {};
+used_types = {};
+used_titles = {};
+if isempty(X)
+    return
+end
+present = false(1, numel(type_order));
+for t = 1:numel(type_order)
+    present(t) = any(strcmp(lock_group(:), type_order{t}));
+end
+for t = 1:numel(type_order)
+    if present(t)
+        used_types{end + 1} = type_order{t}; %#ok<AGROW>
+        used_titles{end + 1} = type_title{t}; %#ok<AGROW>
+    end
+end
+for k = 1:numel(names)
+    for t = 1:numel(used_types)
+        Z(:, end + 1) = X(:, k) .* strcmp(lock_group(:), used_types{t}); %#ok<AGROW>
+        long_names{end + 1} = [names{k}, ', ', used_titles{t}]; %#ok<AGROW>
+    end
+end
+end
+
+
+function R = type_difference_contrasts(long_names, osc_names)
+R = zeros(0, numel(long_names));
+if isempty(long_names)
+    return
+end
+for k = 1:numel(osc_names)
+    cols = [];
+    prefix = [osc_names{k}, ', '];
+    for j = 1:numel(long_names)
+        if strncmp(long_names{j}, prefix, numel(prefix))
+            cols(end + 1) = j; %#ok<AGROW>
+        end
+    end
+    for j = 2:numel(cols)
+        row = zeros(1, numel(long_names));
+        row(cols(1)) = 1;
+        row(cols(j)) = -1;
+        R(end + 1, :) = row; %#ok<AGROW>
+    end
+end
+end
+
+
+function [beta, se, p] = slope_matrix(fit, predictor_names, type_title)
+n_pred = numel(predictor_names);
+n_type = numel(type_title);
+beta = nan(n_pred, n_type);
+se = beta;
+p = beta;
+if ~isfield(fit, 'ok') || ~fit.ok
+    return
+end
+for k = 1:n_pred
+    for t = 1:n_type
+        hit = find(strcmp(fit.names, [predictor_names{k}, ', ', type_title{t}]), 1);
+        if isempty(hit)
+            continue
+        end
+        beta(k, t) = fit.beta(hit);
+        se(k, t) = fit.se(hit);
+        p(k, t) = fit.p(hit);
+    end
+end
+end
+
+
+function report_common_oscillation(fit, weight_sentence)
+open_model_statistics(fit.tag, fit.tag);
+disp(upper(fit.tag))
+if ~fit.ok
+    if isempty(fit.reason)
+        disp('This model could not be fit.')
+    else
+        disp(fit.reason)
+    end
+    return
+end
+disp(weight_sentence)
+disp(['Within-neuron demeaning removes each neuron mean. The slope is ' ...
+    'the partial association inside the neuron. Standard errors are ' ...
+    'cluster-robust by neuron.'])
+disp(sprintf(['  Neurons = %d, strata = %d, coefficients = %d, ' ...
+    'cluster df = %.0f, outliers removed = %d'], ...
+    fit.n_neurons, fit.n, numel(fit.beta), fit.df, fit.n_outliers))
+disp(sprintf('  Within-neuron weighted R^2 = %.3g', fit.rsq))
+if fit.df < 1
+    disp(['  Fewer neurons than coefficients, so the cluster-robust ' ...
+        'test is not identified.'])
+elseif fit.joint_df1 < 1
+    disp('  No oscillatory predictor varied within neurons, so the joint test is not defined.')
+else
+    disp(sprintf(['  Joint test that %s have partial slope 0: ' ...
+        'F(%d, %.0f) = %.3g, p = %.3g'], ...
+        fit.joint_name, fit.joint_df1, fit.df, fit.joint_F, fit.joint_p))
+end
+disp('  Standardized partial slopes:')
+for k = 1:numel(fit.names)
+    disp(sprintf('    %s: beta = %.4g, SE = %.4g, t = %.3g, p = %.3g', ...
+        fit.names{k}, fit.beta(k), fit.se(k), fit.t(k), fit.p(k)))
+end
+end
+
+
+function report_group_oscillation(fit)
+open_model_statistics(fit.tag, fit.tag);
+disp(upper(fit.tag))
+if ~fit.ok
+    if isempty(fit.reason)
+        disp('This model could not be fit.')
+    else
+        disp(fit.reason)
+    end
+    return
+end
+disp(['Equal neuron weights, within-neuron demeaning, and cluster-robust ' ...
+    'standard errors. Trough-locked, peak-locked, and non-entrained ' ...
+    'neurons have their own slope for every predictor. Delta-locked ' ...
+    'neurons are not in this comparison.'])
+disp(sprintf(['  Neurons = %d, strata = %d, coefficients = %d, ' ...
+    'cluster df = %.0f, outliers removed = %d'], ...
+    fit.n_neurons, fit.n, numel(fit.beta), fit.df, fit.n_outliers))
+disp(sprintf('  Within-neuron weighted R^2 = %.3g', fit.rsq))
+if fit.df < 1
+    disp(['  Fewer neurons than coefficients, so the cluster-robust ' ...
+        'test is not identified.'])
+elseif fit.joint_df1 < 1
+    disp(['  Fewer than two neuron types have an oscillatory slope, ' ...
+        'so the type comparison is not defined.'])
+else
+    disp(sprintf(['  Joint test that the oscillatory slopes are the same ' ...
+        'across neuron types: F(%d, %.0f) = %.3g, p = %.3g'], ...
+        fit.joint_df1, fit.df, fit.joint_F, fit.joint_p))
+end
+disp('  Standardized partial slopes:')
+for k = 1:numel(fit.names)
+    disp(sprintf('    %s: beta = %.4g, SE = %.4g, t = %.3g, p = %.3g', ...
+        fit.names{k}, fit.beta(k), fit.se(k), fit.t(k), fit.p(k)))
+end
+end
+
+
+function plot_common_oscillation(fit)
+if ~figure_selected('oscillation_models') || ~isfield(fit, 'ok') || ~fit.ok
+    return
+end
+figure('Name', [fit.tag, ', partial oscillation slopes'], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.12 0.18 0.7 0.58])
+labels = fit.names;
+if isfield(fit, 'short_names') && numel(fit.short_names) == numel(fit.beta)
+    labels = fit.short_names;
+end
+plot_signed_bars(fit.beta(:)', fit.se(:)', fit.p(:)', labels)
+ylabel('Standardized partial slope')
+title(sprintf('Joint oscillation test, p = %.3g, %d neurons', ...
+    fit.joint_p, fit.n_neurons))
+end
+
+
+function plot_group_oscillation(fit)
+if ~figure_selected('oscillation_models') || ~isfield(fit, 'ok') || ~fit.ok ...
+        || isempty(fit.beta_matrix)
+    return
+end
+beta = fit.beta_matrix;
+se = fit.se_matrix;
+n_pred = size(beta, 1);
+n_type = size(beta, 2);
+figure('Name', [fit.tag, ', slopes by neuron type'], 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.08 0.16 0.84 0.62])
+bar(beta, 'grouped')
+hold on
+group_width = min(0.8, n_type / (n_type + 1.5));
+for t = 1:n_type
+    x = (1:n_pred) - group_width / 2 + (2 * t - 1) * group_width / (2 * n_type);
+    errorbar(x, beta(:, t), se(:, t), 'k.', 'LineWidth', 1, 'HandleVisibility', 'off')
+end
+labels = fit.short_names;
+if numel(labels) ~= n_pred
+    labels = fit.names;
+end
+set(gca, 'XTick', 1:n_pred, 'XTickLabel', labels, 'XTickLabelRotation', 20)
+legend(fit.type_title, 'Location', 'northeast')
+ylabel('Standardized partial slope')
+title(sprintf('Oscillatory slopes differ by type, p = %.3g', fit.joint_p))
+box off
+end
+
+
 function [model, beyond, sequential] = fit_strata_ppc_models(strata, group_order, group_title, do_plot)
 if nargin < 4
     do_plot = true;
@@ -3009,7 +3591,8 @@ model = struct();
 beyond = struct();
 sequential = struct();
 if ~isfield(strata, 'ppc')
-    disp_block('PPC model, All neurons, strata')
+    use_model_tag('Model9 PPC strata');
+    open_model_statistics('Model9 PPC strata', 'Model9 PPC strata');
     disp(['Stratum PPC is not in this summary. Run once with ' ...
         'redraw_figures_only = false so each stratum stores its PPC.'])
     model.all = empty_power_fit('All neurons, strata');
@@ -3018,9 +3601,12 @@ if ~isfield(strata, 'ppc')
     return
 end
 [X, y, groups, lock_group, names] = strata_regression_rows(strata, 'ppc');
+use_model_tag('Model9 PPC strata');
 model.all = fit_one_power_model(X, y, names, 'All neurons, strata', groups, 'Neuron', [], 0, 'PPC');
+use_model_tag('Model10 PPC strata residual');
 beyond.all = fit_beyond_rate_model(X, y, names, ...
     'All neurons, strata, beyond firing rate', groups, 'Neuron', 'PPC');
+use_model_tag('Model11 PPC sequential');
 sequential.all = fit_sequential_strata_model(X, y, names, ...
     'All neurons, strata, sequential', groups, 'PPC');
 model.groups = struct();
@@ -3029,20 +3615,23 @@ sequential.groups = struct();
 for g = 1:numel(group_order)
     in_group = stratum_group_rows(lock_group, groups, group_order{g});
     local_groups = subset_groups(groups, in_group);
+    use_model_tag('Model9 PPC strata');
     model.groups.(group_order{g}) = fit_one_power_model( ...
         X(in_group, :), y(in_group), names, ...
         [group_title{g}, ', strata'], local_groups, 'Neuron', [], 0, 'PPC');
+    use_model_tag('Model10 PPC strata residual');
     beyond.groups.(group_order{g}) = fit_beyond_rate_model( ...
         X(in_group, :), y(in_group), names, ...
         [group_title{g}, ', strata, beyond firing rate'], ...
         local_groups, 'Neuron', 'PPC');
+    use_model_tag('Model11 PPC sequential');
     sequential.groups.(group_order{g}) = fit_sequential_strata_model( ...
         X(in_group, :), y(in_group), names, ...
         [group_title{g}, ', strata, sequential'], local_groups, 'PPC');
 end
-model = tag_ppc_figures(model);
-beyond = tag_ppc_figures(beyond);
-sequential = tag_ppc_figures(sequential);
+model = tag_model(tag_ppc_figures(model), 'Model9 PPC strata');
+beyond = tag_model(tag_ppc_figures(beyond), 'Model10 PPC strata residual');
+sequential = tag_model(tag_ppc_figures(sequential), 'Model11 PPC sequential');
 if do_plot && model.all.ok
     plot_power_contributions(model, group_order, group_title, model.all.names, 'PPC strata');
     plot_ceteris_paribus(X, y, names, groups, 'Neuron', model.all);
@@ -3089,18 +3678,21 @@ end
 
 function report_or_fit_ppc_models(summary, group_order, group_title, do_plot)
 if ppc_family_ready(summary, 'ppc_model') && ~do_plot
-    report_power_model_block(summary.ppc_model, group_order);
+    use_model_tag('Model7 PPC session');
+    report_power_model_block(tag_model(summary.ppc_model, 'Model7 PPC session'), group_order);
 else
     fit_ppc_contributions(summary, group_order, group_title, do_plot);
 end
 if ppc_family_ready(summary, 'ppc_model_beyond_rate') ...
         && isfield(summary.ppc_model_beyond_rate.all, 'beyond_rsq') && ~do_plot
-    report_beyond_rate_block(summary.ppc_model_beyond_rate, group_order);
+    use_model_tag('Model8 PPC residual');
+    report_beyond_rate_block(tag_model(summary.ppc_model_beyond_rate, 'Model8 PPC residual'), group_order);
 else
     fit_ppc_beyond_rate(summary, group_order, group_title, do_plot);
 end
 if ~isfield(summary, 'power_strata')
-    disp_block('PPC model, All neurons, strata')
+    use_model_tag('Model9 PPC strata');
+    open_model_statistics('Model9 PPC strata', 'Model9 PPC strata');
     disp('Power strata are not in this summary. Run the full script once.')
     return
 end
@@ -3109,9 +3701,12 @@ ready = ppc_family_ready(summary, 'strata_ppc_model') ...
     && ppc_family_ready(summary, 'strata_ppc_model_sequential') ...
     && isfield(summary.strata_ppc_model_sequential.all, 'sequential_added');
 if ready && ~do_plot
-    report_power_model_block(summary.strata_ppc_model, group_order);
-    report_beyond_rate_block(summary.strata_ppc_model_beyond_rate, group_order);
-    report_power_model_block(summary.strata_ppc_model_sequential, group_order);
+    use_model_tag('Model9 PPC strata');
+    report_power_model_block(tag_model(summary.strata_ppc_model, 'Model9 PPC strata'), group_order);
+    use_model_tag('Model10 PPC strata residual');
+    report_beyond_rate_block(tag_model(summary.strata_ppc_model_beyond_rate, 'Model10 PPC strata residual'), group_order);
+    use_model_tag('Model11 PPC sequential');
+    report_power_model_block(tag_model(summary.strata_ppc_model_sequential, 'Model11 PPC sequential'), group_order);
     return
 end
 fit_strata_ppc_models(summary.power_strata, group_order, group_title, do_plot);
@@ -3144,9 +3739,12 @@ has_sequential = isfield(summary, 'strata_power_model_sequential') ...
     && isfield(summary.strata_power_model_sequential, 'all') ...
     && isfield(summary.strata_power_model_sequential.all, 'sequential_added');
 if has_model && has_beyond && has_sequential && ~do_plot
-    report_power_model_block(summary.strata_power_model, group_order);
-    report_beyond_rate_block(summary.strata_power_model_beyond_rate, group_order);
-    report_power_model_block(summary.strata_power_model_sequential, group_order);
+    use_model_tag('Model3 strata');
+    report_power_model_block(tag_model(summary.strata_power_model, 'Model3 strata'), group_order);
+    use_model_tag('Model4 strata residual');
+    report_beyond_rate_block(tag_model(summary.strata_power_model_beyond_rate, 'Model4 strata residual'), group_order);
+    use_model_tag('Model5 sequential');
+    report_power_model_block(tag_model(summary.strata_power_model_sequential, 'Model5 sequential'), group_order);
     return
 end
 fit_strata_power_models(summary.power_strata, group_order, group_title, do_plot);
@@ -3199,6 +3797,7 @@ function model = fit_power_to_entrainment(strata, group_order, group_title, do_p
 if nargin < 4
     do_plot = true;
 end
+use_model_tag('Model6 entrainment');
 model = struct();
 model.acg_delta = struct();
 model.first_peak = struct();
@@ -3213,7 +3812,8 @@ model.acg_delta = fit_partial_outcome(power, X(:, 1), X(:, 5), ...
     'ACG delta power', do_plot);
 model.first_peak = fit_partial_outcome(power, [X(:, 1), X(:, 2)], X(:, 3), ...
     {'Firing rate', 'Burst, 0-50 ms'}, groups, lock_group, ...
-    group_order, group_title, 'First-peak prominence', do_plot);
+    group_order, group_title,     'First-peak prominence', do_plot);
+model = tag_model(model, 'Model6 entrainment');
 if do_plot
     plot_entrainment_partial_r2(model, group_order, group_title);
 end
@@ -3229,6 +3829,7 @@ names = [{predictor}, covariate_names];
 X = [power, covariates];
 block.all = attach_partial_r2(fit_one_power_model(X, outcome, names, ...
     ['All neurons, LFP power to ', outcome_name], groups, 'Neuron'), predictor);
+block.all.model_tag = active_model_tag(block.all);
 if do_plot
     plot_ceteris_paribus(X, outcome, names, groups, 'Neuron', block.all);
 end
@@ -3239,6 +3840,7 @@ for g = 1:numel(group_order)
         X(in_group, :), outcome(in_group), names, ...
         [group_title{g}, ', LFP power to ', outcome_name], ...
         subset_groups(groups, in_group), 'Neuron'), predictor);
+    block.groups.(group_order{g}).model_tag = active_model_tag(block.groups.(group_order{g}));
     if do_plot
         plot_ceteris_paribus(X(in_group, :), outcome(in_group), names, ...
             subset_groups(groups, in_group), 'Neuron', block.groups.(group_order{g}));
@@ -3308,8 +3910,9 @@ has_acg = isstruct(saved) && isfield(saved, 'acg_delta') ...
 has_peak = isstruct(saved) && isfield(saved, 'first_peak') ...
     && isfield(saved.first_peak, 'all') && isfield(saved.first_peak.all, 'partial_rsq');
 if has_acg && has_peak && ~do_plot
-    report_power_model_block(saved.acg_delta, group_order);
-    report_power_model_block(saved.first_peak, group_order);
+    use_model_tag('Model6 entrainment');
+    report_power_model_block(tag_model(saved.acg_delta, 'Model6 entrainment'), group_order);
+    report_power_model_block(tag_model(saved.first_peak, 'Model6 entrainment'), group_order);
     return
 end
 fit_power_to_entrainment(summary.power_strata, group_order, group_title, do_plot);
@@ -3347,7 +3950,7 @@ for o = 1:numel(outcomes)
         end
     end
 end
-figure('Name', 'Partial R2 of LFP delta power', 'Color', 'w', ...
+figure('Name', prefixed_figure_name(model, 'Partial R2 of LFP delta power'), 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.08 0.18 0.8 0.55])
 bar_with_stars(values, pvals, labels)
 ylabel('Partial R^2 of LFP delta power')
@@ -3430,7 +4033,7 @@ coef = pinv(A) * ys;
 beta = coef(2:end);
 n_col = min(3, n_cont);
 n_row = ceil(n_cont / n_col);
-figure('Name', ['Ceteris paribus, ', ceteris_figure_label(fit)], 'Color', 'w', ...
+figure('Name', prefixed_figure_name(fit, ['Ceteris paribus, ', ceteris_figure_label(fit)]), 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.78])
 for k = 1:n_cont
     subplot(n_row, n_col, k)
@@ -3972,7 +4575,8 @@ type_order = {'trough', 'peak', 'nonentrained'};
 type_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
 if ~isfield(summary, 'run_rate_power') || ~isfield(summary.run_rate_power, 'n') ...
         || summary.run_rate_power.n < 2
-    disp_block('Run firing rate and delta power')
+    use_model_tag('Model12 run rate');
+    open_model_statistics('Model12 run rate', 'Model12 run rate');
     disp(['Run-level rows are not in this summary. Run once with ' ...
         'redraw_figures_only = false.'])
     summary.run_rate_model = empty_run_rate_model();
@@ -3987,11 +4591,13 @@ function model = fit_run_rate_power(rows, type_order, type_title, do_plot)
 if nargin < 4
     do_plot = true;
 end
+use_model_tag('Model12 run rate');
 model = empty_run_rate_model();
+model.model_tag = 'Model12 run rate';
 model.type_order = type_order;
 model.type_title = type_title;
 if ~isfield(rows, 'n') || rows.n < 2
-    disp_block('Run firing rate and delta power')
+    open_model_statistics('Model12 run rate', 'Model12 run rate');
     disp('No run had both a firing rate and a delta power.')
     return
 end
@@ -4019,7 +4625,7 @@ neuron_type = neuron_type(keep);
 n = numel(power);
 n_neurons = numel(unique(neuron));
 if n < n_neurons + 3
-    disp_block('Run firing rate and delta power')
+    open_model_statistics('Model12 run rate', 'Model12 run rate');
     disp(['Too few runs remain after removing outliers: n = ', num2str(n), '.'])
     return
 end
@@ -4119,7 +4725,7 @@ end
 
 
 function report_run_rate_power(model)
-disp_block('Run firing rate and delta power')
+open_model_statistics(active_model_tag(model), 'Model12 run rate')
 disp(sprintf('Runs = %d, neurons = %d', model.n_runs, model.n_neurons))
 if model.n_outliers > 0
     disp(sprintf(['  Removed %d clear outlier runs before the fit ' ...
@@ -4243,7 +4849,7 @@ function plot_run_rate_types(model)
 if ~figure_selected('run_rate_power') || ~model.ok
     return
 end
-figure('Name', 'Run firing rate and delta power', 'Color', 'w', ...
+figure('Name', prefixed_figure_name(model, 'Run firing rate and delta power'), 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.08 0.16 0.84 0.62])
 subplot(1, 2, 1)
 plot_signed_bars(model.slope, model.slope_se, model.slope_p, model.type_title)
@@ -4310,7 +4916,7 @@ for i = 1:max(idx)
     power_dm(in) = power(in) - mean(power(in));
 end
 n_type = numel(model.type_order);
-figure('Name', 'Run rate versus power by neuron type', 'Color', 'w', ...
+figure('Name', prefixed_figure_name(model, 'Run rate versus power by neuron type'), 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.06 0.14 0.88 0.58])
 for t = 1:n_type
     subplot(1, n_type, t)
@@ -4371,6 +4977,7 @@ function model = fit_ppc_contributions(summary, group_order, group_title, do_plo
 if nargin < 4
     do_plot = true;
 end
+use_model_tag('Model7 PPC session');
 % Mean PPC of the runs in the all-runs autocorrelogram, predicted by
 % their mean firing rate, LFP delta power, the 0-50 ms burst, the two
 % delta-peak prominences, and the delta-band power of the half-mirrored
@@ -4380,9 +4987,10 @@ model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_ppc') ...
         || ~isfield(summary.all_neurons, 'model_power')
-    disp_block('PPC model, All neurons')
+    open_model_statistics('Model7 PPC session', 'Model7 PPC session');
     disp('Mean PPC is not in this summary. Run the full script once.')
     model.all = empty_power_fit('All neurons');
+    model = tag_model(model, 'Model7 PPC session');
     return
 end
 neurons = summary.all_neurons;
@@ -4397,7 +5005,7 @@ for g = 1:numel(group_order)
         X(in_group, :), y(in_group), names, group_title{g}, ...
         subset_groups(groups, in_group), 'Session', [], 0, 'PPC');
 end
-model = tag_ppc_figures(model);
+model = tag_model(tag_ppc_figures(model), 'Model7 PPC session');
 if do_plot
     plot_power_contributions(model, group_order, group_title, model.all.names, ...
         'PPC contributions');
@@ -4415,6 +5023,7 @@ function model = fit_ppc_beyond_rate(summary, group_order, group_title, do_plot)
 if nargin < 4
     do_plot = true;
 end
+use_model_tag('Model8 PPC residual');
 % Each predictor other than firing rate is replaced by its residual on
 % firing rate. LFP delta power is one of those predictors. Their
 % relative weights sum to the R^2 added beyond rate and the session
@@ -4423,9 +5032,10 @@ model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_ppc') ...
         || ~isfield(summary.all_neurons, 'model_power')
-    disp_block('PPC model, All neurons, beyond firing rate')
+    open_model_statistics('Model8 PPC residual', 'Model8 PPC residual');
     disp('Mean PPC is not in this summary. Run the full script once.')
     model.all = empty_power_fit('All neurons, beyond firing rate');
+    model = tag_model(model, 'Model8 PPC residual');
     return
 end
 neurons = summary.all_neurons;
@@ -4441,7 +5051,7 @@ for g = 1:numel(group_order)
         X(in_group, :), y(in_group), names, [group_title{g}, ', beyond firing rate'], ...
         subset_groups(groups, in_group), 'Session', 'PPC');
 end
-model = tag_ppc_figures(model);
+model = tag_model(tag_ppc_figures(model), 'Model8 PPC residual');
 if do_plot
     plot_beyond_rate_contributions(model, group_order, group_title, model.all.names, ...
         'PPC beyond firing rate');
@@ -4459,6 +5069,7 @@ function model = fit_delta_power_contributions(summary, group_order, group_title
 if nargin < 4
     do_plot = true;
 end
+use_model_tag('Model1 session');
 % Mean delta power of the runs in the all-runs autocorrelogram, predicted
 % by their mean firing rate, the 0-50 ms burst, the two delta-peak
 % prominences, and the delta-band power of the half-mirrored
@@ -4469,6 +5080,7 @@ model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
     model.all = empty_power_fit('All neurons');
+    model = tag_model(model, 'Model1 session');
     return
 end
 neurons = summary.all_neurons;
@@ -4482,6 +5094,7 @@ for g = 1:numel(group_order)
     model.groups.(group_order{g}) = fit_one_power_model( ...
         X(in_group, :), y(in_group), names, group_title{g}, subset_groups(groups, in_group));
 end
+model = tag_model(model, 'Model1 session');
 if do_plot
     plot_power_contributions(model, group_order, group_title, model.all.names);
     plot_ceteris_paribus(X, y, names, groups, 'Session', model.all);
@@ -4498,6 +5111,7 @@ function model = fit_delta_power_beyond_rate(summary, group_order, group_title, 
 if nargin < 4
     do_plot = true;
 end
+use_model_tag('Model2 beyond rate');
 % Each predictor other than firing rate is replaced by its residual on
 % firing rate. Firing rate then receives all variance it shares with those
 % predictors. Their relative weights sum to the R^2 added beyond rate
@@ -4506,6 +5120,7 @@ model = struct();
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'all_peaks') ...
         || ~isfield(summary.all_neurons, 'model_power')
     model.all = empty_power_fit('All neurons, beyond firing rate');
+    model = tag_model(model, 'Model2 beyond rate');
     return
 end
 neurons = summary.all_neurons;
@@ -4520,6 +5135,7 @@ for g = 1:numel(group_order)
         X(in_group, :), y(in_group), names, [group_title{g}, ', beyond firing rate'], ...
         subset_groups(groups, in_group));
 end
+model = tag_model(model, 'Model2 beyond rate');
 if do_plot
     plot_beyond_rate_contributions(model, group_order, group_title, model.all.names);
     plot_one_session_ceteris(X, y, names, groups, model.all, true);
@@ -4768,6 +5384,7 @@ function plot_beyond_rate_contributions(model, group_order, group_title, names, 
 if nargin < 5 || isempty(figure_name)
     figure_name = 'Delta power beyond firing rate';
 end
+figure_name = prefixed_figure_name(model, figure_name);
 if ~figure_selected(model_figure_kind(model.all, 'model_figures')) || ~model.all.ok || ~isfinite(model.all.beyond_rsq)
     return
 end
@@ -4899,7 +5516,8 @@ if nargin >= 7 && ~isempty(D_override)
 end
 n_dum = size(D, 2);
 if n_dum > 0 && fit.n < n_cont + n_dum + 2
-    disp_block(model_report_name(fit))
+    open_model_statistics(active_model_tag(fit), model_report_name(fit))
+    disp(upper(model_report_name(fit)))
     disp([model_report_name(fit), ': ', num2str(n_levels), ...
         ' ', factor_name, ' levels leave too few residual ', ...
         'degrees of freedom. The factor is omitted in this fit.'])
@@ -4908,7 +5526,8 @@ if n_dum > 0 && fit.n < n_cont + n_dum + 2
     n_levels = 0;
 end
 if fit.n < n_cont + n_dum + 2
-    disp_block(model_report_name(fit))
+    open_model_statistics(active_model_tag(fit), model_report_name(fit))
+    disp(upper(model_report_name(fit)))
     disp([model_report_name(fit), ': n = ', num2str(fit.n), ...
         ' is too small for ', num2str(n_cont), ' predictors and ', ...
         num2str(n_dum), ' ', factor_name, ' terms.'])
@@ -4916,7 +5535,8 @@ if fit.n < n_cont + n_dum + 2
 end
 sd = std(X, 0, 1);
 if any(~isfinite(sd) | sd <= 0) || ~isfinite(std(y)) || std(y) <= 0
-    disp_block(model_report_name(fit))
+    open_model_statistics(active_model_tag(fit), model_report_name(fit))
+    disp(upper(model_report_name(fit)))
     disp([model_report_name(fit), ': a variable has no spread.'])
     return
 end
@@ -5113,6 +5733,50 @@ rsq = sum(weight);
 end
 
 
+function name = prefixed_figure_name(model, figure_name)
+tag = '';
+if isstruct(model) && isfield(model, 'all') && isstruct(model.all) ...
+        && isfield(model.all, 'model_tag')
+    tag = model.all.model_tag;
+elseif isstruct(model) && isfield(model, 'model_tag')
+    tag = model.model_tag;
+elseif isstruct(model) && isfield(model, 'acg_delta') ...
+        && isfield(model.acg_delta, 'all') && isfield(model.acg_delta.all, 'model_tag')
+    tag = model.acg_delta.all.model_tag;
+end
+if isempty(tag)
+    name = figure_name;
+else
+    name = [tag, ', ', figure_name];
+end
+end
+
+
+function model = tag_model(model, tag)
+if ~isstruct(model)
+    return
+end
+model.model_tag = tag;
+if isfield(model, 'all') && isstruct(model.all)
+    model.all.model_tag = tag;
+end
+if isfield(model, 'groups') && isstruct(model.groups)
+    fields = fieldnames(model.groups);
+    for i = 1:numel(fields)
+        if isstruct(model.groups.(fields{i}))
+            model.groups.(fields{i}).model_tag = tag;
+        end
+    end
+end
+if isfield(model, 'acg_delta') && isstruct(model.acg_delta)
+    model.acg_delta = tag_model(model.acg_delta, tag);
+end
+if isfield(model, 'first_peak') && isstruct(model.first_peak)
+    model.first_peak = tag_model(model.first_peak, tag);
+end
+end
+
+
 function name = model_report_name(fit)
 if isfield(fit, 'outcome_name') && ~isempty(fit.outcome_name)
     name = [fit.outcome_name, ' model, ', fit.label];
@@ -5124,7 +5788,8 @@ end
 
 function report_power_model(fit)
 name = model_report_name(fit);
-disp_block(name)
+open_model_statistics(active_model_tag(fit), name);
+disp(upper(name))
 disp([name, ', n = ', num2str(fit.n)])
 if isfield(fit, 'n_outliers') && fit.n_outliers > 0
     disp(sprintf(['  Removed %d clear outlier rows before the fit ' ...
@@ -5227,6 +5892,7 @@ function plot_power_contributions(model, group_order, group_title, names, figure
 if nargin < 5 || isempty(figure_name)
     figure_name = 'Delta power contributions';
 end
+figure_name = prefixed_figure_name(model, figure_name);
 if ~figure_selected(model_figure_kind(model.all, 'model_figures')) || ~model.all.ok
     return
 end

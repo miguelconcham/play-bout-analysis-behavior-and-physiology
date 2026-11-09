@@ -1,0 +1,282 @@
+Locking-period autocorrelogram models
+======================================
+
+The statistics file and the figure title use the same name. Every lock
+group of one model is written into that one statistics file.
+
+Reported coefficients in models 1-11 are standardized ordinary-least-squares
+coefficients unless a line below says otherwise. A row is removed before a
+fit when a predictor or the outcome has a modified z-score above 3.5.
+PPC is not a predictor of LFP delta power, because the PPC estimate uses
+that power.
+
+The default autocorrelogram smooth is smooth_half = 0.06 s. The Gaussian
+sigma is one quarter of that width, 0.015 s. The default stratum minimum
+is 200 spikes, and a stratum still needs a run longer than 0.5 s. Models
+3-6 and 9-15 use the strata saved in the summary, so a change of that
+minimum is used only after one full run.
+
+
+Model1 session
+--------------
+One row per neuron. The outcome is the mean LFP delta power of the runs
+in the all-runs autocorrelogram. A session factor absorbs the power level
+shared by the neurons in one recording.
+
+  P_i = a
+      + b1 FiringRate_i
+      + b2 Burst_i
+      + b3 FirstPeak_i
+      + b4 SecondCycle_i
+      + b5 ACGDelta_i
+      + session of neuron i
+      + error_i
+
+Burst is the 0-50 ms autocorrelogram mass. FirstPeak and SecondCycle are
+the two delta-cycle prominences. ACGDelta is the delta-band power of the
+half-mirrored autocorrelogram after 100 ms.
+
+
+Model2 beyond rate
+-------------------
+Same rows, outcome, and session factor as Model1. Every predictor except
+firing rate is first replaced by its residual on firing rate. Firing rate
+then keeps the variance it shares with the other predictors, and the other
+coefficients are the association beyond firing rate.
+
+  Z_i = X_i - projection of X_i on FiringRate_i
+
+  P_i = a
+      + b1 FiringRate_i
+      + b2 Z(Burst)_i
+      + b3 Z(FirstPeak)_i
+      + b4 Z(SecondCycle)_i
+      + b5 Z(ACGDelta)_i
+      + session of neuron i
+      + error_i
+
+
+Model3 strata
+-------------
+One row per power stratum. Runs of a neuron are ordered from low to high
+LFP delta power and split into strata of about equal spike count. The
+neuron is a fixed factor, so each neuron has its own intercept. Ordinary
+least squares gives every stratum the same weight, and the usual p-value
+treats strata as independent. A neuron with more strata therefore pulls
+the slope more, and the p-value is smaller than a neuron-level test.
+
+  P_ij = a_i
+       + b1 FiringRate_ij
+       + b2 Burst_ij
+       + b3 FirstPeak_ij
+       + b4 SecondCycle_ij
+       + b5 ACGDelta_ij
+       + error_ij
+
+Only a neuron with at least two usable strata enters. The same fit is
+printed for all neurons and, in the same file, for each lock group.
+
+
+Model4 strata residual
+----------------------
+Same rows and neuron intercepts as Model3. As in Model2, every predictor
+except firing rate is replaced by its residual on firing rate before the
+fit. The rate-free coefficients are within-stratum associations beyond
+firing rate. The p-values are still ordinary least-squares p-values.
+
+
+Model5 sequential
+-----------------
+Same rows and outcome as Model3. Predictors are orthogonalized in this
+order, and only in this model:
+
+  1. Firing rate
+  2. Neuron
+  3. Burst, 0-50 ms
+  4. ACG delta power, >100 ms
+  5. First-peak prominence
+  6. Second-cycle prominence
+
+At each step, every later predictor is replaced by its residual on the
+current one. The printed added R^2 is the variance that step explains
+after the earlier steps. Swapping firing rate and neuron would give the
+firing-rate coefficient the within-neuron association; the predictors
+after both would be unchanged.
+
+
+Model6 entrainment
+------------------
+Two outcomes, one statistics file. Neuron is the fixed factor. The
+printed number is the partial R^2 of LFP delta power.
+
+Folded autocorrelogram delta power, with firing rate as the covariate:
+
+  ACGDelta_ij = a_i
+              + bP LFPDeltaPower_ij
+              + bR FiringRate_ij
+              + error_ij
+
+First-peak prominence, with firing rate and burst as the covariates:
+
+  FirstPeak_ij = c_i
+               + dP LFPDeltaPower_ij
+               + dR FiringRate_ij
+               + dB Burst_ij
+               + error_ij
+
+
+Model7 PPC session
+------------------
+One row per neuron. The outcome is mean PPC of the runs in the all-runs
+autocorrelogram. LFP delta power is a predictor here. The session factor
+is the same kind of factor as in Model1.
+
+  PPC_i = a
+        + b1 FiringRate_i
+        + b2 LFPDeltaPower_i
+        + b3 Burst_i
+        + b4 FirstPeak_i
+        + b5 SecondCycle_i
+        + b6 ACGDelta_i
+        + session of neuron i
+        + error_i
+
+
+Model8 PPC residual
+-------------------
+Same rows and outcome as Model7. Every predictor except firing rate,
+including LFP delta power, is replaced by its residual on firing rate.
+The rate-free coefficients are the association with PPC beyond firing rate.
+
+
+Model9 PPC strata
+-----------------
+Same stratum rows and neuron intercepts as Model3. The outcome is the
+PPC of the stratum, and LFP delta power is added to the predictors.
+
+  PPC_ij = a_i
+         + b1 FiringRate_ij
+         + b2 Burst_ij
+         + b3 FirstPeak_ij
+         + b4 SecondCycle_ij
+         + b5 ACGDelta_ij
+         + b6 LFPDeltaPower_ij
+         + error_ij
+
+A full run has to store stratum PPC before this model can be fit.
+
+
+Model10 PPC strata residual
+---------------------------
+Model9 after every predictor except firing rate has been replaced by its
+residual on firing rate. LFP delta power is one of those residualized
+predictors. This is the stratum version of Model8, not a second copy of it.
+
+
+Model11 PPC sequential
+----------------------
+Same rows and outcome as Model9. Orthogonalization order:
+
+  1. LFP delta power
+  2. Firing rate
+  3. Neuron
+  4. Burst, 0-50 ms
+  5. ACG delta power, >100 ms
+  6. First-peak prominence
+  7. Second-cycle prominence
+
+LFP delta power is first, so every later predictor keeps only the variance
+that power does not explain.
+
+
+Model12 run rate
+----------------
+One row per firing run, not per stratum. Neuron identity supplies an
+intercept. Neuron type supplies its own intercept and its own slope.
+The types are trough-locked, peak-locked, and non-entrained.
+
+  P_ij = a_i
+       + c_g(i)
+       + b_g(i) (FiringRate_ij - mean firing rate)
+       + error_ij
+
+g(i) is the type of neuron i. The tests ask whether the slopes differ by
+type and whether the intercepts differ by type. These rows are stored only
+by a full run.
+
+
+Model13 equal neuron
+--------------------
+This is the primary test of the oscillatory predictors. The rows are the
+power strata. Each neuron's mean is subtracted from the outcome and from
+every predictor, so the slope is within the neuron. There is no extra
+random intercept: the neuron mean is already removed, and it is not put
+back as a second term.
+
+The weight of a stratum is 1 over the number of strata of its neuron.
+Every neuron has total weight 1, whether it has two strata or many.
+
+  P_ij - mean_i(P) =
+        b1 (FiringRate_ij - mean_i(FiringRate))
+      + b2 (Burst_ij - mean_i(Burst))
+      + b3 (FirstPeak_ij - mean_i(FirstPeak))
+      + b4 (SecondCycle_ij - mean_i(SecondCycle))
+      + b5 (ACGDelta_ij - mean_i(ACGDelta))
+      + error_ij
+
+The fit is weighted least squares. The printed coefficients are
+standardized on these within-neuron values. The standard error is
+cluster-robust by neuron (CR1, multiplied by G/(G-1), with t and F
+degrees of freedom equal to the number of neurons minus the number of
+coefficients). Strata of one neuron are not treated as independent
+observations.
+
+The joint test is
+
+  b3 = b4 = b5 = 0
+
+Firing rate and burst stay in the model, so a significant joint test is
+not the firing-rate association and not the 0-50 ms burst. The same file
+contains the all-neuron result only; lock groups are not separate copies
+of this model. Model15 is the type comparison.
+
+
+Model14 row weight
+------------------
+The same equation, the same predictors, and the same cluster-robust joint
+test as Model13. The only change is the weight:
+
+  weight_ij = 1
+
+Every stratum has an equal vote, so a neuron with many strata pulls the
+slope more than a neuron with two. The difference between the Model13
+and Model14 coefficients is the pull of those many-strata neurons. This
+is the check beside Model13, not a second primary result.
+
+
+Model15 group slopes
+--------------------
+The same within-neuron demeaning, the same equal-neuron weights, and the
+same cluster-robust standard errors as Model13. Each of the five
+predictors has its own slope in each neuron type. The types are
+trough-locked, peak-locked, and non-entrained. Delta-locked neurons are
+not included.
+
+  P_ij - mean_i(P) =
+      sum over predictors X and types g of
+      b_{X,g} (X_ij - mean_i(X)) * (neuron i is type g)
+      + error_ij
+
+A separate type intercept is not identified, because subtracting the
+neuron mean already removes it. Firing rate and burst have type-specific
+slopes as well, so a type difference in the firing-rate slope is not
+read as a difference in an oscillatory slope.
+
+The joint test is that the three oscillatory slopes do not differ by type:
+
+  b_FirstPeak,trough     = b_FirstPeak,peak     = b_FirstPeak,nonentrained
+  b_SecondCycle,trough   = b_SecondCycle,peak   = b_SecondCycle,nonentrained
+  b_ACGDelta,trough      = b_ACGDelta,peak      = b_ACGDelta,nonentrained
+
+The individual lines in the statistics file are each slope against zero.
+The figure shows the type-specific slopes and the joint type test.
