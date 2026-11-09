@@ -273,9 +273,11 @@ figure_folder = '';
 % reprints the tests. Spikes are not reloaded and no figures are opened.
 % A non-empty figure_folder receives one text file per model type.
 reprint_stats_only = false;
-% true reloads that same summary and draws the figures. Spike files are
-% not read. Cluster bars are computed from the saved curves when the
-% summary does not already contain them.
+% true reloads that same summary and draws the figures that are selected.
+% A show_* pair is used when either entry is true. A model is refit only
+% when its number is in models_to_plot. Spike files are not read. Cluster
+% bars are computed from the saved curves when the summary does not
+% already contain them.
 redraw_figures_only = false;
 
 source_order = {'trough', 'peak', 'nonentrained'};
@@ -2022,8 +2024,17 @@ power_labels = { ...
     'All firing runs'};
 curve_colors = [0.20 0.45 0.75; 0.85 0.25 0.20; 0.15 0.15 0.15];
 if do_tails
+need_mean = figure_selected('mean_acg');
+need_ratio = plot_rate_scaled_peaks && figure_selected('rate_ratio_acg');
+need_paired = figure_selected('paired_tests');
+need_examples = figure_selected('neuron_examples');
+need_spectra = figure_selected('acg_spectra');
+need_peaks = need_paired || need_examples || need_spectra;
+if need_mean || need_ratio || need_peaks
 locking_acg = add_delta_locked_group(locking_acg);
 power_acg = add_delta_locked_group(power_acg);
+end
+if need_mean
 locking_acg = ensure_acg_clusters(locking_acg, group_order, group_title, ...
     'locking', centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 power_acg = ensure_acg_clusters(power_acg, group_order, group_title, ...
@@ -2040,11 +2051,13 @@ locking_acg = plot_summary_acgs(locking_acg, group_order, group_title, ...
 power_acg = plot_summary_acgs(power_acg, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     curve_colors, acg_ylim);
-if plot_rate_scaled_peaks
+end
+if need_ratio
     plot_rate_scaled_mean_acgs(locking_acg, power_acg, bin_w, centers, ...
         group_order, group_title, locking_labels, power_labels, delta_lag, ...
         skip_abs_lag, smooth_n, curve_colors, cluster_alpha, cluster_perm);
 end
+if need_peaks
 if ~isfield(locking_acg, 'all_neurons') || ~isfield(locking_acg.all_neurons, 'low_peaks')
     locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order, delta_lag);
     power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order, delta_lag);
@@ -2056,19 +2069,26 @@ elseif isfield(locking_acg, 'delta') && ~isfield(locking_acg.delta, 'low_peaks')
 end
 locking_acg = attach_missing_acg_delta(locking_acg, centers, group_order, delta_lag);
 power_acg = attach_missing_acg_delta(power_acg, centers, group_order, delta_lag);
+end
+if need_paired
 plot_paired_peak_scores(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking');
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
     'Mean delta power of the runs', 'delta power');
+end
+if need_examples
 plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
     'PPC', 'locking', delta_lag, n_example_neurons);
 plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
     'delta power', 'delta power', delta_lag, n_example_neurons);
+end
+if need_spectra
 plot_tail_acg_spectra(locking_acg, centers, delta_lag, group_order, group_title, ...
     'locking', '');
 plot_tail_acg_spectra(power_acg, centers, delta_lag, group_order, group_title, ...
     'delta power', '');
-if plot_rate_scaled_peaks
+end
+if plot_rate_scaled_peaks && (need_paired || need_spectra)
     plot_rate_scaled_peaks_for(locking_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean PPC of the runs', 'locking', delta_lag);
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
@@ -2076,6 +2096,7 @@ if plot_rate_scaled_peaks
 end
 end
 if do_models
+if model_number_selected(1)
 model_has_delta = isfield(locking_acg, 'delta_power_model') ...
     && isfield(locking_acg.delta_power_model, 'groups') ...
     && isfield(locking_acg.delta_power_model.groups, 'delta');
@@ -2089,6 +2110,8 @@ else
     locking_acg.delta_power_model = fit_delta_power_contributions( ...
         locking_acg, group_order, group_title);
 end
+end
+if model_number_selected(2)
 beyond = [];
 if isfield(locking_acg, 'delta_power_model_beyond_rate')
     beyond = locking_acg.delta_power_model_beyond_rate;
@@ -2103,24 +2126,39 @@ else
     locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
         locking_acg, group_order, group_title);
 end
-if isfield(locking_acg, 'power_strata')
-    [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate, ...
-        locking_acg.strata_power_model_sequential] = ...
-        fit_strata_power_models(locking_acg.power_strata, group_order, group_title, true);
-    locking_acg.power_to_entrainment = fit_power_to_entrainment( ...
-        locking_acg.power_strata, group_order, group_title, true);
-    [locking_acg.strata_ppc_model, locking_acg.strata_ppc_model_beyond_rate, ...
-        locking_acg.strata_ppc_model_sequential] = ...
-        fit_strata_ppc_models(locking_acg.power_strata, group_order, group_title, true);
 end
-locking_acg.ppc_model = fit_ppc_contributions( ...
-    locking_acg, group_order, group_title);
-locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
-    locking_acg, group_order, group_title);
-locking_acg = fit_saved_run_rate_power(locking_acg, true);
 if isfield(locking_acg, 'power_strata')
+    if any_model_selected([3 4 5])
+        [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate, ...
+            locking_acg.strata_power_model_sequential] = ...
+            fit_strata_power_models(locking_acg.power_strata, group_order, group_title, true);
+    end
+    if model_number_selected(6)
+        locking_acg.power_to_entrainment = fit_power_to_entrainment( ...
+            locking_acg.power_strata, group_order, group_title, true);
+    end
+    if any_model_selected([9 10 11])
+        [locking_acg.strata_ppc_model, locking_acg.strata_ppc_model_beyond_rate, ...
+            locking_acg.strata_ppc_model_sequential] = ...
+            fit_strata_ppc_models(locking_acg.power_strata, group_order, group_title, true);
+    end
+end
+if model_number_selected(7)
+    locking_acg.ppc_model = fit_ppc_contributions( ...
+        locking_acg, group_order, group_title);
+end
+if model_number_selected(8)
+    locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
+        locking_acg, group_order, group_title);
+end
+if model_number_selected(12)
+    locking_acg = fit_saved_run_rate_power(locking_acg, true);
+end
+if isfield(locking_acg, 'power_strata') && any_model_selected([13 14 15])
     locking_acg.oscillation_models = fit_oscillation_power_models( ...
         locking_acg.power_strata, true, group_order, group_title);
+end
+if isfield(locking_acg, 'power_strata') && figure_selected('neuron_slopes')
     locking_acg.neuron_slopes = neuron_stratum_slopes( ...
         locking_acg.power_strata, group_order, group_title, true);
 end
@@ -2363,6 +2401,29 @@ if ~append_file && exist(stats_path, 'file') == 2
     delete(stats_path)
 end
 diary(stats_path)
+end
+
+
+function tf = model_number_selected(n)
+tf = false;
+selected = 1:15;
+if isappdata(0, 'locking_acg_models_to_plot')
+    selected = getappdata(0, 'locking_acg_models_to_plot');
+end
+selected = double(selected(:).');
+selected = selected(isfinite(selected) & selected >= 1 & selected <= 15);
+tf = any(selected == n);
+end
+
+
+function tf = any_model_selected(numbers)
+tf = false;
+for k = 1:numel(numbers)
+    if model_number_selected(numbers(k))
+        tf = true;
+        return
+    end
+end
 end
 
 
