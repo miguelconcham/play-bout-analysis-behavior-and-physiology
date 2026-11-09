@@ -2,7 +2,9 @@ Locking-period autocorrelogram models
 ======================================
 
 The statistics file and the figure title use the same name. Every lock
-group of one model is written into that one statistics file.
+group of one model is written into that one statistics file. Set
+models_to_plot to the model numbers whose figures should open, for
+example [13 14 15]. The statistics are printed for every model.
 
 Reported coefficients in models 1-11 are standardized ordinary-least-squares
 coefficients unless a line below says otherwise. A row is removed before a

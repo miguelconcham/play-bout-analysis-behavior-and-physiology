@@ -114,18 +114,18 @@
 % removes neuron identity before firing rate. In the sequential fit,
 % LFP delta power is orthogonalized first and neuron identity is next,
 % so every later predictor keeps only the variance that power and the
-% neuron do not explain. Those figures open only when
-% show_ppc_models is true. The one-row PPC model can be drawn from the
+% neuron do not explain. A model figure opens when its number is listed
+% in models_to_plot. The one-row PPC model can be drawn from the
 % saved summary. Stratum PPC is stored only by a full run, so the
 % within-neuron PPC model needs that run once.
 % Each firing run is also kept. Delta power of the run is predicted by
 % the firing rate of that run. Neuron identity supplies an intercept for
 % every neuron. Neuron type, the trough-locked, peak-locked, or
-% non-entrained label, has its own intercept and its own slope. Those
-% figures open only when show_run_rate_power is true. The rows are stored
+% non-entrained label, has its own intercept and its own slope. The
+% figure opens when 12 is listed in models_to_plot. The rows are stored
 % only by a full run.
-% Three more power models use the same strata and open when
-% show_oscillation_models is true. Each neuron is demeaned, so the slope
+% Three more power models use the same strata. Their figures open when
+% 13, 14, or 15 is listed in models_to_plot. Each neuron is demeaned, so the slope
 % is within the neuron, and the uncertainty is clustered by neuron.
 % Model13 gives every neuron the same total weight. Model14 gives every
 % stratum the same weight. Model15 gives the firing rate, the burst, and
@@ -205,12 +205,13 @@ show_rate_ratio_acg = true;      % mean rate-ratio autocorrelograms
 show_paired_tests = true;        % paired low-versus-high scatters, cycle counts, and latency
 show_neuron_examples = true;     % example neuron autocorrelograms and spectra
 show_acg_spectra = true;         % low tail against high tail spectra
-show_model_figures = true;       % contribution bars and partial-R^2 bars
-show_model_scatters = true;      % ceteris-paribus predictor scatters for each all-neuron model
-show_ppc_models = true;          % PPC contribution bars and ceteris-paribus scatters
-show_run_rate_power = true;      % run-level firing rate versus delta power
 show_strata_preview = true;      % spikes per neuron, and neurons by stratum count
-show_oscillation_models = true;  % partial oscillation slopes, equal-neuron and by type
+models_to_plot = 1:15;           % which model figures to draw. Statistics are always printed.
+                                 % [] draws none. [13 14 15] draws only the oscillation models.
+                                 % 1 session, 2 beyond rate, 3 strata, 4 strata residual,
+                                 % 5 sequential, 6 entrainment, 7 PPC session, 8 PPC residual,
+                                 % 9 PPC strata, 10 PPC strata residual, 11 PPC sequential,
+                                 % 12 run rate, 13 equal neuron, 14 row weight, 15 group slopes
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise every figure is
 % written there as SVG and JPG. Each model type is written as one
@@ -241,12 +242,8 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'paired_tests', show_paired_tests, ...
     'neuron_examples', show_neuron_examples, ...
     'acg_spectra', show_acg_spectra, ...
-    'model_figures', show_model_figures, ...
-    'model_scatters', show_model_scatters, ...
-    'ppc_models', show_ppc_models, ...
-    'run_rate_power', show_run_rate_power, ...
-    'strata_preview', show_strata_preview, ...
-    'oscillation_models', show_oscillation_models));
+    'strata_preview', show_strata_preview));
+setappdata(0, 'locking_acg_models_to_plot', models_to_plot(:).');
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -256,6 +253,7 @@ if reprint_stats_only
         flags.(flag_names{i}) = false;
     end
     setappdata(0, 'locking_acg_figures', flags);
+    setappdata(0, 'locking_acg_models_to_plot', []);
     summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
     require_saved_summary(summary_path, maximize_strata_number, 'reprint_stats_only');
     loaded = load(summary_path, 'locking_acg', 'power_acg');
@@ -1783,6 +1781,54 @@ if ~append_file && exist(stats_path, 'file') == 2
     delete(stats_path)
 end
 diary(stats_path)
+end
+
+
+function tf = model_selected(model)
+tf = false;
+selected = 1:15;
+if isappdata(0, 'locking_acg_models_to_plot')
+    selected = getappdata(0, 'locking_acg_models_to_plot');
+end
+selected = double(selected(:).');
+selected = selected(isfinite(selected) & selected >= 1 & selected <= 15);
+n = model_number_of(model);
+if isempty(n) || isempty(selected)
+    return
+end
+tf = any(selected == n);
+end
+
+
+function n = model_number_of(model)
+n = [];
+tag = '';
+if isstruct(model)
+    if isfield(model, 'model_tag') && ~isempty(model.model_tag)
+        tag = char(model.model_tag);
+    elseif isfield(model, 'tag') && ~isempty(model.tag)
+        tag = char(model.tag);
+    elseif isfield(model, 'all') && isstruct(model.all) ...
+            && isfield(model.all, 'model_tag') && ~isempty(model.all.model_tag)
+        tag = char(model.all.model_tag);
+    elseif isfield(model, 'acg_delta') && isstruct(model.acg_delta) ...
+            && isfield(model.acg_delta, 'all') ...
+            && isfield(model.acg_delta.all, 'model_tag') ...
+            && ~isempty(model.acg_delta.all.model_tag)
+        tag = char(model.acg_delta.all.model_tag);
+    end
+end
+if isempty(tag)
+    tag = active_model_tag(struct());
+end
+token = regexp(tag, 'Model(\d+)', 'tokens', 'once');
+if isempty(token)
+    return
+end
+n = str2double(token{1});
+if ~isfinite(n)
+    n = [];
+end
 end
 
 
@@ -3540,7 +3586,7 @@ end
 
 
 function plot_common_oscillation(fit)
-if ~figure_selected('oscillation_models') || ~isfield(fit, 'ok') || ~fit.ok
+if ~model_selected(fit) || ~isfield(fit, 'ok') || ~fit.ok
     return
 end
 figure('Name', [fit.tag, ', partial oscillation slopes'], 'Color', 'w', ...
@@ -3557,7 +3603,7 @@ end
 
 
 function plot_group_oscillation(fit)
-if ~figure_selected('oscillation_models') || ~isfield(fit, 'ok') || ~fit.ok ...
+if ~model_selected(fit) || ~isfield(fit, 'ok') || ~fit.ok ...
         || isempty(fit.beta_matrix)
     return
 end
@@ -3923,7 +3969,7 @@ end
 
 
 function plot_entrainment_partial_r2(model, group_order, group_title)
-if ~figure_selected('model_figures')
+if ~model_selected(model)
     return
 end
 acg_ok = isfield(model, 'acg_delta') && isfield(model.acg_delta, 'all') && model.acg_delta.all.ok;
@@ -3963,9 +4009,6 @@ end
 
 
 function plot_session_ceteris_paribus(summary, beyond_rate, group_order, group_title) %#ok<INUSD>
-if ~figure_selected('model_scatters')
-    return
-end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary, 'centers') ...
         || ~isfield(summary, 'parameters')
     return
@@ -3983,6 +4026,9 @@ else
         return
     end
     model = summary.delta_power_model;
+end
+if ~model_selected(model)
+    return
 end
 plot_one_session_ceteris(X, y, names, groups, model.all, beyond_rate);
 if ~isfield(model, 'groups')
@@ -4016,7 +4062,7 @@ end
 
 
 function plot_ceteris_paribus(X, y, names, groups, factor_name, fit, D_override)
-if ~figure_selected(model_figure_kind(fit, 'model_scatters')) || ~isfield(fit, 'ok') || ~fit.ok
+if ~model_selected(fit) || ~isfield(fit, 'ok') || ~fit.ok
     return
 end
 if ~isfield(fit, 'label') || isempty(fit.label)
@@ -4077,14 +4123,6 @@ function label = ceteris_figure_label(fit)
 label = fit.label;
 if isfield(fit, 'outcome_name') && strcmp(fit.outcome_name, 'PPC')
     label = ['PPC, ', fit.label];
-end
-end
-
-
-function kind = model_figure_kind(fit, default_kind)
-kind = default_kind;
-if isstruct(fit) && isfield(fit, 'figure_kind') && ~isempty(fit.figure_kind)
-    kind = fit.figure_kind;
 end
 end
 
@@ -4853,7 +4891,7 @@ end
 
 
 function plot_run_rate_types(model)
-if ~figure_selected('run_rate_power') || ~model.ok
+if ~model_selected(model) || ~model.ok
     return
 end
 figure('Name', prefixed_figure_name(model, 'Run firing rate and delta power'), 'Color', 'w', ...
@@ -4911,7 +4949,7 @@ end
 
 
 function plot_run_rate_scatters(rate_c, power, neuron, neuron_type, model)
-if ~figure_selected('run_rate_power') || ~model.ok
+if ~model_selected(model) || ~model.ok
     return
 end
 [~, ~, idx] = unique(neuron, 'stable');
@@ -5406,7 +5444,7 @@ if nargin < 5 || isempty(figure_name)
     figure_name = 'Delta power beyond firing rate';
 end
 figure_name = prefixed_figure_name(model, figure_name);
-if ~figure_selected(model_figure_kind(model.all, 'model_figures')) || ~model.all.ok || ~isfinite(model.all.beyond_rsq)
+if ~model_selected(model) || ~model.all.ok || ~isfinite(model.all.beyond_rsq)
     return
 end
 if ~isempty(model.all.names)
@@ -5919,7 +5957,7 @@ if nargin < 5 || isempty(figure_name)
     figure_name = 'Delta power contributions';
 end
 figure_name = prefixed_figure_name(model, figure_name);
-if ~figure_selected(model_figure_kind(model.all, 'model_figures')) || ~model.all.ok
+if ~model_selected(model) || ~model.all.ok
     return
 end
 if ~isempty(model.all.names)
