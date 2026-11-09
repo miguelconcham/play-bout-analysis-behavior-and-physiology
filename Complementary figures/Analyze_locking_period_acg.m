@@ -169,9 +169,10 @@
 % and spectra for those two outcomes. Each model gets its own subfolder,
 % ModelN plus the short reminder, with the same day at the end. The
 % statistics file names end with that same day. Leave figure_folder empty
-% to save nothing. models_to_plot chooses which model figures open. The
-% other show_* switches choose the remaining figure types. Tests are still
-% printed when a figure type is off. Set
+% to save nothing. models_to_plot chooses which model figures open, and
+% those figures stay open. Each other show_* switch is [save, keep open].
+% [false false] skips that figure. Tests are still printed when a figure
+% type is off. Set
 % reprint_stats_only to reload the saved summary and print those tests
 % again without reloading spikes or opening figures. Set
 % redraw_figures_only to reload that summary and draw the selected
@@ -206,12 +207,19 @@ strata_preview_only = false; % true: plot the stratum preview and stop
 n_example_neurons = 20;     % example neurons drawn per split, four per figure
 plot_rate_scaled_peaks = true;  % false: sum-to-1 autocorrelograms only
                                  % true: also the rate-ratio autocorrelograms (Poisson = 1), their cluster tests, and the peak figures
-show_mean_acg = true;            % mean sum-to-1 autocorrelograms
-show_rate_ratio_acg = true;      % mean rate-ratio autocorrelograms
-show_paired_tests = true;        % paired low-versus-high scatters, cycle counts, and latency
-show_neuron_examples = true;     % example neuron autocorrelograms and spectra
-show_acg_spectra = true;         % low tail against high tail spectra
-show_strata_preview = true;      % spikes per neuron, and neurons by stratum count
+% Each show_* pair is [save, keep open]. It does not apply to model figures.
+% [true false]  plot, save, then close
+% [true true]   plot, save, and leave the figure open
+% [false true]  plot, do not save, and leave the figure open
+% [false false] do not plot and do not save
+% Model figures selected below are always left open. They are saved when
+% figure_folder is set.
+show_mean_acg = [true true];            % mean sum-to-1 autocorrelograms
+show_rate_ratio_acg = [true true];      % mean rate-ratio autocorrelograms
+show_paired_tests = [true true];        % paired low-versus-high scatters, cycle counts, and latency
+show_neuron_examples = [true true];     % example neuron autocorrelograms and spectra
+show_acg_spectra = [true true];         % low tail against high tail spectra
+show_strata_preview = [true true];      % spikes per neuron, and neurons by stratum count
 models_to_plot = 1:15;           % which model figures to draw. Statistics are always printed.
                                  % [] draws none. [13 14 15] draws only the oscillation models.
                                  % 1 session, 2 beyond rate, 3 strata, 4 strata residual,
@@ -285,9 +293,7 @@ if redraw_figures_only
         n_example_neurons);
     save(summary_path, 'locking_acg', 'power_acg');
     disp(['Drew figures from ', summary_path])
-    if ~isempty(figure_folder)
-        save_open_figures(figure_folder)
-    end
+    save_open_figures(figure_folder)
     stop_statistics_diary()
     return
 end
@@ -329,9 +335,7 @@ preview_stratum_choices(parsing_folder, all_neurons, id_all, lock_group, ...
     source_order, areas_to_keep, stratum_min_lag_s, stratum_min_spikes, ...
     maximize_strata_number, strata_preview_min_spikes);
 if strata_preview_only
-    if ~isempty(figure_folder)
-        save_open_figures(figure_folder)
-    end
+    save_open_figures(figure_folder)
     stop_statistics_diary()
     return
 end
@@ -626,9 +630,7 @@ locking_acg.oscillation_models = fit_oscillation_power_models( ...
 summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
 save(summary_path, 'locking_acg', 'power_acg');
 disp(['Saved ', summary_path])
-if ~isempty(figure_folder)
-    save_open_figures(figure_folder)
-end
+save_open_figures(figure_folder)
 stop_statistics_diary()
 
 
@@ -715,43 +717,71 @@ end
 function save_open_figures(folder)
 figs = findall(0, 'Type', 'figure');
 if isempty(figs)
-    disp(['No figures to save in ', folder])
+    if ~isempty(folder)
+        disp(['No figures to save in ', folder])
+    end
     return
 end
-if exist(folder, 'dir') ~= 7
+can_save = ~isempty(folder);
+if can_save && exist(folder, 'dir') ~= 7
     mkdir(folder)
 end
 day = run_day_stamp();
 [~, order] = sort([figs.Number]);
 figs = figs(order);
 for i = 1:numel(figs)
-    raw_name = strtrim(figs(i).Name);
-    if isempty(raw_name)
-        raw_name = sprintf('figure_%d', figs(i).Number);
+    [do_save, keep_open] = figure_file_policy(figs(i));
+    if do_save && can_save
+        raw_name = strtrim(figs(i).Name);
+        if isempty(raw_name)
+            raw_name = sprintf('figure_%d', figs(i).Number);
+        end
+        name = regexprep(raw_name, '[^\w]+', '_');
+        name = regexprep(name, '^_|_$', '');
+        if isempty(name)
+            name = sprintf('figure_%d', figs(i).Number);
+        end
+        dest = fullfile(folder, figure_theme_folder(raw_name, day));
+        if exist(dest, 'dir') ~= 7
+            mkdir(dest)
+        end
+        base = name;
+        suffix = 1;
+        while exist(fullfile(dest, [base '.svg']), 'file') == 2
+            suffix = suffix + 1;
+            base = sprintf('%s_%d', name, suffix);
+        end
+        set(figs(i), 'PaperPositionMode', 'auto')
+        svg_path = fullfile(dest, [base '.svg']);
+        jpg_path = fullfile(dest, [base '.jpg']);
+        print(figs(i), svg_path, '-dsvg')
+        print(figs(i), jpg_path, '-djpeg', '-r200')
+        disp(['Saved ', svg_path])
+        disp(['Saved ', jpg_path])
     end
-    name = regexprep(raw_name, '[^\w]+', '_');
-    name = regexprep(name, '^_|_$', '');
-    if isempty(name)
-        name = sprintf('figure_%d', figs(i).Number);
+    if ~keep_open
+        close(figs(i))
     end
-    dest = fullfile(folder, figure_theme_folder(raw_name, day));
-    if exist(dest, 'dir') ~= 7
-        mkdir(dest)
-    end
-    base = name;
-    suffix = 1;
-    while exist(fullfile(dest, [base '.svg']), 'file') == 2
-        suffix = suffix + 1;
-        base = sprintf('%s_%d', name, suffix);
-    end
-    set(figs(i), 'PaperPositionMode', 'auto')
-    svg_path = fullfile(dest, [base '.svg']);
-    jpg_path = fullfile(dest, [base '.jpg']);
-    print(figs(i), svg_path, '-dsvg')
-    print(figs(i), jpg_path, '-djpeg', '-r200')
-    disp(['Saved ', svg_path])
-    disp(['Saved ', jpg_path])
 end
+end
+
+
+function [do_save, keep_open] = figure_file_policy(fig)
+% Model figures are not marked. They are saved and always left open.
+% A marked figure uses the [save, keep open] pair of its show_* switch.
+do_save = true;
+keep_open = true;
+if isappdata(fig, 'locking_acg_save_figure')
+    do_save = logical(getappdata(fig, 'locking_acg_save_figure'));
+    keep_open = logical(getappdata(fig, 'locking_acg_keep_figure'));
+end
+end
+
+
+function mark_figure_policy(fig, kind)
+policy = figure_policy(kind);
+setappdata(fig, 'locking_acg_save_figure', policy(1));
+setappdata(fig, 'locking_acg_keep_figure', policy(2));
 end
 
 
@@ -1070,7 +1100,7 @@ for g = 1:numel(group_order)
     end
     summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
         [group_title{g}, ', ', split_name, name_suffix], centers, delta_lag, skip_abs_lag, ...
-        smooth_n, curve_colors, acg_ylim, y_label);
+        smooth_n, curve_colors, acg_ylim, y_label, figure_kind);
 end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
         || summary.all_neurons.n < 1
@@ -1078,7 +1108,7 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
 end
 summary.all_neurons = plot_acg_curves(summary.all_neurons, curve_names, curve_labels, ...
     ['All neurons, ', split_name, name_suffix], centers, delta_lag, skip_abs_lag, ...
-    smooth_n, curve_colors, acg_ylim, y_label);
+    smooth_n, curve_colors, acg_ylim, y_label, figure_kind);
 end
 
 
@@ -1099,12 +1129,16 @@ report_acg_clusters(group_acg.low_high_clusters, figure_label, split_name)
 end
 
 
-function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label)
+function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, figure_kind)
 if nargin < 11 || isempty(y_label)
     y_label = 'Mean normalized autocorrelogram';
 end
+if nargin < 12 || isempty(figure_kind)
+    figure_kind = 'mean_acg';
+end
 figure('Name', figure_label, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
+mark_figure_policy(gcf, figure_kind)
 hold on
 shade = shade_delta_lags(delta_lag);
 plotted = gobjects(1, numel(curve_names));
@@ -1248,6 +1282,7 @@ end
 n_col = 2 + isempty(unit_label);
 figure('Name', figure_name, 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.02 0.05 0.96 0.9])
+mark_figure_policy(gcf, 'paired_tests')
 sgtitle(scale_label)
 lag_measures = {'', 'first_lag', 'second_lag'};
 lag_labels = {'', 'First-peak latency (s)', 'Second-cycle latency (s)'};
@@ -1291,6 +1326,7 @@ plot_paired_by_lock_group(neurons, group_order, group_title, colors, split_name,
 if isempty(unit_label)
     figure('Name', ['ACG cycle counts, ', split_name], 'Color', 'w', ...
         'Units', 'normalized', 'OuterPosition', [0.2 0.2 0.55 0.45])
+    mark_figure_policy(gcf, 'paired_tests')
     plot_paired_cycle_counts(neurons, group_order, group_title, colors, split_name)
     plot_first_latency_distributions(neurons, group_order, group_title, colors, split_name)
 end
@@ -1313,6 +1349,7 @@ n_row = numel(row_measures);
 n_col = numel(panel_names);
 figure('Name', ['Paired mesh, ', split_name, ', ', scale_tag], ...
     'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.02 0.03 0.96 0.94])
+mark_figure_policy(gcf, 'paired_tests')
 for c = 1:n_col
     if strcmp(panel_names{c}, 'all')
         in_panel = true(numel(neurons.lock_group), 1);
@@ -1890,13 +1927,31 @@ end
 
 
 function tf = figure_selected(kind)
-tf = true;
+policy = figure_policy(kind);
+tf = policy(1) || policy(2);
+end
+
+
+function policy = figure_policy(kind)
+policy = [true true];
 if ~isappdata(0, 'locking_acg_figures')
     return
 end
 flags = getappdata(0, 'locking_acg_figures');
-if isstruct(flags) && isfield(flags, kind)
-    tf = logical(flags.(kind));
+if ~isstruct(flags) || ~isfield(flags, kind)
+    return
+end
+value = logical(flags.(kind)(:).');
+if isempty(value)
+    policy = [false false];
+elseif numel(value) == 1
+    if value
+        policy = [true true];
+    else
+        policy = [false false];
+    end
+else
+    policy = [value(1), value(2)];
 end
 end
 
@@ -2052,6 +2107,7 @@ if ~any(ok)
 end
 figure('Name', ['First-peak latency, ', split_name], 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.06 0.08 0.88 0.78])
+mark_figure_policy(gcf, 'paired_tests')
 edges = 0.10:0.05:1.00;
 panel_idx = cell(1, 1 + numel(group_order));
 panel_idx{1} = ok;
@@ -2174,6 +2230,7 @@ for f = 1:n_fig
     pick = pick(pick <= numel(rows));
     figure('Name', sprintf('ACG peak examples %d, %s', f, split_name), ...
         'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.06 0.92 0.84])
+    mark_figure_policy(gcf, 'neuron_examples')
     n_col = numel(pick);
     for c = 1:n_col
         subplot(2, n_col, c)
@@ -2262,6 +2319,7 @@ if ~isfinite(top) || top <= 0
 end
 figure('Name', ['ACG spectra, low against high, ', split_name, ', ', scale_tag], ...
     'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.78])
+mark_figure_policy(gcf, 'acg_spectra')
 n_row = ceil(n_panel / 3);
 for p = 1:n_panel
     subplot(n_row, 3, p)
@@ -4413,6 +4471,7 @@ if ~figure_selected('strata_preview')
 end
 figure('Name', 'Spikes per neuron', 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.08 0.16 0.84 0.62])
+mark_figure_policy(gcf, 'strata_preview')
 subplot(1, 2, 1)
 if isempty(spike_counts)
     text(0.5, 0.5, 'No neurons', 'HorizontalAlignment', 'center')
@@ -4453,6 +4512,7 @@ for t = 1:n_thresholds
 end
 figure('Name', 'Neurons by stratum count', 'Color', 'w', ...
     'Units', 'normalized', 'OuterPosition', [0.06 0.14 0.88 0.66])
+mark_figure_policy(gcf, 'strata_preview')
 subplot(1, 2, 1)
 hold on
 for t = 1:n_thresholds
@@ -5956,6 +6016,9 @@ elseif isstruct(model) && isfield(model, 'model_tag')
 elseif isstruct(model) && isfield(model, 'acg_delta') ...
         && isfield(model.acg_delta, 'all') && isfield(model.acg_delta.all, 'model_tag')
     tag = model.acg_delta.all.model_tag;
+end
+if isempty(tag)
+    tag = active_model_tag(model);
 end
 if isempty(tag)
     name = figure_name;
