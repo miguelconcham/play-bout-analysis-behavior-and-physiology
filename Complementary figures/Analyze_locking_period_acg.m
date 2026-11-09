@@ -1533,7 +1533,10 @@ if isempty(all_idx) || all_idx > numel(shown)
     return
 end
 mu = mean(shown{all_idx}, 1, 'omitnan');
-peaks = acg_delta_peaks(mu, centers, 1);
+% Labels on the mean and on the paired difference use a lower bar than
+% the per-neuron scores: prominence at least 5% of the 10-90% range, and
+% a half-prominence width of at least 20 ms.
+peaks = acg_delta_peaks(mu, centers, 1, 0.05, 0.02);
 end
 
 

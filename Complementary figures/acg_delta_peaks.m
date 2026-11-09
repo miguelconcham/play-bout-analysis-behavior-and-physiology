@@ -1,4 +1,4 @@
-function peaks = acg_delta_peaks(acg_row, centers, smooth_n)
+function peaks = acg_delta_peaks(acg_row, centers, smooth_n, prominence_fraction, min_width)
 %ACG_DELTA_PEAKS  Burst level and delta-cycle prominences of one autocorrelogram.
 %
 % The positive and negative lags are averaged. The burst is the mean level
@@ -8,10 +8,9 @@ function peaks = acg_delta_peaks(acg_row, centers, smooth_n)
 % Gaussian standard deviation is one quarter of that width.
 %
 % A local maximum is a peak only when all three of these hold:
-%   the width at half-prominence is at least 40 ms, so a one-bin
-%   deflection is ignored;
-%   the prominence is at least a fifth of the 10-90% range of the
-%   smoothed curve in the search window;
+%   the width at half-prominence is at least min_width (default 40 ms);
+%   the prominence is at least prominence_fraction (default one fifth) of
+%   the 10-90% range of the smoothed curve in the search window;
 %   the curve does not rise above the maximum on both sides within
 %   200 ms. A bump inside a trough fails that last check, because both
 %   shoulders of the trough are higher. A peak on a decaying tail does
@@ -28,13 +27,17 @@ function peaks = acg_delta_peaks(acg_row, centers, smooth_n)
 if nargin < 3 || isempty(smooth_n)
     smooth_n = 1;
 end
+if nargin < 4 || isempty(prominence_fraction)
+    prominence_fraction = 0.20;
+end
+if nargin < 5 || isempty(min_width)
+    min_width = 0.04;
+end
 burst_end = 0.05;
 search_start = 0.10;
 edge_margin = 0.05;
 min_distance = 0.15;
-min_width = 0.04;
 shoulder_window = 0.20;
-prominence_fraction = 0.20;
 delta_period = [0.20 0.50];
 second_scale = [1.7 2.3];
 
