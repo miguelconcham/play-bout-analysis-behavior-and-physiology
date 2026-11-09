@@ -109,12 +109,14 @@ second_hi = second_scale(2) * tau;
 peaks.second_measurable = second_hi <= t_seg(end);
 if ~peaks.second_measurable
     peaks.n_cycles = 1;
+    peaks = add_third_peak(peaks, locs, pk, prom, t_seg(end));
     return
 end
 in_second = locs >= second_lo & locs <= second_hi;
 if ~any(in_second)
     peaks.second_prominence = 0;
     peaks.n_cycles = 1;
+    peaks = add_third_peak(peaks, locs, pk, prom, t_seg(end));
     return
 end
 second_locs = locs(in_second);
@@ -126,6 +128,42 @@ peaks.second_lag = second_locs(pick);
 peaks.second_height = second_pk(pick);
 peaks.second_prominence = second_prom(pick);
 peaks.n_cycles = 2;
+peaks = add_third_peak(peaks, locs, pk, prom, t_seg(end));
+end
+
+
+function peaks = add_third_peak(peaks, locs, pk, prom, t_end)
+peaks.third_measurable = false;
+peaks.third_present = false;
+peaks.third_lag = NaN;
+peaks.third_height = NaN;
+peaks.third_prominence = NaN;
+if ~peaks.first_present || ~isfinite(peaks.first_lag) || isempty(locs)
+    return
+end
+tau = peaks.first_lag;
+third_lo = 2.6 * tau;
+third_hi = 3.4 * tau;
+peaks.third_measurable = third_hi <= t_end;
+if ~peaks.third_measurable
+    return
+end
+in_third = locs >= third_lo & locs <= third_hi;
+in_third = in_third & abs(locs - peaks.first_lag) > 1e-6;
+if peaks.second_present && isfinite(peaks.second_lag)
+    in_third = in_third & abs(locs - peaks.second_lag) > 1e-6;
+end
+if ~any(in_third)
+    return
+end
+third_locs = locs(in_third);
+third_prom = prom(in_third);
+third_pk = pk(in_third);
+[~, pick] = min(abs(third_locs - 3 * tau));
+peaks.third_present = true;
+peaks.third_lag = third_locs(pick);
+peaks.third_height = third_pk(pick);
+peaks.third_prominence = third_prom(pick);
 end
 
 
@@ -156,6 +194,11 @@ peaks.second_present = false;
 peaks.second_lag = NaN;
 peaks.second_height = NaN;
 peaks.second_prominence = NaN;
+peaks.third_measurable = false;
+peaks.third_present = false;
+peaks.third_lag = NaN;
+peaks.third_height = NaN;
+peaks.third_prominence = NaN;
 peaks.n_cycles = NaN;
 peaks.fold_t = [];
 peaks.fold_y = [];

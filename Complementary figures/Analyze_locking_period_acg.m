@@ -36,7 +36,9 @@
 % zero. The paired difference is symmetric about zero. Tick labels are
 % short rounded numbers, such as 1.4 or 1.5.
 % Each mean autocorrelogram is two panels. The left panel is the low tail,
-% the high tail, and all runs, with a 95% confidence interval. The right
+% the high tail, and all runs, with a 95% confidence interval. The
+% all-runs mean is marked with its t1, t2, and, when a third cycle is
+% present, t3. The low and high tails are not marked. The right
 % panel is the paired difference, high minus low, with its own 95%
 % confidence interval and a dashed line at zero. A second figure folds
 % each autocorrelogram about zero before the test and draws only the
@@ -1439,6 +1441,7 @@ mean_ylim = acg_panel_ylim(curves);
 finish_mean_acg_axis(x, mean_ylim, y_label, 'Means, 95% CI')
 legend(plotted, curve_labels, 'Location', 'best')
 place_delta_shade(shade)
+mark_all_runs_mean_peaks(shown, curves, centers, x, curve_labels, curve_colors, min(x) < 0)
 if ~isempty(clusters)
     shade_acg_clusters(clusters, mean_ylim, mirror_bars)
 end
@@ -1484,6 +1487,76 @@ ytickformat(decimal_tick_format(ticks))
 xlabel('Lag (s)')
 ylabel(y_label)
 title(panel_title)
+end
+
+
+function mark_all_runs_mean_peaks(shown, curves, centers, plot_x, curve_labels, curve_colors, mirror_negative)
+all_idx = [];
+for c = 1:numel(curve_labels)
+    if strncmpi(curve_labels{c}, 'All', 3)
+        all_idx = c;
+        break
+    end
+end
+if isempty(all_idx) || all_idx > numel(shown) || all_idx > numel(curves)
+    return
+end
+mu = mean(shown{all_idx}, 1, 'omitnan');
+peaks = acg_delta_peaks(mu, centers, 1);
+color = curve_colors(all_idx, :);
+plot_y = mean(curves{all_idx}, 1, 'omitnan');
+mark_one_mean_peak(peaks, 'first', 't1', color, plot_x, plot_y, mirror_negative);
+mark_one_mean_peak(peaks, 'second', 't2', color, plot_x, plot_y, mirror_negative);
+mark_one_mean_peak(peaks, 'third', 't3', color, plot_x, plot_y, mirror_negative);
+end
+
+
+function mark_one_mean_peak(peaks, which, tag, color, plot_x, plot_y, mirror_negative)
+if strcmp(which, 'first')
+    present = peaks.first_present;
+    lag = peaks.first_lag;
+    prom = peaks.first_prominence;
+elseif strcmp(which, 'second')
+    present = peaks.second_present;
+    lag = peaks.second_lag;
+    prom = peaks.second_prominence;
+else
+    present = isfield(peaks, 'third_present') && peaks.third_present;
+    lag = NaN;
+    prom = NaN;
+    if isfield(peaks, 'third_lag')
+        lag = peaks.third_lag;
+        prom = peaks.third_prominence;
+    end
+end
+if ~present || ~isfinite(lag) || ~isfinite(prom)
+    return
+end
+y = interp1(plot_x, plot_y, lag, 'nearest', NaN);
+if ~isfinite(y)
+    return
+end
+draw_mean_peak_mark(lag, y, prom, tag, color);
+if mirror_negative
+    y_neg = interp1(plot_x, plot_y, -lag, 'nearest', NaN);
+    if isfinite(y_neg)
+        draw_mean_peak_mark(-lag, y_neg, prom, '', color);
+    end
+end
+end
+
+
+function draw_mean_peak_mark(lag, y, prom, tag, color)
+plot([lag lag], [max(y - prom, 0), y], '-', 'Color', color, ...
+    'LineWidth', 1.3, 'HandleVisibility', 'off')
+plot(lag, y, 'o', 'Color', color, 'MarkerFaceColor', color, ...
+    'MarkerSize', 5, 'HandleVisibility', 'off')
+if isempty(tag)
+    return
+end
+text(lag, y, sprintf('  %s %d ms, prom %.3g', tag, round(1000 * lag), prom), ...
+    'Color', color, 'FontSize', 8, 'VerticalAlignment', 'bottom', ...
+    'Interpreter', 'none', 'HandleVisibility', 'off')
 end
 
 
