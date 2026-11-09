@@ -97,11 +97,12 @@
 % duration-weighted mean. Burst, both prominences, firing rate, and the
 % folded autocorrelogram delta power are recomputed in the stratum. The
 % category is the neuron, and a neuron with fewer than two usable strata
-% does not enter. That model is fit again with every predictor except
-% firing rate residualized on firing rate. A third strata fit, and only
-% that fit, orthogonalizes the predictors one at a time. The order is
-% firing rate, neuron, burst (0-50 ms), autocorrelogram delta power
-% after 100 ms, first-peak prominence, then second-cycle prominence.
+% does not enter. That model is fit again after neuron identity is
+% removed and every predictor except firing rate is then residualized on
+% the within-neuron firing rate. A third strata fit, and only that fit,
+% orthogonalizes the predictors one at a time. The order is neuron,
+% firing rate, burst (0-50 ms), autocorrelogram delta power after 100 ms,
+% first-peak prominence, then second-cycle prominence.
 % At each step every later predictor is replaced by its residual on the
 % current one, so each keeps only variance the earlier predictors do
 % not explain. The one-row session model is unchanged.
@@ -109,9 +110,11 @@
 % LFP delta power is added as a predictor. PPC is the locking value, so
 % it is not a predictor in that fit. The one-row model keeps the session
 % factor. The stratum model keeps the neuron factor, including the
-% beyond-rate and sequential versions. In the sequential fit, LFP delta
-% power is orthogonalized first, so every later predictor keeps only the
-% variance that power does not explain. Those figures open only when
+% beyond-rate and sequential versions. The stratum beyond-rate fit
+% removes neuron identity before firing rate. In the sequential fit,
+% LFP delta power is orthogonalized first and neuron identity is next,
+% so every later predictor keeps only the variance that power and the
+% neuron do not explain. Those figures open only when
 % show_ppc_models is true. The one-row PPC model can be drawn from the
 % saved summary. Stratum PPC is stored only by a full run, so the
 % within-neuron PPC model needs that run once.
@@ -4002,6 +4005,10 @@ if nargin < 7 || isempty(factor_name)
 end
 [X, y, groups] = drop_clear_outliers(X, y, groups);
 if beyond_rate && size(X, 2) >= 2 && ~isempty(X)
+    if strcmp(factor_name, 'Neuron')
+        [D, ~] = factor_dummies(groups, size(X, 1));
+        X = residualize_on(X, D);
+    end
     X(:, 2:end) = residualize_on(X(:, 2:end), X(:, 1));
 end
 plot_ceteris_paribus(X, y, names, groups, factor_name, fit);
@@ -5163,9 +5170,13 @@ if size(X, 2) < 2
     return
 end
 [X, y, groups, n_pre] = drop_clear_outliers(X, y, groups);
+[D, ~] = factor_dummies(groups, size(X, 1));
+neuron_first = strcmp(factor_name, 'Neuron');
+if neuron_first
+    X = residualize_on(X, D);
+end
 rate = X(:, 1);
 [~, rate_rsq] = standardized_ols(rate, y);
-[D, ~] = factor_dummies(groups, size(X, 1));
 [~, control_rsq] = standardized_ols([rate, D], y);
 X_free = X;
 X_free(:, 2:end) = residualize_on(X(:, 2:end), rate);
@@ -5173,6 +5184,7 @@ fit = fit_one_power_model(X_free, y, names, label, groups, factor_name, D, n_pre
 fit.rate_rsq = rate_rsq;
 fit.control_rsq = control_rsq;
 fit.beyond_rsq = fit.rsq - control_rsq;
+fit.neuron_before_rate = neuron_first;
 if fit.ok
     report_beyond_rate(fit);
 end
@@ -5180,20 +5192,21 @@ end
 
 
 function fit = fit_sequential_strata_model(X, y, names, label, groups, outcome_name)
-% Gram-Schmidt order for delta power: firing rate, neuron, burst, ACG
-% delta power, first-peak prominence, second-cycle prominence. For PPC,
-% LFP delta power is first, so every later predictor is residualized on
-% it before the same sequence continues. Each later block is replaced by
-% its residual on the current block.
+% Gram-Schmidt order for delta power: neuron, firing rate, burst, ACG
+% delta power, first-peak prominence, second-cycle prominence. Neuron
+% identity is first, so firing rate and every later predictor keep only
+% within-neuron variance. For PPC, LFP delta power is first and neuron
+% identity is second. Each later block is replaced by its residual on
+% the current block.
 if nargin < 6
     outcome_name = '';
 end
 [X, y, groups, n_pre] = drop_clear_outliers(X, y, groups);
 if strcmp(outcome_name, 'PPC')
-    order = {'LFP delta power', 'Firing rate', 'Neuron', 'Burst, 0-50 ms', ...
+    order = {'LFP delta power', 'Neuron', 'Firing rate', 'Burst, 0-50 ms', ...
         'ACG delta power, >100 ms', 'First-peak prominence', 'Second-cycle prominence'};
 else
-    order = {'Firing rate', 'Neuron', 'Burst, 0-50 ms', ...
+    order = {'Neuron', 'Firing rate', 'Burst, 0-50 ms', ...
         'ACG delta power, >100 ms', 'First-peak prominence', 'Second-cycle prominence'};
 end
 [D, ~] = factor_dummies(groups, size(X, 1));
@@ -5218,9 +5231,6 @@ for k = 1:numel(order)
     blocks{k} = X(:, hit);
 end
 for k = 1:numel(blocks) - 1
-    if isempty(blocks{k})
-        continue
-    end
     for j = k + 1:numel(blocks)
         if isempty(blocks{j})
             continue
@@ -5241,7 +5251,7 @@ if ~any(kept)
     fit = empty_power_fit(label);
     return
 end
-fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{neuron_at}, n_pre, outcome_name);
+fit = fit_one_power_model(X_orth(:, kept), y, cont_order(kept), label, groups, 'Neuron', blocks{neuron_at}, n_pre, outcome_name, true);
 if ~fit.ok
     return
 end
@@ -5249,7 +5259,7 @@ if strcmp(outcome_name, 'PPC')
     fit.figure_kind = 'ppc_models';
 end
 plot_ceteris_paribus(X_orth(:, kept), y, cont_order(kept), groups, 'Neuron', fit, blocks{neuron_at});
-fit = align_predictor_names(fit, cont_order);
+fit = align_predictor_names(fit, order);
 fit.predictor_corr = corr(X_orth);
 fit.sequential_order = order;
 added = zeros(numel(order), 1);
@@ -5260,39 +5270,39 @@ for k = 1:numel(order)
     end
 end
 fit.sequential_added = added;
-report_sequential_added(fit);
+report_power_model(fit);
 end
 
 
-function fit = align_predictor_names(fit, cont_order)
-has_neuron = any(strcmp(fit.names, 'Neuron'));
-n = numel(cont_order);
-beta = zeros(n, 1);
+function fit = align_predictor_names(fit, order)
+n = numel(order);
+beta = nan(n, 1);
 t_beta = nan(n, 1);
 p_beta = nan(n, 1);
 unique_rsq = zeros(n, 1);
 weight = zeros(n, 1);
 for k = 1:n
-    hit = find(strcmp(fit.names, cont_order{k}), 1);
+    hit = find(strcmp(fit.names, order{k}), 1);
     if isempty(hit)
         continue
     end
-    beta(k) = fit.beta(hit);
-    t_beta(k) = fit.t_beta(hit);
-    p_beta(k) = fit.p_beta(hit);
-    unique_rsq(k) = fit.unique_rsq(hit);
-    weight(k) = fit.weight(hit);
+    if hit <= numel(fit.beta)
+        beta(k) = fit.beta(hit);
+    end
+    if hit <= numel(fit.t_beta)
+        t_beta(k) = fit.t_beta(hit);
+    end
+    if hit <= numel(fit.p_beta)
+        p_beta(k) = fit.p_beta(hit);
+    end
+    if hit <= numel(fit.unique_rsq)
+        unique_rsq(k) = fit.unique_rsq(hit);
+    end
+    if hit <= numel(fit.weight)
+        weight(k) = fit.weight(hit);
+    end
 end
-names = cont_order;
-if has_neuron
-    hit = find(strcmp(fit.names, 'Neuron'), 1);
-    beta(end + 1, 1) = NaN;
-    t_beta(end + 1, 1) = NaN;
-    p_beta(end + 1, 1) = NaN;
-    unique_rsq(end + 1, 1) = fit.unique_rsq(hit);
-    weight(end + 1, 1) = fit.weight(hit);
-    names{end + 1} = 'Neuron';
-end
+names = order;
 fit.beta = beta;
 fit.t_beta = t_beta;
 fit.p_beta = p_beta;
@@ -5338,13 +5348,24 @@ end
 
 
 function report_beyond_rate(fit)
-disp(sprintf('  Firing rate alone R^2 = %.3g', fit.rate_rsq))
 factor_name = category_name(fit);
+neuron_first = isfield(fit, 'neuron_before_rate') && fit.neuron_before_rate;
+if neuron_first
+    disp(sprintf(['  Neuron identity is removed first. Firing rate within ' ...
+        'neuron R^2 = %.3g'], fit.rate_rsq))
+else
+    disp(sprintf('  Firing rate alone R^2 = %.3g', fit.rate_rsq))
+end
 if isfield(fit, 'factor_df') && fit.factor_df > 0 && isfinite(fit.control_rsq) ...
         && ~isempty(factor_name)
     disp(sprintf('  Firing rate plus %s R^2 = %.3g', lower(factor_name), fit.control_rsq))
-    disp(sprintf(['  R^2 added by the other predictors beyond firing rate ' ...
-        'and %s = %.3g'], lower(factor_name), fit.beyond_rsq))
+    if neuron_first
+        disp(sprintf(['  R^2 added by the other predictors beyond neuron ' ...
+            'identity and firing rate = %.3g'], fit.beyond_rsq))
+    else
+        disp(sprintf(['  R^2 added by the other predictors beyond firing rate ' ...
+            'and %s = %.3g'], lower(factor_name), fit.beyond_rsq))
+    end
 else
     disp(sprintf('  R^2 added beyond firing rate = %.3g', fit.beyond_rsq))
 end
@@ -5486,7 +5507,7 @@ D = D(:, std(D, 0, 1) > 0);
 end
 
 
-function fit = fit_one_power_model(X, y, names, label, groups, factor_name, D_override, n_already_dropped, outcome_name)
+function fit = fit_one_power_model(X, y, names, label, groups, factor_name, D_override, n_already_dropped, outcome_name, skip_report)
 if nargin < 5
     groups = {};
 end
@@ -5498,6 +5519,9 @@ if nargin < 8 || isempty(n_already_dropped)
 end
 if nargin < 9 || isempty(outcome_name)
     outcome_name = 'Delta power';
+end
+if nargin < 10 || isempty(skip_report)
+    skip_report = false;
 end
 fit = empty_power_fit(label);
 fit.outcome_name = outcome_name;
@@ -5586,7 +5610,9 @@ else
     fit.percent_of_rsq = nan(numel(fit.names), 1);
 end
 fit.predictor_corr = corr(X);
-report_power_model(fit);
+if ~skip_report
+    report_power_model(fit);
+end
 end
 
 

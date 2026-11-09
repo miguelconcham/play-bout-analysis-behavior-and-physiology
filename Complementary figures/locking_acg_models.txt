@@ -79,29 +79,37 @@ printed for all neurons and, in the same file, for each lock group.
 
 Model4 strata residual
 ----------------------
-Same rows and neuron intercepts as Model3. As in Model2, every predictor
-except firing rate is replaced by its residual on firing rate before the
-fit. The rate-free coefficients are within-stratum associations beyond
-firing rate. The p-values are still ordinary least-squares p-values.
+Same rows and neuron intercepts as Model3. Neuron identity is removed
+first: every predictor is replaced by its deviation from its own neuron
+mean. Every predictor except firing rate is then replaced by its residual
+on that within-neuron firing rate. The firing-rate coefficient is the
+within-neuron slope. The other coefficients are within-neuron associations
+beyond firing rate. The p-values are still ordinary least-squares p-values.
+
+  X_ij = predictor_ij - mean over strata of neuron i
+  Z_ij = X_ij - projection of X_ij on the within-neuron firing rate
+
+Model2 does not do this. It has one row per neuron, so neuron identity is
+not a repeated factor there.
 
 
 Model5 sequential
 -----------------
 Same rows and outcome as Model3. Predictors are orthogonalized in this
-order, and only in this model:
+order:
 
-  1. Firing rate
-  2. Neuron
+  1. Neuron
+  2. Firing rate
   3. Burst, 0-50 ms
   4. ACG delta power, >100 ms
   5. First-peak prominence
   6. Second-cycle prominence
 
-At each step, every later predictor is replaced by its residual on the
-current one. The printed added R^2 is the variance that step explains
-after the earlier steps. Swapping firing rate and neuron would give the
-firing-rate coefficient the within-neuron association; the predictors
-after both would be unchanged.
+Neuron identity is first. At each step, every later predictor is replaced
+by its residual on the current one. Firing rate therefore keeps only the
+within-neuron variance, and every predictor after firing rate is orthogonal
+to both the neuron and that within-neuron firing rate. The printed added
+R^2 is the variance that step explains after the earlier steps.
 
 
 Model6 entrainment
@@ -168,9 +176,10 @@ A full run has to store stratum PPC before this model can be fit.
 
 Model10 PPC strata residual
 ---------------------------
-Model9 after every predictor except firing rate has been replaced by its
-residual on firing rate. LFP delta power is one of those residualized
-predictors. This is the stratum version of Model8, not a second copy of it.
+Same neuron-first step as Model4, with stratum PPC as the outcome. Neuron
+identity is removed first. Every predictor except firing rate, including
+LFP delta power, is then residualized on the within-neuron firing rate.
+Model8 does not do the neuron step: it has one row per neuron.
 
 
 Model11 PPC sequential
@@ -178,15 +187,16 @@ Model11 PPC sequential
 Same rows and outcome as Model9. Orthogonalization order:
 
   1. LFP delta power
-  2. Firing rate
-  3. Neuron
+  2. Neuron
+  3. Firing rate
   4. Burst, 0-50 ms
   5. ACG delta power, >100 ms
   6. First-peak prominence
   7. Second-cycle prominence
 
-LFP delta power is first, so every later predictor keeps only the variance
-that power does not explain.
+LFP delta power is first. Neuron identity is second, so firing rate and
+every later predictor keep only within-neuron variance that power does
+not explain.
 
 
 Model12 run rate
