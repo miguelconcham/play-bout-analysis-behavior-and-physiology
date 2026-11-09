@@ -30,13 +30,20 @@
 % rebuilt from the session spike times and the saved run intervals.
 % Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz side peak sits at the
 % edge of this window. The shading does not set the vertical scale. Every
-% mean autocorrelogram uses one y limit, taken from the highest and lowest
-% mean plus or minus its standard error, and rounded onto a short decimal.
-% On each mean autocorrelogram, grey bars in the top tenth of the axis mark
-% clusters that survive the sign-flip test. The bars are mirrored because
-% the autocorrelogram is. The statistics report lists every cluster, with
-% its positive-lag range and cluster p-value, including those that do not
-% survive. A cluster survives when that p-value is at or below acg_cluster_alpha.
+% mean autocorrelogram of one tail split uses one y limit, taken from the
+% highest and lowest 95% confidence interval, and rounded onto a short decimal.
+% Each mean autocorrelogram is two panels. The left panel is the low tail,
+% the high tail, and all runs, with a 95% confidence interval. The right
+% panel is the paired difference, high minus low, with its own 95%
+% confidence interval and a dashed line at zero. A second figure folds
+% each autocorrelogram about zero before the test and draws only the
+% positive lags. Open squares mark signed-rank runs that fail the
+% cluster test. Filled grey squares mark runs that survive. The bars sit
+% in the top tenth of each axis. On the unfolded figure they are mirrored
+% because the autocorrelogram is. The statistics report lists every
+% cluster, with its positive-lag range and cluster p-value. A cluster
+% survives when that p-value is at or below acg_cluster_alpha. The same
+% two figures are drawn for the outer 10% of runs.
 %
 % Each plotted autocorrelogram is also scored neuron by neuron. The burst
 % is the mean level from the first positive bin through 50 ms. A local
@@ -191,6 +198,8 @@ alpha            = 0.01;
 non_entrained_p  = 0.1;
 low_percent      = 25;
 high_percent     = 75;
+tail10_low       = 10;  % outer-decile comparison, separate from the 25/75 figures
+tail10_high      = 90;
 delta_lag        = [0.2 0.5];   % s, 5 Hz to 2 Hz
 acg_lag          = 1;       % s, half-width of the autocorrelogram axis
 smooth_half      = 0.06;        % s, full smooth width; Gaussian sigma is a quarter of this (15 ms)
@@ -353,11 +362,15 @@ n_bins = [];
 bin_w = [];
 acg_raw = empty_group_store(source_order, 0);
 acg_power = empty_group_store(source_order, 0);
+acg_raw10 = empty_group_store(source_order, 0);
+acg_power10 = empty_group_store(source_order, 0);
 n_in_parsing = zeros(1, numel(source_order));
 n_kept = zeros(1, numel(source_order));
 n_unsplit = zeros(1, numel(source_order));
+n_unsplit10 = zeros(1, numel(source_order));
 n_kept_power = zeros(1, numel(source_order));
 n_unsplit_power = zeros(1, numel(source_order));
+n_unsplit_power10 = zeros(1, numel(source_order));
 n_missing = 0;
 n_outside = 0;
 strata_rows = empty_power_strata();
@@ -396,6 +409,8 @@ for f = 1:numel(parsing_files)
             n_bins = numel(centers);
             acg_raw = empty_group_store(source_order, n_bins);
             acg_power = empty_group_store(source_order, n_bins);
+            acg_raw10 = empty_group_store(source_order, n_bins);
+            acg_power10 = empty_group_store(source_order, n_bins);
         end
         saved_covers = numel(saved_edges) == numel(edges) ...
             && max(abs(saved_edges - edges)) < 1e-6;
@@ -454,12 +469,16 @@ for f = 1:numel(parsing_files)
             rt = run_cell{nn};
             if isempty(rt) || ~istable(rt) || ~ismember('autoccorrelograms', rt.Properties.VariableNames)
                 n_unsplit(g) = n_unsplit(g) + 1;
+                n_unsplit10(g) = n_unsplit10(g) + 1;
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
+                n_unsplit_power10(g) = n_unsplit_power10(g) + 1;
                 continue
             end
             if size(rt.phase_entrainment, 2) < ppc_col
                 n_unsplit(g) = n_unsplit(g) + 1;
+                n_unsplit10(g) = n_unsplit10(g) + 1;
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
+                n_unsplit_power10(g) = n_unsplit_power10(g) + 1;
                 continue
             end
             if saved_covers
@@ -478,7 +497,9 @@ for f = 1:numel(parsing_files)
                 warning('Analyze_locking_period_acg:width', ...
                     'ACG size mismatch in %s id %g; cell skipped.', animal_code, this_id);
                 n_unsplit(g) = n_unsplit(g) + 1;
+                n_unsplit10(g) = n_unsplit10(g) + 1;
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
+                n_unsplit_power10(g) = n_unsplit_power10(g) + 1;
                 continue
             end
             run_length = acg_run_lengths(rt);
@@ -503,6 +524,15 @@ for f = 1:numel(parsing_files)
             else
                 n_unsplit(g) = n_unsplit(g) + 1;
             end
+            pooled10 = pool_locking_period_acgs(acg, edges, run_length, ...
+                this_ppc, this_corrected, tail10_low, tail10_high);
+            if split_is_usable(pooled10)
+                acg_raw10.(source_order{g}) = append_pooled( ...
+                    acg_raw10.(source_order{g}), pooled10, animal_code, this_id, this_area, ...
+                    this_rate, tail_rate_struct(rt, pooled10), run_means);
+            else
+                n_unsplit10(g) = n_unsplit10(g) + 1;
+            end
 
             pooled_power = pool_locking_period_acgs(acg, edges, run_length, ...
                 this_power, this_corrected, low_percent, high_percent);
@@ -513,6 +543,15 @@ for f = 1:numel(parsing_files)
                 n_kept_power(g) = n_kept_power(g) + 1;
             else
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
+            end
+            pooled_power10 = pool_locking_period_acgs(acg, edges, run_length, ...
+                this_power, this_corrected, tail10_low, tail10_high);
+            if split_is_usable(pooled_power10)
+                acg_power10.(source_order{g}) = append_pooled( ...
+                    acg_power10.(source_order{g}), pooled_power10, animal_code, this_id, this_area, ...
+                    this_rate, tail_rate_struct(rt, pooled_power10), run_means);
+            else
+                n_unsplit_power10(g) = n_unsplit_power10(g) + 1;
             end
         end
 
@@ -539,6 +578,8 @@ parameters = struct( ...
     'non_entrained_p', non_entrained_p, ...
     'low_percent', low_percent, ...
     'high_percent', high_percent, ...
+    'tail10_low', tail10_low, ...
+    'tail10_high', tail10_high, ...
     'delta_lag', delta_lag, ...
     'acg_lag', acg_lag, ...
     'smooth_half', smooth_half, ...
@@ -573,9 +614,28 @@ power_acg = summarize_and_plot(acg_power, source_order, source_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     acg_refractory_s, curve_colors, n_in_parsing, n_unsplit_power, ...
     acg_cluster_alpha, acg_cluster_perm);
+locking10_labels = { ...
+    sprintf('Low %g%% locking', tail10_low), ...
+    sprintf('High %g%% locking', 100 - tail10_high), ...
+    'All firing runs'};
+power10_labels = { ...
+    sprintf('Low %g%% delta power', tail10_low), ...
+    sprintf('High %g%% delta power', 100 - tail10_high), ...
+    'All firing runs'};
+locking_acg.tail10 = summarize_and_plot(acg_raw10, source_order, source_title, ...
+    locking10_labels, 'locking, outer 10%', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    acg_refractory_s, curve_colors, n_in_parsing, n_unsplit10, ...
+    acg_cluster_alpha, acg_cluster_perm);
+power_acg.tail10 = summarize_and_plot(acg_power10, source_order, source_title, ...
+    power10_labels, 'delta power, outer 10%', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    acg_refractory_s, curve_colors, n_in_parsing, n_unsplit_power10, ...
+    acg_cluster_alpha, acg_cluster_perm);
 acg_ylim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, ...
     centers, skip_abs_lag, smooth_n);
+acg_ylim10 = shared_mean_acg_ylim(locking_acg.tail10, power_acg.tail10, group_order, ...
+    centers, skip_abs_lag, smooth_n, 'outer 10%');
 parameters.acg_ylim = acg_ylim;
+parameters.acg_ylim10 = acg_ylim10;
 locking_acg.centers = centers;
 locking_acg.bin_edges = edges;
 locking_acg.parameters = parameters;
@@ -588,6 +648,12 @@ locking_acg = plot_summary_acgs(locking_acg, group_order, group_title, ...
 power_acg = plot_summary_acgs(power_acg, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     curve_colors, acg_ylim);
+plot_summary_acgs(locking_acg.tail10, group_order, group_title, ...
+    locking10_labels, 'locking', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    curve_colors, acg_ylim10, '', '', tail10_low);
+plot_summary_acgs(power_acg.tail10, group_order, group_title, ...
+    power10_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
+    curve_colors, acg_ylim10, '', '', tail10_low);
 if plot_rate_scaled_peaks
     plot_rate_scaled_mean_acgs(locking_acg, power_acg, bin_w, centers, ...
         group_order, group_title, locking_labels, power_labels, delta_lag, ...
@@ -796,6 +862,16 @@ end
 
 
 function folder_name = figure_theme_folder(figure_name, day)
+tail = regexp(figure_name, '^ACG tails, (\d+), (mirrored|non-mirrored)', 'tokens', 'once');
+if ~isempty(tail)
+    if ~isempty(regexpi(figure_name, 'delta power', 'once'))
+        root = 'Power';
+    else
+        root = 'PPC';
+    end
+    folder_name = fullfile([root, '_', day], [tail{1}, '%'], tail{2});
+    return
+end
 model = regexp(figure_name, '^(Model\d+\s+[^,]*)', 'tokens', 'once');
 if ~isempty(model)
     theme = strtrim(model{1});
@@ -910,7 +986,7 @@ for g = 1:numel(group_order)
     disp_rule()
     disp([group_title{g}, ', ', split_name, ': ', num2str(n_in_parsing(g)), ...
         ' in parsing, ', num2str(n), ' plotted, ', num2str(n_unsplit(g)), ...
-        ' skipped (no separated 25/75 split or no spikes)'])
+        ' skipped (no separated tails or no spikes)'])
     if n < 1
         warning('Analyze_locking_period_acg:group', ...
             'No %s neurons with both %s tails.', group_title{g}, split_name);
@@ -1058,7 +1134,8 @@ for i = 1:numel(fn)
     if ~isfield(b, name)
         continue
     end
-    if strcmp(name, 'low_high_clusters') || endsWith(name, '_delta_mass')
+    if strcmp(name, 'low_high_clusters') || strcmp(name, 'mirrored_clusters') ...
+            || strcmp(name, 'mirrored_centers') || endsWith(name, '_delta_mass')
         continue
     end
     va = a.(name);
@@ -1089,12 +1166,15 @@ end
 end
 
 
-function summary = plot_summary_acgs(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, name_suffix)
+function summary = plot_summary_acgs(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, name_suffix, tail_percent)
 if nargin < 12 || isempty(y_label)
     y_label = 'Mean normalized autocorrelogram';
 end
 if nargin < 13
     name_suffix = '';
+end
+if nargin < 14 || isempty(tail_percent)
+    tail_percent = 25;
 end
 if isempty(name_suffix)
     figure_kind = 'mean_acg';
@@ -1112,7 +1192,7 @@ for g = 1:numel(group_order)
     end
     summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
         [group_title{g}, ', ', split_name, name_suffix], centers, delta_lag, skip_abs_lag, ...
-        smooth_n, curve_colors, acg_ylim, y_label, figure_kind);
+        smooth_n, curve_colors, acg_ylim, y_label, figure_kind, tail_percent);
 end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
         || summary.all_neurons.n < 1
@@ -1120,7 +1200,7 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
 end
 summary.all_neurons = plot_acg_curves(summary.all_neurons, curve_names, curve_labels, ...
     ['All neurons, ', split_name, name_suffix], centers, delta_lag, skip_abs_lag, ...
-    smooth_n, curve_colors, acg_ylim, y_label, figure_kind);
+    smooth_n, curve_colors, acg_ylim, y_label, figure_kind, tail_percent);
 end
 
 
@@ -1138,42 +1218,124 @@ high_s = smooth_acg_away_from_zero(group_acg.high, centers, skip_abs_lag, smooth
 group_acg.low_high_clusters = paired_acg_clusters( ...
     low_s, high_s, centers, cluster_alpha, cluster_perm);
 report_acg_clusters(group_acg.low_high_clusters, figure_label, split_name)
+[low_f, high_f, pos_centers] = mirror_average_pair(low_s, high_s, centers);
+group_acg.mirrored_centers = pos_centers;
+group_acg.mirrored_clusters = paired_acg_clusters( ...
+    low_f, high_f, pos_centers, cluster_alpha, cluster_perm);
+report_acg_clusters(group_acg.mirrored_clusters, [figure_label, ', mirrored'], split_name)
 end
 
 
-function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, figure_kind)
+function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, figure_kind, tail_percent)
 if nargin < 11 || isempty(y_label)
     y_label = 'Mean normalized autocorrelogram';
 end
 if nargin < 12 || isempty(figure_kind)
     figure_kind = 'mean_acg';
 end
-figure('Name', figure_label, 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
+if nargin < 13 || isempty(tail_percent)
+    tail_percent = 25;
+end
+shown = cell(1, numel(curve_names));
+for c = 1:numel(curve_names)
+    shown{c} = smooth_acg_away_from_zero( ...
+        group_acg.(curve_names{c}), centers, skip_abs_lag, smooth_n);
+end
+draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, ...
+    curve_colors, acg_ylim, y_label, figure_kind, tail_percent, false, ...
+    group_acg, size(group_acg.low, 1));
+draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, ...
+    curve_colors, acg_ylim, y_label, figure_kind, tail_percent, true, ...
+    group_acg, size(group_acg.low, 1));
+end
+
+
+function draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, curve_colors, acg_ylim, y_label, figure_kind, tail_percent, mirrored, group_acg, n_neurons)
+if mirrored
+    fold_tag = 'mirrored';
+    [folded, x] = mirror_average_rows(shown{1}, centers);
+    if isempty(x)
+        return
+    end
+    curves = cell(1, numel(shown));
+    curves{1} = folded;
+    for c = 2:numel(shown)
+        curves{c} = mirror_average_rows(shown{c}, centers);
+    end
+    clusters = [];
+    if isfield(group_acg, 'mirrored_clusters')
+        clusters = group_acg.mirrored_clusters;
+    end
+    mirror_bars = false;
+else
+    fold_tag = 'non-mirrored';
+    curves = shown;
+    x = centers;
+    clusters = [];
+    if isfield(group_acg, 'low_high_clusters')
+        clusters = group_acg.low_high_clusters;
+    end
+    mirror_bars = true;
+end
+fig_name = sprintf('ACG tails, %g, %s, %s', tail_percent, fold_tag, figure_label);
+figure('Name', fig_name, 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.06 0.12 0.82 0.52])
 mark_figure_policy(gcf, figure_kind)
+
+subplot(1, 2, 1)
 hold on
 shade = shade_delta_lags(delta_lag);
-plotted = gobjects(1, numel(curve_names));
-for c = 1:numel(curve_names)
-    shown = smooth_acg_away_from_zero( ...
-        group_acg.(curve_names{c}), centers, skip_abs_lag, smooth_n);
-    plotted(c) = plot_mean_sem(centers, shown, curve_colors(c, :));
+plotted = gobjects(1, numel(curves));
+for c = 1:numel(curves)
+    plotted(c) = plot_mean_ci95(x, curves{c}, curve_colors(c, :));
 end
-xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
-half_bin = median(diff(centers)) / 2;
-xlim([centers(1) - half_bin, centers(end) + half_bin])
-ylim(acg_ylim)
-yticks(readable_acg_ticks(acg_ylim))
+finish_mean_acg_axis(x, acg_ylim, y_label, 'Means, 95% CI')
+legend(plotted, curve_labels, 'Location', 'best')
+place_delta_shade(shade)
+if ~isempty(clusters)
+    shade_acg_clusters(clusters, acg_ylim, mirror_bars)
+end
+box off
+
+subplot(1, 2, 2)
+hold on
+shade = shade_delta_lags(delta_lag);
+difference = curves{2} - curves{1};
+[mu, lo, hi] = mean_ci95(difference);
+fill_band_finite(x, lo, hi, [0.15 0.15 0.15])
+plot(x, mu, 'Color', [0.15 0.15 0.15], 'LineWidth', 2)
+diff_ylim = paired_difference_ylim(lo, hi);
+finish_mean_acg_axis(x, diff_ylim, 'High minus low', 'Paired difference, 95% CI')
+plot(xlim, [0 0], '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1, ...
+    'HandleVisibility', 'off')
+place_delta_shade(shade)
+if ~isempty(clusters)
+    shade_acg_clusters(clusters, diff_ylim, mirror_bars)
+end
+box off
+sgtitle({figure_label, sprintf( ...
+    'n = %d    band: 2-5 Hz    filled bars survive, open bars do not', n_neurons)})
+end
+
+
+function finish_mean_acg_axis(x, y_lim, y_label, panel_title)
+half_bin = median(diff(x)) / 2;
+if ~isfinite(half_bin) || half_bin <= 0
+    half_bin = 0;
+end
+if min(x) >= 0
+    xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
+    xlim([0, x(end) + half_bin])
+else
+    xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
+    xlim([x(1) - half_bin, x(end) + half_bin])
+end
+ylim(y_lim)
+yticks(readable_acg_ticks(y_lim))
 ytickformat('%g')
 xlabel('Lag (s)')
 ylabel(y_label)
-title({figure_label, sprintf('n = %d    band: 2-5 Hz    top bars: clusters that survive', size(group_acg.low, 1))})
-legend(plotted, curve_labels, 'Location', 'best')
-place_delta_shade(shade)
-if isfield(group_acg, 'low_high_clusters')
-    shade_acg_clusters(group_acg.low_high_clusters, acg_ylim)
-end
-box off
+title(panel_title)
 end
 
 
@@ -1608,6 +1770,39 @@ locking_acg = plot_summary_acgs(locking_acg, group_order, group_title, ...
 power_acg = plot_summary_acgs(power_acg, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     curve_colors, acg_ylim);
+if isfield(locking_acg, 'tail10') && isfield(power_acg, 'tail10')
+    if isfield(locking_acg, 'parameters') && isfield(locking_acg.parameters, 'tail10_low')
+        tail10_low = locking_acg.parameters.tail10_low;
+        tail10_high = locking_acg.parameters.tail10_high;
+    else
+        tail10_low = 10;
+        tail10_high = 90;
+    end
+    locking10_labels = { ...
+        sprintf('Low %g%% locking', tail10_low), ...
+        sprintf('High %g%% locking', 100 - tail10_high), ...
+        'All firing runs'};
+    power10_labels = { ...
+        sprintf('Low %g%% delta power', tail10_low), ...
+        sprintf('High %g%% delta power', 100 - tail10_high), ...
+        'All firing runs'};
+    locking_acg.tail10 = ensure_acg_clusters(locking_acg.tail10, group_order, group_title, ...
+        'locking, outer 10%', centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
+    power_acg.tail10 = ensure_acg_clusters(power_acg.tail10, group_order, group_title, ...
+        'delta power, outer 10%', centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
+    if isfield(locking_acg, 'parameters') && isfield(locking_acg.parameters, 'acg_ylim10')
+        acg_ylim10 = locking_acg.parameters.acg_ylim10;
+    else
+        acg_ylim10 = shared_mean_acg_ylim(locking_acg.tail10, power_acg.tail10, group_order, ...
+            centers, skip_abs_lag, smooth_n, 'outer 10%');
+    end
+    plot_summary_acgs(locking_acg.tail10, group_order, group_title, ...
+        locking10_labels, 'locking', centers, delta_lag, skip_abs_lag, smooth_n, ...
+        curve_colors, acg_ylim10, '', '', tail10_low);
+    plot_summary_acgs(power_acg.tail10, group_order, group_title, ...
+        power10_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
+        curve_colors, acg_ylim10, '', '', tail10_low);
+end
 if plot_rate_scaled_peaks
     plot_rate_scaled_mean_acgs(locking_acg, power_acg, bin_w, centers, ...
         group_order, group_title, locking_labels, power_labels, delta_lag, ...
@@ -1702,14 +1897,25 @@ for g = 1:numel(names)
         continue
     end
     group = summary.(names{g});
-    if ~isfield(group, 'low_high_clusters')
+    low_s = [];
+    high_s = [];
+    if ~isfield(group, 'low_high_clusters') || ~isfield(group, 'mirrored_clusters')
         low_s = smooth_acg_away_from_zero(group.low, centers, skip_abs_lag, smooth_n);
         high_s = smooth_acg_away_from_zero(group.high, centers, skip_abs_lag, smooth_n);
+    end
+    if ~isfield(group, 'low_high_clusters')
         group.low_high_clusters = paired_acg_clusters( ...
             low_s, high_s, centers, cluster_alpha, cluster_perm);
     end
+    if ~isfield(group, 'mirrored_clusters')
+        [low_f, high_f, pos_centers] = mirror_average_pair(low_s, high_s, centers);
+        group.mirrored_centers = pos_centers;
+        group.mirrored_clusters = paired_acg_clusters( ...
+            low_f, high_f, pos_centers, cluster_alpha, cluster_perm);
+    end
     disp_rule()
     report_acg_clusters(group.low_high_clusters, [titles{g}, ', ', split_name], split_name)
+    report_acg_clusters(group.mirrored_clusters, [titles{g}, ', ', split_name, ', mirrored'], split_name)
     summary.(names{g}) = group;
 end
 end
@@ -1733,6 +1939,34 @@ reprint_split_mass(locking_acg, group_order, group_title, locking_labels, ...
     'locking', centers, params.delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 reprint_split_mass(power_acg, group_order, group_title, power_labels, ...
     'delta power', centers, params.delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
+if isfield(locking_acg, 'tail10')
+    if isfield(params, 'tail10_low')
+        tail10_low = params.tail10_low;
+        tail10_high = params.tail10_high;
+    else
+        tail10_low = 10;
+        tail10_high = 90;
+    end
+    reprint_split_mass(locking_acg.tail10, group_order, group_title, ...
+        {sprintf('Low %g%% locking', tail10_low), ...
+         sprintf('High %g%% locking', 100 - tail10_high), 'All firing runs'}, ...
+        'locking, outer 10%', centers, params.delta_lag, skip_abs_lag, smooth_n, ...
+        cluster_alpha, cluster_perm);
+end
+if isfield(power_acg, 'tail10')
+    if isfield(params, 'tail10_low')
+        tail10_low = params.tail10_low;
+        tail10_high = params.tail10_high;
+    else
+        tail10_low = 10;
+        tail10_high = 90;
+    end
+    reprint_split_mass(power_acg.tail10, group_order, group_title, ...
+        {sprintf('Low %g%% delta power', tail10_low), ...
+         sprintf('High %g%% delta power', 100 - tail10_high), 'All firing runs'}, ...
+        'delta power, outer 10%', centers, params.delta_lag, skip_abs_lag, smooth_n, ...
+        cluster_alpha, cluster_perm);
+end
 if plot_rate_scaled_peaks
     rate_scaled_acg_stats(locking_acg, bin_w, group_order, group_title, ...
         locking_labels, 'locking', centers, params.delta_lag, skip_abs_lag, ...
@@ -2962,13 +3196,13 @@ end
 function report_split_contrast(group_acg, group_label, split_name)
 p_low = paired_signrank(group_acg.high_delta_mass, group_acg.low_delta_mass);
 p_all = paired_signrank(group_acg.high_delta_mass, group_acg.all_delta_mass);
-disp(sprintf('  %s two-sided signrank, high vs low 25%% %s: p = %.3g', group_label, split_name, p_low))
+disp(sprintf('  %s two-sided signrank, high vs low %s: p = %.3g', group_label, split_name, p_low))
 disp(sprintf('  %s two-sided signrank, high vs all runs: p = %.3g', group_label, p_all))
 end
 
 
 function report_acg_clusters(result, figure_label, split_name)
-disp(sprintf(['  %s cluster test, high vs low 25%% %s, positive lags: ' ...
+disp(sprintf(['  %s cluster test, high vs low %s, positive lags: ' ...
     'uncorrected signrank p < %.3g, %d sign flips'], ...
     figure_label, split_name, result.alpha, result.n_perm))
 if isempty(result.clusters)
@@ -2985,27 +3219,39 @@ for k = 1:numel(result.clusters)
     disp(sprintf('  Cluster %.3g-%.3g s, cluster p = %.3g, %s', ...
         cluster.x0, cluster.x1, cluster.p, fate))
 end
-disp('  Only clusters that survive are shaded, on the positive lags and on their negative mirrors.')
+disp('  Filled squares survive the cluster test. Open squares are signed-rank runs that do not.')
 end
 
 
-function shade_acg_clusters(result, y_lim)
-if isempty(result.clusters)
+function shade_acg_clusters(result, y_lim, mirror_negative)
+if nargin < 3 || isempty(mirror_negative)
+    mirror_negative = true;
+end
+if isempty(result) || ~isfield(result, 'clusters') || isempty(result.clusters)
     return
 end
 span = y_lim(2) - y_lim(1);
 y0 = y_lim(2) - 0.1 * span;
 y1 = y_lim(2);
 for k = 1:numel(result.clusters)
-    if ~result.clusters(k).survives
-        continue
-    end
     x0 = result.clusters(k).x0;
     x1 = result.clusters(k).x1;
+    draw_cluster_patch(x0, x1, y0, y1, result.clusters(k).survives);
+    if mirror_negative
+        draw_cluster_patch(-x1, -x0, y0, y1, result.clusters(k).survives);
+    end
+end
+end
+
+
+function draw_cluster_patch(x0, x1, y0, y1, filled)
+if filled
     patch([x0 x1 x1 x0], [y0 y0 y1 y1], [0.25 0.25 0.25], ...
         'FaceAlpha', 0.45, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-    patch([-x1 -x0 -x0 -x1], [y0 y0 y1 y1], [0.25 0.25 0.25], ...
-        'FaceAlpha', 0.45, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+else
+    patch([x0 x1 x1 x0], [y0 y0 y1 y1], 'w', ...
+        'FaceAlpha', 0, 'EdgeColor', [0.25 0.25 0.25], 'LineWidth', 1.2, ...
+        'HandleVisibility', 'off');
 end
 end
 
@@ -3025,19 +3271,71 @@ p = signrank(a, b, 'tail', tail);
 end
 
 
-function h = plot_mean_sem(t, M, col)
-mu = mean(M, 1, 'omitnan');
-n = sum(isfinite(M), 1);
-sem = std(M, 0, 1, 'omitnan') ./ sqrt(max(n, 1));
-fill_sem_finite(t, mu, sem, col)
+function h = plot_mean_ci95(t, M, col)
+[mu, lo, hi] = mean_ci95(M);
+fill_band_finite(t, lo, hi, col)
 h = plot(t, mu, 'Color', col, 'LineWidth', 2);
 end
 
 
-function fill_sem_finite(t, mu, sem, col)
-lo = mu - sem;
-hi = mu + sem;
-ok = isfinite(mu) & isfinite(lo) & isfinite(hi);
+function [mu, lo, hi] = mean_ci95(M)
+mu = mean(M, 1, 'omitnan');
+n = sum(isfinite(M), 1);
+sem = std(M, 0, 1, 'omitnan') ./ sqrt(max(n, 1));
+tcrit = tcrit95(max(n - 1, 1));
+tcrit(n < 2) = NaN;
+lo = mu - tcrit .* sem;
+hi = mu + tcrit .* sem;
+end
+
+
+function tcrit = tcrit95(df)
+if exist('tinv', 'file') == 2
+    tcrit = tinv(0.975, df);
+else
+    tcrit = 1.96 * ones(size(df));
+end
+end
+
+
+function y_lim = paired_difference_ylim(lo, hi)
+vals = [0, lo(isfinite(lo)), hi(isfinite(hi))];
+if numel(vals) < 2
+    y_lim = [-1 1];
+    return
+end
+span = max(vals) - min(vals);
+pad = 0.08 * max(span, eps);
+y_lim = [min(vals) - pad, max(vals) + pad];
+end
+
+
+function [low_f, high_f, pos_centers] = mirror_average_pair(low, high, centers)
+[low_f, pos_centers] = mirror_average_rows(low, centers);
+high_f = mirror_average_rows(high, centers);
+end
+
+
+function [folded, pos_centers] = mirror_average_rows(curves, centers)
+centers = centers(:).';
+pos = find(centers > 0);
+neg = find(centers < 0);
+neg = neg(end:-1:1);
+n = min(numel(pos), numel(neg));
+pos = pos(1:n);
+neg = neg(1:n);
+if n < 1 || max(abs(centers(pos) + centers(neg))) > 1e-6
+    folded = zeros(size(curves, 1), 0);
+    pos_centers = zeros(1, 0);
+    return
+end
+folded = (curves(:, pos) + curves(:, neg)) / 2;
+pos_centers = centers(pos);
+end
+
+
+function fill_band_finite(t, lo, hi, col)
+ok = isfinite(lo) & isfinite(hi);
 d = diff([false, ok, false]);
 i1 = find(d == 1);
 i2 = find(d == -1) - 1;
@@ -3053,8 +3351,8 @@ end
 
 
 function y_lim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, centers, skip_abs_lag, smooth_n, scale_label)
-% One vertical range for every mean autocorrelogram. The range is the
-% mean curve plus and minus its standard error, not the delta-band shade.
+% One vertical range for the mean-ACG panels of one tail split. The range
+% is the 95% confidence interval of each mean, not the delta-band shade.
 if nargin < 7 || isempty(scale_label)
     scale_label = 'sum-to-1 normalized autocorrelogram';
 end
@@ -3073,11 +3371,7 @@ for s = 1:numel(summaries)
         for c = 1:numel(curve_names)
             shown = smooth_acg_away_from_zero( ...
                 group.(curve_names{c}), centers, skip_abs_lag, smooth_n);
-            mu = mean(shown, 1, 'omitnan');
-            n = sum(isfinite(shown), 1);
-            sem = std(shown, 0, 1, 'omitnan') ./ sqrt(max(n, 1));
-            band_lo = mu - sem;
-            band_hi = mu + sem;
+            [~, band_lo, band_hi] = mean_ci95(shown);
             band_lo = band_lo(isfinite(band_lo));
             band_hi = band_hi(isfinite(band_hi));
             if ~isempty(band_lo)
