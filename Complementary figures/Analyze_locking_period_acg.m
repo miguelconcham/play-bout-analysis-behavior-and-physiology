@@ -99,11 +99,16 @@
 % and 500 spikes, how many neurons would receive each stratum count.
 % Beside that exact count is the cumulative: how many neurons have at
 % least that many strata. strata_preview_only stops after those figures.
-% The 4-then-2-then-1
-% rule is saved as locking_period_acg_summary_tail25.mat, with the tail
-% percent in the name. The maximized rule adds _max_strata before the
-% tail. A reprint or a figures-only redraw loads the file that matches
-% the current switch and the current tail_percent.
+% The 4-then-2-then-1 rule is saved as locking_period_acg_summary.mat.
+% The maximized rule is locking_period_acg_summary_max_strata.mat. These
+% files hold the strata, the models, and the per-neuron slopes. They do
+% not depend on tail_percent. The low-versus-high autocorrelograms are
+% saved apart from them, as locking_period_acg_tails_25.mat or
+% locking_period_acg_tails_10.mat. A later run that only changes the
+% tail loads the strata file and does not estimate it again. A later
+% run that only changes the stratum rule loads the tail file and does
+% not estimate those tails again. A reprint or a figures-only redraw
+% loads each file that matches the current switch.
 % Stratum power is the
 % duration-weighted mean. Burst, both prominences, firing rate, and the
 % folded autocorrelogram delta power are recomputed in the stratum. The
@@ -249,6 +254,8 @@ areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % are folders inside that percent. Statistics for those plots end with
 % the same percent, so a later run at 10 does not replace the 25 files.
 % Each model has its own subfolder. Model statistics do not use the tail.
+% The strata file and the tail file are separate, so changing one setting
+% does not overwrite the saved estimates of the other.
 figure_folder = '';
 % true reloads the summary that matches maximize_strata_number and
 % reprints the tests. Spikes are not reloaded and no figures are opened.
@@ -294,33 +301,63 @@ if reprint_stats_only
     end
     setappdata(0, 'locking_acg_figures', flags);
     setappdata(0, 'locking_acg_models_to_plot', []);
-    summary_path = locking_summary_path(parsing_folder, maximize_strata_number, tail_percent);
-    require_saved_summary(summary_path, maximize_strata_number, 'reprint_stats_only');
-    loaded = load(summary_path, 'locking_acg', 'power_acg');
-    assert_summary_strata_rule(loaded.locking_acg, maximize_strata_number, summary_path);
-    assert_summary_tail(loaded.locking_acg, tail_percent, summary_path);
-    smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
-    reprint_saved_statistics(loaded.locking_acg, loaded.power_acg, ...
-        group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
-        skip_abs_lag, acg_cluster_alpha, acg_cluster_perm);
-    disp(['Reprinted statistics from ', summary_path])
+    tail_path = tail_summary_path(parsing_folder, tail_percent);
+    base_path = base_summary_path(parsing_folder, maximize_strata_number);
+    if exist(tail_path, 'file') == 2
+        [tail_locking, tail_power] = load_analysis_summary(tail_path);
+        assert_summary_tail(tail_locking, tail_percent, tail_path);
+        smooth_n = max(1, round(smooth_half / median(diff(tail_locking.centers))));
+        reprint_saved_statistics(tail_locking, tail_power, ...
+            group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
+            skip_abs_lag, acg_cluster_alpha, acg_cluster_perm, 'tails');
+        disp(['Reprinted tail statistics from ', tail_path])
+    else
+        disp(['No tail file at ', tail_path, '. Tail statistics were not reprinted.'])
+    end
+    if exist(base_path, 'file') == 2
+        [base_locking, base_power] = load_analysis_summary(base_path);
+        assert_summary_strata_rule(base_locking, maximize_strata_number, base_path);
+        reprint_saved_statistics(base_locking, base_power, ...
+            group_order, group_title, false, 1, skip_abs_lag, ...
+            acg_cluster_alpha, acg_cluster_perm, 'models');
+        disp(['Reprinted strata and model statistics from ', base_path])
+    else
+        disp(['No strata file at ', base_path, '. Model statistics were not reprinted.'])
+    end
     stop_statistics_diary()
     return
 end
 
 if redraw_figures_only
-    summary_path = locking_summary_path(parsing_folder, maximize_strata_number, tail_percent);
-    require_saved_summary(summary_path, maximize_strata_number, 'redraw_figures_only');
-    loaded = load(summary_path, 'locking_acg', 'power_acg');
-    assert_summary_strata_rule(loaded.locking_acg, maximize_strata_number, summary_path);
-    assert_summary_tail(loaded.locking_acg, tail_percent, summary_path);
-    smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
-    [locking_acg, power_acg] = redraw_saved_figures(loaded.locking_acg, loaded.power_acg, ...
-        group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
-        skip_abs_lag, delta_lag, acg_cluster_alpha, acg_cluster_perm, ...
-        n_example_neurons);
-    save(summary_path, 'locking_acg', 'power_acg');
-    disp(['Drew figures from ', summary_path])
+    tail_path = tail_summary_path(parsing_folder, tail_percent);
+    base_path = base_summary_path(parsing_folder, maximize_strata_number);
+    if exist(tail_path, 'file') ~= 2 && exist(base_path, 'file') ~= 2
+        error('Analyze_locking_period_acg:nosummary', ...
+            'No tail file at %s and no strata file at %s.', tail_path, base_path);
+    end
+    if exist(tail_path, 'file') == 2
+        [locking_acg, power_acg] = load_analysis_summary(tail_path);
+        assert_summary_tail(locking_acg, tail_percent, tail_path);
+        smooth_n = max(1, round(smooth_half / median(diff(locking_acg.centers))));
+        [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, ...
+            group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
+            skip_abs_lag, delta_lag, acg_cluster_alpha, acg_cluster_perm, ...
+            n_example_neurons, 'tails');
+        save_tail_summary(tail_path, locking_acg, power_acg);
+        disp(['Drew tail figures from ', tail_path])
+    else
+        disp(['No tail file at ', tail_path, '. Tail figures were not drawn.'])
+    end
+    if exist(base_path, 'file') == 2
+        [base_locking, base_power] = load_analysis_summary(base_path);
+        assert_summary_strata_rule(base_locking, maximize_strata_number, base_path);
+        redraw_saved_figures(base_locking, base_power, ...
+            group_order, group_title, false, 1, skip_abs_lag, delta_lag, ...
+            acg_cluster_alpha, acg_cluster_perm, n_example_neurons, 'models');
+        disp(['Drew model figures from ', base_path])
+    else
+        disp(['No strata file at ', base_path, '. Model figures were not drawn.'])
+    end
     save_open_figures(figure_folder)
     stop_statistics_diary()
     return
@@ -359,9 +396,54 @@ if isempty(parsing_files)
         parsing_folder);
 end
 
-preview_stratum_choices(parsing_folder, all_neurons, id_all, lock_group, ...
-    source_order, areas_to_keep, stratum_min_lag_s, stratum_min_spikes, ...
-    maximize_strata_number, strata_preview_min_spikes);
+parameters = struct( ...
+    'alpha', alpha, ...
+    'non_entrained_p', non_entrained_p, ...
+    'low_percent', low_percent, ...
+    'high_percent', high_percent, ...
+    'tail_percent', tail_percent, ...
+    'delta_lag', delta_lag, ...
+    'acg_lag', acg_lag, ...
+    'smooth_half', smooth_half, ...
+    'skip_abs_lag', skip_abs_lag, ...
+    'acg_refractory_s', acg_refractory_s, ...
+    'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
+    'areas_to_keep', {areas_to_keep}, ...
+    'figure_folder', figure_folder, ...
+    'acg_cluster_alpha', acg_cluster_alpha, ...
+    'acg_cluster_perm', acg_cluster_perm, ...
+    'stratum_min_spikes', stratum_min_spikes, ...
+    'stratum_min_lag_s', stratum_min_lag_s, ...
+    'maximize_strata_number', maximize_strata_number, ...
+    'min_strata_per_neuron', min_strata_per_neuron, ...
+    'neuron_slope_alpha', neuron_slope_alpha, ...
+    'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
+base_path = base_summary_path(parsing_folder, maximize_strata_number);
+tail_path = tail_summary_path(parsing_folder, tail_percent);
+reuse_base = summary_is_reusable(base_path, parameters, 'base');
+reuse_tail = summary_is_reusable(tail_path, parameters, 'tail');
+collect_strata = ~reuse_base;
+collect_tails = ~reuse_tail;
+if reuse_base && reuse_tail
+    disp('The strata file and this tail file already match these settings.')
+    disp('No estimates are repeated. Tail figures are drawn from the saved file.')
+    [locking_acg, power_acg] = load_analysis_summary(tail_path);
+    smooth_n = max(1, round(smooth_half / median(diff(locking_acg.centers))));
+    redraw_saved_figures(locking_acg, power_acg, group_order, group_title, ...
+        plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, ...
+        acg_cluster_alpha, acg_cluster_perm, n_example_neurons, 'tails');
+    disp(['Strata and models stay in ', base_path])
+    save_open_figures(figure_folder)
+    stop_statistics_diary()
+    return
+end
+if ~reuse_base
+    preview_stratum_choices(parsing_folder, all_neurons, id_all, lock_group, ...
+        source_order, areas_to_keep, stratum_min_lag_s, stratum_min_spikes, ...
+        maximize_strata_number, strata_preview_min_spikes);
+else
+    disp(['Strata and models stay in ', base_path])
+end
 if strata_preview_only
     save_open_figures(figure_folder)
     stop_statistics_diary()
@@ -507,14 +589,19 @@ for f = 1:numel(parsing_files)
             this_rate = neuron_run_rate(rt);
             this_ppc = rt.phase_entrainment(:, ppc_col);
             this_power = run_delta_power(rt);
+            if collect_strata
+                strata_rows = append_neuron_power_strata(strata_rows, acg, edges, centers, ...
+                    run_length, this_power, rt, this_corrected, ...
+                    max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
+                    stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
+                    this_ppc, maximize_strata_number);
+                run_rows = append_run_rate_rows(run_rows, run_length, this_power, rt, ...
+                    animal_code, this_id, this_group);
+            end
+            if ~collect_tails
+                continue
+            end
             run_means = all_run_means(rt, acg, run_length, this_ppc, this_power);
-            strata_rows = append_neuron_power_strata(strata_rows, acg, edges, centers, ...
-                run_length, this_power, rt, this_corrected, ...
-                max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
-                stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
-                this_ppc, maximize_strata_number);
-            run_rows = append_run_rate_rows(run_rows, run_length, this_power, rt, ...
-                animal_code, this_id, this_group);
             pooled = pool_locking_period_acgs(acg, edges, run_length, ...
                 this_ppc, this_corrected, low_percent, high_percent);
             if split_is_usable(pooled)
@@ -554,31 +641,12 @@ if isempty(edges)
 end
 
 %% Normalize and plot
+if ~collect_tails && isempty(edges)
+    error('Analyze_locking_period_acg:nobins', 'No parsing struct contained ACG bin edges.');
+end
+if collect_tails
 smooth_n = max(1, round(smooth_half / bin_w));
 curve_colors = [0.20 0.45 0.75; 0.85 0.25 0.20; 0.15 0.15 0.15];
-parameters = struct( ...
-    'alpha', alpha, ...
-    'non_entrained_p', non_entrained_p, ...
-    'low_percent', low_percent, ...
-    'high_percent', high_percent, ...
-    'tail_percent', tail_percent, ...
-    'delta_lag', delta_lag, ...
-    'acg_lag', acg_lag, ...
-    'smooth_half', smooth_half, ...
-    'skip_abs_lag', skip_abs_lag, ...
-    'acg_refractory_s', acg_refractory_s, ...
-    'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
-    'areas_to_keep', {areas_to_keep}, ...
-    'figure_folder', figure_folder, ...
-    'acg_cluster_alpha', acg_cluster_alpha, ...
-    'acg_cluster_perm', acg_cluster_perm, ...
-    'stratum_min_spikes', stratum_min_spikes, ...
-    'stratum_min_lag_s', stratum_min_lag_s, ...
-    'maximize_strata_number', maximize_strata_number, ...
-    'min_strata_per_neuron', min_strata_per_neuron, ...
-    'neuron_slope_alpha', neuron_slope_alpha, ...
-    'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
-
 locking_labels = { ...
     sprintf('Low %g%% locking', low_percent), ...
     sprintf('High %g%% locking', 100 - high_percent), ...
@@ -636,6 +704,11 @@ if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean delta power of the runs', 'delta power', delta_lag);
 end
+else
+    [locking_acg, power_acg] = load_analysis_summary(tail_path);
+    disp(['Loaded tails from ', tail_path, '. Those tails are not estimated again.'])
+end
+if collect_strata
 locking_acg.delta_power_model = fit_delta_power_contributions( ...
     locking_acg, group_order, group_title);
 locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
@@ -659,39 +732,109 @@ locking_acg.oscillation_models = fit_oscillation_power_models( ...
     strata_rows, true, group_order, group_title);
 locking_acg.neuron_slopes = neuron_stratum_slopes( ...
     strata_rows, group_order, group_title, true);
-
-summary_path = locking_summary_path(parsing_folder, maximize_strata_number, tail_percent);
-save(summary_path, 'locking_acg', 'power_acg');
-disp(['Saved ', summary_path])
+save(base_path, 'locking_acg', 'power_acg');
+disp(['Saved strata and models in ', base_path])
+else
+    disp(['Left strata and models in ', base_path])
+end
+if collect_tails
+    save_tail_summary(tail_path, locking_acg, power_acg);
+    disp(['Saved tails in ', tail_path])
+end
 save_open_figures(figure_folder)
 stop_statistics_diary()
 
 
-function summary_path = locking_summary_path(parsing_folder, maximize_strata_number, tail_percent)
-if nargin < 3 || isempty(tail_percent)
-    tail_percent = tail_percent_now();
-end
+function summary_path = base_summary_path(parsing_folder, maximize_strata_number)
 if maximize_strata_number
-    file_name = sprintf('locking_period_acg_summary_max_strata_tail%g.mat', tail_percent);
+    file_name = 'locking_period_acg_summary_max_strata.mat';
 else
-    file_name = sprintf('locking_period_acg_summary_tail%g.mat', tail_percent);
+    file_name = 'locking_period_acg_summary.mat';
 end
 summary_path = fullfile(parsing_folder, file_name);
 end
 
 
-function require_saved_summary(summary_path, maximize_strata_number, switch_name)
-if exist(summary_path, 'file') == 2
+function summary_path = tail_summary_path(parsing_folder, tail_percent)
+if nargin < 2 || isempty(tail_percent)
+    tail_percent = tail_percent_now();
+end
+summary_path = fullfile(parsing_folder, ...
+    sprintf('locking_period_acg_tails_%g.mat', tail_percent));
+end
+
+
+function [locking_acg, power_acg] = load_analysis_summary(summary_path)
+loaded = load(summary_path, 'locking_acg', 'power_acg');
+locking_acg = loaded.locking_acg;
+power_acg = loaded.power_acg;
+end
+
+
+function save_tail_summary(summary_path, locking_acg, power_acg)
+locking_acg = strip_independent_estimates(locking_acg);
+power_acg = strip_independent_estimates(power_acg);
+save(summary_path, 'locking_acg', 'power_acg');
+end
+
+
+function summary = strip_independent_estimates(summary)
+drop = {'delta_power_model', 'delta_power_model_beyond_rate', 'power_strata', ...
+    'strata_power_model', 'strata_power_model_beyond_rate', 'strata_power_model_sequential', ...
+    'power_to_entrainment', 'ppc_model', 'ppc_model_beyond_rate', ...
+    'strata_ppc_model', 'strata_ppc_model_beyond_rate', 'strata_ppc_model_sequential', ...
+    'run_rate_power', 'run_rate_model', 'oscillation_models', 'neuron_slopes'};
+for i = 1:numel(drop)
+    if isfield(summary, drop{i})
+        summary = rmfield(summary, drop{i});
+    end
+end
+end
+
+
+function ok = summary_is_reusable(summary_path, current, kind)
+ok = false;
+if exist(summary_path, 'file') ~= 2
     return
 end
-if maximize_strata_number
-    rule = 'maximize_strata_number = true';
-else
-    rule = 'maximize_strata_number = false';
+loaded = load(summary_path, 'locking_acg');
+if ~isfield(loaded, 'locking_acg') || ~isfield(loaded.locking_acg, 'parameters')
+    disp(['Ignoring ', summary_path, ' because it has no saved settings.'])
+    return
 end
-error('Analyze_locking_period_acg:nosummary', ...
-    'No saved summary at %s. Run once with %s and %s = false.', ...
-    summary_path, rule, switch_name);
+if ~parameters_compatible(loaded.locking_acg.parameters, current, kind)
+    disp([summary_path, ' used different settings, so that part will be estimated again.'])
+    return
+end
+if strcmp(kind, 'base')
+    assert_summary_strata_rule(loaded.locking_acg, current.maximize_strata_number, summary_path);
+else
+    assert_summary_tail(loaded.locking_acg, current.tail_percent, summary_path);
+end
+ok = true;
+disp(['Keeping saved estimates in ', summary_path])
+end
+
+
+function ok = parameters_compatible(saved, current, kind)
+if strcmp(kind, 'base')
+    fields = {'alpha', 'non_entrained_p', 'delta_lag', 'acg_lag', 'smooth_half', ...
+        'skip_abs_lag', 'acg_refractory_s', 'stratum_min_spikes', 'stratum_min_lag_s', ...
+        'maximize_strata_number', 'min_strata_per_neuron', 'neuron_slope_alpha', ...
+        'areas_to_keep'};
+else
+    fields = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', 'tail_percent', ...
+        'delta_lag', 'acg_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s', ...
+        'acg_cluster_alpha', 'acg_cluster_perm', 'areas_to_keep'};
+end
+ok = true;
+for i = 1:numel(fields)
+    name = fields{i};
+    if ~isfield(saved, name) || ~isfield(current, name) || ~isequaln(saved.(name), current.(name))
+        ok = false;
+        return
+    end
+end
 end
 
 
@@ -1723,10 +1866,15 @@ end
 end
 
 
-function [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, cluster_alpha, cluster_perm, n_example_neurons)
+function [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, cluster_alpha, cluster_perm, n_example_neurons, figure_scope)
 if nargin < 11 || isempty(n_example_neurons)
     n_example_neurons = 20;
 end
+if nargin < 12 || isempty(figure_scope)
+    figure_scope = 'both';
+end
+do_tails = ~strcmp(figure_scope, 'models');
+do_models = ~strcmp(figure_scope, 'tails');
 centers = locking_acg.centers(:).';
 bin_w = median(diff(centers));
 if isfield(locking_acg, 'parameters') && isfield(locking_acg.parameters, 'low_percent')
@@ -1745,6 +1893,7 @@ power_labels = { ...
     sprintf('High %g%% delta power', 100 - high_percent), ...
     'All firing runs'};
 curve_colors = [0.20 0.45 0.75; 0.85 0.25 0.20; 0.15 0.15 0.15];
+if do_tails
 locking_acg = add_delta_locked_group(locking_acg);
 power_acg = add_delta_locked_group(power_acg);
 locking_acg = ensure_acg_clusters(locking_acg, group_order, group_title, ...
@@ -1797,6 +1946,8 @@ if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean delta power of the runs', 'delta power', delta_lag);
 end
+end
+if do_models
 model_has_delta = isfield(locking_acg, 'delta_power_model') ...
     && isfield(locking_acg.delta_power_model, 'groups') ...
     && isfield(locking_acg.delta_power_model.groups, 'delta');
@@ -1846,6 +1997,7 @@ if isfield(locking_acg, 'power_strata')
         locking_acg.power_strata, group_order, group_title, true);
 end
 end
+end
 
 
 function summary = ensure_acg_clusters(summary, group_order, group_title, split_name, centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm)
@@ -1881,7 +2033,13 @@ end
 end
 
 
-function reprint_saved_statistics(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, cluster_alpha, cluster_perm)
+function reprint_saved_statistics(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, cluster_alpha, cluster_perm, summary_scope)
+if nargin < 10 || isempty(summary_scope)
+    summary_scope = 'both';
+end
+do_tails = ~strcmp(summary_scope, 'models');
+do_models = ~strcmp(summary_scope, 'tails');
+if do_tails
 locking_acg = add_delta_locked_group(locking_acg);
 power_acg = add_delta_locked_group(power_acg);
 params = locking_acg.parameters;
@@ -1923,6 +2081,8 @@ if plot_rate_scaled_peaks
     report_peak_tests(power_hz, group_order, group_title, ...
         'Mean delta power of the runs', 'delta power', 'ratio');
 end
+end
+if do_models
 if power_model_is_stale(locking_acg, 'delta_power_model')
     locking_acg.delta_power_model = fit_delta_power_contributions( ...
         locking_acg, group_order, group_title, false);
@@ -1944,6 +2104,7 @@ fit_saved_run_rate_power(locking_acg, false);
 if isfield(locking_acg, 'power_strata')
     fit_oscillation_power_models(locking_acg.power_strata, false, group_order, group_title);
     neuron_stratum_slopes(locking_acg.power_strata, group_order, group_title, false);
+end
 end
 end
 
