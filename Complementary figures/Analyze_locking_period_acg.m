@@ -30,9 +30,10 @@
 % The lag axis runs to +/- 1 s. Saved histograms that stop at +/- 0.5 s are
 % rebuilt from the session spike times and the saved run intervals.
 % Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz side peak sits at the
-% edge of this window. The shading does not set the vertical scale. Every
-% mean autocorrelogram of one tail split uses one y limit, taken from the
-% highest and lowest 95% confidence interval, and rounded onto a short decimal.
+% edge of this window. The shading does not set the vertical scale. Each
+% mean autocorrelogram is scaled to its own 95% confidence interval, so
+% the curves fill the axis. The paired difference is symmetric about zero,
+% and both axes use a short decimal step.
 % Each mean autocorrelogram is two panels. The left panel is the low tail,
 % the high tail, and all runs, with a 95% confidence interval. The right
 % panel is the paired difference, high minus low, with its own 95%
@@ -1393,7 +1394,8 @@ draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, ...
 end
 
 
-function draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, curve_colors, acg_ylim, y_label, figure_kind, tail_percent, mirrored, group_acg, n_neurons)
+function draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, curve_colors, acg_ylim, y_label, figure_kind, tail_percent, mirrored, group_acg, n_neurons) %#ok<INUSD>
+% acg_ylim is the old shared scale. Each panel now uses its own limits.
 if mirrored
     fold_tag = 'mirrored';
     [folded, x] = mirror_average_rows(shown{1}, centers);
@@ -1432,11 +1434,12 @@ plotted = gobjects(1, numel(curves));
 for c = 1:numel(curves)
     plotted(c) = plot_mean_ci95(x, curves{c}, curve_colors(c, :));
 end
-finish_mean_acg_axis(x, acg_ylim, y_label, 'Means, 95% CI')
+mean_ylim = acg_panel_ylim(curves);
+finish_mean_acg_axis(x, mean_ylim, y_label, 'Means, 95% CI')
 legend(plotted, curve_labels, 'Location', 'best')
 place_delta_shade(shade)
 if ~isempty(clusters)
-    shade_acg_clusters(clusters, acg_ylim, mirror_bars)
+    shade_acg_clusters(clusters, mean_ylim, mirror_bars)
 end
 box off
 
@@ -1474,8 +1477,9 @@ else
     xlim([x(1) - half_bin, x(end) + half_bin])
 end
 ylim(y_lim)
-yticks(readable_acg_ticks(y_lim))
-ytickformat('%g')
+ticks = rounded_axis_ticks(y_lim);
+yticks(ticks)
+ytickformat(decimal_tick_format(ticks))
 xlabel('Lag (s)')
 ylabel(y_label)
 title(panel_title)
@@ -3450,14 +3454,112 @@ end
 
 
 function y_lim = paired_difference_ylim(lo, hi)
-vals = [0, lo(isfinite(lo)), hi(isfinite(hi))];
-if numel(vals) < 2
+extent = max(abs([0, lo(isfinite(lo)), hi(isfinite(hi))]));
+if ~isfinite(extent) || extent == 0
     y_lim = [-1 1];
     return
 end
-span = max(vals) - min(vals);
-pad = 0.08 * max(span, eps);
-y_lim = [min(vals) - pad, max(vals) + pad];
+y_lim = snapped_symmetric_limits(extent);
+end
+
+
+function y_lim = acg_panel_ylim(curves)
+lo = inf;
+hi = -inf;
+for c = 1:numel(curves)
+    [~, band_lo, band_hi] = mean_ci95(curves{c});
+    band_lo = band_lo(isfinite(band_lo));
+    band_hi = band_hi(isfinite(band_hi));
+    if ~isempty(band_lo)
+        lo = min(lo, min(band_lo));
+    end
+    if ~isempty(band_hi)
+        hi = max(hi, max(band_hi));
+    end
+end
+if ~isfinite(lo) || ~isfinite(hi) || hi <= lo
+    y_lim = [0 0.01];
+    return
+end
+if lo >= 0
+    lo = 0;
+end
+span = max(hi - lo, eps);
+target_hi = hi + 0.22 * span;
+target_lo = lo;
+if lo < 0
+    target_lo = lo - 0.08 * span;
+end
+y_lim = snapped_span_limits(target_lo, target_hi, lo, hi);
+end
+
+
+function y_lim = snapped_symmetric_limits(extent)
+target = extent * 1.35;
+step = nice_decimal(target / 2, 'ceil');
+if step <= 0
+    y_lim = [-1 1];
+    return
+end
+top = step * ceil(target / step - 1e-9);
+y_lim = [-top, top];
+end
+
+
+function y_lim = snapped_span_limits(target_lo, target_hi, data_lo, data_hi)
+span = max(target_hi - target_lo, eps);
+step = nice_decimal(span / 4, 'ceil');
+if step <= 0
+    y_lim = [target_lo, target_hi];
+    return
+end
+bottom = step * floor(target_lo / step + 1e-9);
+top = step * ceil(target_hi / step - 1e-9);
+if top <= data_hi
+    top = top + step;
+end
+if bottom >= data_lo && data_lo < 0
+    bottom = bottom - step;
+end
+y_lim = [bottom, top];
+end
+
+
+function ticks = rounded_axis_ticks(y_lim)
+span = y_lim(2) - y_lim(1);
+step = nice_decimal(span / 4, 'ceil');
+if step <= 0 || span / step < 2
+    step = nice_decimal(span / 4, 'floor');
+end
+if step <= 0
+    ticks = y_lim;
+    return
+end
+first = step * ceil(y_lim(1) / step - 1e-9);
+last = step * floor(y_lim(2) / step + 1e-9);
+if last < first
+    ticks = y_lim;
+    return
+end
+ticks = first:step:last;
+ticks = ticks(ticks >= y_lim(1) - step * 1e-6 & ticks <= y_lim(2) + step * 1e-6);
+if isempty(ticks)
+    ticks = y_lim;
+end
+end
+
+
+function fmt = decimal_tick_format(ticks)
+d = diff(ticks);
+d = d(d > 0);
+if isempty(d)
+    fmt = '%g';
+    return
+end
+step = min(d);
+places = max(0, ceil(-log10(step) - 1e-9));
+places = min(places, 6);
+fmt = sprintf('%%.%df', places);
 end
 
 
@@ -3502,8 +3604,8 @@ end
 
 
 function y_lim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, centers, skip_abs_lag, smooth_n, scale_label)
-% One vertical range for the mean-ACG panels of one tail split. The range
-% is the 95% confidence interval of each mean, not the delta-band shade.
+% One recorded span for the statistics file. Each plotted autocorrelogram
+% uses its own vertical scale, taken from that panel's 95% interval.
 if nargin < 7 || isempty(scale_label)
     scale_label = 'sum-to-1 normalized autocorrelogram';
 end
@@ -3535,9 +3637,9 @@ for s = 1:numel(summaries)
     end
 end
 y_lim = readable_acg_scale(lo, hi);
-disp_block(['Shared autocorrelogram scale, ', scale_label], true)
+disp_block(['Autocorrelogram scale, ', scale_label], true)
 disp(sprintf(['Mean autocorrelograms span %.4g to %.4g. ' ...
-    'Shared y limit is [%.4g %.4g].'], lo, hi, y_lim(1), y_lim(2)))
+    'Each figure is scaled to its own interval.'], lo, hi))
 end
 
 
