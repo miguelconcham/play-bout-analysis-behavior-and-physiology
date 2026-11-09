@@ -38,8 +38,11 @@
 % panel is the paired difference, high minus low, with its own 95%
 % confidence interval and a dashed line at zero. A second figure folds
 % each autocorrelogram about zero before the test and draws only the
-% positive lags. Open squares mark signed-rank runs that fail the
-% cluster test. Filled grey squares mark runs that survive. The bars sit
+% positive lags. Open squares mark runs where the same t interval drawn
+% on the paired difference excludes zero, but the sign-flip cluster test
+% does not. Filled grey squares mark runs that survive. The cluster
+% probability is the sign-flip probability of that t score, so it does
+% not assume the differences are normal. The bars sit
 % in the top tenth of each axis. On the unfolded figure they are mirrored
 % because the autocorrelogram is. The statistics report lists every
 % cluster, with its positive-lag range and cluster p-value. A cluster
@@ -3305,7 +3308,7 @@ end
 
 function report_acg_clusters(result, figure_label, split_name)
 disp(sprintf(['  %s cluster test, high vs low %s, positive lags: ' ...
-    'uncorrected signrank p < %.3g, %d sign flips'], ...
+    't interval excludes 0 at alpha %.3g, %d sign flips'], ...
     figure_label, split_name, result.alpha, result.n_perm))
 if isempty(result.clusters)
     disp('  No contiguous uncorrected difference.')
@@ -3321,7 +3324,8 @@ for k = 1:numel(result.clusters)
     disp(sprintf('  Cluster %.3g-%.3g s, cluster p = %.3g, %s', ...
         cluster.x0, cluster.x1, cluster.p, fate))
 end
-disp('  Filled squares survive the cluster test. Open squares are signed-rank runs that do not.')
+disp(['  Filled squares survive the sign-flip cluster test. Open squares are ' ...
+    'lags where the t interval excludes 0 but the cluster does not.'])
 end
 
 
