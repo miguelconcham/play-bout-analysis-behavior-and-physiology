@@ -38,7 +38,8 @@
 % Each mean autocorrelogram is two panels. The left panel is the low tail,
 % the high tail, and all runs, with a 95% confidence interval. The
 % all-runs mean is marked with its t1, t2, and, when a third cycle is
-% present, t3. The low and high tails are not marked. The right
+% present, t3. The same lags are marked on the paired difference, with
+% the high-minus-low value there. The low and high tails are not marked. The right
 % panel is the paired difference, high minus low, with its own 95%
 % confidence interval and a dashed line at zero. A second figure folds
 % each autocorrelogram about zero before the test and draws only the
@@ -1462,6 +1463,7 @@ place_delta_shade(shade)
 if ~isempty(clusters)
     shade_acg_clusters(clusters, diff_ylim, mirror_bars)
 end
+mark_all_runs_difference_peaks(shown, centers, x, mu, curve_labels, min(x) < 0)
 box off
 sgtitle({figure_label, sprintf( ...
     'n = %d    labels: uncorrected p    filled bars survive Bonferroni across 3 windows', n_neurons)})
@@ -1491,6 +1493,32 @@ end
 
 
 function mark_all_runs_mean_peaks(shown, curves, centers, plot_x, curve_labels, curve_colors, mirror_negative)
+[peaks, all_idx] = peaks_of_all_runs(shown, centers, curve_labels);
+if isempty(all_idx)
+    return
+end
+color = curve_colors(all_idx, :);
+plot_y = mean(curves{all_idx}, 1, 'omitnan');
+mark_one_mean_peak(peaks, 'first', 't1', color, plot_x, plot_y, mirror_negative, 'prominence');
+mark_one_mean_peak(peaks, 'second', 't2', color, plot_x, plot_y, mirror_negative, 'prominence');
+mark_one_mean_peak(peaks, 'third', 't3', color, plot_x, plot_y, mirror_negative, 'prominence');
+end
+
+
+function mark_all_runs_difference_peaks(shown, centers, plot_x, difference_mean, curve_labels, mirror_negative)
+[peaks, all_idx] = peaks_of_all_runs(shown, centers, curve_labels);
+if isempty(all_idx)
+    return
+end
+color = [0.15 0.15 0.15];
+mark_one_mean_peak(peaks, 'first', 't1', color, plot_x, difference_mean, mirror_negative, 'difference');
+mark_one_mean_peak(peaks, 'second', 't2', color, plot_x, difference_mean, mirror_negative, 'difference');
+mark_one_mean_peak(peaks, 'third', 't3', color, plot_x, difference_mean, mirror_negative, 'difference');
+end
+
+
+function [peaks, all_idx] = peaks_of_all_runs(shown, centers, curve_labels)
+peaks = struct();
 all_idx = [];
 for c = 1:numel(curve_labels)
     if strncmpi(curve_labels{c}, 'All', 3)
@@ -1498,20 +1526,19 @@ for c = 1:numel(curve_labels)
         break
     end
 end
-if isempty(all_idx) || all_idx > numel(shown) || all_idx > numel(curves)
+if isempty(all_idx) || all_idx > numel(shown)
+    all_idx = [];
     return
 end
 mu = mean(shown{all_idx}, 1, 'omitnan');
 peaks = acg_delta_peaks(mu, centers, 1);
-color = curve_colors(all_idx, :);
-plot_y = mean(curves{all_idx}, 1, 'omitnan');
-mark_one_mean_peak(peaks, 'first', 't1', color, plot_x, plot_y, mirror_negative);
-mark_one_mean_peak(peaks, 'second', 't2', color, plot_x, plot_y, mirror_negative);
-mark_one_mean_peak(peaks, 'third', 't3', color, plot_x, plot_y, mirror_negative);
 end
 
 
-function mark_one_mean_peak(peaks, which, tag, color, plot_x, plot_y, mirror_negative)
+function mark_one_mean_peak(peaks, which, tag, color, plot_x, plot_y, mirror_negative, value_mode)
+if nargin < 8 || isempty(value_mode)
+    value_mode = 'prominence';
+end
 if strcmp(which, 'first')
     present = peaks.first_present;
     lag = peaks.first_lag;
@@ -1529,32 +1556,48 @@ else
         prom = peaks.third_prominence;
     end
 end
-if ~present || ~isfinite(lag) || ~isfinite(prom)
+if ~present || ~isfinite(lag)
+    return
+end
+if strcmp(value_mode, 'prominence') && ~isfinite(prom)
     return
 end
 y = interp1(plot_x, plot_y, lag, 'nearest', NaN);
 if ~isfinite(y)
     return
 end
-draw_mean_peak_mark(lag, y, prom, tag, color);
+draw_mean_peak_mark(lag, y, prom, tag, color, value_mode);
 if mirror_negative
     y_neg = interp1(plot_x, plot_y, -lag, 'nearest', NaN);
     if isfinite(y_neg)
-        draw_mean_peak_mark(-lag, y_neg, prom, '', color);
+        draw_mean_peak_mark(-lag, y_neg, prom, '', color, value_mode);
     end
 end
 end
 
 
-function draw_mean_peak_mark(lag, y, prom, tag, color)
-plot([lag lag], [max(y - prom, 0), y], '-', 'Color', color, ...
+function draw_mean_peak_mark(lag, y, prom, tag, color, value_mode)
+if nargin < 6 || isempty(value_mode)
+    value_mode = 'prominence';
+end
+if strcmp(value_mode, 'difference')
+    y0 = 0;
+else
+    y0 = max(y - prom, 0);
+end
+plot([lag lag], [y0, y], '-', 'Color', color, ...
     'LineWidth', 1.3, 'HandleVisibility', 'off')
 plot(lag, y, 'o', 'Color', color, 'MarkerFaceColor', color, ...
     'MarkerSize', 5, 'HandleVisibility', 'off')
 if isempty(tag)
     return
 end
-text(lag, y, sprintf('  %s %d ms, prom %.3g', tag, round(1000 * lag), prom), ...
+if strcmp(value_mode, 'difference')
+    label = sprintf('  %s %d ms, %.3g', tag, round(1000 * lag), y);
+else
+    label = sprintf('  %s %d ms, prom %.3g', tag, round(1000 * lag), prom);
+end
+text(lag, y, label, ...
     'Color', color, 'FontSize', 8, 'VerticalAlignment', 'bottom', ...
     'Interpreter', 'none', 'HandleVisibility', 'off')
 end
