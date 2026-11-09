@@ -296,3 +296,24 @@ The joint test is that the three oscillatory slopes do not differ by type:
 
 The individual lines in the statistics file are each slope against zero.
 The figure shows the type-specific slopes and the joint type test.
+
+
+Per-neuron slopes
+-----------------
+Separate from Model15. A neuron enters only when it has at least
+min_strata_per_neuron finite strata. The default is 10. For that neuron,
+LFP delta power is the predictor and each autocorrelogram measure is its
+own outcome: ACG delta power, first-peak prominence, and second-cycle
+prominence.
+
+The slope is ordinary least squares after strata with a modified z-score
+above 3.5, on LFP power or on the outcome, are removed. It is reported
+only when at least 6 strata remain. Its p-value is the usual t-test.
+Spearman rank correlation uses every finite stratum and does not drop
+those points.
+
+Each outcome is summarized for all neurons and for each lock group:
+a histogram of the slopes, a violin with one point per neuron, the count
+of significantly positive and significantly negative slopes, and a
+Wilcoxon signed-rank test of the slopes against zero. The violin and the
+signed-rank test are repeated for the rank correlations.

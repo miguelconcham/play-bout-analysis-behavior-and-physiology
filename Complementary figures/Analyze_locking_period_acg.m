@@ -200,6 +200,8 @@ acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutof
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
 stratum_min_spikes = 200;   % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
+min_strata_per_neuron = 10; % strata required for a within-neuron LFP-to-ACG slope
+neuron_slope_alpha = 0.05;  % per-neuron threshold for a significant slope or rank correlation
 maximize_strata_number = false; % true: largest valid stratum count for each neuron
                                  % false: try 4, then 2, then 1
 strata_preview_min_spikes = [100 200 300 400 500];
@@ -220,6 +222,7 @@ show_paired_tests = [true true];        % paired low-versus-high scatters, cycle
 show_neuron_examples = [true true];     % example neuron autocorrelograms and spectra
 show_acg_spectra = [true true];         % low tail against high tail spectra
 show_strata_preview = [true true];      % spikes per neuron, and neurons by stratum count
+show_neuron_slopes = [true true];       % per-neuron LFP-to-ACG slopes and rank correlations
 models_to_plot = 1:15;           % which model figures to draw. Statistics are always printed.
                                  % [] draws none. [13 14 15] draws only the oscillation models.
                                  % 1 session, 2 beyond rate, 3 strata, 4 strata residual,
@@ -256,7 +259,10 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'paired_tests', show_paired_tests, ...
     'neuron_examples', show_neuron_examples, ...
     'acg_spectra', show_acg_spectra, ...
-    'strata_preview', show_strata_preview));
+    'strata_preview', show_strata_preview, ...
+    'neuron_slopes', show_neuron_slopes));
+setappdata(0, 'locking_acg_min_strata', min_strata_per_neuron);
+setappdata(0, 'locking_acg_slope_alpha', neuron_slope_alpha);
 setappdata(0, 'locking_acg_models_to_plot', models_to_plot(:).');
 start_statistics_diary(figure_folder)
 
@@ -546,6 +552,8 @@ parameters = struct( ...
     'stratum_min_spikes', stratum_min_spikes, ...
     'stratum_min_lag_s', stratum_min_lag_s, ...
     'maximize_strata_number', maximize_strata_number, ...
+    'min_strata_per_neuron', min_strata_per_neuron, ...
+    'neuron_slope_alpha', neuron_slope_alpha, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
 
 locking_labels = { ...
@@ -626,6 +634,8 @@ locking_acg.run_rate_power = run_rows;
 locking_acg = fit_saved_run_rate_power(locking_acg, true);
 locking_acg.oscillation_models = fit_oscillation_power_models( ...
     strata_rows, true, group_order, group_title);
+locking_acg.neuron_slopes = neuron_stratum_slopes( ...
+    strata_rows, group_order, group_title, true);
 
 summary_path = locking_summary_path(parsing_folder, maximize_strata_number);
 save(summary_path, 'locking_acg', 'power_acg');
@@ -789,6 +799,8 @@ function folder_name = figure_theme_folder(figure_name, day)
 model = regexp(figure_name, '^(Model\d+\s+[^,]*)', 'tokens', 'once');
 if ~isempty(model)
     theme = strtrim(model{1});
+elseif ~isempty(regexpi(figure_name, 'Neuron slopes', 'once'))
+    theme = 'Neuron slopes';
 elseif ~isempty(regexpi(figure_name, 'spike|stratum|strata', 'once'))
     theme = 'Strata preview';
 elseif ~isempty(regexpi(figure_name, 'delta power', 'once'))
@@ -1675,6 +1687,8 @@ locking_acg = fit_saved_run_rate_power(locking_acg, true);
 if isfield(locking_acg, 'power_strata')
     locking_acg.oscillation_models = fit_oscillation_power_models( ...
         locking_acg.power_strata, true, group_order, group_title);
+    locking_acg.neuron_slopes = neuron_stratum_slopes( ...
+        locking_acg.power_strata, group_order, group_title, true);
 end
 end
 
@@ -1763,6 +1777,7 @@ report_or_fit_ppc_models(locking_acg, group_order, group_title, false);
 fit_saved_run_rate_power(locking_acg, false);
 if isfield(locking_acg, 'power_strata')
     fit_oscillation_power_models(locking_acg.power_strata, false, group_order, group_title);
+    neuron_stratum_slopes(locking_acg.power_strata, group_order, group_title, false);
 end
 end
 
@@ -3359,6 +3374,351 @@ if do_plot
     plot_lock_group_slopes(result.row, group_order, group_title);
     plot_group_oscillation(result.group);
 end
+end
+
+
+function result = neuron_stratum_slopes(strata, group_order, group_title, do_plot)
+% One slope per neuron, for neurons with enough power strata. LFP delta
+% power is the predictor. The outcomes are ACG delta power, first-peak
+% prominence, and second-cycle prominence. A stratum is left out of that
+% neuron's slope when its modified z-score exceeds 3.5. Rank correlations
+% keep every finite stratum.
+if nargin < 4
+    do_plot = true;
+end
+min_n = 10;
+slope_alpha = 0.05;
+if isappdata(0, 'locking_acg_min_strata')
+    min_n = getappdata(0, 'locking_acg_min_strata');
+end
+if isappdata(0, 'locking_acg_slope_alpha')
+    slope_alpha = getappdata(0, 'locking_acg_slope_alpha');
+end
+min_clean = 6;
+outcome_fields = {'acg_delta', 'first_prominence', 'second_prominence'};
+outcome_titles = {'ACG delta power', 'First-peak prominence', 'Second-cycle prominence'};
+panel_names = [{'all'}, group_order];
+panel_titles = [{'All neurons'}, group_title];
+result = struct('min_n', min_n, 'alpha', slope_alpha, 'min_clean', min_clean, ...
+    'outcome_titles', {outcome_titles}, 'panel_titles', {panel_titles});
+disp_block('Neuron stratum slopes')
+disp(sprintf(['Neurons need at least %d finite strata. A slope then drops ' ...
+    'strata with modified z-score above 3.5 on LFP power or on the outcome, ' ...
+    'and is fit only when at least %d strata remain. Spearman correlations ' ...
+    'use every finite stratum.'], min_n, min_clean))
+disp(sprintf('  Per-neuron significance threshold = %.3g', slope_alpha))
+n_out = numel(outcome_fields);
+n_panel = numel(panel_names);
+for o = 1:n_out
+    for p = 1:n_panel
+        result.slope{o, p} = zeros(0, 1);
+        result.slope_p{o, p} = zeros(0, 1);
+        result.rho{o, p} = zeros(0, 1);
+        result.rho_p{o, p} = zeros(0, 1);
+        result.n_dropped{o, p} = zeros(0, 1);
+    end
+end
+if ~isfield(strata, 'neuron') || isempty(strata.neuron) || ~isfield(strata, 'power')
+    disp('Power strata are not in this summary. Run the full script once.')
+    return
+end
+[ids, ~, neuron_idx] = unique(strata.neuron(:), 'stable');
+for i = 1:numel(ids)
+    rows = find(neuron_idx == i);
+    this_group = strata.lock_group{rows(1)};
+    in_panel = false(1, n_panel);
+    in_panel(1) = true;
+    for p = 2:n_panel
+        in_panel(p) = in_lock_group({this_group}, panel_names{p});
+    end
+    x_all = strata.power(rows);
+    for o = 1:n_out
+        y_all = strata.(outcome_fields{o})(rows);
+        ok = isfinite(x_all) & isfinite(y_all);
+        x = x_all(ok);
+        y = y_all(ok);
+        if numel(x) < min_n
+            continue
+        end
+        [rho, rho_p] = rank_correlation(x, y);
+        [slope, slope_p, n_drop] = cleaned_neuron_slope(x, y, min_clean);
+        for p = 1:n_panel
+            if ~in_panel(p)
+                continue
+            end
+            if isfinite(rho)
+                result.rho{o, p}(end + 1, 1) = rho; %#ok<AGROW>
+                result.rho_p{o, p}(end + 1, 1) = rho_p; %#ok<AGROW>
+            end
+            if isfinite(slope)
+                result.slope{o, p}(end + 1, 1) = slope; %#ok<AGROW>
+                result.slope_p{o, p}(end + 1, 1) = slope_p; %#ok<AGROW>
+                result.n_dropped{o, p}(end + 1, 1) = n_drop; %#ok<AGROW>
+            end
+        end
+    end
+end
+for o = 1:n_out
+    disp_rule()
+    disp(outcome_titles{o})
+    for p = 1:n_panel
+        report_neuron_slope_panel(panel_titles{p}, result.slope{o, p}, ...
+            result.slope_p{o, p}, result.n_dropped{o, p}, ...
+            result.rho{o, p}, result.rho_p{o, p}, slope_alpha)
+    end
+end
+if do_plot && figure_selected('neuron_slopes')
+    plot_neuron_slope_histograms(result, outcome_titles, panel_titles, slope_alpha)
+    plot_neuron_slope_violins(result, outcome_titles, panel_titles, 'slope', ...
+        'Neuron slopes, violins', 'Within-neuron slope')
+    plot_neuron_slope_counts(result, outcome_titles, panel_titles, slope_alpha)
+    plot_neuron_slope_violins(result, outcome_titles, panel_titles, 'rho', ...
+        'Neuron slopes, rank violins', 'Spearman rho')
+end
+end
+
+
+function [slope, p, n_drop] = cleaned_neuron_slope(x, y, min_clean)
+slope = NaN;
+p = NaN;
+n_drop = 0;
+bad = clear_outlier_rows([x(:), y(:)]);
+n_drop = nnz(bad);
+x = x(~bad);
+y = y(~bad);
+n = numel(x);
+if n < min_clean || std(x, 0) <= 0 || std(y, 0) <= 0
+    return
+end
+A = [ones(n, 1), x(:)];
+coef = A \ y(:);
+resid = y(:) - A * coef;
+df = n - 2;
+ss = sum(resid .^ 2) / df;
+C = pinv(A' * A);
+se = sqrt(max(ss * C(2, 2), 0));
+if ~isfinite(se) || se <= 0
+    return
+end
+slope = coef(2);
+p = t_two_tailed(slope / se, df);
+end
+
+
+function [rho, p] = rank_correlation(x, y)
+rho = NaN;
+p = NaN;
+n = numel(x);
+if n < 3
+    return
+end
+rx = average_rank(x);
+ry = average_rank(y);
+rx = rx - mean(rx);
+ry = ry - mean(ry);
+den = sqrt(sum(rx .^ 2) * sum(ry .^ 2));
+if ~isfinite(den) || den <= 0
+    return
+end
+rho = sum(rx .* ry) / den;
+df = n - 2;
+tstat = rho * sqrt(df / max(1 - rho ^ 2, 1e-12));
+p = t_two_tailed(tstat, df);
+end
+
+
+function ranks = average_rank(x)
+[sorted, order] = sort(x(:));
+ranks = zeros(numel(x), 1);
+i = 1;
+n = numel(sorted);
+while i <= n
+    j = i;
+    while j < n && sorted(j + 1) == sorted(i)
+        j = j + 1;
+    end
+    ranks(order(i:j)) = (i + j) / 2;
+    i = j + 1;
+end
+end
+
+
+function report_neuron_slope_panel(label, slope, slope_p, n_dropped, rho, rho_p, alpha)
+disp(['  ', label])
+[n_pos, n_neg] = signed_significant_counts(slope, slope_p, alpha);
+disp(sprintf(['    Slopes: n = %d, median = %.3g, strata removed as outliers = %d, ' ...
+    'significant positive = %d, significant negative = %d'], ...
+    numel(slope), median(slope, 'omitnan'), sum(n_dropped), n_pos, n_neg))
+disp(sprintf('    Slopes versus 0: two-sided signrank p = %.3g, one-sided above 0 p = %.3g', ...
+    paired_signrank(slope, zeros(size(slope))), ...
+    paired_signrank(slope, zeros(size(slope)), 'right')))
+[n_pos, n_neg] = signed_significant_counts(rho, rho_p, alpha);
+disp(sprintf(['    Spearman: n = %d, median rho = %.3g, ' ...
+    'significant positive = %d, significant negative = %d'], ...
+    numel(rho), median(rho, 'omitnan'), n_pos, n_neg))
+disp(sprintf('    Spearman versus 0: two-sided signrank p = %.3g, one-sided above 0 p = %.3g', ...
+    paired_signrank(rho, zeros(size(rho))), ...
+    paired_signrank(rho, zeros(size(rho)), 'right')))
+end
+
+
+function [n_pos, n_neg] = signed_significant_counts(values, pvals, alpha)
+sig = isfinite(values) & isfinite(pvals) & pvals < alpha;
+n_pos = sum(sig & values > 0);
+n_neg = sum(sig & values < 0);
+end
+
+
+function plot_neuron_slope_histograms(result, outcome_titles, panel_titles, alpha)
+n_out = numel(outcome_titles);
+n_panel = numel(panel_titles);
+figure('Name', 'Neuron slopes, histograms', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.03 0.05 0.94 0.88])
+mark_figure_policy(gcf, 'neuron_slopes')
+for o = 1:n_out
+    edges = shared_hist_edges(result.slope(o, :));
+    for p = 1:n_panel
+        subplot(n_out, n_panel, (o - 1) * n_panel + p)
+        values = result.slope{o, p};
+        if isempty(values)
+            title(sprintf('%s\nn = 0', panel_titles{p}))
+            continue
+        end
+        histogram(values, edges, 'FaceColor', [0.25 0.38 0.62], 'EdgeColor', 'none')
+        hold on
+        yl = ylim;
+        plot([0 0], yl, '--', 'Color', [0.35 0.35 0.35])
+        [n_pos, n_neg] = signed_significant_counts(values, result.slope_p{o, p}, alpha);
+        title(sprintf('%s\nn = %d, +%d / -%d', panel_titles{p}, numel(values), n_pos, n_neg))
+        if p == 1
+            ylabel(outcome_titles{o})
+        end
+        box off
+    end
+end
+sgtitle('Within-neuron slopes after dropping extreme strata. The line is zero.')
+end
+
+
+function edges = shared_hist_edges(row)
+values = [];
+for p = 1:numel(row)
+    values = [values; row{p}(:)]; %#ok<AGROW>
+end
+values = values(isfinite(values));
+if numel(values) < 2
+    edges = [-1 0 1];
+    return
+end
+lo = min(min(values), 0);
+hi = max(max(values), 0);
+pad = 0.05 * max(hi - lo, eps);
+edges = linspace(lo - pad, hi + pad, 21);
+end
+
+
+function plot_neuron_slope_violins(result, outcome_titles, panel_titles, field, figure_name, value_name)
+n_out = numel(outcome_titles);
+n_panel = numel(panel_titles);
+p_field = [field, '_p'];
+figure('Name', figure_name, 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.03 0.05 0.94 0.88])
+mark_figure_policy(gcf, 'neuron_slopes')
+for o = 1:n_out
+    span = shared_value_span(result.(field)(o, :));
+    for p = 1:n_panel
+        subplot(n_out, n_panel, (o - 1) * n_panel + p)
+        values = result.(field){o, p};
+        pvals = result.(p_field){o, p};
+        draw_violin_scatter(values, pvals, result.alpha, span)
+        pop_p = paired_signrank(values, zeros(size(values)));
+        title(sprintf('%s\nmedian %.3g, signrank p = %.3g', ...
+            panel_titles{p}, median(values, 'omitnan'), pop_p))
+        if p == 1
+            ylabel(outcome_titles{o})
+        end
+    end
+end
+sgtitle({[value_name, ' by lock group'], ...
+    'Red is significantly positive, blue significantly negative, gray is not.'})
+end
+
+
+function span = shared_value_span(row)
+values = [];
+for p = 1:numel(row)
+    values = [values; row{p}(:)]; %#ok<AGROW>
+end
+values = values(isfinite(values));
+if isempty(values)
+    span = [-1 1];
+    return
+end
+lo = min(min(values), 0);
+hi = max(max(values), 0);
+pad = 0.08 * max(hi - lo, 1);
+span = [lo - pad, hi + pad];
+end
+
+
+function draw_violin_scatter(values, pvals, alpha, span)
+hold on
+plot([0.55 1.45], [0 0], '--', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+values = values(:);
+pvals = pvals(:);
+ok = isfinite(values);
+values = values(ok);
+pvals = pvals(ok);
+if numel(values) >= 2 && std(values, 0) > 0
+    grid = linspace(span(1), span(2), 80)';
+    scale = 0.12 * max(std(values, 0), eps);
+    width = exp(-0.5 * (bsxfun(@minus, grid, values(:)') ./ scale) .^ 2);
+    density = sum(width, 2);
+    density = 0.32 * density / max(density);
+    fill([1 - density; flipud(1 + density)], [grid; flipud(grid)], ...
+        [0.75 0.80 0.86], 'EdgeColor', 'none', 'HandleVisibility', 'off')
+end
+for i = 1:numel(values)
+    x = 1 + 0.12 * sin(i * 12.9898);
+    if isfinite(pvals(i)) && pvals(i) < alpha && values(i) > 0
+        col = [0.75 0.12 0.14];
+    elseif isfinite(pvals(i)) && pvals(i) < alpha && values(i) < 0
+        col = [0.20 0.40 0.72];
+    else
+        col = [0.45 0.45 0.45];
+    end
+    plot(x, values(i), '.', 'Color', col, 'MarkerSize', 10, 'HandleVisibility', 'off')
+end
+xlim([0.45 1.55])
+ylim(span)
+set(gca, 'XTick', [])
+box off
+end
+
+
+function plot_neuron_slope_counts(result, outcome_titles, panel_titles, alpha)
+n_out = numel(outcome_titles);
+n_panel = numel(panel_titles);
+figure('Name', 'Neuron slopes, significant counts', 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.06 0.12 0.88 0.72])
+mark_figure_policy(gcf, 'neuron_slopes')
+for o = 1:n_out
+    counts = zeros(n_panel, 2);
+    for p = 1:n_panel
+        [counts(p, 1), counts(p, 2)] = signed_significant_counts( ...
+            result.slope{o, p}, result.slope_p{o, p}, alpha);
+    end
+    subplot(1, n_out, o)
+    bar(counts)
+    set(gca, 'XTick', 1:n_panel, 'XTickLabel', panel_titles, 'XTickLabelRotation', 20)
+    ylabel('Neurons')
+    title(outcome_titles{o})
+    if o == n_out
+        legend({'Significant positive', 'Significant negative'}, 'Location', 'northeast')
+    end
+    box off
+end
+sgtitle(sprintf('Slopes with two-sided p < %.3g after outlier removal', alpha))
 end
 
 
