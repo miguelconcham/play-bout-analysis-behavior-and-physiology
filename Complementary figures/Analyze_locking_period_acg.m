@@ -7,13 +7,14 @@
 % trough-locked, peak-locked (PPC p < alpha, split at +/- pi/2), or
 % non-entrained (PPC p >= 0.1). Delta-locked is the peak-locked and
 % trough-locked neurons together. For each neuron the saved runs are split
-% twice, each time at that neuron's own values: bottom 25% and top 25% of
-% PPC, and bottom 25% and top 25% of delta power. A neuron is plotted for
+% twice, each time at that neuron's own values. tail_percent is the low
+% tail. The high tail is the mirror, so 25 means bottom 25% and top 25%
+% (the 75th percentile) and 10 means bottom 10% and top 10%. A neuron is plotted for
 % a split only when at least four of its runs have that score, so the two
 % tails are separated. The third curve pools every firing run. Delta power
 % is the square of the median delta-band envelope stored in lfp_param
 % column 2. Squaring does not change which runs fall in the outer
-% quartiles. The estimate stores autocorrelograms inside firing runs, so
+% tails. The estimate stores autocorrelograms inside firing runs, so
 % spikes that fall in the gaps between runs are not in these curves.
 %
 % Only areas_to_keep are analyzed. The depth tables label superior
@@ -37,14 +38,37 @@
 % The lag axis runs to +/- 1 s. Saved histograms that stop at +/- 0.5 s are
 % rebuilt from the session spike times and the saved run intervals.
 % Shading marks lags of 0.2-0.5 s (2-5 Hz). A 1 Hz side peak sits at the
-% edge of this window. The shading does not set the vertical scale. Every
-% mean autocorrelogram uses one y limit, taken from the highest and lowest
-% mean plus or minus its standard error, and rounded onto a short decimal.
-% On each mean autocorrelogram, grey bars in the top tenth of the axis mark
-% clusters that survive the sign-flip test. The bars are mirrored because
-% the autocorrelogram is. The statistics report lists every cluster, with
-% its positive-lag range and cluster p-value, including those that do not
-% survive. A cluster survives when that p-value is at or below acg_cluster_alpha.
+% edge of this window. The shading does not set the vertical scale. Each
+% mean autocorrelogram is scaled to its own 95% confidence interval, so
+% the curves fill the axis instead of sitting on a scale that starts at
+% zero. The paired difference is symmetric about zero. Tick labels are
+% short rounded numbers, such as 1.4 or 1.5.
+% Each mean autocorrelogram is two panels. The left panel is the low tail,
+% the high tail, and all runs, with a 95% confidence interval. The
+% all-runs mean is marked with its t1, t2, and, when a third cycle is
+% present, t3. mean_acg_peak_height is the prominence required for those
+% labels only, as a fraction of the 10-90% range. The same lags are marked
+% on the paired difference, with the high-minus-low value there. The low
+% and high tails are not marked. The right
+% panel is the paired difference, high minus low, with its own 95%
+% confidence interval and a dashed line at zero. A second figure folds
+% each autocorrelogram about zero before the test and draws only the
+% positive lags. The search is split into 0-200 ms, 200-400 ms, and
+% 400-600 ms, so the burst does not set the null for a peak. Each window
+% has its own sign-flip cluster test. Bonferroni then corrects those
+% three tests. Open squares mark runs where the t interval excludes zero
+% but the corrected cluster test does not. Filled grey squares mark runs
+% that survive. The number on a square is that cluster's uncorrected
+% p-value. The cluster probability is the sign-flip probability of that
+% t score, so it does not assume the differences are normal. The bars sit
+% in the top tenth of each axis. On the unfolded figure they are mirrored
+% because the autocorrelogram is. The statistics report lists every
+% cluster, with its window, positive-lag range, uncorrected p-value, and
+% Bonferroni p-value. A cluster survives when the Bonferroni p-value is
+% at or below acg_cluster_alpha.
+% Set tail_percent and run the script again to write the same figures
+% for another split. A run at 25 and a run at 10 keep separate folders
+% and separate statistics files.
 %
 % Each plotted autocorrelogram is also scored neuron by neuron. The burst
 % is the mean level from the first positive bin through 50 ms. A local
@@ -99,12 +123,21 @@
 % and 500 spikes, how many neurons would receive each stratum count.
 % Beside that exact count is the cumulative: how many neurons have at
 % least that many strata. strata_preview_only stops after those figures.
-% The 4-then-2-then-1
-% rule with acg_method 'overlap' is saved as locking_period_acg_summary.mat.
-% 'eligible' inserts _eligible before .mat, so a new estimate does not
-% replace that file. The maximized rule adds _max_strata in the same way.
-% A reprint or a figures-only redraw loads the file that matches both
-% the strata switch and acg_method.
+% The 4-then-2-then-1 rule with acg_method 'overlap' is saved as
+% locking_period_acg_summary.mat. The maximized rule is
+% locking_period_acg_summary_max_strata.mat. 'eligible' inserts
+% _eligible before .mat, so a new estimate does not replace an overlap
+% file. These files hold the strata, the models, and the per-neuron
+% slopes. They do not depend on tail_percent. The low-versus-high
+% autocorrelograms are saved apart from them, as
+% locking_period_acg_tails_25.mat or locking_period_acg_tails_10.mat
+% for overlap, and locking_period_acg_tails_eligible_25.mat for the
+% eligible-spike method. A later run that only changes the tail loads
+% the strata file for the same method and does not estimate it again.
+% A later run that only changes the stratum rule loads the tail file
+% for the same method. A reprint or a figures-only redraw loads each
+% file that matches the current switch and acg_method. A summary saved
+% before this selector has no method and is treated as overlap.
 % Stratum power is the
 % duration-weighted mean. Burst, both prominences, firing rate, and the
 % folded autocorrelogram delta power are recomputed in the stratum. The
@@ -201,15 +234,18 @@ npx_root       = fullfile(data_root, 'NPX data', 'NPX raw data');
 
 alpha            = 0.01;
 non_entrained_p  = 0.1;
-low_percent      = 25;
-high_percent     = 75;
+tail_percent     = 25;  % low tail. The high tail is 100 minus this value.
+low_percent      = tail_percent;
+high_percent     = 100 - tail_percent;
 delta_lag        = [0.2 0.5];   % s, 5 Hz to 2 Hz
 acg_lag          = 1;       % s, half-width of the autocorrelogram axis
 smooth_half      = 0.06;        % s, full smooth width; Gaussian sigma is a quarter of this (15 ms)
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
-acg_cluster_alpha = 0.05;  % uncorrected paired threshold, and the cluster cutoff
+acg_cluster_alpha = 0.05;  % t interval and Bonferroni cluster cutoff
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
+mean_acg_peak_height = 0.02; % mean ACG labels only. Fraction of the 10-90% range.
+                             % Neuron peak scores stay at one fifth. Set 0 to keep every local maximum that passes the other checks.
 stratum_min_spikes = 200;   % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
 min_strata_per_neuron = 10; % strata required for a within-neuron LFP-to-ACG slope
@@ -244,22 +280,29 @@ models_to_plot = 1:15;           % which model figures to draw. Statistics are a
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 % Leave empty to keep figures on screen only. Otherwise statistics text
 % files are written here, and figures are written in dated subfolders.
-% PPC and Power hold the autocorrelograms, paired comparisons, and the
-% related example and spectrum figures. Each model has its own subfolder.
+% Plots that use the tail split go in PPC_date/25% or Power_date/25%
+% (the number is tail_percent). Mirrored and non-mirrored autocorrelograms
+% are folders inside that percent. Statistics for those plots end with
+% the same percent, so a later run at 10 does not replace the 25 files.
+% Each model has its own subfolder. Model statistics do not use the tail.
+% The strata file and the tail file are separate, so changing one setting
+% does not overwrite the saved estimates of the other.
 figure_folder = '';
 % true reloads the summary that matches maximize_strata_number and
-% acg_method, and reprints the tests. Spikes are not reloaded and no
-% figures are opened. A non-empty figure_folder receives one text file
-% per model type.
+% reprints the tests. Spikes are not reloaded and no figures are opened.
+% A non-empty figure_folder receives one text file per model type.
 reprint_stats_only = false;
-% true reloads that same summary and draws the figures. Spike files are
-% not read. Cluster bars are computed from the saved curves when the
-% summary does not already contain them.
+% true reloads that same summary and draws the figures that are selected.
+% A show_* pair is used when either entry is true. A model is refit only
+% when its number is in models_to_plot. Spike files are not read. Cluster
+% bars are computed from the saved curves when the summary does not
+% already contain them.
 redraw_figures_only = false;
 % 'eligible': one observation per spike that can see the whole bin.
 % 'overlap': pair counts / (T-|lag|), and the summaries already saved
 % under that method.
 acg_method = 'eligible';
+acg_method = canonical_acg_method(acg_method);
 
 source_order = {'trough', 'peak', 'nonentrained'};
 source_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -281,7 +324,13 @@ setappdata(0, 'locking_acg_figures', struct( ...
 setappdata(0, 'locking_acg_min_strata', min_strata_per_neuron);
 setappdata(0, 'locking_acg_slope_alpha', neuron_slope_alpha);
 setappdata(0, 'locking_acg_models_to_plot', models_to_plot(:).');
-acg_method = canonical_acg_method(acg_method);
+if ~(isfinite(tail_percent) && tail_percent > 0 && tail_percent < 50)
+    error('Analyze_locking_period_acg:tail', ...
+        'tail_percent must be greater than 0 and less than 50. The high tail is 100 minus that value.');
+end
+setappdata(0, 'locking_acg_tail_percent', tail_percent);
+setappdata(0, 'locking_acg_mean_peak_height', mean_acg_peak_height);
+setappdata(0, 'locking_acg_method', acg_method);
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -292,33 +341,67 @@ if reprint_stats_only
     end
     setappdata(0, 'locking_acg_figures', flags);
     setappdata(0, 'locking_acg_models_to_plot', []);
-    summary_path = locking_summary_path(parsing_folder, maximize_strata_number, acg_method);
-    require_saved_summary(summary_path, maximize_strata_number, 'reprint_stats_only', acg_method);
-    loaded = load(summary_path, 'locking_acg', 'power_acg');
-    assert_summary_strata_rule(loaded.locking_acg, maximize_strata_number, summary_path);
-    assert_summary_method(loaded.locking_acg, acg_method, summary_path);
-    smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
-    reprint_saved_statistics(loaded.locking_acg, loaded.power_acg, ...
-        group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
-        skip_abs_lag, acg_cluster_alpha, acg_cluster_perm);
-    disp(['Reprinted statistics from ', summary_path])
+    tail_path = tail_summary_path(parsing_folder, tail_percent, acg_method);
+    base_path = base_summary_path(parsing_folder, maximize_strata_number, acg_method);
+    if exist(tail_path, 'file') == 2
+        [tail_locking, tail_power] = load_analysis_summary(tail_path);
+        assert_summary_tail(tail_locking, tail_percent, tail_path);
+        assert_summary_method(tail_locking, acg_method, tail_path);
+        smooth_n = max(1, round(smooth_half / median(diff(tail_locking.centers))));
+        reprint_saved_statistics(tail_locking, tail_power, ...
+            group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
+            skip_abs_lag, acg_cluster_alpha, acg_cluster_perm, 'tails');
+        disp(['Reprinted tail statistics from ', tail_path])
+    else
+        disp(['No tail file at ', tail_path, '. Tail statistics were not reprinted.'])
+    end
+    if exist(base_path, 'file') == 2
+        [base_locking, base_power] = load_analysis_summary(base_path);
+        assert_summary_strata_rule(base_locking, maximize_strata_number, base_path);
+        assert_summary_method(base_locking, acg_method, base_path);
+        reprint_saved_statistics(base_locking, base_power, ...
+            group_order, group_title, false, 1, skip_abs_lag, ...
+            acg_cluster_alpha, acg_cluster_perm, 'models');
+        disp(['Reprinted strata and model statistics from ', base_path])
+    else
+        disp(['No strata file at ', base_path, '. Model statistics were not reprinted.'])
+    end
     stop_statistics_diary()
     return
 end
 
 if redraw_figures_only
-    summary_path = locking_summary_path(parsing_folder, maximize_strata_number, acg_method);
-    require_saved_summary(summary_path, maximize_strata_number, 'redraw_figures_only', acg_method);
-    loaded = load(summary_path, 'locking_acg', 'power_acg');
-    assert_summary_strata_rule(loaded.locking_acg, maximize_strata_number, summary_path);
-    assert_summary_method(loaded.locking_acg, acg_method, summary_path);
-    smooth_n = max(1, round(smooth_half / median(diff(loaded.locking_acg.centers))));
-    [locking_acg, power_acg] = redraw_saved_figures(loaded.locking_acg, loaded.power_acg, ...
-        group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
-        skip_abs_lag, delta_lag, acg_cluster_alpha, acg_cluster_perm, ...
-        n_example_neurons);
-    save(summary_path, 'locking_acg', 'power_acg');
-    disp(['Drew figures from ', summary_path])
+    tail_path = tail_summary_path(parsing_folder, tail_percent, acg_method);
+    base_path = base_summary_path(parsing_folder, maximize_strata_number, acg_method);
+    if exist(tail_path, 'file') ~= 2 && exist(base_path, 'file') ~= 2
+        error('Analyze_locking_period_acg:nosummary', ...
+            'No tail file at %s and no strata file at %s.', tail_path, base_path);
+    end
+    if exist(tail_path, 'file') == 2
+        [locking_acg, power_acg] = load_analysis_summary(tail_path);
+        assert_summary_tail(locking_acg, tail_percent, tail_path);
+        assert_summary_method(locking_acg, acg_method, tail_path);
+        smooth_n = max(1, round(smooth_half / median(diff(locking_acg.centers))));
+        [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, ...
+            group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
+            skip_abs_lag, delta_lag, acg_cluster_alpha, acg_cluster_perm, ...
+            n_example_neurons, 'tails');
+        save_tail_summary(tail_path, locking_acg, power_acg);
+        disp(['Drew tail figures from ', tail_path])
+    else
+        disp(['No tail file at ', tail_path, '. Tail figures were not drawn.'])
+    end
+    if exist(base_path, 'file') == 2
+        [base_locking, base_power] = load_analysis_summary(base_path);
+        assert_summary_strata_rule(base_locking, maximize_strata_number, base_path);
+        assert_summary_method(base_locking, acg_method, base_path);
+        redraw_saved_figures(base_locking, base_power, ...
+            group_order, group_title, false, 1, skip_abs_lag, delta_lag, ...
+            acg_cluster_alpha, acg_cluster_perm, n_example_neurons, 'models');
+        disp(['Drew model figures from ', base_path])
+    else
+        disp(['No strata file at ', base_path, '. Model figures were not drawn.'])
+    end
     save_open_figures(figure_folder)
     stop_statistics_diary()
     return
@@ -357,9 +440,55 @@ if isempty(parsing_files)
         parsing_folder);
 end
 
-preview_stratum_choices(parsing_folder, all_neurons, id_all, lock_group, ...
-    source_order, areas_to_keep, stratum_min_lag_s, stratum_min_spikes, ...
-    maximize_strata_number, strata_preview_min_spikes);
+parameters = struct( ...
+    'alpha', alpha, ...
+    'non_entrained_p', non_entrained_p, ...
+    'low_percent', low_percent, ...
+    'high_percent', high_percent, ...
+    'tail_percent', tail_percent, ...
+    'delta_lag', delta_lag, ...
+    'acg_lag', acg_lag, ...
+    'smooth_half', smooth_half, ...
+    'skip_abs_lag', skip_abs_lag, ...
+    'acg_refractory_s', acg_refractory_s, ...
+    'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
+    'areas_to_keep', {areas_to_keep}, ...
+    'figure_folder', figure_folder, ...
+    'acg_cluster_alpha', acg_cluster_alpha, ...
+    'acg_cluster_perm', acg_cluster_perm, ...
+    'stratum_min_spikes', stratum_min_spikes, ...
+    'stratum_min_lag_s', stratum_min_lag_s, ...
+    'maximize_strata_number', maximize_strata_number, ...
+    'min_strata_per_neuron', min_strata_per_neuron, ...
+    'neuron_slope_alpha', neuron_slope_alpha, ...
+    'acg_method', acg_method, ...
+    'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
+base_path = base_summary_path(parsing_folder, maximize_strata_number, acg_method);
+tail_path = tail_summary_path(parsing_folder, tail_percent, acg_method);
+reuse_base = summary_is_reusable(base_path, parameters, 'base');
+reuse_tail = summary_is_reusable(tail_path, parameters, 'tail');
+collect_strata = ~reuse_base;
+collect_tails = ~reuse_tail;
+if reuse_base && reuse_tail
+    disp('The strata file and this tail file already match these settings.')
+    disp('No estimates are repeated. Tail figures are drawn from the saved file.')
+    [locking_acg, power_acg] = load_analysis_summary(tail_path);
+    smooth_n = max(1, round(smooth_half / median(diff(locking_acg.centers))));
+    redraw_saved_figures(locking_acg, power_acg, group_order, group_title, ...
+        plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, ...
+        acg_cluster_alpha, acg_cluster_perm, n_example_neurons, 'tails');
+    disp(['Strata and models stay in ', base_path])
+    save_open_figures(figure_folder)
+    stop_statistics_diary()
+    return
+end
+if ~reuse_base
+    preview_stratum_choices(parsing_folder, all_neurons, id_all, lock_group, ...
+        source_order, areas_to_keep, stratum_min_lag_s, stratum_min_spikes, ...
+        maximize_strata_number, strata_preview_min_spikes);
+else
+    disp(['Strata and models stay in ', base_path])
+end
 if strata_preview_only
     save_open_figures(figure_folder)
     stop_statistics_diary()
@@ -518,14 +647,19 @@ for f = 1:numel(parsing_files)
             this_rate = neuron_run_rate(rt);
             this_ppc = rt.phase_entrainment(:, ppc_col);
             this_power = run_delta_power(rt);
+            if collect_strata
+                strata_rows = append_neuron_power_strata(strata_rows, acg, edges, centers, ...
+                    run_length, this_power, rt, this_corrected, ...
+                    max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
+                    stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
+                    this_ppc, maximize_strata_number, acg_method, n_eligible);
+                run_rows = append_run_rate_rows(run_rows, run_length, this_power, rt, ...
+                    animal_code, this_id, this_group);
+            end
+            if ~collect_tails
+                continue
+            end
             run_means = all_run_means(rt, acg, run_length, this_ppc, this_power);
-            strata_rows = append_neuron_power_strata(strata_rows, acg, edges, centers, ...
-                run_length, this_power, rt, this_corrected, ...
-                max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
-                stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
-                this_ppc, maximize_strata_number, acg_method, n_eligible);
-            run_rows = append_run_rate_rows(run_rows, run_length, this_power, rt, ...
-                animal_code, this_id, this_group);
             pooled = pool_period_acgs(acg, n_eligible, edges, run_length, ...
                 this_ppc, this_corrected, low_percent, high_percent, acg_method);
             if split_is_usable(pooled)
@@ -565,31 +699,12 @@ if isempty(edges)
 end
 
 %% Normalize and plot
+if ~collect_tails && isempty(edges)
+    error('Analyze_locking_period_acg:nobins', 'No parsing struct contained ACG bin edges.');
+end
+if collect_tails
 smooth_n = max(1, round(smooth_half / bin_w));
 curve_colors = [0.20 0.45 0.75; 0.85 0.25 0.20; 0.15 0.15 0.15];
-parameters = struct( ...
-    'alpha', alpha, ...
-    'non_entrained_p', non_entrained_p, ...
-    'low_percent', low_percent, ...
-    'high_percent', high_percent, ...
-    'delta_lag', delta_lag, ...
-    'acg_lag', acg_lag, ...
-    'smooth_half', smooth_half, ...
-    'skip_abs_lag', skip_abs_lag, ...
-    'acg_refractory_s', acg_refractory_s, ...
-    'plot_rate_scaled_peaks', plot_rate_scaled_peaks, ...
-    'areas_to_keep', {areas_to_keep}, ...
-    'figure_folder', figure_folder, ...
-    'acg_cluster_alpha', acg_cluster_alpha, ...
-    'acg_cluster_perm', acg_cluster_perm, ...
-    'stratum_min_spikes', stratum_min_spikes, ...
-    'stratum_min_lag_s', stratum_min_lag_s, ...
-    'maximize_strata_number', maximize_strata_number, ...
-    'min_strata_per_neuron', min_strata_per_neuron, ...
-    'neuron_slope_alpha', neuron_slope_alpha, ...
-    'acg_method', acg_method, ...
-    'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
-
 locking_labels = { ...
     sprintf('Low %g%% locking', low_percent), ...
     sprintf('High %g%% locking', 100 - high_percent), ...
@@ -647,6 +762,11 @@ if plot_rate_scaled_peaks
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean delta power of the runs', 'delta power', delta_lag);
 end
+else
+    [locking_acg, power_acg] = load_analysis_summary(tail_path);
+    disp(['Loaded tails from ', tail_path, '. Those tails are not estimated again.'])
+end
+if collect_strata
 locking_acg.delta_power_model = fit_delta_power_contributions( ...
     locking_acg, group_order, group_title);
 locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
@@ -670,32 +790,47 @@ locking_acg.oscillation_models = fit_oscillation_power_models( ...
     strata_rows, true, group_order, group_title);
 locking_acg.neuron_slopes = neuron_stratum_slopes( ...
     strata_rows, group_order, group_title, true);
-
-summary_path = locking_summary_path(parsing_folder, maximize_strata_number, acg_method);
-save(summary_path, 'locking_acg', 'power_acg');
-disp(['Saved ', summary_path])
+save(base_path, 'locking_acg', 'power_acg');
+disp(['Saved strata and models in ', base_path])
+else
+    disp(['Left strata and models in ', base_path])
+end
+if collect_tails
+    save_tail_summary(tail_path, locking_acg, power_acg);
+    disp(['Saved tails in ', tail_path])
+end
 save_open_figures(figure_folder)
 stop_statistics_diary()
 
 
-function summary_path = locking_summary_path(parsing_folder, maximize_strata_number, method)
+function summary_path = base_summary_path(parsing_folder, maximize_strata_number, method)
+if nargin < 3 || isempty(method)
+    method = acg_method_now();
+end
 summary_path = fullfile(parsing_folder, ...
     locking_summary_filename(maximize_strata_number, method));
 end
 
 
-function require_saved_summary(summary_path, maximize_strata_number, switch_name, method)
-if exist(summary_path, 'file') == 2
-    return
+function summary_path = tail_summary_path(parsing_folder, tail_percent, method)
+if nargin < 2 || isempty(tail_percent)
+    tail_percent = tail_percent_now();
 end
-if maximize_strata_number
-    rule = 'maximize_strata_number = true';
-else
-    rule = 'maximize_strata_number = false';
+if nargin < 3 || isempty(method)
+    method = acg_method_now();
 end
-error('Analyze_locking_period_acg:nosummary', ...
-    'No saved summary at %s. Run once with %s, acg_method = ''%s'', and %s = false.', ...
-    summary_path, rule, canonical_acg_method(method), switch_name);
+summary_path = fullfile(parsing_folder, locking_tail_filename(tail_percent, method));
+end
+
+
+function method = acg_method_now()
+method = 'overlap';
+if isappdata(0, 'locking_acg_method')
+    stored = getappdata(0, 'locking_acg_method');
+    if ~isempty(stored)
+        method = canonical_acg_method(stored);
+    end
+end
 end
 
 
@@ -715,6 +850,96 @@ end
 end
 
 
+function [locking_acg, power_acg] = load_analysis_summary(summary_path)
+loaded = load(summary_path, 'locking_acg', 'power_acg');
+locking_acg = loaded.locking_acg;
+power_acg = loaded.power_acg;
+end
+
+
+function save_tail_summary(summary_path, locking_acg, power_acg)
+locking_acg = strip_independent_estimates(locking_acg);
+power_acg = strip_independent_estimates(power_acg);
+save(summary_path, 'locking_acg', 'power_acg');
+end
+
+
+function summary = strip_independent_estimates(summary)
+drop = {'delta_power_model', 'delta_power_model_beyond_rate', 'power_strata', ...
+    'strata_power_model', 'strata_power_model_beyond_rate', 'strata_power_model_sequential', ...
+    'power_to_entrainment', 'ppc_model', 'ppc_model_beyond_rate', ...
+    'strata_ppc_model', 'strata_ppc_model_beyond_rate', 'strata_ppc_model_sequential', ...
+    'run_rate_power', 'run_rate_model', 'oscillation_models', 'neuron_slopes'};
+for i = 1:numel(drop)
+    if isfield(summary, drop{i})
+        summary = rmfield(summary, drop{i});
+    end
+end
+end
+
+
+function ok = summary_is_reusable(summary_path, current, kind)
+ok = false;
+if exist(summary_path, 'file') ~= 2
+    return
+end
+loaded = load(summary_path, 'locking_acg');
+if ~isfield(loaded, 'locking_acg') || ~isfield(loaded.locking_acg, 'parameters')
+    disp(['Ignoring ', summary_path, ' because it has no saved settings.'])
+    return
+end
+if ~parameters_compatible(loaded.locking_acg.parameters, current, kind)
+    disp([summary_path, ' used different settings, so that part will be estimated again.'])
+    return
+end
+if strcmp(kind, 'base')
+    assert_summary_strata_rule(loaded.locking_acg, current.maximize_strata_number, summary_path);
+else
+    assert_summary_tail(loaded.locking_acg, current.tail_percent, summary_path);
+end
+ok = true;
+disp(['Keeping saved estimates in ', summary_path])
+end
+
+
+function ok = parameters_compatible(saved, current, kind)
+if strcmp(kind, 'base')
+    fields = {'alpha', 'non_entrained_p', 'delta_lag', 'acg_lag', 'smooth_half', ...
+        'skip_abs_lag', 'acg_refractory_s', 'stratum_min_spikes', 'stratum_min_lag_s', ...
+        'maximize_strata_number', 'min_strata_per_neuron', 'neuron_slope_alpha', ...
+        'areas_to_keep'};
+else
+    fields = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', 'tail_percent', ...
+        'delta_lag', 'acg_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s', ...
+        'acg_cluster_alpha', 'acg_cluster_perm', 'areas_to_keep'};
+end
+ok = saved_method_matches(saved, current);
+if ~ok
+    return
+end
+for i = 1:numel(fields)
+    name = fields{i};
+    if ~isfield(saved, name) || ~isfield(current, name) || ~isequaln(saved.(name), current.(name))
+        ok = false;
+        return
+    end
+end
+end
+
+
+function ok = saved_method_matches(saved, current)
+saved_method = 'overlap';
+if isfield(saved, 'acg_method') && ~isempty(saved.acg_method)
+    saved_method = canonical_acg_method(saved.acg_method);
+end
+current_method = 'overlap';
+if isfield(current, 'acg_method') && ~isempty(current.acg_method)
+    current_method = canonical_acg_method(current.acg_method);
+end
+ok = strcmp(saved_method, current_method);
+end
+
+
 function assert_summary_strata_rule(locking_acg, maximize_strata_number, summary_path)
 has_flag = isstruct(locking_acg) && isfield(locking_acg, 'parameters') ...
     && isfield(locking_acg.parameters, 'maximize_strata_number');
@@ -730,6 +955,32 @@ error('Analyze_locking_period_acg:summaryrule', ...
     ['%s was built with maximize_strata_number = %d. ' ...
      'The current switch is %d.'], ...
     summary_path, saved, logical(maximize_strata_number));
+end
+
+
+function assert_summary_tail(locking_acg, tail_percent, summary_path)
+saved = NaN;
+if isstruct(locking_acg) && isfield(locking_acg, 'parameters') ...
+        && isfield(locking_acg.parameters, 'low_percent')
+    saved = locking_acg.parameters.low_percent;
+end
+if isfinite(saved) && abs(saved - tail_percent) < 1e-6
+    return
+end
+error('Analyze_locking_period_acg:summarytail', ...
+    '%s was built with tail_percent = %g. The current value is %g.', ...
+    summary_path, saved, tail_percent);
+end
+
+
+function percent = tail_percent_now()
+percent = 25;
+if isappdata(0, 'locking_acg_tail_percent')
+    stored = getappdata(0, 'locking_acg_tail_percent');
+    if isfinite(stored)
+        percent = stored;
+    end
+end
 end
 
 
@@ -842,6 +1093,23 @@ end
 
 
 function folder_name = figure_theme_folder(figure_name, day)
+tail = regexp(figure_name, '^ACG tails, (\d+), (mirrored|non-mirrored)', 'tokens', 'once');
+uses_tail = ~isempty(tail) || ~isempty(regexpi(figure_name, ...
+    ['Paired ACG|Paired mesh|cycle counts|First-peak latency|' ...
+     'ACG spectra|ACG peak examples'], 'once'));
+if uses_tail
+    if ~isempty(regexpi(figure_name, 'delta power', 'once'))
+        root = 'Power';
+    else
+        root = 'PPC';
+    end
+    if isempty(tail)
+        folder_name = fullfile([root, '_', day], sprintf('%g%%', tail_percent_now()));
+    else
+        folder_name = fullfile([root, '_', day], [tail{1}, '%'], tail{2});
+    end
+    return
+end
 model = regexp(figure_name, '^(Model\d+\s+[^,]*)', 'tokens', 'once');
 if ~isempty(model)
     theme = strtrim(model{1});
@@ -949,14 +1217,14 @@ end
 function summary = summarize_and_plot(acg_raw, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, acg_refractory_s, curve_colors, n_in_parsing, n_unsplit, cluster_alpha, cluster_perm)
 curve_names = {'low', 'high', 'all'};
 summary = struct();
-disp_block(['Mean autocorrelogram, ', split_name])
+disp_block(['Mean autocorrelogram, ', split_name], true)
 for g = 1:numel(group_order)
     name = group_order{g};
     n = acg_raw.(name).n;
     disp_rule()
     disp([group_title{g}, ', ', split_name, ': ', num2str(n_in_parsing(g)), ...
         ' in parsing, ', num2str(n), ' plotted, ', num2str(n_unsplit(g)), ...
-        ' skipped (no separated 25/75 split or no spikes)'])
+        ' skipped (no separated tails or no spikes)'])
     if n < 1
         warning('Analyze_locking_period_acg:group', ...
             'No %s neurons with both %s tails.', group_title{g}, split_name);
@@ -1104,7 +1372,8 @@ for i = 1:numel(fn)
     if ~isfield(b, name)
         continue
     end
-    if strcmp(name, 'low_high_clusters') || endsWith(name, '_delta_mass')
+    if strcmp(name, 'low_high_clusters') || strcmp(name, 'mirrored_clusters') ...
+            || strcmp(name, 'mirrored_centers') || endsWith(name, '_delta_mass')
         continue
     end
     va = a.(name);
@@ -1135,12 +1404,15 @@ end
 end
 
 
-function summary = plot_summary_acgs(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, name_suffix)
+function summary = plot_summary_acgs(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, name_suffix, tail_percent)
 if nargin < 12 || isempty(y_label)
     y_label = 'Mean normalized autocorrelogram';
 end
 if nargin < 13
     name_suffix = '';
+end
+if nargin < 14 || isempty(tail_percent)
+    tail_percent = tail_percent_now();
 end
 if isempty(name_suffix)
     figure_kind = 'mean_acg';
@@ -1158,7 +1430,7 @@ for g = 1:numel(group_order)
     end
     summary.(name) = plot_acg_curves(summary.(name), curve_names, curve_labels, ...
         [group_title{g}, ', ', split_name, name_suffix], centers, delta_lag, skip_abs_lag, ...
-        smooth_n, curve_colors, acg_ylim, y_label, figure_kind);
+        smooth_n, curve_colors, acg_ylim, y_label, figure_kind, tail_percent);
 end
 if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
         || summary.all_neurons.n < 1
@@ -1166,7 +1438,7 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
 end
 summary.all_neurons = plot_acg_curves(summary.all_neurons, curve_names, curve_labels, ...
     ['All neurons, ', split_name, name_suffix], centers, delta_lag, skip_abs_lag, ...
-    smooth_n, curve_colors, acg_ylim, y_label, figure_kind);
+    smooth_n, curve_colors, acg_ylim, y_label, figure_kind, tail_percent);
 end
 
 
@@ -1184,42 +1456,246 @@ high_s = smooth_acg_away_from_zero(group_acg.high, centers, skip_abs_lag, smooth
 group_acg.low_high_clusters = paired_acg_clusters( ...
     low_s, high_s, centers, cluster_alpha, cluster_perm);
 report_acg_clusters(group_acg.low_high_clusters, figure_label, split_name)
+[low_f, high_f, pos_centers] = mirror_average_pair(low_s, high_s, centers);
+group_acg.mirrored_centers = pos_centers;
+group_acg.mirrored_clusters = paired_acg_clusters( ...
+    low_f, high_f, pos_centers, cluster_alpha, cluster_perm);
+report_acg_clusters(group_acg.mirrored_clusters, [figure_label, ', mirrored'], split_name)
 end
 
 
-function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, figure_kind)
+function group_acg = plot_acg_curves(group_acg, curve_names, curve_labels, figure_label, centers, delta_lag, skip_abs_lag, smooth_n, curve_colors, acg_ylim, y_label, figure_kind, tail_percent)
 if nargin < 11 || isempty(y_label)
     y_label = 'Mean normalized autocorrelogram';
 end
 if nargin < 12 || isempty(figure_kind)
     figure_kind = 'mean_acg';
 end
-figure('Name', figure_label, 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.15 0.15 0.55 0.55])
+if nargin < 13 || isempty(tail_percent)
+    tail_percent = tail_percent_now();
+end
+shown = cell(1, numel(curve_names));
+for c = 1:numel(curve_names)
+    shown{c} = smooth_acg_away_from_zero( ...
+        group_acg.(curve_names{c}), centers, skip_abs_lag, smooth_n);
+end
+draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, ...
+    curve_colors, acg_ylim, y_label, figure_kind, tail_percent, false, ...
+    group_acg, size(group_acg.low, 1));
+draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, ...
+    curve_colors, acg_ylim, y_label, figure_kind, tail_percent, true, ...
+    group_acg, size(group_acg.low, 1));
+end
+
+
+function draw_acg_tail_figure(shown, centers, curve_labels, figure_label, delta_lag, curve_colors, acg_ylim, y_label, figure_kind, tail_percent, mirrored, group_acg, n_neurons) %#ok<INUSD>
+% acg_ylim is the old shared scale. Each panel now uses its own limits.
+if mirrored
+    fold_tag = 'mirrored';
+    [folded, x] = mirror_average_rows(shown{1}, centers);
+    if isempty(x)
+        return
+    end
+    curves = cell(1, numel(shown));
+    curves{1} = folded;
+    for c = 2:numel(shown)
+        curves{c} = mirror_average_rows(shown{c}, centers);
+    end
+    clusters = [];
+    if isfield(group_acg, 'mirrored_clusters')
+        clusters = group_acg.mirrored_clusters;
+    end
+    mirror_bars = false;
+else
+    fold_tag = 'non-mirrored';
+    curves = shown;
+    x = centers;
+    clusters = [];
+    if isfield(group_acg, 'low_high_clusters')
+        clusters = group_acg.low_high_clusters;
+    end
+    mirror_bars = true;
+end
+fig_name = sprintf('ACG tails, %g, %s, %s', tail_percent, fold_tag, figure_label);
+figure('Name', fig_name, 'Color', 'w', ...
+    'Units', 'normalized', 'OuterPosition', [0.06 0.12 0.82 0.52])
 mark_figure_policy(gcf, figure_kind)
+
+subplot(1, 2, 1)
 hold on
 shade = shade_delta_lags(delta_lag);
-plotted = gobjects(1, numel(curve_names));
-for c = 1:numel(curve_names)
-    shown = smooth_acg_away_from_zero( ...
-        group_acg.(curve_names{c}), centers, skip_abs_lag, smooth_n);
-    plotted(c) = plot_mean_sem(centers, shown, curve_colors(c, :));
+plotted = gobjects(1, numel(curves));
+for c = 1:numel(curves)
+    plotted(c) = plot_mean_ci95(x, curves{c}, curve_colors(c, :));
 end
-xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
-half_bin = median(diff(centers)) / 2;
-xlim([centers(1) - half_bin, centers(end) + half_bin])
-ylim(acg_ylim)
-yticks(readable_acg_ticks(acg_ylim))
-ytickformat('%g')
-xlabel('Lag (s)')
-ylabel(y_label)
-title({figure_label, sprintf('n = %d    band: 2-5 Hz    top bars: clusters that survive', size(group_acg.low, 1))})
+mean_ylim = acg_panel_ylim(curves);
+finish_mean_acg_axis(x, mean_ylim, y_label, 'Means, 95% CI')
 legend(plotted, curve_labels, 'Location', 'best')
 place_delta_shade(shade)
-if isfield(group_acg, 'low_high_clusters')
-    shade_acg_clusters(group_acg.low_high_clusters, acg_ylim)
+mark_all_runs_mean_peaks(shown, curves, centers, x, curve_labels, curve_colors, min(x) < 0)
+if ~isempty(clusters)
+    shade_acg_clusters(clusters, mean_ylim, mirror_bars)
 end
 box off
+
+subplot(1, 2, 2)
+hold on
+shade = shade_delta_lags(delta_lag);
+difference = curves{2} - curves{1};
+[mu, lo, hi] = mean_ci95(difference);
+fill_band_finite(x, lo, hi, [0.15 0.15 0.15])
+plot(x, mu, 'Color', [0.15 0.15 0.15], 'LineWidth', 2)
+diff_ylim = paired_difference_ylim(lo, hi);
+finish_mean_acg_axis(x, diff_ylim, 'High minus low', 'Paired difference, 95% CI')
+plot(xlim, [0 0], '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1, ...
+    'HandleVisibility', 'off')
+place_delta_shade(shade)
+if ~isempty(clusters)
+    shade_acg_clusters(clusters, diff_ylim, mirror_bars)
+end
+mark_all_runs_difference_peaks(shown, centers, x, mu, curve_labels, min(x) < 0)
+box off
+sgtitle({figure_label, sprintf( ...
+    'n = %d    labels: uncorrected p    filled bars survive Bonferroni across 3 windows', n_neurons)})
+end
+
+
+function finish_mean_acg_axis(x, y_lim, y_label, panel_title)
+half_bin = median(diff(x)) / 2;
+if ~isfinite(half_bin) || half_bin <= 0
+    half_bin = 0;
+end
+if min(x) >= 0
+    xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
+    xlim([0, x(end) + half_bin])
+else
+    xline(0, ':', 'Color', [0.4 0.4 0.4], 'HandleVisibility', 'off')
+    xlim([x(1) - half_bin, x(end) + half_bin])
+end
+ylim(y_lim)
+ticks = rounded_axis_ticks(y_lim);
+yticks(ticks)
+ytickformat(decimal_tick_format(ticks))
+xlabel('Lag (s)')
+ylabel(y_label)
+title(panel_title)
+end
+
+
+function mark_all_runs_mean_peaks(shown, curves, centers, plot_x, curve_labels, curve_colors, mirror_negative)
+[peaks, all_idx] = peaks_of_all_runs(shown, centers, curve_labels);
+if isempty(all_idx)
+    return
+end
+color = curve_colors(all_idx, :);
+plot_y = mean(curves{all_idx}, 1, 'omitnan');
+mark_one_mean_peak(peaks, 'first', 't1', color, plot_x, plot_y, mirror_negative, 'prominence');
+mark_one_mean_peak(peaks, 'second', 't2', color, plot_x, plot_y, mirror_negative, 'prominence');
+mark_one_mean_peak(peaks, 'third', 't3', color, plot_x, plot_y, mirror_negative, 'prominence');
+end
+
+
+function mark_all_runs_difference_peaks(shown, centers, plot_x, difference_mean, curve_labels, mirror_negative)
+[peaks, all_idx] = peaks_of_all_runs(shown, centers, curve_labels);
+if isempty(all_idx)
+    return
+end
+color = [0.15 0.15 0.15];
+mark_one_mean_peak(peaks, 'first', 't1', color, plot_x, difference_mean, mirror_negative, 'difference');
+mark_one_mean_peak(peaks, 'second', 't2', color, plot_x, difference_mean, mirror_negative, 'difference');
+mark_one_mean_peak(peaks, 'third', 't3', color, plot_x, difference_mean, mirror_negative, 'difference');
+end
+
+
+function [peaks, all_idx] = peaks_of_all_runs(shown, centers, curve_labels)
+peaks = struct();
+all_idx = [];
+for c = 1:numel(curve_labels)
+    if strncmpi(curve_labels{c}, 'All', 3)
+        all_idx = c;
+        break
+    end
+end
+if isempty(all_idx) || all_idx > numel(shown)
+    all_idx = [];
+    return
+end
+mu = mean(shown{all_idx}, 1, 'omitnan');
+% This cutoff is only for labeling the mean and the paired difference.
+% Per-neuron scores keep the default of one fifth.
+height_fraction = 0.02;
+if isappdata(0, 'locking_acg_mean_peak_height')
+    height_fraction = getappdata(0, 'locking_acg_mean_peak_height');
+end
+peaks = acg_delta_peaks(mu, centers, 1, height_fraction, 0.02);
+end
+
+
+function mark_one_mean_peak(peaks, which, tag, color, plot_x, plot_y, mirror_negative, value_mode)
+if nargin < 8 || isempty(value_mode)
+    value_mode = 'prominence';
+end
+if strcmp(which, 'first')
+    present = peaks.first_present;
+    lag = peaks.first_lag;
+    prom = peaks.first_prominence;
+elseif strcmp(which, 'second')
+    present = peaks.second_present;
+    lag = peaks.second_lag;
+    prom = peaks.second_prominence;
+else
+    present = isfield(peaks, 'third_present') && peaks.third_present;
+    lag = NaN;
+    prom = NaN;
+    if isfield(peaks, 'third_lag')
+        lag = peaks.third_lag;
+        prom = peaks.third_prominence;
+    end
+end
+if ~present || ~isfinite(lag)
+    return
+end
+if strcmp(value_mode, 'prominence') && ~isfinite(prom)
+    return
+end
+y = interp1(plot_x, plot_y, lag, 'nearest', NaN);
+if ~isfinite(y)
+    return
+end
+draw_mean_peak_mark(lag, y, prom, tag, color, value_mode);
+if mirror_negative
+    y_neg = interp1(plot_x, plot_y, -lag, 'nearest', NaN);
+    if isfinite(y_neg)
+        draw_mean_peak_mark(-lag, y_neg, prom, '', color, value_mode);
+    end
+end
+end
+
+
+function draw_mean_peak_mark(lag, y, prom, tag, color, value_mode)
+if nargin < 6 || isempty(value_mode)
+    value_mode = 'prominence';
+end
+if strcmp(value_mode, 'difference')
+    y0 = 0;
+else
+    y0 = max(y - prom, 0);
+end
+plot([lag lag], [y0, y], '-', 'Color', color, ...
+    'LineWidth', 1.3, 'HandleVisibility', 'off')
+plot(lag, y, 'o', 'Color', color, 'MarkerFaceColor', color, ...
+    'MarkerSize', 5, 'HandleVisibility', 'off')
+if isempty(tag)
+    return
+end
+if strcmp(value_mode, 'difference')
+    label = sprintf('  %s %d ms, %.3g', tag, round(1000 * lag), y);
+else
+    label = sprintf('  %s %d ms, prom %.3g', tag, round(1000 * lag), prom);
+end
+text(lag, y, label, ...
+    'Color', color, 'FontSize', 8, 'VerticalAlignment', 'bottom', ...
+    'Interpreter', 'none', 'HandleVisibility', 'off')
 end
 
 
@@ -1602,7 +2078,7 @@ else
 end
 lag_measures = {'first_lag', 'second_lag'};
 lag_labels = {'First-peak latency (s)', 'Second-cycle latency (s)'};
-disp_block(['Paired tests, ', split_name, ': ', scale_label])
+disp_block(['Paired tests, ', split_name, ': ', scale_label], true)
 for m = 1:numel(measures)
     report_paired_increase(summary, neurons, group_order, group_title, ...
         measures{m}, measure_labels{m}, split_name, score_label, scale_label);
@@ -1614,10 +2090,15 @@ end
 end
 
 
-function [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, cluster_alpha, cluster_perm, n_example_neurons)
+function [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, delta_lag, cluster_alpha, cluster_perm, n_example_neurons, figure_scope)
 if nargin < 11 || isempty(n_example_neurons)
     n_example_neurons = 20;
 end
+if nargin < 12 || isempty(figure_scope)
+    figure_scope = 'both';
+end
+do_tails = ~strcmp(figure_scope, 'models');
+do_models = ~strcmp(figure_scope, 'tails');
 centers = locking_acg.centers(:).';
 bin_w = median(diff(centers));
 if isfield(locking_acg, 'parameters') && isfield(locking_acg.parameters, 'low_percent')
@@ -1636,8 +2117,18 @@ power_labels = { ...
     sprintf('High %g%% delta power', 100 - high_percent), ...
     'All firing runs'};
 curve_colors = [0.20 0.45 0.75; 0.85 0.25 0.20; 0.15 0.15 0.15];
+if do_tails
+need_mean = figure_selected('mean_acg');
+need_ratio = plot_rate_scaled_peaks && figure_selected('rate_ratio_acg');
+need_paired = figure_selected('paired_tests');
+need_examples = figure_selected('neuron_examples');
+need_spectra = figure_selected('acg_spectra');
+need_peaks = need_paired || need_examples || need_spectra;
+if need_mean || need_ratio || need_peaks
 locking_acg = add_delta_locked_group(locking_acg);
 power_acg = add_delta_locked_group(power_acg);
+end
+if need_mean
 locking_acg = ensure_acg_clusters(locking_acg, group_order, group_title, ...
     'locking', centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm);
 power_acg = ensure_acg_clusters(power_acg, group_order, group_title, ...
@@ -1654,11 +2145,13 @@ locking_acg = plot_summary_acgs(locking_acg, group_order, group_title, ...
 power_acg = plot_summary_acgs(power_acg, group_order, group_title, ...
     power_labels, 'delta power', centers, delta_lag, skip_abs_lag, smooth_n, ...
     curve_colors, acg_ylim);
-if plot_rate_scaled_peaks
+end
+if need_ratio
     plot_rate_scaled_mean_acgs(locking_acg, power_acg, bin_w, centers, ...
         group_order, group_title, locking_labels, power_labels, delta_lag, ...
         skip_abs_lag, smooth_n, curve_colors, cluster_alpha, cluster_perm);
 end
+if need_peaks
 if ~isfield(locking_acg, 'all_neurons') || ~isfield(locking_acg.all_neurons, 'low_peaks')
     locking_acg = add_peak_scores(locking_acg, centers, smooth_n, group_order, delta_lag);
     power_acg = add_peak_scores(power_acg, centers, smooth_n, group_order, delta_lag);
@@ -1670,24 +2163,34 @@ elseif isfield(locking_acg, 'delta') && ~isfield(locking_acg.delta, 'low_peaks')
 end
 locking_acg = attach_missing_acg_delta(locking_acg, centers, group_order, delta_lag);
 power_acg = attach_missing_acg_delta(power_acg, centers, group_order, delta_lag);
+end
+if need_paired
 plot_paired_peak_scores(locking_acg, group_order, group_title, ...
     'Mean PPC of the runs', 'locking');
 plot_paired_peak_scores(power_acg, group_order, group_title, ...
     'Mean delta power of the runs', 'delta power');
+end
+if need_examples
 plot_peak_examples(locking_acg, centers, smooth_n, group_order, group_title, ...
     'PPC', 'locking', delta_lag, n_example_neurons);
 plot_peak_examples(power_acg, centers, smooth_n, group_order, group_title, ...
     'delta power', 'delta power', delta_lag, n_example_neurons);
+end
+if need_spectra
 plot_tail_acg_spectra(locking_acg, centers, delta_lag, group_order, group_title, ...
     'locking', '');
 plot_tail_acg_spectra(power_acg, centers, delta_lag, group_order, group_title, ...
     'delta power', '');
-if plot_rate_scaled_peaks
+end
+if plot_rate_scaled_peaks && (need_paired || need_spectra)
     plot_rate_scaled_peaks_for(locking_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean PPC of the runs', 'locking', delta_lag);
     plot_rate_scaled_peaks_for(power_acg, bin_w, centers, smooth_n, ...
         group_order, group_title, 'Mean delta power of the runs', 'delta power', delta_lag);
 end
+end
+if do_models
+if model_number_selected(1)
 model_has_delta = isfield(locking_acg, 'delta_power_model') ...
     && isfield(locking_acg.delta_power_model, 'groups') ...
     && isfield(locking_acg.delta_power_model.groups, 'delta');
@@ -1701,6 +2204,8 @@ else
     locking_acg.delta_power_model = fit_delta_power_contributions( ...
         locking_acg, group_order, group_title);
 end
+end
+if model_number_selected(2)
 beyond = [];
 if isfield(locking_acg, 'delta_power_model_beyond_rate')
     beyond = locking_acg.delta_power_model_beyond_rate;
@@ -1715,53 +2220,95 @@ else
     locking_acg.delta_power_model_beyond_rate = fit_delta_power_beyond_rate( ...
         locking_acg, group_order, group_title);
 end
-if isfield(locking_acg, 'power_strata')
-    [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate, ...
-        locking_acg.strata_power_model_sequential] = ...
-        fit_strata_power_models(locking_acg.power_strata, group_order, group_title, true);
-    locking_acg.power_to_entrainment = fit_power_to_entrainment( ...
-        locking_acg.power_strata, group_order, group_title, true);
-    [locking_acg.strata_ppc_model, locking_acg.strata_ppc_model_beyond_rate, ...
-        locking_acg.strata_ppc_model_sequential] = ...
-        fit_strata_ppc_models(locking_acg.power_strata, group_order, group_title, true);
 end
-locking_acg.ppc_model = fit_ppc_contributions( ...
-    locking_acg, group_order, group_title);
-locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
-    locking_acg, group_order, group_title);
-locking_acg = fit_saved_run_rate_power(locking_acg, true);
 if isfield(locking_acg, 'power_strata')
+    if any_model_selected([3 4 5])
+        [locking_acg.strata_power_model, locking_acg.strata_power_model_beyond_rate, ...
+            locking_acg.strata_power_model_sequential] = ...
+            fit_strata_power_models(locking_acg.power_strata, group_order, group_title, true);
+    end
+    if model_number_selected(6)
+        locking_acg.power_to_entrainment = fit_power_to_entrainment( ...
+            locking_acg.power_strata, group_order, group_title, true);
+    end
+    if any_model_selected([9 10 11])
+        [locking_acg.strata_ppc_model, locking_acg.strata_ppc_model_beyond_rate, ...
+            locking_acg.strata_ppc_model_sequential] = ...
+            fit_strata_ppc_models(locking_acg.power_strata, group_order, group_title, true);
+    end
+end
+if model_number_selected(7)
+    locking_acg.ppc_model = fit_ppc_contributions( ...
+        locking_acg, group_order, group_title);
+end
+if model_number_selected(8)
+    locking_acg.ppc_model_beyond_rate = fit_ppc_beyond_rate( ...
+        locking_acg, group_order, group_title);
+end
+if model_number_selected(12)
+    locking_acg = fit_saved_run_rate_power(locking_acg, true);
+end
+if isfield(locking_acg, 'power_strata') && any_model_selected([13 14 15])
     locking_acg.oscillation_models = fit_oscillation_power_models( ...
         locking_acg.power_strata, true, group_order, group_title);
+end
+if isfield(locking_acg, 'power_strata') && figure_selected('neuron_slopes')
     locking_acg.neuron_slopes = neuron_stratum_slopes( ...
         locking_acg.power_strata, group_order, group_title, true);
 end
+end
+end
+
+
+function ok = cluster_result_is_windowed(result)
+ok = isstruct(result) && isfield(result, 'n_tests');
 end
 
 
 function summary = ensure_acg_clusters(summary, group_order, group_title, split_name, centers, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm)
 names = [group_order, {'all_neurons'}];
 titles = [group_title, {'All neurons'}];
-disp_block(['ACG clusters, ', split_name])
+disp_block(['ACG clusters, ', split_name], true)
 for g = 1:numel(names)
     if ~isfield(summary, names{g}) || ~isfield(summary.(names{g}), 'low')
         continue
     end
     group = summary.(names{g});
-    if ~isfield(group, 'low_high_clusters')
+    low_s = [];
+    high_s = [];
+    need_low = ~isfield(group, 'low_high_clusters') ...
+        || ~cluster_result_is_windowed(group.low_high_clusters);
+    need_mirror = ~isfield(group, 'mirrored_clusters') ...
+        || ~cluster_result_is_windowed(group.mirrored_clusters);
+    if need_low || need_mirror
         low_s = smooth_acg_away_from_zero(group.low, centers, skip_abs_lag, smooth_n);
         high_s = smooth_acg_away_from_zero(group.high, centers, skip_abs_lag, smooth_n);
+    end
+    if need_low
         group.low_high_clusters = paired_acg_clusters( ...
             low_s, high_s, centers, cluster_alpha, cluster_perm);
     end
+    if need_mirror
+        [low_f, high_f, pos_centers] = mirror_average_pair(low_s, high_s, centers);
+        group.mirrored_centers = pos_centers;
+        group.mirrored_clusters = paired_acg_clusters( ...
+            low_f, high_f, pos_centers, cluster_alpha, cluster_perm);
+    end
     disp_rule()
     report_acg_clusters(group.low_high_clusters, [titles{g}, ', ', split_name], split_name)
+    report_acg_clusters(group.mirrored_clusters, [titles{g}, ', ', split_name, ', mirrored'], split_name)
     summary.(names{g}) = group;
 end
 end
 
 
-function reprint_saved_statistics(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, cluster_alpha, cluster_perm)
+function reprint_saved_statistics(locking_acg, power_acg, group_order, group_title, plot_rate_scaled_peaks, smooth_n, skip_abs_lag, cluster_alpha, cluster_perm, summary_scope)
+if nargin < 10 || isempty(summary_scope)
+    summary_scope = 'both';
+end
+do_tails = ~strcmp(summary_scope, 'models');
+do_models = ~strcmp(summary_scope, 'tails');
+if do_tails
 locking_acg = add_delta_locked_group(locking_acg);
 power_acg = add_delta_locked_group(power_acg);
 params = locking_acg.parameters;
@@ -1803,6 +2350,8 @@ if plot_rate_scaled_peaks
     report_peak_tests(power_hz, group_order, group_title, ...
         'Mean delta power of the runs', 'delta power', 'ratio');
 end
+end
+if do_models
 if power_model_is_stale(locking_acg, 'delta_power_model')
     locking_acg.delta_power_model = fit_delta_power_contributions( ...
         locking_acg, group_order, group_title, false);
@@ -1826,13 +2375,14 @@ if isfield(locking_acg, 'power_strata')
     neuron_stratum_slopes(locking_acg.power_strata, group_order, group_title, false);
 end
 end
+end
 
 
 function reprint_split_mass(summary, group_order, group_title, curve_labels, split_name, centers, delta_lag, skip_abs_lag, smooth_n, cluster_alpha, cluster_perm)
 curve_names = {'low', 'high', 'all'};
 names = [group_order, {'all_neurons'}];
 titles = [group_title, {'All neurons'}];
-disp_block(['Mean autocorrelogram, ', split_name])
+disp_block(['Mean autocorrelogram, ', split_name], true)
 for g = 1:numel(names)
     if ~isfield(summary, names{g}) || ~isfield(summary.(names{g}), 'low')
         continue
@@ -1845,8 +2395,11 @@ end
 end
 
 
-function disp_block(title)
-open_statistics_block(title, false)
+function disp_block(title, uses_tail)
+if nargin < 2
+    uses_tail = false;
+end
+open_statistics_block(title, false, uses_tail)
 setappdata(0, 'locking_acg_stats_token', char(title))
 disp_rule()
 disp(upper(title))
@@ -1912,9 +2465,12 @@ setappdata(0, 'locking_acg_model_tag', tag)
 end
 
 
-function open_statistics_block(title, append_file)
+function open_statistics_block(title, append_file, uses_tail)
 if nargin < 2
     append_file = false;
+end
+if nargin < 3
+    uses_tail = false;
 end
 if ~isappdata(0, 'locking_acg_stats_folder')
     return
@@ -1931,11 +2487,37 @@ token = regexprep(token, '^_|_$', '');
 if isempty(token)
     token = 'STATISTICS';
 end
+if uses_tail
+    token = sprintf('%s_%g', token, tail_percent_now());
+end
 stats_path = fullfile(folder, [token, '_', run_day_stamp(), '.txt']);
 if ~append_file && exist(stats_path, 'file') == 2
     delete(stats_path)
 end
 diary(stats_path)
+end
+
+
+function tf = model_number_selected(n)
+tf = false;
+selected = 1:15;
+if isappdata(0, 'locking_acg_models_to_plot')
+    selected = getappdata(0, 'locking_acg_models_to_plot');
+end
+selected = double(selected(:).');
+selected = selected(isfinite(selected) & selected >= 1 & selected <= 15);
+tf = any(selected == n);
+end
+
+
+function tf = any_model_selected(numbers)
+tf = false;
+for k = 1:numel(numbers)
+    if model_number_selected(numbers(k))
+        tf = true;
+        return
+    end
+end
 end
 
 
@@ -2270,7 +2852,7 @@ if ~isfield(summary, 'all_neurons') || ~isfield(summary.all_neurons, 'low') ...
     return
 end
 neurons = summary.all_neurons;
-disp_block(['Peak examples, ', split_name])
+disp_block(['Peak examples, ', split_name], true)
 [rows, labels] = list_example_neurons(neurons, group_order, group_title, n_examples);
 if isempty(rows)
     disp(['No peak examples for ', split_name])
@@ -2740,7 +3322,7 @@ scaled = rate_scale_summary(summary, bin_w, group_order);
 names = [group_order, {'all_neurons'}];
 titles = [group_title, {'All neurons'}];
 curve_names = {'low', 'high', 'all'};
-disp_block(['Mean autocorrelogram, rate ratio (Poisson = 1), ', split_name])
+disp_block(['Mean autocorrelogram, rate ratio (Poisson = 1), ', split_name], true)
 for g = 1:numel(names)
     if ~isfield(scaled, names{g}) || ~isfield(scaled.(names{g}), 'low')
         continue
@@ -3016,17 +3598,22 @@ end
 function report_split_contrast(group_acg, group_label, split_name)
 p_low = paired_signrank(group_acg.high_delta_mass, group_acg.low_delta_mass);
 p_all = paired_signrank(group_acg.high_delta_mass, group_acg.all_delta_mass);
-disp(sprintf('  %s two-sided signrank, high vs low 25%% %s: p = %.3g', group_label, split_name, p_low))
+disp(sprintf('  %s two-sided signrank, high vs low %s: p = %.3g', group_label, split_name, p_low))
 disp(sprintf('  %s two-sided signrank, high vs all runs: p = %.3g', group_label, p_all))
 end
 
 
 function report_acg_clusters(result, figure_label, split_name)
-disp(sprintf(['  %s cluster test, high vs low 25%% %s, positive lags: ' ...
-    'uncorrected signrank p < %.3g, %d sign flips'], ...
-    figure_label, split_name, result.alpha, result.n_perm))
+n_tests = 3;
+if isfield(result, 'n_tests') && isfinite(result.n_tests)
+    n_tests = result.n_tests;
+end
+disp(sprintf(['  %s cluster test, high vs low %s, positive lags: ' ...
+    'separate sign flips in 0-200, 200-400, and 400-600 ms, ' ...
+    't interval excludes 0 at alpha %.3g, %d sign flips, Bonferroni across %d windows'], ...
+    figure_label, split_name, result.alpha, result.n_perm, n_tests))
 if isempty(result.clusters)
-    disp('  No contiguous uncorrected difference.')
+    disp('  No contiguous uncorrected difference in those windows.')
     return
 end
 for k = 1:numel(result.clusters)
@@ -3036,30 +3623,70 @@ for k = 1:numel(result.clusters)
     else
         fate = 'does not survive';
     end
-    disp(sprintf('  Cluster %.3g-%.3g s, cluster p = %.3g, %s', ...
-        cluster.x0, cluster.x1, cluster.p, fate))
+    window_name = '';
+    if isfield(cluster, 'window')
+        window_name = cluster.window;
+    end
+    p_corrected = cluster.p;
+    if isfield(cluster, 'p_corrected')
+        p_corrected = cluster.p_corrected;
+    end
+    disp(sprintf(['  %s cluster %.3g-%.3g s, mass %.3g, uncorrected p = %.3g, ' ...
+        'Bonferroni p = %.3g, %s'], ...
+        window_name, cluster.x0, cluster.x1, cluster.mass, cluster.p, p_corrected, fate))
 end
-disp('  Only clusters that survive are shaded, on the positive lags and on their negative mirrors.')
+disp(['  The number on each square is the uncorrected cluster p. Filled squares ' ...
+    'survive Bonferroni across the three windows. Open squares do not.'])
 end
 
 
-function shade_acg_clusters(result, y_lim)
-if isempty(result.clusters)
+function shade_acg_clusters(result, y_lim, mirror_negative)
+if nargin < 3 || isempty(mirror_negative)
+    mirror_negative = true;
+end
+if isempty(result) || ~isfield(result, 'clusters') || isempty(result.clusters)
     return
 end
 span = y_lim(2) - y_lim(1);
 y0 = y_lim(2) - 0.1 * span;
 y1 = y_lim(2);
 for k = 1:numel(result.clusters)
-    if ~result.clusters(k).survives
-        continue
-    end
     x0 = result.clusters(k).x0;
     x1 = result.clusters(k).x1;
+    draw_cluster_patch(x0, x1, y0, y1, result.clusters(k).survives);
+    draw_cluster_p(x0, x1, y1, result.clusters(k).p);
+    if mirror_negative
+        draw_cluster_patch(-x1, -x0, y0, y1, result.clusters(k).survives);
+        draw_cluster_p(-x1, -x0, y1, result.clusters(k).p);
+    end
+end
+end
+
+
+function draw_cluster_p(x0, x1, y_top, p)
+if ~isfinite(p)
+    return
+end
+if p < 0.001
+    label = 'p<0.001';
+else
+    label = sprintf('p=%.3f', p);
+end
+text((x0 + x1) / 2, y_top, label, ...
+    'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
+    'FontSize', 8, 'Color', [0.1 0.1 0.1], ...
+    'Clipping', 'on', 'HandleVisibility', 'off');
+end
+
+
+function draw_cluster_patch(x0, x1, y0, y1, filled)
+if filled
     patch([x0 x1 x1 x0], [y0 y0 y1 y1], [0.25 0.25 0.25], ...
         'FaceAlpha', 0.45, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-    patch([-x1 -x0 -x0 -x1], [y0 y0 y1 y1], [0.25 0.25 0.25], ...
-        'FaceAlpha', 0.45, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+else
+    patch([x0 x1 x1 x0], [y0 y0 y1 y1], 'w', ...
+        'FaceAlpha', 0, 'EdgeColor', [0.25 0.25 0.25], 'LineWidth', 1.2, ...
+        'HandleVisibility', 'off');
 end
 end
 
@@ -3079,19 +3706,174 @@ p = signrank(a, b, 'tail', tail);
 end
 
 
-function h = plot_mean_sem(t, M, col)
-mu = mean(M, 1, 'omitnan');
-n = sum(isfinite(M), 1);
-sem = std(M, 0, 1, 'omitnan') ./ sqrt(max(n, 1));
-fill_sem_finite(t, mu, sem, col)
+function h = plot_mean_ci95(t, M, col)
+[mu, lo, hi] = mean_ci95(M);
+fill_band_finite(t, lo, hi, col)
 h = plot(t, mu, 'Color', col, 'LineWidth', 2);
 end
 
 
-function fill_sem_finite(t, mu, sem, col)
-lo = mu - sem;
-hi = mu + sem;
-ok = isfinite(mu) & isfinite(lo) & isfinite(hi);
+function [mu, lo, hi] = mean_ci95(M)
+mu = mean(M, 1, 'omitnan');
+n = sum(isfinite(M), 1);
+sem = std(M, 0, 1, 'omitnan') ./ sqrt(max(n, 1));
+tcrit = tcrit95(max(n - 1, 1));
+tcrit(n < 2) = NaN;
+lo = mu - tcrit .* sem;
+hi = mu + tcrit .* sem;
+end
+
+
+function tcrit = tcrit95(df)
+if exist('tinv', 'file') == 2
+    tcrit = tinv(0.975, df);
+else
+    tcrit = 1.96 * ones(size(df));
+end
+end
+
+
+function y_lim = paired_difference_ylim(lo, hi)
+extent = max(abs([0, lo(isfinite(lo)), hi(isfinite(hi))]));
+if ~isfinite(extent) || extent == 0
+    y_lim = [-1 1];
+    return
+end
+y_lim = snapped_symmetric_limits(extent);
+end
+
+
+function y_lim = acg_panel_ylim(curves)
+lo = inf;
+hi = -inf;
+for c = 1:numel(curves)
+    [~, band_lo, band_hi] = mean_ci95(curves{c});
+    band_lo = band_lo(isfinite(band_lo));
+    band_hi = band_hi(isfinite(band_hi));
+    if ~isempty(band_lo)
+        lo = min(lo, min(band_lo));
+    end
+    if ~isempty(band_hi)
+        hi = max(hi, max(band_hi));
+    end
+end
+if ~isfinite(lo) || ~isfinite(hi)
+    y_lim = [0 0.01];
+    return
+end
+span = hi - lo;
+if span <= 0
+    span = max(abs(hi), eps);
+end
+% A little room under the curve and a little more above it for the
+% cluster marks. The limits stay next to the data, so a curve from 1 to
+% 1.5 is not drawn from 0 to 2.
+step = fine_step(span);
+bottom = step * floor(lo / step + 1e-6);
+top = step * ceil((hi + 0.12 * span) / step - 1e-6);
+if top <= hi
+    top = top + step;
+end
+if bottom >= lo
+    bottom = bottom - step;
+end
+y_lim = [bottom, top];
+end
+
+
+function y_lim = snapped_symmetric_limits(extent)
+target = extent * 1.2;
+step = fine_step(target);
+if step <= 0
+    y_lim = [-1 1];
+    return
+end
+top = step * ceil(target / step - 1e-6);
+y_lim = [-top, top];
+end
+
+
+function step = fine_step(span)
+% A short step, about one fifth of the data span: 1, 2, 2.5, or 5 times
+% a power of ten. That gives labels such as 1.4 or 1.5, not 1.47982.
+if ~isfinite(span) || span <= 0
+    step = 1;
+    return
+end
+raw = span / 5;
+exp10 = floor(log10(raw));
+base = 10 ^ exp10;
+mantissa = raw / base;
+grid = [1 2 2.5 5 10];
+pick = find(grid + 1e-9 >= mantissa, 1, 'first');
+if isempty(pick)
+    pick = numel(grid);
+end
+step = grid(pick) * base;
+end
+
+
+function ticks = rounded_axis_ticks(y_lim)
+span = y_lim(2) - y_lim(1);
+step = fine_step(span);
+if step <= 0
+    ticks = y_lim;
+    return
+end
+first = step * ceil(y_lim(1) / step - 1e-6);
+last = step * floor(y_lim(2) / step + 1e-6);
+if last + step * 1e-6 < first
+    ticks = y_lim;
+    return
+end
+ticks = first:step:last;
+end
+
+
+function fmt = decimal_tick_format(ticks)
+d = diff(ticks);
+d = d(d > 0);
+if isempty(d)
+    fmt = '%g';
+    return
+end
+step = min(d);
+places = 0;
+scale = step;
+while places < 6 && abs(scale - round(scale)) > 1e-6 * max(1, abs(scale))
+    scale = scale * 10;
+    places = places + 1;
+end
+fmt = sprintf('%%.%df', places);
+end
+
+
+function [low_f, high_f, pos_centers] = mirror_average_pair(low, high, centers)
+[low_f, pos_centers] = mirror_average_rows(low, centers);
+high_f = mirror_average_rows(high, centers);
+end
+
+
+function [folded, pos_centers] = mirror_average_rows(curves, centers)
+centers = centers(:).';
+pos = find(centers > 0);
+neg = find(centers < 0);
+neg = neg(end:-1:1);
+n = min(numel(pos), numel(neg));
+pos = pos(1:n);
+neg = neg(1:n);
+if n < 1 || max(abs(centers(pos) + centers(neg))) > 1e-6
+    folded = zeros(size(curves, 1), 0);
+    pos_centers = zeros(1, 0);
+    return
+end
+folded = (curves(:, pos) + curves(:, neg)) / 2;
+pos_centers = centers(pos);
+end
+
+
+function fill_band_finite(t, lo, hi, col)
+ok = isfinite(lo) & isfinite(hi);
 d = diff([false, ok, false]);
 i1 = find(d == 1);
 i2 = find(d == -1) - 1;
@@ -3107,8 +3889,8 @@ end
 
 
 function y_lim = shared_mean_acg_ylim(locking_acg, power_acg, group_order, centers, skip_abs_lag, smooth_n, scale_label)
-% One vertical range for every mean autocorrelogram. The range is the
-% mean curve plus and minus its standard error, not the delta-band shade.
+% One recorded span for the statistics file. Each plotted autocorrelogram
+% uses its own vertical scale, taken from that panel's 95% interval.
 if nargin < 7 || isempty(scale_label)
     scale_label = 'sum-to-1 normalized autocorrelogram';
 end
@@ -3127,11 +3909,7 @@ for s = 1:numel(summaries)
         for c = 1:numel(curve_names)
             shown = smooth_acg_away_from_zero( ...
                 group.(curve_names{c}), centers, skip_abs_lag, smooth_n);
-            mu = mean(shown, 1, 'omitnan');
-            n = sum(isfinite(shown), 1);
-            sem = std(shown, 0, 1, 'omitnan') ./ sqrt(max(n, 1));
-            band_lo = mu - sem;
-            band_hi = mu + sem;
+            [~, band_lo, band_hi] = mean_ci95(shown);
             band_lo = band_lo(isfinite(band_lo));
             band_hi = band_hi(isfinite(band_hi));
             if ~isempty(band_lo)
@@ -3144,9 +3922,9 @@ for s = 1:numel(summaries)
     end
 end
 y_lim = readable_acg_scale(lo, hi);
-disp_block(['Shared autocorrelogram scale, ', scale_label])
+disp_block(['Autocorrelogram scale, ', scale_label], true)
 disp(sprintf(['Mean autocorrelograms span %.4g to %.4g. ' ...
-    'Shared y limit is [%.4g %.4g].'], lo, hi, y_lim(1), y_lim(2)))
+    'Each figure is scaled to its own interval.'], lo, hi))
 end
 
 

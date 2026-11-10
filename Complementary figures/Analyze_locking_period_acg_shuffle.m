@@ -29,8 +29,10 @@
 % Every analysis setting is read from the assignments at the top of
 % Analyze_locking_period_acg.m in this same folder: alpha, the
 % non-entrained threshold, the 25/75 tails, acg_lag, the delta window,
-% smooth_half, skip_abs_lag, the refractory blank, areas_to_keep, and
-% acg_method. The lag axis is built from that acg_lag and the parsing bin
+% smooth_half, skip_abs_lag, the refractory blank, areas_to_keep,
+% tail_percent, and acg_method. low_percent and high_percent follow
+% tail_percent when they are not written as numbers. The lag axis is
+% built from that acg_lag and the parsing bin
 % width, the same way Analyze_locking_period_acg builds it. No summary
 % file is read. 'eligible' counts partners of spikes that can see each
 % bin. 'overlap' keeps pair counts / (T-|lag|). The checkpoint name
@@ -1036,9 +1038,17 @@ if exist(script_path, 'file') ~= 2
     error('Analyze_locking_period_acg_shuffle:noscript', ...
         'Analyze_locking_period_acg.m was not found next to this script.');
 end
-names = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', ...
+names = {'alpha', 'non_entrained_p', 'tail_percent', ...
     'acg_lag', 'delta_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s'};
 analysis = read_script_assignments(script_path, names);
+analysis.low_percent = read_script_number(script_path, 'low_percent');
+analysis.high_percent = read_script_number(script_path, 'high_percent');
+if isempty(analysis.low_percent)
+    analysis.low_percent = analysis.tail_percent;
+end
+if isempty(analysis.high_percent)
+    analysis.high_percent = 100 - analysis.tail_percent;
+end
 analysis.areas_to_keep = read_script_areas(script_path);
 analysis.acg_method = canonical_acg_method(read_script_string(script_path, 'acg_method'));
 analysis.script_path = script_path;
@@ -1122,6 +1132,17 @@ for i = 1:numel(names)
             'Could not read %s from Analyze_locking_period_acg.m.', name);
     end
 end
+end
+
+
+function value = read_script_number(script_path, name)
+text = fileread(script_path);
+token = regexp(text, ['(?m)^', name, '\s*=\s*([^;%]+)'], 'tokens', 'once');
+value = [];
+if isempty(token)
+    return
+end
+value = str2num(token{1}); %#ok<ST2NM>
 end
 
 

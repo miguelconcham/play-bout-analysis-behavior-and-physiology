@@ -201,6 +201,23 @@ assert(abs(found.clusters(1).x0 - 0.195) < 1e-9 && abs(found.clusters(1).x1 - 0.
     'The cluster did not cover the planted 0.20-0.30 s window.');
 assert(found.clusters(1).survives && found.clusters(1).p <= 0.05, ...
     'The planted cluster did not survive the sign-flip test.');
+assert(strcmp(found.clusters(1).window, '200-400 ms'), ...
+    'The planted 0.20-0.30 s window was not tested as the first peak.');
+
+centers = -0.60:0.01:0.60;
+n = 30;
+low = zeros(n, numel(centers));
+high = zeros(n, numel(centers));
+high(:, abs(centers) >= 0.05 & abs(centers) <= 0.10) = 4;
+high(:, abs(centers) >= 0.25 & abs(centers) <= 0.32) = 1;
+split = paired_acg_clusters(low, high, centers, 0.05, 199);
+assert(numel(split.clusters) == 2, ...
+    'The burst and the first peak were not separate clusters.');
+assert(strcmp(split.clusters(1).window, '0-200 ms') ...
+    && strcmp(split.clusters(2).window, '200-400 ms'), ...
+    'The burst and the first peak were not assigned to their own windows.');
+assert(split.clusters(2).survives && split.clusters(2).p_corrected <= 0.05, ...
+    'The peak cluster was judged against the burst instead of its own window.');
 
 centers = -1:0.01:1;
 osc = cos(2 * pi * 4 * centers);
