@@ -26,8 +26,13 @@ runs = true_runs(sig);
 n_clusters = size(runs, 1);
 clusters = repmat(empty_cluster(), n_clusters, 1);
 if n_clusters > 0 && n_perm > 0
-    stream = RandStream('mt19937ar', 'Seed', 1);
-    neuron_flip = 2 * (rand(stream, n_neurons, n_perm) > 0.5) - 1;
+    if exist('RandStream', 'class') == 8
+        stream = RandStream('mt19937ar', 'Seed', 1);
+        neuron_flip = 2 * (rand(stream, n_neurons, n_perm) > 0.5) - 1;
+    else
+        rng(1);
+        neuron_flip = 2 * (rand(n_neurons, n_perm) > 0.5) - 1;
+    end
     max_mass = zeros(1, n_perm);
     for perm = 1:n_perm
         [sig_perm, z_perm] = flipped_significance( ...

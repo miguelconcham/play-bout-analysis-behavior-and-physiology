@@ -1,0 +1,13 @@
+function names = play_power_condition_names()
+%PLAY_POWER_CONDITION_NAMES  Epoch sets stored for every neuron.
+%
+% play_low and play_high are the outer power tails and still contain
+% epochs that had no outside partner. The matched names contain only
+% epochs that were paired inside the decibel caliper.
+
+names = { ...
+    'play_low', 'play_high', ...
+    'play_matched', 'outside_matched', ...
+    'play_low_matched', 'outside_low_matched', ...
+    'play_high_matched', 'outside_high_matched'};
+end
