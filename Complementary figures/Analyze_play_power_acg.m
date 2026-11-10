@@ -20,9 +20,14 @@
 % The same neurons are then compared on the locking-period properties:
 % burst (0-50 ms), first-peak prominence, second-cycle prominence, folded
 % autocorrelogram delta power after 100 ms, and the two peak latencies.
-% Sum-to-1 and rate-ratio curves are both tested. A rate-ratio curve is the
-% overlap-weighted autocorrelogram divided by rate squared times bin width,
-% so a Poisson train sits at 1.
+% Sum-to-1 and rate-ratio curves are both tested. acg_method chooses which
+% saved sessions are loaded. 'eligible' reads
+% {animal}_play_power_acg_eligible.mat. Its rate-ratio curve divides the
+% mean partner count by firing rate times bin width. 'overlap' reads the
+% original files and divides pair counts / overlap by rate squared times
+% bin width. A Poisson train sits at 1 either way. Set the same value in
+% Estimate_play_power_acg.m before estimating. Plotting does not recompute
+% the autocorrelograms; it loads the file for the method selected here.
 %
 % figure_folder empty keeps figures on screen only. Statistics are printed
 % either way. Each show_* pair is [save, keep open]. [false false] skips
@@ -50,6 +55,8 @@ show_rate_ratio_acg = [true true];
 show_paired_tests = [true true];
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 figure_folder = '';
+% 'eligible' or 'overlap'. Plotting loads the sessions saved for this method.
+acg_method = 'eligible';
 
 group_order = {'trough', 'peak', 'delta', 'nonentrained', 'all'};
 group_title = {'Trough-locked', 'Peak-locked', 'Delta-locked', 'Non-entrained', 'All neurons'};
@@ -61,7 +68,8 @@ compare_options = struct( ...
     'skip_abs_lag', skip_abs_lag, ...
     'delta_lag', delta_lag, ...
     'cluster_alpha', acg_cluster_alpha, ...
-    'cluster_perm', acg_cluster_perm);
+    'cluster_perm', acg_cluster_perm, ...
+    'acg_method', acg_method);
 
 if ~isempty(figure_folder)
     if exist(figure_folder, 'dir') ~= 7
@@ -84,10 +92,13 @@ for i = 1:n_cells
 end
 
 %% Stack session autocorrelograms
-session_files = dir(fullfile(result_folder, '*_play_power_acg.mat'));
+acg_method = canonical_acg_method(acg_method);
+compare_options.acg_method = acg_method;
+session_files = dir(fullfile(result_folder, play_power_acg_filename('*', acg_method)));
 if isempty(session_files)
     error('Analyze_play_power_acg:empty', ...
-        'No play-power ACG files in %s. Run Estimate_play_power_acg first.', result_folder);
+        ['No %s play-power ACG files in %s. Run Estimate_play_power_acg ' ...
+        'with acg_method = ''%s''.'], acg_method, result_folder, acg_method);
 end
 stack = [];
 n_missing = 0;
@@ -100,6 +111,16 @@ for f = 1:numel(session_files)
         continue
     end
     session = loaded.play_power_acg;
+    stored_method = 'overlap';
+    if isfield(session, 'acg_method') && ~isempty(session.acg_method)
+        stored_method = canonical_acg_method(session.acg_method);
+    end
+    if ~strcmp(stored_method, acg_method)
+        warning('Analyze_play_power_acg:method', ...
+            '%s was saved with acg_method ''%s'' and was skipped.', ...
+            session_files(f).name, stored_method);
+        continue
+    end
     if isempty(stack)
         stack = empty_neuron_stack(numel(session.centers), condition_names);
         stack.centers = session.centers;

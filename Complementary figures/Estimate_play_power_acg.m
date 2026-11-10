@@ -3,6 +3,12 @@
 % play, and in the low and high delta-power tails of play. Run
 % add_repo_paths.m before this script. Analyze_play_power_acg.m reads the
 % per-session files written here.
+%
+% acg_method 'eligible' keeps one observation per spike that can see the
+% whole lag bin and writes {animal}_play_power_acg_eligible.mat. 'overlap'
+% is pair counts / (T-|lag|) and keeps the original file name, so a new
+% eligible estimate does not replace an overlap file. Set the same value
+% in Analyze_play_power_acg.m before plotting.
 
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 npx_raw_data = fullfile(data_root, 'NPX data', 'NPX raw data');
@@ -32,6 +38,9 @@ generator_options.high_percent = 75;
 generator_options.caliper_sd = 0.25;
 generator_options.areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 generator_options.session_type = 'Partners session';
+% 'eligible' or 'overlap'. Eligible files are not written over overlap files.
+acg_method = 'eligible';
+generator_options.acg_method = acg_method;
 RECOMPUTE_EXISTING = false;
 
 animal_list = dir(npx_raw_data);
@@ -48,7 +57,7 @@ n_added = 0;
 
 for fn = 1:numel(animal_list)
     animal_name = animal_list(fn).name;
-    session_file = fullfile(saving_folder, [animal_name, '_play_power_acg.mat']);
+    session_file = fullfile(saving_folder, play_power_acg_filename(animal_name, acg_method));
     fprintf('\nSession %d/%d: %s\n', fn, numel(animal_list), animal_name);
     if ~RECOMPUTE_EXISTING && exist(session_file, 'file') == 2
         fprintf('Keeping existing file: %s\n', session_file);
@@ -68,7 +77,7 @@ for fn = 1:numel(animal_list)
     end
 end
 
-retry_file = fullfile(saving_folder, 'play_power_acg_retry_sessions.mat');
+retry_file = fullfile(saving_folder, play_power_retry_filename(acg_method));
 save(retry_file, 'failed_sessions', 'skipped_sessions', ...
     'generator_options', 'delta_band', 'n_added');
 fprintf('Kept %d existing sessions; added %d; %d failed.\nLog: %s\n', ...

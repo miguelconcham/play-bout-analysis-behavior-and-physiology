@@ -1,12 +1,15 @@
 function result = compare_play_power_acgs(side_a, side_b, centers, rate_a, rate_b, scale, options)
 %COMPARE_PLAY_POWER_ACGS  Paired time-wise and property tests of two ACGs.
 %
-% side_a and side_b are neurons by lag bins. Each row is the
-% overlap-weighted autocorrelogram (pair counts / overlap) of one neuron
-% in one condition. Bins covering the refractory gap are blanked. scale
-% 'sum' divides each neuron by its own finite mass. scale 'ratio' then
-% multiplies back by that mass and divides by firing rate squared times
-% the bin width, so a flat Poisson autocorrelogram sits at 1.
+% side_a and side_b are neurons by lag bins. Each row is one neuron in
+% one condition. For acg_method 'overlap', or when no method is set, a
+% row is pair counts / overlap and the rate ratio divides by firing rate
+% squared times the bin width. For 'eligible' a row is the mean partner
+% count of spikes that can see the bin, and the rate ratio divides by
+% firing rate times the bin width. Bins covering the refractory gap are
+% blanked. scale 'sum' divides each neuron by its own finite mass. scale
+% 'ratio' restores that mass and applies the rate ratio, so a flat
+% Poisson autocorrelogram sits at 1.
 %
 % The cluster test is the sign-flip test on the Gaussian-smoothed curves.
 % Difference is side B minus side A. Properties are the locking-period
@@ -44,8 +47,9 @@ curve_a = normalize_acg_rows(blank_a);
 curve_b = normalize_acg_rows(blank_b);
 if strcmp(scale, 'ratio')
     bin_w = median(diff(centers));
-    curve_a = scale_acg_by_rate(curve_a, mass_a, rate_a, bin_w);
-    curve_b = scale_acg_by_rate(curve_b, mass_b, rate_b, bin_w);
+    rate_exponent = acg_rate_exponent(options.acg_method);
+    curve_a = scale_acg_by_rate(curve_a, mass_a, rate_a, bin_w, rate_exponent);
+    curve_b = scale_acg_by_rate(curve_b, mass_b, rate_b, bin_w, rate_exponent);
 elseif ~strcmp(scale, 'sum')
     error('compare_play_power_acgs:scale', 'scale must be ''sum'' or ''ratio''.');
 end
@@ -84,11 +88,17 @@ end
 if ~isfield(options, 'cluster_perm') || isempty(options.cluster_perm)
     options.cluster_perm = 1000;
 end
+if ~isfield(options, 'acg_method') || isempty(options.acg_method)
+    options.acg_method = 'overlap';
+end
 end
 
 
-function Y = scale_acg_by_rate(Y, mass, rate, bin_w)
-factor = mass(:) ./ ((rate(:) .^ 2) * bin_w);
+function Y = scale_acg_by_rate(Y, mass, rate, bin_w, rate_exponent)
+if nargin < 5 || isempty(rate_exponent)
+    rate_exponent = 2;
+end
+factor = mass(:) ./ ((rate(:) .^ rate_exponent) * bin_w);
 factor(~isfinite(factor) | rate(:) <= 0 | mass(:) <= 0) = NaN;
 Y = Y .* factor;
 end

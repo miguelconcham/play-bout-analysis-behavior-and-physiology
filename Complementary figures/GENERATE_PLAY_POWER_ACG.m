@@ -146,7 +146,8 @@ for cc = 1:numel(channels_with_spikes)
                 these_epochs = epochs.play(idx, :);
                 these_power = play_power(idx);
             end
-            block = window_condition_acg(unit_spikes, these_epochs, bin_edges, these_power);
+            block = condition_window_acg(unit_spikes, these_epochs, bin_edges, these_power, ...
+                options.acg_method);
             block.median_pair_gap_db = gap_of.(name);
             blocks.(name) = block;
         end
@@ -170,6 +171,7 @@ session.delta_band = options.delta_band;
 session.low_percent = options.low_percent;
 session.high_percent = options.high_percent;
 session.caliper_sd = options.caliper_sd;
+session.acg_method = options.acg_method;
 session.areas_to_keep = options.areas_to_keep;
 session.session_type = options.session_type;
 session.play_epochs = epochs.play;
@@ -210,6 +212,10 @@ end
 if ~isfield(options, 'session_type') || isempty(options.session_type)
     options.session_type = 'Partners session';
 end
+if ~isfield(options, 'acg_method') || isempty(options.acg_method)
+    options.acg_method = 'eligible';
+end
+options.acg_method = canonical_acg_method(options.acg_method);
 end
 
 
