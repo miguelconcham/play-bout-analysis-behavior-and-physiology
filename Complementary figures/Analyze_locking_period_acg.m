@@ -38,8 +38,10 @@
 % Each mean autocorrelogram is two panels. The left panel is the low tail,
 % the high tail, and all runs, with a 95% confidence interval. The
 % all-runs mean is marked with its t1, t2, and, when a third cycle is
-% present, t3. The same lags are marked on the paired difference, with
-% the high-minus-low value there. The low and high tails are not marked. The right
+% present, t3. mean_acg_peak_height is the prominence required for those
+% labels only, as a fraction of the 10-90% range. The same lags are marked
+% on the paired difference, with the high-minus-low value there. The low
+% and high tails are not marked. The right
 % panel is the paired difference, high minus low, with its own 95%
 % confidence interval and a dashed line at zero. A second figure folds
 % each autocorrelogram about zero before the test and draws only the
@@ -227,6 +229,8 @@ skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
 acg_cluster_alpha = 0.05;  % t interval and Bonferroni cluster cutoff
 acg_cluster_perm  = 1000;  % sign flips for the cluster p-value
+mean_acg_peak_height = 0.02; % mean ACG labels only. Fraction of the 10-90% range.
+                             % Neuron peak scores stay at one fifth. Set 0 to keep every local maximum that passes the other checks.
 stratum_min_spikes = 200;   % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
 min_strata_per_neuron = 10; % strata required for a within-neuron LFP-to-ACG slope
@@ -305,6 +309,7 @@ if ~(isfinite(tail_percent) && tail_percent > 0 && tail_percent < 50)
         'tail_percent must be greater than 0 and less than 50. The high tail is 100 minus that value.');
 end
 setappdata(0, 'locking_acg_tail_percent', tail_percent);
+setappdata(0, 'locking_acg_mean_peak_height', mean_acg_peak_height);
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -1533,10 +1538,13 @@ if isempty(all_idx) || all_idx > numel(shown)
     return
 end
 mu = mean(shown{all_idx}, 1, 'omitnan');
-% Labels on the mean and on the paired difference use a lower bar than
-% the per-neuron scores: prominence at least 5% of the 10-90% range, and
-% a half-prominence width of at least 20 ms.
-peaks = acg_delta_peaks(mu, centers, 1, 0.05, 0.02);
+% This cutoff is only for labeling the mean and the paired difference.
+% Per-neuron scores keep the default of one fifth.
+height_fraction = 0.02;
+if isappdata(0, 'locking_acg_mean_peak_height')
+    height_fraction = getappdata(0, 'locking_acg_mean_peak_height');
+end
+peaks = acg_delta_peaks(mu, centers, 1, height_fraction, 0.02);
 end
 
 
