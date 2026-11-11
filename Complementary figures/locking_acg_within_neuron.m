@@ -46,6 +46,9 @@ for o = 1:numel(result.outcome_fields)
 end
 result = summarize_paired(result);
 report_paired_change(result);
+result.aligned = aligned_properties(strata, result);
+result = summarize_examples(result);
+report_examples(result);
 clear diary_cleanup
 if options.do_plot
     plot_violins(result, options, 'slope', 'slope_p', ...
@@ -60,6 +63,12 @@ if options.do_plot
     plot_median_r_bars(result, options);
     plot_slope_change(result, options);
     plot_common_slopes(result, options);
+    plot_trough_examples(result, options, 'median_index', ...
+        'Trough correlations near the median');
+    plot_trough_examples(result, options, 'significant_index', ...
+        'Trough significant correlations');
+    plot_rho_matrices(result, options);
+    plot_trough_property_link(result, options);
 end
 end
 
@@ -192,7 +201,7 @@ ids = unique(neuron, 'stable');
 rec = struct('id', {}, 'group', {}, 'slope', {}, 'slope_p', {}, ...
     'partial_slope', {}, 'partial_slope_p', {}, 'rho', {}, 'rho_p', {}, ...
     'partial_rho', {}, 'partial_rho_p', {}, 'n_dropped', {}, ...
-    'P', {}, 'y', {}, 'rate', {});
+    'P', {}, 'y', {}, 'rate', {}, 'P_corr', {}, 'y_corr', {});
 n_other = 0;
 n_rec = 0;
 for i = 1:numel(ids)
@@ -234,6 +243,8 @@ for i = 1:numel(ids)
     rec(n_rec).P = Pc;
     rec(n_rec).y = yc;
     rec(n_rec).rate = rc;
+    rec(n_rec).P_corr = P;
+    rec(n_rec).y_corr = y;
 end
 end
 
@@ -366,6 +377,9 @@ per_neuron.n_dropped = empty_cells(n_panel);
 per_neuron.slope_drop = empty_cells(n_panel);
 per_neuron.rho_drop = empty_cells(n_panel);
 per_neuron.paired_slope_id = empty_id_cells(n_panel);
+per_neuron.rho_id = empty_id_cells(n_panel);
+per_neuron.rho_P = empty_id_cells(n_panel);
+per_neuron.rho_y = empty_id_cells(n_panel);
 per_neuron.n_other_group = 0;
 end
 
@@ -390,6 +404,9 @@ function per_neuron = append_record(per_neuron, p, rec)
 if isfinite(rec.rho)
     per_neuron.rho{p}(end + 1, 1) = rec.rho;
     per_neuron.rho_p{p}(end + 1, 1) = rec.rho_p;
+    per_neuron.rho_id{p}{end + 1, 1} = rec.id;
+    per_neuron.rho_P{p}{end + 1, 1} = rec.P_corr;
+    per_neuron.rho_y{p}{end + 1, 1} = rec.y_corr;
 end
 if isfinite(rec.partial_rho)
     per_neuron.partial_rho{p}(end + 1, 1) = rec.partial_rho;
@@ -1025,6 +1042,416 @@ if Fstat < 0
     return
 end
 p = betainc(df2 / (df2 + df1 * Fstat), df2 / 2, df1 / 2);
+end
+
+
+function aligned = aligned_properties(strata, result)
+neuron = as_cellstr(strata.neuron);
+lock_group = as_cellstr(strata.lock_group);
+power = double(strata.power(:));
+rate = double(strata.rate(:));
+Y = [double(strata.acg_delta(:)), double(strata.first_prominence(:)), ...
+    double(strata.second_prominence(:))];
+ids = unique(neuron, 'stable');
+aligned.id = {};
+aligned.group = {};
+aligned.P = {};
+aligned.Y = {};
+n = 0;
+for i = 1:numel(ids)
+    rows = find(strcmp(neuron, ids{i}));
+    group = lock_group{rows(1)};
+    if ~any(strcmp(group, result.type_order))
+        continue
+    end
+    P = power(rows);
+    r = rate(rows);
+    y = Y(rows, :);
+    ok = isfinite(P) & isfinite(r);
+    if nnz(ok) < 2
+        continue
+    end
+    n = n + 1;
+    aligned.id{n, 1} = ids{i};
+    aligned.group{n, 1} = group;
+    aligned.P{n, 1} = P(ok);
+    aligned.Y{n, 1} = y(ok, :);
+end
+end
+
+
+function result = summarize_examples(result)
+n_pick = 5;
+panel = find(strcmp(result.panel_names, 'trough'), 1);
+examples.n_pick = n_pick;
+examples.panel = panel;
+n_out = numel(result.outcome_fields);
+examples.median_index = cell(1, n_out);
+examples.significant_index = cell(1, n_out);
+for o = 1:n_out
+    rho = result.per_neuron(o).rho{panel};
+    pvals = result.per_neuron(o).rho_p{panel};
+    examples.median_index{o} = nearest_to_value(rho, finite_median(rho), n_pick);
+    examples.significant_index{o} = strongest_significant(rho, pvals, result.alpha, n_pick);
+end
+result.examples = examples;
+result.rho_link = link_matrices(result);
+end
+
+
+function idx = nearest_to_value(values, target, n_pick)
+ok = find(isfinite(values(:)));
+idx = zeros(0, 1);
+if isempty(ok) || ~isfinite(target)
+    return
+end
+distance = abs(values(ok) - target);
+[~, order] = sortrows([distance, ok]);
+n_pick = min(n_pick, numel(order));
+idx = ok(order(1:n_pick));
+[~, show] = sort(values(idx));
+idx = idx(show);
+end
+
+
+function idx = strongest_significant(values, pvals, alpha, n_pick)
+values = values(:);
+pvals = pvals(:);
+ok = find(isfinite(values) & isfinite(pvals) & pvals < alpha);
+idx = zeros(0, 1);
+if isempty(ok)
+    return
+end
+[~, order] = sortrows([pvals(ok), -abs(values(ok)), ok]);
+n_pick = min(n_pick, numel(order));
+idx = ok(order(1:n_pick));
+[~, show] = sort(values(idx));
+idx = idx(show);
+end
+
+
+function link = link_matrices(result)
+n_cell = numel(result.cell_order);
+n_out = numel(result.outcome_fields);
+for g = 1:n_cell
+    panel = result.cell_panel(g);
+    [ids, R] = rho_table(result, panel);
+    C = nan(n_out, n_out);
+    n_pair = zeros(n_out, n_out);
+    for a = 1:n_out
+        for b = 1:n_out
+            ok = isfinite(R(:, a)) & isfinite(R(:, b));
+            n_pair(a, b) = nnz(ok);
+            if a == b && n_pair(a, b) >= 2
+                C(a, b) = 1;
+            elseif n_pair(a, b) >= 4
+                C(a, b) = pearson_corr(R(ok, a), R(ok, b));
+            end
+        end
+    end
+    block.ids = ids;
+    block.R = R;
+    block.C = C;
+    block.n_pair = n_pair;
+    if g == 1
+        link = block;
+    else
+        link(g) = block; %#ok<AGROW>
+    end
+end
+end
+
+
+function [ids, R] = rho_table(result, panel)
+n_out = numel(result.outcome_fields);
+ids = {};
+for o = 1:n_out
+    ids = union_stable(ids, result.per_neuron(o).rho_id{panel});
+end
+R = nan(numel(ids), n_out);
+for o = 1:n_out
+    these = result.per_neuron(o).rho_id{panel};
+    vals = result.per_neuron(o).rho{panel};
+    for i = 1:numel(these)
+        hit = find(strcmp(ids, these{i}), 1);
+        if ~isempty(hit)
+            R(hit, o) = vals(i);
+        end
+    end
+end
+end
+
+
+function kept = union_stable(first, second)
+kept = first(:);
+second = second(:);
+for i = 1:numel(second)
+    if ~any(strcmp(kept, second{i}))
+        kept{end + 1, 1} = second{i}; %#ok<AGROW>
+    end
+end
+end
+
+
+function report_examples(result)
+panel = result.examples.panel;
+disp(repmat('=', 1, 72))
+disp('TROUGH EXAMPLE CORRELATIONS WITH LFP DELTA POWER')
+disp(['Five neurons closest to the median Spearman correlation, and up to ' ...
+    'five with a significant correlation. r is the within-neuron Spearman ' ...
+    'correlation.'])
+for o = 1:numel(result.outcome_titles)
+    rho = result.per_neuron(o).rho{panel};
+    pvals = result.per_neuron(o).rho_p{panel};
+    ids = result.per_neuron(o).rho_id{panel};
+    disp(['  ', result.outcome_titles{o}])
+    disp(sprintf('    Median r = %s', plain_number(finite_median(rho))))
+    report_example_list('Near the median', ids, rho, pvals, result.examples.median_index{o});
+    report_example_list('Significant', ids, rho, pvals, result.examples.significant_index{o});
+end
+disp('CORRELATION OF THE PER-NEURON CORRELATIONS')
+disp(['Each entry is the Pearson correlation, across neurons, of the ' ...
+    'Spearman values for two autocorrelogram measures. The same neurons ' ...
+    'pull both values up when the entry is positive.'])
+short_outcome = {'ACG delta power', 'First-peak prominence', 'Second-cycle prominence'};
+for g = 1:numel(result.cell_title)
+    disp(['  ', result.cell_title{g}])
+    C = result.rho_link(g).C;
+    n_pair = result.rho_link(g).n_pair;
+    for a = 1:numel(short_outcome)
+        for b = a + 1:numel(short_outcome)
+            disp(sprintf('    %s with %s: r = %s, neurons = %d', ...
+                short_outcome{a}, short_outcome{b}, plain_number(C(a, b)), n_pair(a, b)))
+        end
+    end
+end
+end
+
+
+function report_example_list(label, ids, rho, pvals, idx)
+disp(['    ', label])
+if isempty(idx)
+    disp('      none')
+    return
+end
+for i = 1:numel(idx)
+    disp(sprintf('      %s  r = %s  p = %s', ids{idx(i)}, ...
+        plain_number(rho(idx(i))), plain_number(pvals(idx(i)))))
+end
+end
+
+
+function plot_trough_examples(result, options, index_field, figure_name)
+n_out = numel(result.outcome_titles);
+n_col = result.examples.n_pick;
+panel = result.examples.panel;
+short_outcome = {'ACG delta power', 'First-peak prominence', 'Second-cycle prominence'};
+figure('Name', figure_name, 'Color', 'w', 'Visible', options.figure_visible)
+set(gcf, 'Units', 'pixels', 'Position', [20 20 1680 980])
+for o = 1:n_out
+    idx = result.examples.(index_field){o};
+    for c = 1:n_col
+        subplot(n_out, n_col, (o - 1) * n_col + c)
+        if c > numel(idx)
+            axis off
+            if c == 1
+                title(sprintf('%s  none', short_outcome{o}))
+            end
+            continue
+        end
+        k = idx(c);
+        draw_example_scatter(result.per_neuron(o).rho_P{panel}{k}, ...
+            result.per_neuron(o).rho_y{panel}{k})
+        title(sprintf('%s  r=%s', short_label(result.per_neuron(o).rho_id{panel}{k}), ...
+            plain_number(result.per_neuron(o).rho{panel}(k))))
+        if c == 1
+            ylabel(short_outcome{o})
+        end
+        if o == n_out
+            xlabel('LFP delta power')
+        end
+        box off
+    end
+end
+save_figure(options.figure_folder, figure_name);
+end
+
+
+function draw_example_scatter(x, y)
+x = x(:);
+y = y(:);
+ok = isfinite(x) & isfinite(y);
+x = x(ok);
+y = y(ok);
+plot(x, y, '.', 'Color', [0.20 0.40 0.70], 'MarkerSize', 10)
+hold on
+if numel(x) >= 2 && std(x, 0) > 0 && std(y, 0) > 0
+    coef = [ones(numel(x), 1), x] \ y;
+    xx = [min(x); max(x)];
+    plot(xx, coef(1) + coef(2) * xx, '-', 'Color', [0.75 0.12 0.14], 'LineWidth', 1.2)
+end
+end
+
+
+function label = short_label(id)
+label = char(id);
+label = strrep(label, ',', ' ');
+label = strrep(label, '-', ' ');
+if numel(label) > 18
+    label = label(end - 17:end);
+end
+end
+
+
+function plot_rho_matrices(result, options)
+n_cell = numel(result.cell_title);
+short_outcome = {'ACG', 'Peak', 'Cycle'};
+figure('Name', 'Correlation values by cell type', 'Color', 'w', ...
+    'Visible', options.figure_visible)
+set(gcf, 'Units', 'pixels', 'Position', [40 40 1400 420])
+for g = 1:n_cell
+    subplot(1, n_cell, g)
+    draw_corr_matrix(result.rho_link(g).C, short_outcome)
+    title(result.cell_title{g})
+end
+save_figure(options.figure_folder, 'Correlation values by cell type');
+end
+
+
+function draw_corr_matrix(C, labels)
+hold on
+n = size(C, 1);
+for i = 1:n
+    for j = 1:n
+        patch([j - 0.5, j + 0.5, j + 0.5, j - 0.5], ...
+            [i - 0.5, i - 0.5, i + 0.5, i + 0.5], diverging_color(C(i, j)), ...
+            'EdgeColor', [0.85 0.85 0.85])
+        if isfinite(C(i, j))
+            text(j, i, sprintf('%.2f', C(i, j)), 'HorizontalAlignment', 'center', ...
+                'FontSize', 10)
+        else
+            text(j, i, 'n/a', 'HorizontalAlignment', 'center', 'FontSize', 10, ...
+                'Color', [0.35 0.35 0.35])
+        end
+    end
+end
+set(gca, 'XTick', 1:n, 'XTickLabel', labels, 'YTick', 1:n, 'YTickLabel', labels, ...
+    'YDir', 'reverse')
+xlim([0.5, n + 0.5])
+ylim([0.5, n + 0.5])
+axis square
+box on
+end
+
+
+function color = diverging_color(value)
+if ~isfinite(value)
+    color = [0.93 0.93 0.93];
+    return
+end
+value = max(min(value, 1), -1);
+if value >= 0
+    color = [1, 1 - 0.75 * value, 1 - 0.75 * value];
+else
+    color = [1 + 0.75 * value, 1 + 0.55 * value, 1];
+end
+end
+
+
+function plot_trough_property_link(result, options)
+pairs = [1 2; 1 3; 2 3];
+pair_names = {'ACG delta', 'First peak', 'Second cycle'};
+panel = result.examples.panel;
+figure('Name', 'Trough correlation value scatters', 'Color', 'w', ...
+    'Visible', options.figure_visible)
+set(gcf, 'Units', 'pixels', 'Position', [40 40 980 980])
+for row = 1:size(pairs, 1)
+    a = pairs(row, 1);
+    b = pairs(row, 2);
+    [xa, xb] = paired_rhos(result, panel, a, b);
+    subplot(size(pairs, 1), 2, (row - 1) * 2 + 1)
+    draw_pair_scatter(xa, xb, [0.20 0.45 0.80])
+    title(sprintf('%s vs %s correlations  r=%s', pair_names{a}, pair_names{b}, ...
+        plain_number(pairwise_pearson(xa, xb))))
+    xlabel([pair_names{a}, ' correlation'])
+    ylabel([pair_names{b}, ' correlation'])
+    box off
+    [ya, yb] = pooled_properties(result, a, b);
+    subplot(size(pairs, 1), 2, (row - 1) * 2 + 2)
+    draw_pair_scatter(ya, yb, [0.35 0.35 0.35])
+    title(sprintf('%s vs %s values  r=%s', pair_names{a}, pair_names{b}, ...
+        plain_number(pairwise_pearson(ya, yb))))
+    xlabel([pair_names{a}, ' value'])
+    ylabel([pair_names{b}, ' value'])
+    box off
+end
+save_figure(options.figure_folder, 'Trough correlation value scatters');
+end
+
+
+function [xa, xb] = paired_rhos(result, panel, a, b)
+ids = intersect_stable(result.per_neuron(a).rho_id{panel}, ...
+    result.per_neuron(b).rho_id{panel});
+xa = nan(numel(ids), 1);
+xb = nan(numel(ids), 1);
+ida = result.per_neuron(a).rho_id{panel};
+idb = result.per_neuron(b).rho_id{panel};
+ra = result.per_neuron(a).rho{panel};
+rb = result.per_neuron(b).rho{panel};
+for i = 1:numel(ids)
+    ha = find(strcmp(ida, ids{i}), 1);
+    hb = find(strcmp(idb, ids{i}), 1);
+    if ~isempty(ha)
+        xa(i) = ra(ha);
+    end
+    if ~isempty(hb)
+        xb(i) = rb(hb);
+    end
+end
+end
+
+
+function [x, y] = pooled_properties(result, col_a, col_b)
+panel = find(strcmp(result.panel_names, 'trough'), 1);
+ids = result.per_neuron(1).rho_id{panel};
+for o = 2:numel(result.outcome_fields)
+    ids = union_stable(ids, result.per_neuron(o).rho_id{panel});
+end
+x = zeros(0, 1);
+y = zeros(0, 1);
+for i = 1:numel(result.aligned.id)
+    if ~any(strcmp(ids, result.aligned.id{i}))
+        continue
+    end
+    Y = result.aligned.Y{i};
+    ok = isfinite(Y(:, col_a)) & isfinite(Y(:, col_b));
+    x = [x; Y(ok, col_a)]; %#ok<AGROW>
+    y = [y; Y(ok, col_b)]; %#ok<AGROW>
+end
+end
+
+
+function draw_pair_scatter(x, y, color)
+ok = isfinite(x(:)) & isfinite(y(:));
+x = x(ok);
+y = y(ok);
+plot(x, y, '.', 'Color', color, 'MarkerSize', 8)
+hold on
+if numel(x) >= 2 && std(x, 0) > 0 && std(y, 0) > 0
+    coef = [ones(numel(x), 1), x] \ y;
+    xx = [min(x); max(x)];
+    plot(xx, coef(1) + coef(2) * xx, '-', 'Color', [0.75 0.12 0.14], 'LineWidth', 1.2)
+end
+end
+
+
+function r = pairwise_pearson(a, b)
+ok = isfinite(a(:)) & isfinite(b(:));
+if nnz(ok) < 4
+    r = NaN;
+    return
+end
+r = pearson_corr(a(ok), b(ok));
 end
 
 

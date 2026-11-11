@@ -32,6 +32,14 @@
 % second plot shows the median slope change after firing rate, for each
 % autocorrelogram measure and lock group. A star marks a lock group in
 % which any of those three changes survives a Bonferroni correction.
+%
+% For trough-locked neurons, one figure shows five neurons near the median
+% correlation of each autocorrelogram measure with LFP delta power, and
+% another shows up to five neurons whose correlation is significant. A
+% matrix for each lock group shows whether the same neurons have high
+% correlations on more than one measure. For trough-locked neurons, the
+% scatter of those correlation values sits beside the scatter of the
+% measures themselves.
 
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 
