@@ -141,8 +141,9 @@
 % Stratum power is the
 % duration-weighted mean. Burst, both prominences, firing rate, and the
 % folded autocorrelogram delta power are recomputed in the stratum. The
-% category is the neuron, and a neuron with fewer than two usable strata
-% does not enter. That model is fit again after neuron identity is
+% category is the neuron, and a neuron with fewer than
+% min_strata_in_model usable strata does not enter. That model is fit
+% again after neuron identity is
 % removed and every predictor except firing rate is then residualized on
 % the within-neuron firing rate. A third strata fit, and only that fit,
 % orthogonalizes the predictors one at a time. The order is neuron,
@@ -249,6 +250,7 @@ mean_acg_peak_height = 0.02; % mean ACG labels only. Fraction of the 10-90% rang
 stratum_min_spikes = 200;   % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
 min_strata_per_neuron = 10; % strata required for a within-neuron LFP-to-ACG slope
+min_strata_in_model = 2;     % usable strata required before a neuron enters the strata models
 neuron_slope_alpha = 0.05;  % per-neuron threshold for a significant slope or rank correlation
 maximize_strata_number = false; % true: largest valid stratum count for each neuron
                                  % false: try 4, then 2, then 1
@@ -322,11 +324,16 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'strata_preview', show_strata_preview, ...
     'neuron_slopes', show_neuron_slopes));
 setappdata(0, 'locking_acg_min_strata', min_strata_per_neuron);
+setappdata(0, 'locking_acg_model_min_strata', min_strata_in_model);
 setappdata(0, 'locking_acg_slope_alpha', neuron_slope_alpha);
 setappdata(0, 'locking_acg_models_to_plot', models_to_plot(:).');
 if ~(isfinite(tail_percent) && tail_percent > 0 && tail_percent < 50)
     error('Analyze_locking_period_acg:tail', ...
         'tail_percent must be greater than 0 and less than 50. The high tail is 100 minus that value.');
+end
+if ~(isfinite(min_strata_in_model) && min_strata_in_model >= 2)
+    error('Analyze_locking_period_acg:modelStrata', ...
+        'min_strata_in_model must be at least 2. A neuron factor needs two strata.');
 end
 setappdata(0, 'locking_acg_tail_percent', tail_percent);
 setappdata(0, 'locking_acg_mean_peak_height', mean_acg_peak_height);
@@ -460,6 +467,7 @@ parameters = struct( ...
     'stratum_min_lag_s', stratum_min_lag_s, ...
     'maximize_strata_number', maximize_strata_number, ...
     'min_strata_per_neuron', min_strata_per_neuron, ...
+    'min_strata_in_model', min_strata_in_model, ...
     'neuron_slope_alpha', neuron_slope_alpha, ...
     'acg_method', acg_method, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
@@ -917,6 +925,10 @@ ok = saved_method_matches(saved, current);
 if ~ok
     return
 end
+if strcmp(kind, 'base') && ~saved_model_min_matches(saved, current)
+    ok = false;
+    return
+end
 for i = 1:numel(fields)
     name = fields{i};
     if ~isfield(saved, name) || ~isfield(current, name) || ~isequaln(saved.(name), current.(name))
@@ -937,6 +949,19 @@ if isfield(current, 'acg_method') && ~isempty(current.acg_method)
     current_method = canonical_acg_method(current.acg_method);
 end
 ok = strcmp(saved_method, current_method);
+end
+
+
+function ok = saved_model_min_matches(saved, current)
+saved_n = 2;
+if isfield(saved, 'min_strata_in_model') && isfinite(saved.min_strata_in_model)
+    saved_n = saved.min_strata_in_model;
+end
+current_n = 2;
+if isfield(current, 'min_strata_in_model') && isfinite(current.min_strata_in_model)
+    current_n = current.min_strata_in_model;
+end
+ok = abs(saved_n - current_n) < 1e-9;
 end
 
 
@@ -4148,12 +4173,10 @@ if ~isfield(strata, 'n') || strata.n < 2
 end
 [X0, y0, neuron0, lock0, row_names] = strata_regression_rows(strata);
 if isempty(y0) || size(X0, 2) ~= numel(names)
-    note_oscillation_model('Model13 equal neuron', ...
-        'Too few neurons have two strata for this model.');
-    note_oscillation_model('Model14 row weight', ...
-        'Too few neurons have two strata for this model.');
-    note_oscillation_model('Model15 group slopes', ...
-        'Too few neurons have two strata for this model.');
+    few_neurons = sprintf('Too few neurons have %g strata for this model.', model_min_strata());
+    note_oscillation_model('Model13 equal neuron', few_neurons);
+    note_oscillation_model('Model14 row weight', few_neurons);
+    note_oscillation_model('Model15 group slopes', few_neurons);
     return
 end
 names = row_names;
@@ -4557,7 +4580,7 @@ end
 function [fit, X, y, neuron, lock_group] = fit_common_sample(X, y, neuron, lock_group, equal_weight, names, short_names, osc_names, tag, label, weight_sentence)
 [X, y, neuron, n_outliers, keep] = drop_clear_outliers(X, y, neuron);
 lock_group = lock_group(keep);
-[X, y, neuron, lock_group] = keep_neuron_rows(X, y, neuron, lock_group, 2);
+[X, y, neuron, lock_group] = keep_neuron_rows(X, y, neuron, lock_group, model_min_strata());
 if equal_weight
     weights = neuron_stratum_weights(neuron);
 else
@@ -5219,7 +5242,8 @@ end
 if include_lfp && ~isfield(strata, 'power')
     return
 end
-keep = rows_of_repeated_groups(strata.neuron, 2);
+min_n = model_min_strata();
+keep = rows_of_repeated_groups(strata.neuron, min_n);
 X = [strata.rate(keep), strata.burst(keep), strata.first_prominence(keep), ...
     strata.second_prominence(keep), strata.acg_delta(keep)];
 if include_lfp
@@ -5233,7 +5257,7 @@ X = X(finite_row, :);
 y = y(finite_row);
 groups = groups(finite_row);
 lock_group = lock_group(finite_row);
-keep_again = rows_of_repeated_groups(groups, 2);
+keep_again = rows_of_repeated_groups(groups, min_n);
 X = X(keep_again, :);
 y = y(keep_again);
 groups = groups(keep_again);
@@ -5566,7 +5590,7 @@ end
 function in_group = stratum_group_rows(lock_group, groups, group_name)
 in_group = in_lock_group(lock_group, group_name);
 selected = find(in_group);
-keep_local = rows_of_repeated_groups(groups(in_group), 2);
+keep_local = rows_of_repeated_groups(groups(in_group), model_min_strata());
 in_group(selected(~keep_local)) = false;
 end
 
@@ -5893,9 +5917,22 @@ if ~isfield(strata, 'neuron') || isempty(strata.neuron)
 end
 [~, ~, idx] = unique(strata.neuron, 'stable');
 counts = accumarray(idx, 1);
+min_n = model_min_strata();
 disp(sprintf('  Neurons with both prominences in one stratum only: %d', sum(counts == 1)))
-disp(sprintf('  Neurons entering the within-neuron model: %d', sum(counts >= 2)))
-disp(sprintf('  Strata entering that model: %d', sum(counts(idx) >= 2)))
+disp(sprintf('  Neurons entering the within-neuron model, at least %g strata: %d', ...
+    min_n, sum(counts >= min_n)))
+disp(sprintf('  Strata entering that model: %d', sum(counts(idx) >= min_n)))
+end
+
+
+function n = model_min_strata()
+n = 2;
+if isappdata(0, 'locking_acg_model_min_strata')
+    stored = getappdata(0, 'locking_acg_model_min_strata');
+    if isfinite(stored) && stored >= 2
+        n = stored;
+    end
+end
 end
 
 
