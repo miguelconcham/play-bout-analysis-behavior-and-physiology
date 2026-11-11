@@ -48,20 +48,18 @@ result = summarize_paired(result);
 report_paired_change(result);
 result.aligned = aligned_properties(strata, result);
 result = summarize_examples(result);
+result.component = first_component(result);
+report_scale(result);
 report_examples(result);
+report_component(result);
 clear diary_cleanup
 if options.do_plot
     plot_violins(result, options, 'slope', 'slope_p', ...
         'Neuron slopes, violins', 'Within-neuron slope');
     plot_violins(result, options, 'rho', 'rho_p', ...
         'Neuron slopes, rank violins', 'Spearman rho');
-    plot_violins(result, options, 'partial_slope', 'partial_slope_p', ...
-        'Neuron slopes after firing rate, violins', 'Slope after firing rate');
-    plot_violins(result, options, 'partial_rho', 'partial_rho_p', ...
-        'Neuron rank correlations after firing rate, violins', ...
-        'Partial Spearman rho');
     plot_median_r_bars(result, options);
-    plot_slope_change(result, options);
+    plot_paired_slope_square(result, options);
     plot_common_slopes(result, options);
     plot_trough_examples(result, options, 'median_index', ...
         'Trough correlations near the median');
@@ -69,6 +67,7 @@ if options.do_plot
         'Trough significant correlations');
     plot_rho_matrices(result, options);
     plot_trough_property_link(result, options);
+    plot_component_correlation(result, options);
 end
 end
 
@@ -375,6 +374,8 @@ per_neuron.partial_rho = empty_cells(n_panel);
 per_neuron.partial_rho_p = empty_cells(n_panel);
 per_neuron.n_dropped = empty_cells(n_panel);
 per_neuron.slope_drop = empty_cells(n_panel);
+per_neuron.paired_slope = empty_cells(n_panel);
+per_neuron.paired_partial = empty_cells(n_panel);
 per_neuron.rho_drop = empty_cells(n_panel);
 per_neuron.paired_slope_id = empty_id_cells(n_panel);
 per_neuron.rho_id = empty_id_cells(n_panel);
@@ -423,6 +424,8 @@ if isfinite(rec.partial_slope)
 end
 if isfinite(rec.slope) && isfinite(rec.partial_slope)
     per_neuron.slope_drop{p}(end + 1, 1) = rec.slope - rec.partial_slope;
+    per_neuron.paired_slope{p}(end + 1, 1) = rec.slope;
+    per_neuron.paired_partial{p}(end + 1, 1) = rec.partial_slope;
     per_neuron.paired_slope_id{p}{end + 1, 1} = rec.id;
 end
 if isfinite(rec.rho) && isfinite(rec.partial_rho)
@@ -1290,6 +1293,8 @@ if numel(x) >= 2 && std(x, 0) > 0 && std(y, 0) > 0
     xx = [min(x); max(x)];
     plot(xx, coef(1) + coef(2) * xx, '-', 'Color', [0.75 0.12 0.14], 'LineWidth', 1.2)
 end
+xlim(data_limits(x, false))
+ylim(data_limits(y, false))
 end
 
 
@@ -1442,6 +1447,10 @@ if numel(x) >= 2 && std(x, 0) > 0 && std(y, 0) > 0
     xx = [min(x); max(x)];
     plot(xx, coef(1) + coef(2) * xx, '-', 'Color', [0.75 0.12 0.14], 'LineWidth', 1.2)
 end
+if ~isempty(x)
+    xlim(data_limits(x, false))
+    ylim(data_limits(y, false))
+end
 end
 
 
@@ -1452,6 +1461,180 @@ if nnz(ok) < 4
     return
 end
 r = pearson_corr(a(ok), b(ok));
+end
+
+
+function report_scale(result)
+disp(repmat('=', 1, 72))
+disp('SCALE OF THE AUTOCORRELOGRAM MEASURES')
+disp(['Each autocorrelogram is scaled so its bins sum to 1. ACG delta power is ' ...
+    'the variance of that curve inside the delta band, so it is much smaller ' ...
+    'than 1. A within-neuron slope divides that measure by LFP delta power, ' ...
+    'which is a squared envelope, so a real association can have a slope near ' ...
+    '1e-13. Axes follow the data instead of stretching to -1 and 1.'])
+labels = {'LFP delta power', 'ACG delta power', 'First-peak prominence', ...
+    'Second-cycle prominence'};
+columns = pooled_measure(result);
+for k = 1:numel(labels)
+    if k == 1
+        values = columns.power;
+    else
+        values = columns.Y(:, k - 1);
+    end
+    disp(sprintf('  %s: n = %d  median = %s  p10 = %s  p90 = %s', ...
+        labels{k}, nnz(isfinite(values)), plain_number(finite_median(values)), ...
+        plain_number(percentile_value(values, 0.10)), ...
+        plain_number(percentile_value(values, 0.90))))
+end
+for o = 1:numel(result.outcome_titles)
+    slopes = result.per_neuron(o).slope{1};
+    disp(sprintf('  Within-neuron slope of %s: median = %s  p10 = %s  p90 = %s', ...
+        result.outcome_titles{o}, plain_number(finite_median(slopes)), ...
+        plain_number(percentile_value(slopes, 0.10)), ...
+        plain_number(percentile_value(slopes, 0.90))))
+end
+end
+
+
+function columns = pooled_measure(result)
+power = zeros(0, 1);
+Y = zeros(0, 3);
+for i = 1:numel(result.aligned.id)
+    power = [power; result.aligned.P{i}(:)]; %#ok<AGROW>
+    Y = [Y; result.aligned.Y{i}]; %#ok<AGROW>
+end
+columns.power = power;
+columns.Y = Y;
+end
+
+
+function value = percentile_value(values, fraction)
+values = sort(values(isfinite(values(:))));
+value = NaN;
+if isempty(values)
+    return
+end
+if numel(values) == 1
+    value = values;
+    return
+end
+rank = 1 + (numel(values) - 1) * fraction;
+lo = floor(rank);
+hi = ceil(rank);
+lo = max(lo, 1);
+hi = min(hi, numel(values));
+if lo == hi
+    value = values(lo);
+else
+    value = values(lo) + (rank - lo) * (values(hi) - values(lo));
+end
+end
+
+
+function component = first_component(result)
+n_panel = numel(result.panel_names);
+component.loadings = nan(1, 3);
+component.variance = NaN;
+component.rho = empty_cells(n_panel);
+component.rho_p = empty_cells(n_panel);
+rows = zeros(0, 3);
+owner = zeros(0, 1);
+for i = 1:numel(result.aligned.id)
+    Y = result.aligned.Y{i};
+    ok = all(isfinite(Y), 2);
+    if ~any(ok)
+        continue
+    end
+    rows = [rows; Y(ok, :)]; %#ok<AGROW>
+    owner = [owner; i * ones(nnz(ok), 1)]; %#ok<AGROW>
+end
+if size(rows, 1) < 4
+    return
+end
+Z = zeros(size(rows));
+for k = 1:3
+    spread = std(rows(:, k), 0);
+    if ~isfinite(spread) || spread <= 0
+        Z(:, k) = 0;
+    else
+        Z(:, k) = (rows(:, k) - mean(rows(:, k))) / spread;
+    end
+end
+[~, S, V] = svd(Z, 'econ');
+loadings = V(:, 1);
+if sum(loadings) < 0
+    loadings = -loadings;
+end
+score = Z * loadings;
+singular = diag(S);
+component.variance = singular(1) ^ 2 / sum(singular .^ 2);
+component.loadings = loadings(:)';
+for i = 1:numel(result.aligned.id)
+    take = owner == i;
+    if nnz(take) < 4
+        continue
+    end
+    P = result.aligned.P{i};
+    Y = result.aligned.Y{i};
+    ok = all(isfinite(Y), 2);
+    P = P(ok);
+    [rho, p] = spearman_with_p(P, score(take));
+    if ~isfinite(rho)
+        continue
+    end
+    group = result.aligned.group{i};
+    for p_idx = 1:n_panel
+        if ~panel_has(group, result.panel_names{p_idx})
+            continue
+        end
+        component.rho{p_idx}(end + 1, 1) = rho;
+        component.rho_p{p_idx}(end + 1, 1) = p;
+    end
+end
+end
+
+
+function report_component(result)
+component = result.component;
+disp(repmat('=', 1, 72))
+disp('FIRST PRINCIPAL COMPONENT OF THE THREE AUTOCORRELOGRAM MEASURES')
+disp(['The three measures are standardized across strata, then combined. ' ...
+    'The sign is chosen so a high score means the measures are high together.'])
+disp(sprintf(['  Loadings: ACG delta power = %s  first-peak prominence = %s  ' ...
+    'second-cycle prominence = %s'], plain_number(component.loadings(1)), ...
+    plain_number(component.loadings(2)), plain_number(component.loadings(3))))
+disp(sprintf('  Fraction of standardized variance on the first component = %s', ...
+    plain_number(component.variance)))
+disp('  Spearman correlation of the component with LFP delta power')
+for p = 1:numel(result.panel_titles)
+    values = component.rho{p};
+    disp(sprintf('    %s: n = %d  median = %s  signrank p = %s', ...
+        result.panel_titles{p}, nnz(isfinite(values)), ...
+        plain_number(finite_median(values)), ...
+        plain_number(signed_rank_p(values, 'both'))))
+end
+end
+
+
+function plot_component_correlation(result, options)
+n_panel = numel(result.panel_titles);
+short_panels = {'All', 'Trough', 'Peak', 'Delta', 'Non'};
+values = result.component.rho;
+figure('Name', 'PC1 correlation with LFP delta power', 'Color', 'w', ...
+    'Visible', options.figure_visible)
+set(gcf, 'Units', 'pixels', 'Position', [40 40 1500 420])
+span = shared_value_span(values);
+for p = 1:n_panel
+    subplot(1, n_panel, p)
+    draw_violin_scatter(values{p}, result.component.rho_p{p}, result.alpha, span)
+    title(sprintf('%s  median %s', short_panels{p}, ...
+        plain_number(finite_median(values{p}))))
+    if p == 1
+        ylabel('Spearman rho')
+    end
+    box off
+end
+save_figure(options.figure_folder, 'PC1 correlation with LFP delta power');
 end
 
 
@@ -1490,15 +1673,38 @@ values = zeros(0, 1);
 for p = 1:numel(panels)
     values = [values; panels{p}(:)]; %#ok<AGROW>
 end
-values = values(isfinite(values));
+span = data_limits(values, true);
+end
+
+
+function lim = data_limits(values, keep_zero)
+values = values(isfinite(values(:)));
 if isempty(values)
-    span = [-1 1];
+    lim = [-1 1];
     return
 end
-lo = min([values; 0]);
-hi = max([values; 0]);
-pad = 0.08 * max(hi - lo, 1);
-span = [lo - pad, hi + pad];
+lo = min(values);
+hi = max(values);
+span = hi - lo;
+if ~(span > 0)
+    span = max(abs(lo), 1e-300) * 0.1;
+end
+pad = 0.08 * span;
+lim = [lo - pad, hi + pad];
+if nargin >= 2 && keep_zero && lim(1) > 0
+    reach = max(5 * (lim(2) - lim(1)), 1e-300);
+    if lim(1) <= reach
+        lim(1) = -pad;
+    end
+elseif nargin >= 2 && keep_zero && lim(2) < 0
+    reach = max(5 * (lim(2) - lim(1)), 1e-300);
+    if -lim(2) <= reach
+        lim(2) = pad;
+    end
+end
+if ~(lim(2) > lim(1))
+    lim = [lo - 1, hi + 1];
+end
 end
 
 
@@ -1567,40 +1773,59 @@ save_figure(options.figure_folder, 'Median Spearman by lock group');
 end
 
 
-function plot_slope_change(result, options)
+function plot_paired_slope_square(result, options)
 n_out = numel(result.outcome_titles);
 n_cell = numel(result.cell_title);
-colors = [0.20 0.45 0.80; 0.85 0.45 0.15; 0.30 0.55 0.35];
 short_outcome = {'ACG delta', 'First peak', 'Second cycle'};
 short_cell = {'Trough', 'Peak', 'Delta', 'Non'};
-figure('Name', 'Slope change after firing rate', 'Color', 'w', ...
+figure('Name', 'Slope before and after firing rate', 'Color', 'w', ...
     'Visible', options.figure_visible)
-set(gcf, 'Units', 'pixels', 'Position', [40 40 920 560])
-hold on
-plot([0.4, n_cell + 0.6], [0 0], '--', 'Color', [0.35 0.35 0.35], ...
-    'HandleVisibility', 'off')
-offsets = [-0.24 0 0.24];
+set(gcf, 'Units', 'pixels', 'Position', [20 20 1500 980])
 for o = 1:n_out
     for g = 1:n_cell
-        draw_sig_bar(g + offsets(o), result.slope_change(o).median(g), 0.22, ...
-            colors(o, :), result.slope_change(o).filled(g))
+        subplot(n_out, n_cell, (o - 1) * n_cell + g)
+        panel = result.cell_panel(g);
+        x = result.per_neuron(o).paired_slope{panel};
+        y = result.per_neuron(o).paired_partial{panel};
+        draw_paired_square(x, y)
+        delta = x(:) - y(:);
+        [mean_delta, p_mean] = mean_vs_zero(delta);
+        title(sprintf('%s %s  diff=%s  p=%s', short_cell{g}, short_outcome{o}, ...
+            plain_number(mean_delta), plain_number(p_mean)))
+        if g == 1
+            ylabel('Slope with rate')
+        end
+        if o == n_out
+            xlabel('Slope without rate')
+        end
+        box off
     end
-    plot(nan, nan, 's', 'Color', colors(o, :), 'MarkerFaceColor', colors(o, :), ...
-        'MarkerSize', 8)
 end
-y_top = ylim;
-for g = 1:n_cell
-    if result.joint_slope_change(g).changes
-        plot(g, y_top(2), 'k*', 'MarkerSize', 8, 'HandleVisibility', 'off')
-    end
+save_figure(options.figure_folder, 'Slope before and after firing rate');
 end
-set(gca, 'XTick', 1:n_cell, 'XTickLabel', short_cell)
-xlim([0.4, n_cell + 0.6])
-ylabel('Median slope change')
-title('Filled when the mean slope change differs from zero')
-legend(short_outcome, 'Location', 'northeast')
-box off
-save_figure(options.figure_folder, 'Slope change after firing rate');
+
+
+function draw_paired_square(x, y)
+x = x(:);
+y = y(:);
+n = min(numel(x), numel(y));
+x = x(1:n);
+y = y(1:n);
+ok = isfinite(x) & isfinite(y);
+x = x(ok);
+y = y(ok);
+if isempty(x)
+    axis off
+    return
+end
+lim = data_limits([x; y], true);
+plot(lim, lim, '--', 'Color', [0.45 0.45 0.45], 'LineWidth', 1)
+hold on
+plot(x, y, '.', 'Color', [0.20 0.40 0.70], 'MarkerSize', 10)
+plot(mean(x), mean(y), '+', 'Color', 'k', 'MarkerSize', 14, 'LineWidth', 2)
+xlim(lim)
+ylim(lim)
+axis square
 end
 
 

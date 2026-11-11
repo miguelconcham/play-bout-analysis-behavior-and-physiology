@@ -28,18 +28,22 @@
 % change is that neuron's value without firing rate minus its value with
 % firing rate. Violin plots keep the per-neuron distributions. One bar
 % plot gives the median correlation of each lock group: the bar is filled
-% when the mean correlation differs from zero and empty otherwise. A
-% second plot shows the median slope change after firing rate, for each
-% autocorrelogram measure and lock group. A star marks a lock group in
-% which any of those three changes survives a Bonferroni correction.
+% when the mean correlation differs from zero and empty otherwise.
+% The comparison with firing rate is a square scatter: the original slope
+% on x, the rate-adjusted slope on y, the identity line, and the mean as
+% a cross. The title is the paired test of that difference.
 %
 % For trough-locked neurons, one figure shows five neurons near the median
 % correlation of each autocorrelogram measure with LFP delta power, and
-% another shows up to five neurons whose correlation is significant. A
-% matrix for each lock group shows whether the same neurons have high
+% another shows up to five neurons whose correlation is significant. The
+% axis of each example follows that neuron's values. A normalized
+% autocorrelogram has a small delta-band power, so those values can sit
+% near 1e-13; that scale is reported and is not stretched to -1 and 1.
+% A matrix for each lock group shows whether the same neurons have high
 % correlations on more than one measure. For trough-locked neurons, the
 % scatter of those correlation values sits beside the scatter of the
-% measures themselves.
+% measures themselves. The first principal component of the three
+% standardized measures is correlated with LFP delta power in one more figure.
 
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 
