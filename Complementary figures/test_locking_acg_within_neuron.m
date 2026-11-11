@@ -69,6 +69,8 @@ assert(abs(finite_values(result.per_neuron(through_rate).partial_slope{panel_ind
     'The median neuron slope carried by firing rate remained after the adjustment.');
 assert(result.model(direct).simple.n_neurons == result.model(direct).with_rate.n_neurons, ...
     'The rate-adjusted fit did not use the same neurons as the simple fit.');
+assert(result.zscore_limit == 3.5, ...
+    'The modified z-score cutoff did not keep its default of 3.5.');
 trough_cell = find(strcmp(result.cell_order, 'trough'), 1);
 peak_cell = find(strcmp(result.cell_order, 'peak'), 1);
 direct_bar = result.correlation_bars(direct);

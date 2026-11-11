@@ -4,7 +4,7 @@ function result = locking_acg_within_neuron(source, options)
 % source is the locking summary, its power_strata struct, or the path of
 % a summary file. options.min_strata is the number of finite strata a
 % neuron needs. options.min_clean is how many must remain after a stratum
-% with modified z-score above 3.5 is removed. The common slope, the
+% with modified z-score above options.zscore_limit is removed. The common slope, the
 % per-neuron slopes, and the Spearman correlations use those cleaned strata.
 %
 % The common slope is one fit. Neuron intercepts are removed by
@@ -74,6 +74,7 @@ function options = fill_options(options)
 defaults = struct( ...
     'min_strata', 10, ...
     'min_clean', 6, ...
+    'zscore_limit', 3.5, ...
     'alpha', 0.05, ...
     'do_plot', true, ...
     'figure_folder', '', ...
@@ -93,8 +94,13 @@ end
 
 
 function result = empty_result(options)
+if ~(options.zscore_limit > 0)
+    error('locking_acg_within_neuron:zscoreLimit', ...
+        'zscore_limit must be a positive modified z-score cutoff.');
+end
 result.min_strata = options.min_strata;
 result.min_clean = options.min_clean;
+result.zscore_limit = options.zscore_limit;
 result.alpha = options.alpha;
 result.outcome_fields = {'acg_delta', 'first_prominence', 'second_prominence'};
 result.outcome_titles = {'ACG delta power', 'First-peak prominence', ...
@@ -219,7 +225,7 @@ for i = 1:numel(ids)
         continue
     end
     [slope, slope_p, partial_slope, partial_slope_p, n_drop, Pc, yc, rc] = ...
-        cleaned_slopes(P, y, r, options.min_clean);
+        cleaned_slopes(P, y, r, options.min_clean, options.zscore_limit);
     rho = NaN;
     rho_p = NaN;
     partial_rho = NaN;
@@ -253,7 +259,7 @@ end
 
 
 function [slope, slope_p, partial, partial_p, n_drop, x, y, rate] = ...
-        cleaned_slopes(P, y_all, rate_all, min_clean)
+        cleaned_slopes(P, y_all, rate_all, min_clean, zscore_limit)
 slope = NaN;
 slope_p = NaN;
 partial = NaN;
@@ -261,7 +267,7 @@ partial_p = NaN;
 x = zeros(0, 1);
 y = zeros(0, 1);
 rate = zeros(0, 1);
-bad = modified_z_rows([P(:), rate_all(:), y_all(:)]);
+bad = modified_z_rows([P(:), rate_all(:), y_all(:)], zscore_limit);
 n_drop = nnz(bad);
 x = P(~bad);
 y = y_all(~bad);
@@ -710,8 +716,9 @@ disp(['One fit uses every neuron. Each neuron has its own intercept. ' ...
     'peak-locked, and non-entrained neurons.'])
 disp(sprintf(['A neuron needs %d finite strata of LFP power, firing rate, ' ...
     'and the autocorrelogram measure. Slopes then drop strata with modified ' ...
-    'z-score above 3.5 and keep a neuron when %d strata remain. Spearman ' ...
-    'correlations use those same cleaned strata.'], options.min_strata, options.min_clean))
+    'z-score above %g and keep a neuron when %d strata remain. Spearman ' ...
+    'correlations use those same cleaned strata.'], ...
+    options.min_strata, options.zscore_limit, options.min_clean))
 disp(['The second fit adds firing rate, with its own slope in each lock ' ...
     'group. The rate-adjusted LFP slope is the test of whether the ' ...
     'association remains. Delta-locked neurons appear in the per-neuron ' ...
@@ -1593,7 +1600,7 @@ for i = 1:numel(result.aligned.id)
         rate = rate(1:n_use);
         sc = sc(1:n_use);
     end
-    bad = modified_z_rows([P(:), rate(:), sc(:)]);
+    bad = modified_z_rows([P(:), rate(:), sc(:)], result.zscore_limit);
     P = P(~bad);
     sc = sc(~bad);
     if numel(P) < result.min_clean
@@ -1987,8 +1994,11 @@ r = 1 - sum(resid .^ 2) / ss;
 end
 
 
-function bad = modified_z_rows(M)
+function bad = modified_z_rows(M, zscore_limit)
 bad = false(size(M, 1), 1);
+if nargin < 2 || isempty(zscore_limit)
+    zscore_limit = 3.5;
+end
 for k = 1:size(M, 2)
     col = M(:, k);
     ok = isfinite(col);
@@ -2001,7 +2011,7 @@ for k = 1:size(M, 2)
         continue
     end
     modified_z = 0.6745 * (col - center) / mad;
-    bad = bad | (ok & abs(modified_z) > 3.5);
+    bad = bad | (ok & abs(modified_z) > zscore_limit);
 end
 end
 
