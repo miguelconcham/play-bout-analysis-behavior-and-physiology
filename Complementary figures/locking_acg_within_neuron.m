@@ -4,9 +4,8 @@ function result = locking_acg_within_neuron(source, options)
 % source is the locking summary, its power_strata struct, or the path of
 % a summary file. options.min_strata is the number of finite strata a
 % neuron needs. options.min_clean is how many must remain after a stratum
-% with modified z-score above 3.5 is removed. The common slope and the
-% per-neuron slopes use those cleaned strata. Spearman correlations keep
-% every finite stratum.
+% with modified z-score above 3.5 is removed. The common slope, the
+% per-neuron slopes, and the Spearman correlations use those cleaned strata.
 %
 % The common slope is one fit. Neuron intercepts are removed by
 % subtracting each neuron's mean, which is the same as giving every neuron
@@ -60,7 +59,6 @@ if options.do_plot
         'Neuron slopes, rank violins', 'Spearman rho');
     plot_median_r_bars(result, options);
     plot_paired_slope_square(result, options);
-    plot_common_slopes(result, options);
     plot_trough_examples(result, options, 'median_index', ...
         'Trough correlations near the median');
     plot_trough_examples(result, options, 'significant_index', ...
@@ -220,10 +218,16 @@ for i = 1:numel(ids)
     if numel(P) < options.min_strata
         continue
     end
-    [rho, rho_p] = spearman_with_p(P, y);
-    [partial_rho, partial_rho_p] = partial_spearman(P, y, r);
     [slope, slope_p, partial_slope, partial_slope_p, n_drop, Pc, yc, rc] = ...
         cleaned_slopes(P, y, r, options.min_clean);
+    rho = NaN;
+    rho_p = NaN;
+    partial_rho = NaN;
+    partial_rho_p = NaN;
+    if numel(Pc) >= 4
+        [rho, rho_p] = spearman_with_p(Pc, yc);
+        [partial_rho, partial_rho_p] = partial_spearman(Pc, yc, rc);
+    end
     if ~isfinite(rho) && ~isfinite(slope)
         continue
     end
@@ -242,8 +246,8 @@ for i = 1:numel(ids)
     rec(n_rec).P = Pc;
     rec(n_rec).y = yc;
     rec(n_rec).rate = rc;
-    rec(n_rec).P_corr = P;
-    rec(n_rec).y_corr = y;
+    rec(n_rec).P_corr = Pc;
+    rec(n_rec).y_corr = yc;
 end
 end
 
@@ -707,7 +711,7 @@ disp(['One fit uses every neuron. Each neuron has its own intercept. ' ...
 disp(sprintf(['A neuron needs %d finite strata of LFP power, firing rate, ' ...
     'and the autocorrelogram measure. Slopes then drop strata with modified ' ...
     'z-score above 3.5 and keep a neuron when %d strata remain. Spearman ' ...
-    'correlations use every finite stratum.'], options.min_strata, options.min_clean))
+    'correlations use those same cleaned strata.'], options.min_strata, options.min_clean))
 disp(['The second fit adds firing rate, with its own slope in each lock ' ...
     'group. The rate-adjusted LFP slope is the test of whether the ' ...
     'association remains. Delta-locked neurons appear in the per-neuron ' ...
@@ -1059,6 +1063,7 @@ ids = unique(neuron, 'stable');
 aligned.id = {};
 aligned.group = {};
 aligned.P = {};
+aligned.rate = {};
 aligned.Y = {};
 n = 0;
 for i = 1:numel(ids)
@@ -1078,6 +1083,7 @@ for i = 1:numel(ids)
     aligned.id{n, 1} = ids{i};
     aligned.group{n, 1} = group;
     aligned.P{n, 1} = P(ok);
+    aligned.rate{n, 1} = r(ok);
     aligned.Y{n, 1} = y(ok, :);
 end
 end
@@ -1575,10 +1581,25 @@ for i = 1:numel(result.aligned.id)
         continue
     end
     P = result.aligned.P{i};
+    rate = result.aligned.rate{i};
     Y = result.aligned.Y{i};
-    ok = all(isfinite(Y), 2);
+    ok = all(isfinite(Y), 2) & isfinite(rate);
     P = P(ok);
-    [rho, p] = spearman_with_p(P, score(take));
+    rate = rate(ok);
+    sc = score(take);
+    if numel(P) ~= numel(sc)
+        n_use = min(numel(P), numel(sc));
+        P = P(1:n_use);
+        rate = rate(1:n_use);
+        sc = sc(1:n_use);
+    end
+    bad = modified_z_rows([P(:), rate(:), sc(:)]);
+    P = P(~bad);
+    sc = sc(~bad);
+    if numel(P) < result.min_clean
+        continue
+    end
+    [rho, p] = spearman_with_p(P, sc);
     if ~isfinite(rho)
         continue
     end
@@ -1627,8 +1648,9 @@ span = shared_value_span(values);
 for p = 1:n_panel
     subplot(1, n_panel, p)
     draw_violin_scatter(values{p}, result.component.rho_p{p}, result.alpha, span)
-    title(sprintf('%s  median %s', short_panels{p}, ...
-        plain_number(finite_median(values{p}))))
+    title(sprintf('%s  median %s  p=%s', short_panels{p}, ...
+        plain_number(finite_median(values{p})), ...
+        plain_number(signed_rank_p(values{p}, 'both'))))
     if p == 1
         ylabel('Spearman rho')
     end
@@ -1651,8 +1673,9 @@ for o = 1:n_out
         values = result.per_neuron(o).(value_field){p};
         pvals = result.per_neuron(o).(p_field){p};
         draw_violin_scatter(values, pvals, result.alpha, span)
-        title(sprintf('%s  median %s', short_panels{p}, ...
-            plain_number(finite_median(values))))
+        title(sprintf('%s  median %s  p=%s', short_panels{p}, ...
+            plain_number(finite_median(values)), ...
+            plain_number(signed_rank_p(values, 'both'))))
         if p == 1
             ylabel(result.outcome_titles{o})
         end
@@ -1818,7 +1841,7 @@ if isempty(x)
     axis off
     return
 end
-lim = data_limits([x; y], true);
+lim = tight_limits([x; y]);
 plot(lim, lim, '--', 'Color', [0.45 0.45 0.45], 'LineWidth', 1)
 hold on
 plot(x, y, '.', 'Color', [0.20 0.40 0.70], 'MarkerSize', 10)
@@ -1826,6 +1849,23 @@ plot(mean(x), mean(y), '+', 'Color', 'k', 'MarkerSize', 14, 'LineWidth', 2)
 xlim(lim)
 ylim(lim)
 axis square
+end
+
+
+function lim = tight_limits(values)
+values = values(isfinite(values(:)));
+if isempty(values)
+    lim = [-1 1];
+    return
+end
+lo = min(values);
+hi = max(values);
+span = hi - lo;
+if ~(span > 0)
+    span = max(abs(lo), 1e-300) * 0.08;
+end
+pad = 0.04 * span;
+lim = [lo - pad, hi + pad];
 end
 
 
@@ -1867,55 +1907,6 @@ end
 end
 
 
-function plot_common_slopes(result, options)
-n_out = numel(result.outcome_titles);
-n_type = numel(result.type_order);
-simple_color = [0.20 0.45 0.80];
-rate_color = [0.85 0.33 0.20];
-short_title = {'Trough', 'Peak', 'Non-entrained'};
-short_outcome = {'ACG delta power', 'First peak', 'Second cycle'};
-figure('Name', 'Common within-neuron slopes', 'Color', 'w', ...
-    'Visible', options.figure_visible)
-set(gcf, 'Units', 'pixels', 'Position', [40 40 1500 520])
-for o = 1:n_out
-    subplot(1, n_out, o)
-    hold on
-    plot([0.5, n_type + 0.5], [0 0], '--', 'Color', [0.35 0.35 0.35], ...
-        'HandleVisibility', 'off')
-    draw_slope_points((1:n_type) - 0.12, result.model(o).simple, simple_color)
-    draw_slope_points((1:n_type) + 0.12, result.model(o).with_rate, rate_color)
-    set(gca, 'XTick', 1:n_type, 'XTickLabel', short_title)
-    xlim([0.5, n_type + 0.5])
-    title(short_outcome{o})
-    ylabel('Common within-neuron slope')
-    box off
-    if o == 1
-        plot(nan, nan, '--', 'Color', [0.35 0.35 0.35])
-        plot(nan, nan, 'o', 'Color', simple_color, 'MarkerFaceColor', simple_color)
-        plot(nan, nan, 'o', 'Color', rate_color, 'MarkerFaceColor', rate_color)
-        legend({'Zero', 'Without firing rate', 'With firing rate'}, ...
-            'Location', 'southeast')
-    end
-end
-save_figure(options.figure_folder, 'Common within-neuron slopes');
-end
-
-
-function draw_slope_points(x, fit, color)
-for g = 1:numel(x)
-    if g > numel(fit.beta) || ~isfinite(fit.beta(g)) || ~isfinite(fit.se(g))
-        continue
-    end
-    h = errorbar(x(g), fit.beta(g), 1.96 * fit.se(g), 'o');
-    set(h, 'Color', color, 'MarkerFaceColor', color, 'LineWidth', 1.2)
-    try
-        set(h, 'HandleVisibility', 'off')
-    catch
-    end
-end
-end
-
-
 function save_figure(folder, name)
 if isempty(folder)
     return
@@ -1925,6 +1916,7 @@ if exist(folder, 'dir') ~= 7
 end
 set(gcf, 'PaperUnits', 'inches', 'PaperSize', [16 9], 'PaperPosition', [0 0 16 9])
 print(gcf, '-dpng', '-r120', fullfile(folder, [name, '.png']));
+print(gcf, '-dsvg', fullfile(folder, [name, '.svg']));
 end
 
 
