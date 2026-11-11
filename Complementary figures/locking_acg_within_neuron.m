@@ -44,11 +44,21 @@ for o = 1:numel(result.outcome_fields)
     end
     report_outcome(result, o);
 end
+result = summarize_paired(result);
+report_paired_change(result);
 clear diary_cleanup
 if options.do_plot
-    plot_slope_distributions(result, options, 'slope', 'Within-neuron slopes');
-    plot_slope_distributions(result, options, 'partial_slope', ...
-        'Within-neuron slopes after firing rate');
+    plot_violins(result, options, 'slope', 'slope_p', ...
+        'Neuron slopes, violins', 'Within-neuron slope');
+    plot_violins(result, options, 'rho', 'rho_p', ...
+        'Neuron slopes, rank violins', 'Spearman rho');
+    plot_violins(result, options, 'partial_slope', 'partial_slope_p', ...
+        'Neuron slopes after firing rate, violins', 'Slope after firing rate');
+    plot_violins(result, options, 'partial_rho', 'partial_rho_p', ...
+        'Neuron rank correlations after firing rate, violins', ...
+        'Partial Spearman rho');
+    plot_median_r_bars(result, options);
+    plot_slope_change(result, options);
     plot_common_slopes(result, options);
 end
 end
@@ -88,6 +98,9 @@ result.type_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
 result.panel_names = {'all', 'trough', 'peak', 'delta', 'nonentrained'};
 result.panel_titles = {'All neurons', 'Trough-locked', 'Peak-locked', ...
     'Delta-locked', 'Non-entrained'};
+result.cell_order = {'trough', 'peak', 'delta', 'nonentrained'};
+result.cell_title = {'Trough-locked', 'Peak-locked', 'Delta-locked', ...
+    'Non-entrained'};
 result.per_neuron = struct([]);
 result.model = struct([]);
 end
@@ -352,6 +365,7 @@ per_neuron.partial_rho_p = empty_cells(n_panel);
 per_neuron.n_dropped = empty_cells(n_panel);
 per_neuron.slope_drop = empty_cells(n_panel);
 per_neuron.rho_drop = empty_cells(n_panel);
+per_neuron.paired_slope_id = empty_id_cells(n_panel);
 per_neuron.n_other_group = 0;
 end
 
@@ -360,6 +374,14 @@ function cells = empty_cells(n_panel)
 cells = cell(1, n_panel);
 for p = 1:n_panel
     cells{p} = zeros(0, 1);
+end
+end
+
+
+function cells = empty_id_cells(n_panel)
+cells = cell(1, n_panel);
+for p = 1:n_panel
+    cells{p} = {};
 end
 end
 
@@ -384,6 +406,7 @@ if isfinite(rec.partial_slope)
 end
 if isfinite(rec.slope) && isfinite(rec.partial_slope)
     per_neuron.slope_drop{p}(end + 1, 1) = rec.slope - rec.partial_slope;
+    per_neuron.paired_slope_id{p}{end + 1, 1} = rec.id;
 end
 if isfinite(rec.rho) && isfinite(rec.partial_rho)
     per_neuron.rho_drop{p}(end + 1, 1) = rec.rho - rec.partial_rho;
@@ -815,39 +838,380 @@ end
 
 
 function report_shift(label, values)
-disp(sprintf(['      %s: n = %d, median = %.3g, two-sided signrank p = %.3g, ' ...
-    'one-sided positive drop p = %.3g'], ...
-    label, nnz(isfinite(values)), finite_median(values), ...
-    signed_rank_p(values, 'both'), signed_rank_p(values, 'right')))
+[mean_change, paired_p] = mean_vs_zero(values);
+disp(sprintf(['      %s: n = %d, median change = %.3g, mean change = %.3g, ' ...
+    'paired t p = %.3g, signrank p = %.3g'], ...
+    label, nnz(isfinite(values)), finite_median(values), mean_change, ...
+    paired_p, signed_rank_p(values, 'both')))
 end
 
 
-function plot_slope_distributions(result, options, field_name, figure_name)
+function result = summarize_paired(result)
+% Median Spearman rho by cell type, and the paired slope change when
+% firing rate is added. A bar is filled when the mean differs from zero.
+n_out = numel(result.outcome_fields);
+n_cell = numel(result.cell_order);
+panel = zeros(1, n_cell);
+for g = 1:n_cell
+    panel(g) = find(strcmp(result.panel_names, result.cell_order{g}), 1);
+end
+result.cell_panel = panel;
+for o = 1:n_out
+    bars.median_r = nan(1, n_cell);
+    bars.mean_r = nan(1, n_cell);
+    bars.p_mean = nan(1, n_cell);
+    bars.filled = false(1, n_cell);
+    change.median = nan(1, n_cell);
+    change.mean = nan(1, n_cell);
+    change.p_mean = nan(1, n_cell);
+    change.p_signrank = nan(1, n_cell);
+    change.filled = false(1, n_cell);
+    change.n = zeros(1, n_cell);
+    for g = 1:n_cell
+        rho = result.per_neuron(o).rho{panel(g)};
+        [bars.mean_r(g), bars.p_mean(g)] = mean_vs_zero(rho);
+        bars.median_r(g) = finite_median(rho);
+        bars.filled(g) = isfinite(bars.p_mean(g)) && bars.p_mean(g) < result.alpha;
+        delta = result.per_neuron(o).slope_drop{panel(g)};
+        [change.mean(g), change.p_mean(g)] = mean_vs_zero(delta);
+        change.median(g) = finite_median(delta);
+        change.p_signrank(g) = signed_rank_p(delta, 'both');
+        change.n(g) = nnz(isfinite(delta));
+        change.filled(g) = isfinite(change.p_mean(g)) && change.p_mean(g) < result.alpha;
+    end
+    if o == 1
+        result.correlation_bars = bars;
+        result.slope_change = change;
+    else
+        result.correlation_bars(o) = bars;
+        result.slope_change(o) = change;
+    end
+end
+for g = 1:n_cell
+    p_var = nan(1, n_out);
+    for o = 1:n_out
+        p_var(o) = result.slope_change(o).p_mean(g);
+    end
+    finite_p = p_var(isfinite(p_var));
+    joint.p_each = p_var;
+    joint.p_any = NaN;
+    joint.changes = false;
+    if ~isempty(finite_p)
+        joint.p_any = min(1, n_out * min(finite_p));
+        joint.changes = isfinite(joint.p_any) && joint.p_any < result.alpha;
+    end
+    [joint.F, joint.p_hotelling, joint.df1, joint.df2, joint.n] = ...
+        hotelling_slope_change(result, panel(g));
+    if g == 1
+        result.joint_slope_change = joint;
+    else
+        result.joint_slope_change(g) = joint;
+    end
+end
+end
+
+
+function report_paired_change(result)
+disp(repmat('=', 1, 72))
+disp('PAIRED CHANGE, WITHOUT FIRING RATE MINUS WITH FIRING RATE')
+disp(['Each neuron contributes the difference of its two values. The paired ' ...
+    't test asks whether the mean difference differs from zero.'])
+for g = 1:numel(result.cell_title)
+    disp(['  ', result.cell_title{g}])
+    for o = 1:numel(result.outcome_titles)
+        change = result.slope_change(o);
+        disp(sprintf(['    %s slopes: n = %d, median change = %.3g, ' ...
+            'mean change = %.3g, paired t p = %.3g, signrank p = %.3g'], ...
+            result.outcome_titles{o}, change.n(g), change.median(g), ...
+            change.mean(g), change.p_mean(g), change.p_signrank(g)))
+    end
+    joint = result.joint_slope_change(g);
+    if joint.changes
+        changed = 'yes';
+    else
+        changed = 'no';
+    end
+    disp(sprintf(['    Any slope changes when firing rate is added: %s ' ...
+        '(Bonferroni p = %.3g).'], changed, joint.p_any))
+    disp(sprintf(['    Joint Hotelling test of the three slope changes: ' ...
+        'F = %.3g, df = %d %d, p = %.3g, neurons = %d'], ...
+        joint.F, joint.df1, joint.df2, joint.p_hotelling, joint.n))
+end
+end
+
+
+function [Fstat, p, df1, df2, n] = hotelling_slope_change(result, panel)
+Fstat = NaN;
+p = NaN;
+df1 = numel(result.outcome_fields);
+df2 = NaN;
+n = 0;
+ids = result.per_neuron(1).paired_slope_id{panel};
+ids = ids(:);
+for o = 2:numel(result.outcome_fields)
+    ids = intersect_stable(ids, result.per_neuron(o).paired_slope_id{panel});
+end
+n = numel(ids);
+pdim = numel(result.outcome_fields);
+df1 = pdim;
+df2 = n - pdim;
+if n <= pdim
+    return
+end
+D = nan(n, pdim);
+for o = 1:pdim
+    these = result.per_neuron(o).paired_slope_id{panel};
+    drops = result.per_neuron(o).slope_drop{panel};
+    for i = 1:n
+        hit = find(strcmp(these(:), ids{i}), 1);
+        if ~isempty(hit)
+            D(i, o) = drops(hit);
+        end
+    end
+end
+if any(~isfinite(D(:)))
+    return
+end
+mu = mean(D, 1)';
+C = cov(D);
+if rank(C) < pdim
+    return
+end
+T2 = n * (mu' * (C \ mu));
+Fstat = ((n - pdim) / (pdim * (n - 1))) * T2;
+p = f_upper_tail(Fstat, pdim, n - pdim);
+end
+
+
+function kept = intersect_stable(first, second)
+kept = {};
+second = second(:);
+for i = 1:numel(first)
+    if any(strcmp(second, first{i}))
+        kept{end + 1, 1} = first{i}; %#ok<AGROW>
+    end
+end
+end
+
+
+function [mean_value, p] = mean_vs_zero(values)
+values = values(isfinite(values));
+mean_value = NaN;
+p = NaN;
+n = numel(values);
+if n < 1
+    return
+end
+mean_value = mean(values);
+if n < 2
+    return
+end
+spread = std(values, 0);
+if ~isfinite(spread) || spread <= 0
+    p = double(mean_value == 0);
+    return
+end
+tstat = mean_value / (spread / sqrt(n));
+p = t_two_tailed(tstat, n - 1);
+end
+
+
+function p = f_upper_tail(Fstat, df1, df2)
+p = NaN;
+if ~isfinite(Fstat) || df1 < 1 || df2 < 1
+    return
+end
+if Fstat < 0
+    return
+end
+p = betainc(df2 / (df2 + df1 * Fstat), df2 / 2, df1 / 2);
+end
+
+
+function plot_violins(result, options, value_field, p_field, figure_name, value_name)
 n_out = numel(result.outcome_titles);
 n_panel = numel(result.panel_titles);
 figure('Name', figure_name, 'Color', 'w', 'Visible', options.figure_visible)
 set(gcf, 'Units', 'pixels', 'Position', [40 40 1680 980])
-short_panels = {'All', 'Trough', 'Peak', 'Delta', 'Non-entrained'};
+short_panels = {'All', 'Trough', 'Peak', 'Delta', 'Non'};
 for o = 1:n_out
-    edges = shared_edges(result.per_neuron(o).(field_name));
+    span = shared_value_span(result.per_neuron(o).(value_field));
     for p = 1:n_panel
         subplot(n_out, n_panel, (o - 1) * n_panel + p)
-        values = result.per_neuron(o).(field_name){p};
-        draw_hist(values, edges, [0.25 0.38 0.62])
-        hold on
-        mark_zero()
-        mark_median(finite_median(values))
-        title(sprintf('%s n=%d', short_panels{p}, nnz(isfinite(values))))
-        if o == n_out
-            xlabel('Slope')
-        end
+        values = result.per_neuron(o).(value_field){p};
+        pvals = result.per_neuron(o).(p_field){p};
+        draw_violin_scatter(values, pvals, result.alpha, span)
+        title(sprintf('%s  median %s', short_panels{p}, ...
+            plain_number(finite_median(values))))
         if p == 1
             ylabel(result.outcome_titles{o})
         end
-        box off
+        if o == n_out && p == 1
+            xlabel(value_name)
+        end
     end
 end
+if exist('sgtitle', 'file') == 2
+    sgtitle([value_name, '. Red is significantly positive. Blue is significantly negative. Gray is not.'])
+end
 save_figure(options.figure_folder, figure_name);
+end
+
+
+function span = shared_value_span(panels)
+values = zeros(0, 1);
+for p = 1:numel(panels)
+    values = [values; panels{p}(:)]; %#ok<AGROW>
+end
+values = values(isfinite(values));
+if isempty(values)
+    span = [-1 1];
+    return
+end
+lo = min([values; 0]);
+hi = max([values; 0]);
+pad = 0.08 * max(hi - lo, 1);
+span = [lo - pad, hi + pad];
+end
+
+
+function draw_violin_scatter(values, pvals, alpha, span)
+hold on
+plot([0.55 1.45], [0 0], '--', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+values = values(:);
+pvals = pvals(:);
+n = min(numel(values), numel(pvals));
+values = values(1:n);
+pvals = pvals(1:n);
+ok = isfinite(values);
+values = values(ok);
+pvals = pvals(ok);
+if numel(values) >= 2 && std(values, 0) > 0
+    grid = linspace(span(1), span(2), 80)';
+    scale = 0.12 * max(std(values, 0), eps);
+    width = exp(-0.5 * (bsxfun(@minus, grid, values(:)') ./ scale) .^ 2);
+    density = sum(width, 2);
+    density = 0.32 * density / max(density);
+    fill([1 - density; flipud(1 + density)], [grid; flipud(grid)], ...
+        [0.75 0.80 0.86], 'EdgeColor', 'none', 'HandleVisibility', 'off')
+end
+for i = 1:numel(values)
+    x = 1 + 0.12 * sin(i * 12.9898);
+    if isfinite(pvals(i)) && pvals(i) < alpha && values(i) > 0
+        col = [0.75 0.12 0.14];
+    elseif isfinite(pvals(i)) && pvals(i) < alpha && values(i) < 0
+        col = [0.20 0.40 0.72];
+    else
+        col = [0.45 0.45 0.45];
+    end
+    plot(x, values(i), '.', 'Color', col, 'MarkerSize', 10, 'HandleVisibility', 'off')
+end
+xlim([0.45 1.55])
+ylim(span)
+set(gca, 'XTick', [])
+box off
+end
+
+
+function plot_median_r_bars(result, options)
+n_out = numel(result.outcome_titles);
+n_cell = numel(result.cell_title);
+colors = cell_colors(result.cell_order);
+short_cell = {'Trough', 'Peak', 'Delta', 'Non'};
+figure('Name', 'Median Spearman by lock group', 'Color', 'w', ...
+    'Visible', options.figure_visible)
+set(gcf, 'Units', 'pixels', 'Position', [40 40 1400 480])
+for o = 1:n_out
+    subplot(1, n_out, o)
+    hold on
+    plot([0.4, n_cell + 0.6], [0 0], '--', 'Color', [0.35 0.35 0.35], ...
+        'HandleVisibility', 'off')
+    bars = result.correlation_bars(o);
+    for g = 1:n_cell
+        draw_sig_bar(g, bars.median_r(g), 0.7, colors(g, :), bars.filled(g))
+    end
+    set(gca, 'XTick', 1:n_cell, 'XTickLabel', short_cell)
+    xlim([0.4, n_cell + 0.6])
+    ylabel('Median Spearman rho')
+    title(result.outcome_titles{o})
+    box off
+end
+save_figure(options.figure_folder, 'Median Spearman by lock group');
+end
+
+
+function plot_slope_change(result, options)
+n_out = numel(result.outcome_titles);
+n_cell = numel(result.cell_title);
+colors = [0.20 0.45 0.80; 0.85 0.45 0.15; 0.30 0.55 0.35];
+short_outcome = {'ACG delta', 'First peak', 'Second cycle'};
+short_cell = {'Trough', 'Peak', 'Delta', 'Non'};
+figure('Name', 'Slope change after firing rate', 'Color', 'w', ...
+    'Visible', options.figure_visible)
+set(gcf, 'Units', 'pixels', 'Position', [40 40 920 560])
+hold on
+plot([0.4, n_cell + 0.6], [0 0], '--', 'Color', [0.35 0.35 0.35], ...
+    'HandleVisibility', 'off')
+offsets = [-0.24 0 0.24];
+for o = 1:n_out
+    for g = 1:n_cell
+        draw_sig_bar(g + offsets(o), result.slope_change(o).median(g), 0.22, ...
+            colors(o, :), result.slope_change(o).filled(g))
+    end
+    plot(nan, nan, 's', 'Color', colors(o, :), 'MarkerFaceColor', colors(o, :), ...
+        'MarkerSize', 8)
+end
+y_top = ylim;
+for g = 1:n_cell
+    if result.joint_slope_change(g).changes
+        plot(g, y_top(2), 'k*', 'MarkerSize', 8, 'HandleVisibility', 'off')
+    end
+end
+set(gca, 'XTick', 1:n_cell, 'XTickLabel', short_cell)
+xlim([0.4, n_cell + 0.6])
+ylabel('Median slope change')
+title('Filled when the mean slope change differs from zero')
+legend(short_outcome, 'Location', 'northeast')
+box off
+save_figure(options.figure_folder, 'Slope change after firing rate');
+end
+
+
+function draw_sig_bar(x, height, width, color, filled)
+if ~isfinite(height)
+    return
+end
+h = bar(x, height, width);
+if filled
+    set(h, 'FaceColor', color, 'EdgeColor', color, 'LineWidth', 1)
+else
+    set(h, 'FaceColor', 'none', 'EdgeColor', color, 'LineWidth', 1.6)
+end
+set(h, 'HandleVisibility', 'off')
+end
+
+
+function label = plain_number(value)
+if ~isfinite(value)
+    label = 'NaN';
+    return
+end
+label = sprintf('%.3g', abs(value));
+if value < 0
+    label = ['neg ', label];
+end
+end
+
+
+function colors = cell_colors(names)
+palette.trough = [0.20 0.45 0.80];
+palette.peak = [0.85 0.25 0.20];
+palette.delta = [0.10 0.50 0.35];
+palette.nonentrained = [0.45 0.45 0.45];
+colors = zeros(numel(names), 3);
+for g = 1:numel(names)
+    colors(g, :) = palette.(names{g});
+end
 end
 
 
@@ -897,65 +1261,6 @@ for g = 1:numel(x)
     catch
     end
 end
-end
-
-
-function draw_hist(values, edges, color)
-values = values(isfinite(values));
-n_bin = numel(edges) - 1;
-if n_bin < 1
-    return
-end
-counts = zeros(1, n_bin);
-for k = 1:n_bin
-    if k < n_bin
-        counts(k) = sum(values >= edges(k) & values < edges(k + 1));
-    else
-        counts(k) = sum(values >= edges(k) & values <= edges(k + 1));
-    end
-end
-centers = (edges(1:end - 1) + edges(2:end)) / 2;
-h = bar(centers, counts, 1);
-set(h, 'FaceColor', color, 'EdgeColor', 'none')
-xlim(edges([1 end]))
-end
-
-
-function mark_zero()
-yl = ylim;
-plot([0 0], yl, '--', 'Color', [0.35 0.35 0.35], 'HandleVisibility', 'off')
-ylim(yl)
-end
-
-
-function mark_median(value)
-if ~isfinite(value)
-    return
-end
-yl = ylim;
-plot([value value], yl, '-', 'Color', [0.10 0.10 0.10], 'LineWidth', 1.2, ...
-    'HandleVisibility', 'off')
-ylim(yl)
-end
-
-
-function edges = shared_edges(panels)
-values = zeros(0, 1);
-for p = 1:numel(panels)
-    values = [values; panels{p}(:)]; %#ok<AGROW>
-end
-values = values(isfinite(values));
-if numel(values) < 2
-    edges = linspace(-1, 1, 21);
-    return
-end
-lo = min([values; 0]);
-hi = max([values; 0]);
-pad = 0.05 * (hi - lo);
-if pad <= 0
-    pad = 1;
-end
-edges = linspace(lo - pad, hi + pad, 21);
 end
 
 

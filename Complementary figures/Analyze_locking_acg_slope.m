@@ -24,8 +24,14 @@
 % when firing rate and LFP power rise together.
 %
 % Beside the common slope, each qualifying neuron contributes one slope
-% and one Spearman correlation, with and without firing rate. The sign-rank
-% test asks whether that distribution sits above zero.
+% and one Spearman correlation, with and without firing rate. The paired
+% change is that neuron's value without firing rate minus its value with
+% firing rate. Violin plots keep the per-neuron distributions. One bar
+% plot gives the median correlation of each lock group: the bar is filled
+% when the mean correlation differs from zero and empty otherwise. A
+% second plot shows the median slope change after firing rate, for each
+% autocorrelogram measure and lock group. A star marks a lock group in
+% which any of those three changes survives a Bonferroni correction.
 
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 
