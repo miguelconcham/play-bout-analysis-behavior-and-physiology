@@ -154,16 +154,14 @@ assert(abs(R.Baseline - 2) < 1e-12, ...
 assert(isfinite(R.OscillationScore) && R.OscillationScore > 1, ...
     'The spectral oscillation score was not above the mean spectrum.');
 
-full_lag = [-flipud(positive_lag); positive_lag];
-full_acg = [zeros(numel(positive_lag), 1); rhythm];
 if exist('array2table', 'file') == 2 && exist('movevars', 'file') == 2
-    feature_table = acg2features(full_acg', full_lag);
+    feature_table = acg2features(rhythm', positive_lag);
     assert(feature_table.NeuronIndex == 1, ...
         'The feature table did not keep the neuron row.');
     assert(abs(feature_table.Modulation1 - R.FirstModulation) < 1e-12, ...
-        'Negative lags changed the positive-lag modulation.');
+        'acg2features did not keep the first modulation.');
     assert(abs(feature_table.OscillationScore - R.OscillationScore) < 1e-9, ...
-        'Negative lags changed the oscillation score.');
+        'acg2features did not keep the oscillation score.');
 end
 
 disp('test_shuffle_percentile_plot passed')

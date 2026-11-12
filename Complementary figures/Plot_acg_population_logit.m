@@ -98,9 +98,10 @@ imagesc_sum_power_high = imagesc_logit.sum.power_high;
 imagesc_sum_power_low = imagesc_logit.sum.power_low;
 
 prep_file = fullfile(parsing_folder, 'acg_population_logit_prep.mat');
-% Positive lags are scored by quantify_acg_rhythmicity. A two-sided lag
-% axis is accepted.
-feature_table = acg2features(imagesc_sum_power_high, lag);
+% acg2features scores the lags it is given. The checkpoint axis is
+% two-sided, and the rhythmicity function uses the positive side.
+positive_lag = lag > 0;
+feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positive_lag));
 
 save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
@@ -128,7 +129,8 @@ if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
     load(prep_file)
 end
 if ~exist('feature_table', 'var')
-    feature_table = acg2features(imagesc_sum_power_high, lag);
+    positive_lag = lag > 0;
+    feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positive_lag));
 end
 
 rng(42);
