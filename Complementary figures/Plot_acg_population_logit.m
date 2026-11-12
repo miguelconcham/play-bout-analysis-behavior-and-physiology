@@ -5,7 +5,7 @@
 % locking_period_acg_shuffle_n500.mat and builds the matrices and
 % feature_table. Section 2 runs PCA, t-SNE, and the two-group split.
 % Section 3 keeps cluster 1 of cluster_method, the higher-modulation group.
-% cluster_method is 'kmeans' or 'ward'.
+% cluster_method is 'ward' or 'kmeans'. Ward is the default.
 % Section 4 only draws. After section 3 has run, edit section 4 and run
 % that section alone.
 %
@@ -15,7 +15,9 @@
 % in the workspace.
 % n_example_neurons and n_example_subplots are set at the start of section 4.
 % n_example_neurons chooses how many of the strongest oscillatory neurons
-% are drawn. n_example_subplots is how many panels go on each figure.
+% are drawn. The examples also keep the strongest oscillatory neuron from
+% each analysed area except VLPAG, so that count can be larger than
+% n_example_neurons. n_example_subplots is how many panels go on each figure.
 % Each neuron uses two panels, so the figures continue until every
 % requested neuron is drawn.
 %
@@ -27,8 +29,9 @@
 % Row 1 is the highest all-runs sum-to-1 score.
 %
 % Section 2 builds ACG features from the high-power sum-to-1 logit and
-% splits the neurons with k-means and Ward. cluster_method chooses which
-% split is kept. Cluster 1 of that split is the higher-modulation group.
+% splits the neurons with Ward and k-means. cluster_method chooses which
+% split is kept. Ward is the default. Cluster 1 of that split is the
+% higher-modulation group.
 % shown_logit is that group, strongest modulation first.
 % imagesc_osc_sum_all is the same sum-to-1 image under a plain name.
 % osc_neuron_type is its lock group. feature_table has one row per neuron.
@@ -145,12 +148,13 @@ write_summary_section(output_folder, '1. Checkpoint and population matrices', st
 %% 2. ACG features, PCA, t-SNE, and the two-group split
 % Re-run this section after changing the feature list or cluster_method.
 % Section 1 does not need to run again while feature_table is still in
-% the workspace. cluster_method is 'kmeans' or 'ward'. Cluster 1 of that
-% split is the higher-modulation group, and section 3 uses it. Both
+% the workspace. cluster_method is 'ward' by default. Set it to 'kmeans'
+% to keep the k-means split instead. Cluster 1 of that split is the
+% higher-modulation group, and section 3 uses it. Both
 % splits are still drawn. The violins after the split also show
 % frequency, amplitude, and the peak-to-peak drop. Those extra columns
 % do not enter the split.
-cluster_method = 'kmeans';
+cluster_method = 'ward';
 if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
@@ -995,6 +999,48 @@ if ~exist('neuron_area', 'var') || numel(neuron_area) ~= numel(neuron_type)
         neuron_cluster_id = nan(numel(neuron_type), 1);
     end
 end
+[area_percent, area_observed, area_total, area_label] = ...
+    area_osc_rate(neuron_area, osc_rows);
+open_full_figure('Oscillatory cells within each brain area')
+shown_area = area_percent;
+shown_area(~isfinite(shown_area)) = 0;
+hold on
+for k = 1:numel(area_label)
+    bar(k, shown_area(k), 'FaceColor', [0.20 0.45 0.80], 'BarWidth', 0.8)
+    text(k, min(shown_area(k) + 4, 108), sprintf('%d/%d', area_observed(k), area_total(k)), ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
+end
+set(gca, 'XTick', 1:numel(area_label), 'XTickLabel', area_label)
+try
+    set(gca, 'TickLabelInterpreter', 'none')
+catch
+end
+ylabel('Oscillatory within area (%)')
+ylim([0 115])
+title('Share of analysed neurons in each area that are oscillatory')
+box off
+save_script_figure(output_folder)
+area_lines = cell(1, numel(area_label));
+for k = 1:numel(area_label)
+    area_lines{k} = sprintf('%-16s %d/%d   %.1f%%', area_label{k}, ...
+        area_observed(k), area_total(k), area_percent(k));
+end
+missing_area = area_label(area_observed == 0);
+if isempty(missing_area)
+    missing_line = 'Every analysed area has at least one oscillatory neuron.';
+else
+    missing_line = ['Areas with no oscillatory neuron: ', strjoin(missing_area, ', '), '.'];
+end
+if all(strcmp(area_label, 'area unknown'))
+    area_note = 'No brain area was stored on these neurons. Re-run section 1, or run section 4 while the shuffle checkpoint is available.';
+else
+    area_note = 'The denominator is every analysed neuron in that area. The numerator is how many of them are in the oscillatory group.';
+end
+write_summary_section(output_folder, '4. Oscillatory share by brain area', join_summary_lines( ...
+    area_note, ...
+    'These percentages are descriptive. They are not part of a Holm-Sidak family.', ...
+    area_lines, ...
+    missing_line))
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
@@ -1005,7 +1051,8 @@ else
     example_summary_path = '';
 end
 example_bank = load_example_acg_bank(example_summary_path);
-n_example = min(n_example_neurons, numel(osc_rows));
+example_pos = example_positions(osc_rows, neuron_area, n_example_neurons, 'VLPAG');
+n_example = numel(example_pos);
 example_names = [comparison_names, {'Peak1 - Peak2'}];
 neurons_per_figure = max(1, floor(n_example_subplots / 2));
 n_example_cols = neurons_per_figure;
@@ -1019,11 +1066,9 @@ if n_example > 0
         open_full_figure(sprintf('Example oscillatory neurons %d', page))
         for k = 1:(i1 - i0 + 1)
             i = i0 + k - 1;
-            pop_row = osc_rows(i);
-            area_label = neuron_area{pop_row};
-            if isempty(area_label)
-                area_label = 'area unknown';
-            end
+            rank = example_pos(i);
+            pop_row = osc_rows(rank);
+            this_area = area_display_name(neuron_area{pop_row});
             lock_label = display_lock_label(neuron_type{pop_row});
             [acg_lag, acg_y, acg_found] = example_acg_curve(example_bank, ...
                 neuron_session{pop_row}, neuron_cluster_id(pop_row));
@@ -1038,12 +1083,12 @@ if n_example > 0
             end
             xlabel('Lag (s)')
             ylabel('Sum-to-1')
-            title({sprintf('%s, %s', area_label, lock_label), ...
+            title({sprintf('%s, %s', this_area, lock_label), ...
                 sprintf('%s id %g', neuron_session{pop_row}, neuron_cluster_id(pop_row))}, ...
                 'Interpreter', 'none')
             box off
             subplot(2, n_example_cols, n_example_cols + k)
-            plot(lag, shown_percentile.sum.power_high(i, :), 'Color', [0.15 0.35 0.7], ...
+            plot(lag, shown_percentile.sum.power_high(rank, :), 'Color', [0.15 0.35 0.7], ...
                 'LineWidth', 1.4)
             xlim(lag_limits)
             ylim([0 100])
@@ -1051,10 +1096,10 @@ if n_example > 0
             ylabel('Percentile')
             box off
             example_lines{i} = example_neuron_summary(i, neuron_session{pop_row}, ...
-                neuron_cluster_id(pop_row), area_label, lock_label, osc_score(pop_row), ...
+                neuron_cluster_id(pop_row), this_area, lock_label, osc_score(pop_row), ...
                 acg_found, feature_table, feature_table_low, pop_row, example_names);
         end
-        sgtitle({sprintf('Neurons %d-%d of %d, highest modulation first.', i0, i1, n_example), ...
+        sgtitle({sprintf('Neurons %d-%d of %d. VLPAG is left out.', i0, i1, n_example), ...
             'Top: autocorrelogram on its own scale. Bottom: high-power shuffle percentile.'}, ...
             'Interpreter', 'none')
         save_script_figure(output_folder)
@@ -1064,13 +1109,20 @@ if n_example > 0
             n_example_neurons, n_example, 2 * neurons_per_figure), ...
         sprintf('Figures: %d. Each figure holds up to %d neurons, autocorrelogram above percentile.', ...
             n_example_figures, neurons_per_figure), ...
-        'These are the oscillatory neurons with the highest modulation score.', ...
+        'VLPAG is left out. Each other area that has an oscillatory neuron contributes its strongest one.', ...
+        'Further neurons are the next highest modulation scores outside VLPAG, until n_example_neurons is reached.', ...
+        'If those areas already exceed n_example_neurons, every area representative is still drawn.', ...
+        'The drawn order is strongest modulation first.', ...
         example_bank.note, ...
         'Each autocorrelogram uses the same lag window as the percentile.', ...
         'Its y-axis is set from that neuron alone, using lags at and after 0.05 s, so the bin beside zero does not flatten the trace.', ...
         'The percentile is the high-power sum-to-1 shuffle percentile.', ...
         'Features are the high-power and low-power values for that neuron.', ...
         example_lines))
+else
+    write_summary_section(output_folder, '4. Example oscillatory neurons', join_summary_lines( ...
+        sprintf('n_example_neurons = %d. Drawn: 0.', n_example_neurons), ...
+        'No oscillatory neuron outside VLPAG was available.'))
 end
 write_section_4_summary(output_folder, column_title, cycle_n, cycle_r, cycle_p, ...
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
@@ -1448,6 +1500,95 @@ for i = 1:numel(bank.cluster_id)
         return
     end
 end
+end
+
+
+function name = area_display_name(raw)
+name = strtrim(value_text(raw));
+if isempty(name)
+    name = 'area unknown';
+end
+end
+
+
+function tf = is_skipped_example_area(raw, skip_name)
+tf = strcmpi(strtrim(value_text(raw)), strtrim(skip_name));
+end
+
+
+function [percent, observed, total, label] = area_osc_rate(neuron_area, osc_rows)
+%AREA_OSC_RATE  Percent of analysed neurons in each area that are oscillatory.
+
+preferred = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
+names = cell(numel(neuron_area), 1);
+for i = 1:numel(neuron_area)
+    names{i} = area_display_name(neuron_area{i});
+end
+label = cell(1, 0);
+for k = 1:numel(preferred)
+    if any(strcmp(names, preferred{k}))
+        label{end + 1} = preferred{k}; %#ok<AGROW>
+    end
+end
+for i = 1:numel(names)
+    if ~any(strcmp(label, names{i}))
+        label{end + 1} = names{i}; %#ok<AGROW>
+    end
+end
+n = numel(label);
+observed = zeros(1, n);
+total = zeros(1, n);
+if isempty(osc_rows)
+    osc_names = {};
+else
+    osc_names = names(osc_rows);
+end
+for k = 1:n
+    total(k) = sum(strcmp(names, label{k}));
+    observed(k) = sum(strcmp(osc_names, label{k}));
+end
+percent = nan(1, n);
+has_cells = total > 0;
+percent(has_cells) = 100 * observed(has_cells) ./ total(has_cells);
+end
+
+
+function position = example_positions(osc_rows, neuron_area, n_requested, skip_area)
+%EXAMPLE_POSITIONS  Oscillatory rows to draw, skipping one area.
+%
+% position indexes osc_rows. The strongest oscillatory neuron in every
+% other area is kept. More neurons are added in modulation order until
+% n_requested, and the area representatives are kept even past that count.
+
+if nargin < 3 || isempty(n_requested)
+    n_requested = 0;
+end
+eligible = zeros(0, 1);
+for i = 1:numel(osc_rows)
+    if ~is_skipped_example_area(neuron_area{osc_rows(i)}, skip_area)
+        eligible(end + 1, 1) = i; %#ok<AGROW>
+    end
+end
+covered = cell(1, 0);
+reps = zeros(0, 1);
+for k = 1:numel(eligible)
+    name = area_display_name(neuron_area{osc_rows(eligible(k))});
+    if ~any(strcmp(covered, name))
+        covered{end + 1} = name; %#ok<AGROW>
+        reps(end + 1, 1) = eligible(k); %#ok<AGROW>
+    end
+end
+position = reps(:);
+target = max(n_requested, numel(reps));
+for k = 1:numel(eligible)
+    if numel(position) >= target
+        break
+    end
+    if ~any(position == eligible(k))
+        position(end + 1, 1) = eligible(k); %#ok<AGROW>
+    end
+end
+position = sort(position(:));
 end
 
 
