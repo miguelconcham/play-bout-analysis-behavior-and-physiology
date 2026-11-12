@@ -4,7 +4,8 @@
 % Overlap is the standard method. Section 1 loads
 % locking_period_acg_shuffle_n500.mat and builds the matrices and
 % feature_table. Section 2 runs PCA, t-SNE, and the two-group split.
-% Section 3 keeps k-means cluster 1, the higher-modulation group.
+% Section 3 keeps cluster 1 of cluster_method, the higher-modulation group.
+% cluster_method is 'kmeans' or 'ward'.
 % Section 4 only draws. After section 3 has run, edit section 4 and run
 % that section alone.
 %
@@ -16,8 +17,9 @@
 % Row 1 is the highest all-runs sum-to-1 score.
 %
 % Section 2 builds ACG features from the high-power sum-to-1 logit and
-% splits the neurons with k-means. Cluster 1 is the group with the higher
-% modulation. shown_logit is that group, strongest modulation first.
+% splits the neurons with k-means and Ward. cluster_method chooses which
+% split is kept. Cluster 1 of that split is the higher-modulation group.
+% shown_logit is that group, strongest modulation first.
 % imagesc_osc_sum_all is the same sum-to-1 image under a plain name.
 % osc_neuron_type is its lock group. feature_table has one row per neuron.
 
@@ -113,13 +115,14 @@ disp('imagesc_sum_all is neurons by lag. neuron_type is the lock group of each r
 disp('feature_table is one row of ACG features per neuron. Run section 2 to classify.')
 
 %% 2. ACG features, PCA, t-SNE, and the two-group split
-% Re-run this section after changing the feature list. Section 1 does not
-% need to run again while feature_table is still in the workspace.
-% Cluster 1 is the k-means group with the higher modulation. Section 3
-% uses that group. The PCA and t-SNE figures are there to see whether the
-% same split is visible. They do not choose the neurons. The violins
-% after the split also show frequency, amplitude, and the peak-to-peak
-% drop. Those extra columns do not enter the split.
+% Re-run this section after changing the feature list or cluster_method.
+% Section 1 does not need to run again while feature_table is still in
+% the workspace. cluster_method is 'kmeans' or 'ward'. Cluster 1 of that
+% split is the higher-modulation group, and section 3 uses it. Both
+% splits are still drawn. The violins after the split also show
+% frequency, amplitude, and the peak-to-peak drop. Those extra columns
+% do not enter the split.
+cluster_method = 'kmeans';
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
 if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
@@ -318,6 +321,17 @@ if ward_modulation(2) > ward_modulation(1)
     idx_ward = 3 - idx_ward;
 end
 fprintf('\nAfter relabeling, cluster 1 is the higher-modulation group.\n')
+if strcmpi(cluster_method, 'kmeans') || strcmpi(cluster_method, 'k-means')
+    idx_cluster = idx_kmeans;
+    cluster_method_label = 'k-means';
+elseif strcmpi(cluster_method, 'ward')
+    idx_cluster = idx_ward;
+    cluster_method_label = 'Ward';
+else
+    error('Plot_acg_population_logit:cluster', ...
+        'cluster_method must be ''kmeans'' or ''ward''.');
+end
+fprintf('The oscillatory group is %s cluster 1.\n', cluster_method_label)
 
 complete_rows = find(valid_rows);
 % The first six names entered the split when they had variance. The rest
@@ -361,7 +375,8 @@ if all(ismember({'Peak1', 'Peak2'}, table_names))
     shown_roles{end + 1} = 'not used in the split'; %#ok<AGROW>
 end
 if ~isempty(shown_titles)
-    figure('Name', 'Feature distributions by k-means group', 'Color', 'w')
+    figure('Name', ['Feature distributions by ', cluster_method_label, ' group'], ...
+        'Color', 'w')
     n_descriptor_cols = 5;
     tiledlayout(ceil(numel(shown_titles) / n_descriptor_cols), n_descriptor_cols, ...
         'TileSpacing', 'compact')
@@ -369,7 +384,7 @@ if ~isempty(shown_titles)
         nexttile
         hold on
         for group = 1:2
-            this_group = descriptor_values(idx_kmeans == group, j);
+            this_group = descriptor_values(idx_cluster == group, j);
             this_group = this_group(isfinite(this_group));
             draw_one_violin(group, this_group, [0.75 0.75 0.75])
             if isempty(this_group)
@@ -382,10 +397,10 @@ if ~isempty(shown_titles)
         set(gca, 'XTick', [1 2])
         xlim([0.4 2.6])
         title({shown_titles{j}, shown_roles{j}}, 'Interpreter', 'none')
-        xlabel('K-means group')
+        xlabel([cluster_method_label, ' group'])
         grid on
     end
-    sgtitle({'Cluster 1 is the higher modulation.', ...
+    sgtitle({[cluster_method_label, ' cluster 1 is the higher modulation.'], ...
         'Peak1 - Peak2 is the drop from the first peak to the second.'})
 end
 
@@ -402,27 +417,29 @@ ACG_PCA = struct( ...
     'perplexity', perplexity_values, ...
     'idx_kmeans', idx_kmeans, ...
     'idx_ward', idx_ward, ...
+    'idx_cluster', idx_cluster, ...
+    'cluster_method', cluster_method, ...
     'kmeans_centers', kmeans_centers, ...
     'modulation_score', modulation_score, ...
     'valid_rows', valid_rows);
-disp('Run section 3 to keep k-means cluster 1.')
+disp(['Run section 3 to keep ', cluster_method_label, ' cluster 1.'])
 
 %% 3. Choose the oscillatory neurons
-% Cluster 1 is the higher-modulation k-means group. Its rows are the
-% complete feature rows, not yet the image rows. The strongest modulation
-% is placed first.
+% Cluster 1 is the higher-modulation group of cluster_method. Its rows are
+% the complete feature rows, not yet the image rows. The strongest
+% modulation is placed first.
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
-if ~exist('idx_kmeans', 'var') || ~exist('complete_rows', 'var') ...
+if ~exist('idx_cluster', 'var') || ~exist('complete_rows', 'var') ...
         || ~exist('modulation_score', 'var') || ~exist('neuron_type', 'var')
     error('Plot_acg_population_logit:cluster', ...
-        'The k-means split is not in the workspace. Run section 2 first.');
+        'The chosen split is not in the workspace. Run section 2 first.');
 end
 
 osc_score = nan(numel(neuron_type), 1);
 osc_score(complete_rows) = modulation_score;
 osc_member = false(numel(neuron_type), 1);
-osc_member(complete_rows(idx_kmeans == 1)) = true;
+osc_member(complete_rows(idx_cluster == 1)) = true;
 osc_rows = oscillatory_member_rows(osc_member, osc_score);
 osc_neuron_type = neuron_type(osc_rows);
 [type_percent, type_observed, type_total, lock_type_label] = ...
@@ -569,7 +586,7 @@ for s = 1
         box off
     end
     sgtitle({['Oscillatory neurons, ', scale_title{s}], ...
-        'K-means group with the higher modulation, strongest first.'})
+        [cluster_method_label, ' group with the higher modulation, strongest first.']})
 end
 
 figure('Name', 'ACG population logit, high minus low power', ...
