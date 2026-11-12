@@ -62,17 +62,60 @@ assert(isequal(size(matched), [1 3]), 'A curve on a different lag axis was kept.
 
 lag = [0.05 0.25 0.35 0.60];
 unsorted = [90 10 10 90; 10 80 70 10; NaN NaN NaN 40];
-[sorted_pctl, sorted_logit, score] = order_percentile_rows(unsorted, lag, [0.2 0.4], 500);
+[sorted_pctl, sorted_logit, score, order] = order_percentile_rows(unsorted, lag, [0.2 0.4], 500);
 assert(abs(score(1) - mean([80 70])) < 1e-12, ...
     'The sort score was not the mean percentile from 200 to 400 ms.');
 assert(abs(score(2) - mean([10 10])) < 1e-12, ...
     'Lags outside 200 to 400 ms changed the sort score.');
 assert(isequal(sorted_pctl(1, :), unsorted(2, :)), ...
     'The higher 200-400 ms percentile was not the first row.');
+assert(order(1) == 2, ...
+    'The sort index did not point at the higher 200-400 ms row.');
 assert(all(isnan(sorted_pctl(3, 1:3))), ...
     'A neuron with no percentile in the window was not placed last.');
 assert(all(isfinite(sorted_logit(1:2, :))), ...
     'A sorted percentile of 0 or 100 made the logit infinite.');
+
+lag = [0.10 0.25 0.35];
+kept_neuron = population_record('trough', lag, [1 2 3]);
+missing_low = population_record('peak', lag, [4 5 6]);
+missing_low.power = rmfield(missing_low.power, 'low');
+unlocked = population_record('nonentrained', lag, [7 8 9]);
+unclassified = population_record('', lag, [0 1 1]);
+other_axis = population_record('peak', [0.10 0.20], [1 2]);
+[got_lag, got_percentile, got_type, got_index] = align_population_percentiles( ...
+    {kept_neuron, missing_low, unlocked, unclassified, other_axis});
+assert(isequal(got_lag, lag), 'The shared lag axis was not kept.');
+assert(isequal(got_index, [1; 3; 4]), ...
+    'A neuron missing one curve, or on another lag axis, was kept.');
+assert(isequal(got_type, {'trough'; 'nonentrained'; ''}), ...
+    'Lock group was not kept in the same row order as the curves.');
+assert(isequal(got_percentile.sum.all(2, :), [7 8 9]), ...
+    'The all-runs row was not the same neuron as the lock-group row.');
+assert(isequal(got_percentile.sum.power_high(2, :), [9 10 11]), ...
+    'The high-power row was not aligned with the all-runs row.');
+assert(isequal(got_percentile.ratio.power_low(1, :), [6 7 8]), ...
+    'The rate-ratio low-power row was not aligned with the sum-to-1 row.');
+
+osc_lag = [0.10 0.30 0.40 0.50];
+osc_logit = [0 1.5 0 0; 0 0 0 0; 0 0.4 0 0; NaN NaN 0 0];
+[osc_rows, osc_score] = oscillatory_row_index( ...
+    osc_logit, osc_lag, [0.25 0.35], [0.05 0.15], 0);
+assert(isequal(osc_rows, [1; 3]), ...
+    'Oscillatory rows were not the positive peak-minus-trough scores, strongest first.');
+assert(abs(osc_score(1) - 1.5) < 1e-12 && abs(osc_score(3) - 0.4) < 1e-12, ...
+    'The oscillation score was not the peak-window mean minus the trough-window mean.');
+assert(abs(osc_score(2)) < 1e-12, ...
+    'A flat logit did not score zero.');
+
+[type_count, type_proportion, type_label] = lock_type_proportion( ...
+    {'Trough', 'peak', 'nonentrained', '', 'delta'});
+assert(isequal(type_count, [1 1 1 2]), ...
+    'Trough, peak, unlocked, and non-classified were not counted separately.');
+assert(abs(type_proportion(4) - 0.4) < 1e-12, ...
+    'An unlabeled neuron and an unknown label were not both non-classified.');
+assert(isequal(type_label, {'Trough', 'Peak', 'Unlocked', 'Non-classified'}), ...
+    'The lock-type labels were renamed.');
 
 disp('test_shuffle_percentile_plot passed')
 end
@@ -82,4 +125,18 @@ function rec = make_record(group_name, lag, curve)
 rec.lock_group = group_name;
 rec.locking.low.pctl_lag = lag;
 rec.locking.low.sum_pctl = curve;
+end
+
+
+function rec = population_record(group_name, lag, curve)
+rec.lock_group = group_name;
+rec.all.pctl_lag = lag;
+rec.all.sum_pctl = curve;
+rec.all.ratio_pctl = curve + 1;
+rec.power.high.pctl_lag = lag;
+rec.power.high.sum_pctl = curve + 2;
+rec.power.high.ratio_pctl = curve + 3;
+rec.power.low.pctl_lag = lag;
+rec.power.low.sum_pctl = curve + 4;
+rec.power.low.ratio_pctl = curve + 5;
 end

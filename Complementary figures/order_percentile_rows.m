@@ -1,10 +1,11 @@
-function [percentile, logit, score] = order_percentile_rows(percentile, lag, window_s, n_shuffles)
+function [percentile, logit, score, order] = order_percentile_rows(percentile, lag, window_s, n_shuffles)
 %ORDER_PERCENTILE_ROWS  Sort neurons by mean percentile inside a lag window.
 %
 % percentile is neurons by lags, on a 0-100 scale. score is the mean
 % percentile at lags inside window_s (seconds, inclusive). The highest
 % score becomes row 1, which is the top row of imagesc. logit is
 % log10(p/(1-p)) for every neuron, with 0 and 100 pulled inside (0, 1).
+% order indexes the input rows in that sorted order.
 
 percentile = double(percentile);
 lag = double(lag(:).');
