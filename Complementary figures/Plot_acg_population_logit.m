@@ -604,14 +604,15 @@ ylabel('Mean logit difference')
 title('Red marks a paired difference at p < 0.05')
 box off
 
-% t-SNE cannot place a new point in an existing map. The low-power
-% features are projected into the PCA built from the high-power features.
+% The PCA below keeps its original axes and only receives the low-power
+% points. t-SNE cannot do that, so the t-SNE figure is a new embedding of
+% the high-power neurons plus the oscillatory neurons at low power.
 if ~exist('pca_coeff', 'var') || ~exist('pca_mu', 'var') ...
         || ~exist('pca_score', 'var') || ~exist('pca_explained', 'var') ...
         || ~exist('feature_mean', 'var') || ~exist('feature_sigma', 'var') ...
         || ~exist('feature_names', 'var') || ~exist('complete_rows', 'var') ...
         || ~exist('feature_table', 'var') || ~exist('imagesc_sum_power_low', 'var') ...
-        || ~exist('osc_rows', 'var')
+        || ~exist('osc_rows', 'var') || ~exist('Xz', 'var')
     error('Plot_acg_population_logit:pca', ...
         'The high-power PCA is not in the workspace. Run sections 2 and 3 first.');
 end
@@ -626,42 +627,106 @@ osc_pos = osc_pos(in_complete);
 high_xy = pca_score(osc_pos, 1:2);
 low_xy = score_low(osc_pos, 1:2);
 finite_projection = all(isfinite(high_xy), 2) & all(isfinite(low_xy), 2);
+osc_in_complete = ismember(complete_rows(:), osc_rows(:));
+group_color = [0.84 0.37 0.00; 0.00 0.62 0.45; 0.00 0.45 0.70];
+group_label = { ...
+    'Oscillatory, high power', ...
+    'Non-oscillatory, high power', ...
+    'Oscillatory, low power'};
 
 figure('Name', 'Low-power ACGs in the high-power PCA', ...
     'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.16 0.16 0.46 0.62])
 hold on
-high_cloud = scatter(pca_score(:, 1), pca_score(:, 2), 18, [0.75 0.75 0.75], ...
-    'filled', 'MarkerFaceAlpha', 0.35);
-paired_line = gobjects(0);
 if any(finite_projection)
     paired_lines = plot( ...
         [high_xy(finite_projection, 1).'; low_xy(finite_projection, 1).'], ...
         [high_xy(finite_projection, 2).'; low_xy(finite_projection, 2).'], ...
         '-', 'Color', [0.55 0.55 0.55]);
-    paired_line = paired_lines(1);
-    if numel(paired_lines) > 1
-        set(paired_lines(2:end), 'HandleVisibility', 'off')
-    end
+    set(paired_lines, 'HandleVisibility', 'off')
 end
-high_points = scatter(high_xy(finite_projection, 1), high_xy(finite_projection, 2), ...
-    36, [0.85 0.25 0.20], 'filled');
-low_points = scatter(low_xy(finite_projection, 1), low_xy(finite_projection, 2), ...
-    36, [0.20 0.45 0.80], 'filled');
+pca_handle = gobjects(3, 1);
+pca_shown = false(3, 1);
+if any(~osc_in_complete)
+    pca_handle(2) = scatter( ...
+        pca_score(~osc_in_complete, 1), pca_score(~osc_in_complete, 2), ...
+        28, group_color(2, :), 'filled', 'MarkerFaceAlpha', 0.75);
+    pca_shown(2) = true;
+end
+if any(osc_in_complete)
+    pca_handle(1) = scatter( ...
+        pca_score(osc_in_complete, 1), pca_score(osc_in_complete, 2), ...
+        28, group_color(1, :), 'filled', 'MarkerFaceAlpha', 0.75);
+    pca_shown(1) = true;
+end
+if any(finite_projection)
+    pca_handle(3) = scatter( ...
+        low_xy(finite_projection, 1), low_xy(finite_projection, 2), ...
+        28, group_color(3, :), 'filled', 'MarkerFaceAlpha', 0.75);
+    pca_shown(3) = true;
+end
 xlabel(sprintf('PC1 (%.1f%%)', pca_explained(1)))
 ylabel(sprintf('PC2 (%.1f%%)', pca_explained(2)))
-title({'Oscillatory neurons in the high-power PCA', ...
-    'Red is high power. Blue is the same neuron at low power.'})
-if isempty(paired_line)
-    legend([high_cloud, high_points, low_points], ...
-        {'All neurons, high power', 'Oscillatory, high power', ...
-        'Oscillatory, low power'}, 'Location', 'best', 'Box', 'off')
-else
-    legend([high_cloud, paired_line, high_points, low_points], ...
-        {'All neurons, high power', 'Same neuron', 'Oscillatory, high power', ...
-        'Oscillatory, low power'}, 'Location', 'best', 'Box', 'off')
+title({'High-power PCA', ...
+    'Lines join the same oscillatory neuron at low power.'})
+if any(pca_shown)
+    legend(pca_handle(pca_shown), group_label(find(pca_shown)), ...
+        'Location', 'best', 'Box', 'off')
 end
 grid on
 axis square
+box off
+
+low_member = osc_in_complete & all(isfinite(Xz_low), 2);
+X_embed = [Xz; Xz_low(low_member, :)];
+group_id = ones(size(Xz, 1), 1);
+group_id(~osc_in_complete) = 2;
+group_id = [group_id; 3 * ones(sum(low_member), 1)];
+n_embed = size(X_embed, 1);
+candidate_perplexity = [5 15 30 50];
+candidate_perplexity = candidate_perplexity( ...
+    candidate_perplexity < (n_embed - 1) / 3);
+if isempty(candidate_perplexity)
+    candidate_perplexity = max(2, floor((n_embed - 1) / 3));
+end
+if numel(candidate_perplexity) >= 2
+    embed_perplexity = candidate_perplexity(2);
+else
+    embed_perplexity = candidate_perplexity(1);
+end
+rng(42);
+Y_power = tsne(X_embed, ...
+    'NumDimensions', 2, ...
+    'Perplexity', embed_perplexity, ...
+    'Standardize', false, ...
+    'Distance', 'euclidean');
+fprintf(['Low-power oscillatory neurons in the new t-SNE: %d. ', ...
+    'Omitted for missing low-power features: %d.\n'], ...
+    sum(low_member), sum(osc_in_complete) - sum(low_member))
+
+figure('Name', 't-SNE with low-power oscillatory neurons', ...
+    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.18 0.16 0.46 0.62])
+hold on
+tsne_handle = gobjects(3, 1);
+tsne_shown = false(3, 1);
+for g = [2 1 3]
+    in_group = group_id == g;
+    if ~any(in_group)
+        continue
+    end
+    tsne_handle(g) = scatter(Y_power(in_group, 1), Y_power(in_group, 2), ...
+        28, group_color(g, :), 'filled', 'MarkerFaceAlpha', 0.75);
+    tsne_shown(g) = true;
+end
+xlabel('t-SNE 1')
+ylabel('t-SNE 2')
+title({sprintf('Perplexity = %g', embed_perplexity), ...
+    'High-power neurons plus oscillatory neurons at low power.'})
+if any(tsne_shown)
+    legend(tsne_handle(tsne_shown), group_label(find(tsne_shown)), ...
+        'Location', 'best', 'Box', 'off')
+end
+axis square
+grid on
 box off
 
 % Same columns as the cluster boxcharts. High values come from the
