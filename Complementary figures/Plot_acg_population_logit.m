@@ -114,7 +114,9 @@ disp('feature_table is one row of ACG features per neuron. Run section 2 to clas
 % need to run again while feature_table is still in the workspace.
 % Cluster 1 is the k-means group with the higher modulation. Section 3
 % uses that group. The PCA and t-SNE figures are there to see whether the
-% same split is visible. They do not choose the neurons.
+% same split is visible. They do not choose the neurons. The boxcharts
+% after the split also show frequency, amplitude, and the peak-to-peak
+% drop. Those extra columns do not enter the split.
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
 if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
@@ -283,16 +285,6 @@ title('K-means vs Ward counts')
 colorbar
 disp(group_counts)
 
-figure('Name', 'Feature distributions by k-means group', 'Color', 'w')
-tiledlayout(2, ceil(numel(feature_names) / 2), 'TileSpacing', 'compact')
-for j = 1:numel(feature_names)
-    nexttile
-    boxchart(categorical(idx_kmeans), X(:, j))
-    title(feature_names{j}, 'Interpreter', 'none')
-    xlabel('K-means group')
-    grid on
-end
-
 figure('Name', 'Silhouette comparison', 'Color', 'w')
 subplot(1, 2, 1)
 silhouette(Xz, idx_kmeans, 'euclidean')
@@ -322,6 +314,62 @@ end
 fprintf('\nAfter relabeling, cluster 1 is the higher-modulation group.\n')
 
 complete_rows = find(valid_rows);
+% The first six names entered the split when they had variance. The rest
+% are drawn so the two groups can be compared. Peak1 - Peak2 is positive
+% when the first peak is larger than the second.
+descriptor_names = { ...
+    'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
+    'OscillationScore', 'Baseline', ...
+    'DominantFrequency', 'PeakFrequency', 'TroughFrequency', ...
+    'Persistence', 'Peak1', 'Peak2', 'Trough1', 'Trough2'};
+descriptor_titles = { ...
+    'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
+    'OscillationScore', 'Baseline', ...
+    'DominantFrequency', 'PeakFrequency', 'TroughFrequency', ...
+    'Persistence (2nd / 1st modulation)', 'Peak1', 'Peak2', 'Trough1', 'Trough2'};
+table_names = feature_table.Properties.VariableNames;
+descriptor_values = zeros(numel(complete_rows), 0);
+shown_titles = {};
+shown_roles = {};
+for j = 1:numel(descriptor_names)
+    this_name = descriptor_names{j};
+    if ~ismember(this_name, table_names)
+        continue
+    end
+    this_column = feature_table{complete_rows, this_name};
+    if ~isnumeric(this_column)
+        continue
+    end
+    descriptor_values(:, end + 1) = this_column; %#ok<AGROW>
+    shown_titles{end + 1} = descriptor_titles{j}; %#ok<AGROW>
+    if ismember(this_name, feature_names)
+        shown_roles{end + 1} = 'used in the split'; %#ok<AGROW>
+    else
+        shown_roles{end + 1} = 'not used in the split'; %#ok<AGROW>
+    end
+end
+if all(ismember({'Peak1', 'Peak2'}, table_names))
+    descriptor_values(:, end + 1) = feature_table{complete_rows, 'Peak1'} ...
+        - feature_table{complete_rows, 'Peak2'}; %#ok<AGROW>
+    shown_titles{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
+    shown_roles{end + 1} = 'not used in the split'; %#ok<AGROW>
+end
+if ~isempty(shown_titles)
+    figure('Name', 'Feature distributions by k-means group', 'Color', 'w')
+    n_descriptor_cols = 5;
+    tiledlayout(ceil(numel(shown_titles) / n_descriptor_cols), n_descriptor_cols, ...
+        'TileSpacing', 'compact')
+    for j = 1:numel(shown_titles)
+        nexttile
+        boxchart(categorical(idx_kmeans), descriptor_values(:, j))
+        title({shown_titles{j}, shown_roles{j}}, 'Interpreter', 'none')
+        xlabel('K-means group')
+        grid on
+    end
+    sgtitle({'Cluster 1 is the higher modulation.', ...
+        'Peak1 - Peak2 is the drop from the first peak to the second.'})
+end
+
 ACG_PCA = struct( ...
     'feature_names', {feature_names}, ...
     'complete_rows', complete_rows, ...
