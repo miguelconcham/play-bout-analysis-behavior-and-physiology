@@ -13,9 +13,11 @@
 % where this script writes each figure as jpg and svg, and where it writes
 % analysis_summary.txt. Later sections keep that folder when it is already
 % in the workspace.
-% n_example_neurons is set at the start of section 4. It chooses how many
-% of the strongest oscillatory neurons are drawn with their autocorrelogram
-% and shuffle percentile.
+% n_example_neurons and n_example_subplots are set at the start of section 4.
+% n_example_neurons chooses how many of the strongest oscillatory neurons
+% are drawn. n_example_subplots is how many panels go on each figure.
+% Each neuron uses two panels, so the figures continue until every
+% requested neuron is drawn.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -576,6 +578,7 @@ if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
 n_example_neurons = 10;
+n_example_subplots = 6;
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
 if ~exist('shown_logit', 'var')
@@ -1004,65 +1007,67 @@ end
 example_bank = load_example_acg_bank(example_summary_path);
 n_example = min(n_example_neurons, numel(osc_rows));
 example_names = [comparison_names, {'Peak1 - Peak2'}];
+neurons_per_figure = max(1, floor(n_example_subplots / 2));
+n_example_cols = neurons_per_figure;
 if n_example > 0
-    open_full_figure('Example oscillatory neurons')
     example_lines = cell(n_example, 1);
-    acg_values = [];
-    for i = 1:n_example
-        pop_row = osc_rows(i);
-        [acg_lag, acg_y, acg_found] = example_acg_curve(example_bank, ...
-            neuron_session{pop_row}, neuron_cluster_id(pop_row));
-        if acg_found
-            acg_values = [acg_values, acg_y(:).']; %#ok<AGROW>
+    lag_limits = example_lag_limits(lag);
+    n_example_figures = ceil(n_example / neurons_per_figure);
+    for page = 1:n_example_figures
+        i0 = (page - 1) * neurons_per_figure + 1;
+        i1 = min(page * neurons_per_figure, n_example);
+        open_full_figure(sprintf('Example oscillatory neurons %d', page))
+        for k = 1:(i1 - i0 + 1)
+            i = i0 + k - 1;
+            pop_row = osc_rows(i);
+            area_label = neuron_area{pop_row};
+            if isempty(area_label)
+                area_label = 'area unknown';
+            end
+            lock_label = display_lock_label(neuron_type{pop_row});
+            [acg_lag, acg_y, acg_found] = example_acg_curve(example_bank, ...
+                neuron_session{pop_row}, neuron_cluster_id(pop_row));
+            subplot(2, n_example_cols, k)
+            if acg_found
+                plot(acg_lag, acg_y, 'k', 'LineWidth', 1.4)
+                xlim(lag_limits)
+                ylim(example_acg_ylim(acg_lag, acg_y, lag_limits))
+            else
+                text(0.5, 0.5, 'ACG not in summary', 'HorizontalAlignment', 'center')
+                axis([0 1 0 1])
+            end
+            xlabel('Lag (s)')
+            ylabel('Sum-to-1')
+            title({sprintf('%s, %s', area_label, lock_label), ...
+                sprintf('%s id %g', neuron_session{pop_row}, neuron_cluster_id(pop_row))}, ...
+                'Interpreter', 'none')
+            box off
+            subplot(2, n_example_cols, n_example_cols + k)
+            plot(lag, shown_percentile.sum.power_high(i, :), 'Color', [0.15 0.35 0.7], ...
+                'LineWidth', 1.4)
+            xlim(lag_limits)
+            ylim([0 100])
+            xlabel('Lag (s)')
+            ylabel('Percentile')
+            box off
+            example_lines{i} = example_neuron_summary(i, neuron_session{pop_row}, ...
+                neuron_cluster_id(pop_row), area_label, lock_label, osc_score(pop_row), ...
+                acg_found, feature_table, feature_table_low, pop_row, example_names);
         end
-    end
-    if isempty(acg_values)
-        acg_limits = [0 1];
-    else
-        acg_pad = 0.05 * max(max(acg_values) - min(acg_values), eps);
-        acg_limits = [min(acg_values) - acg_pad, max(acg_values) + acg_pad];
-    end
-    for i = 1:n_example
-        pop_row = osc_rows(i);
-        area_label = neuron_area{pop_row};
-        if isempty(area_label)
-            area_label = 'area unknown';
-        end
-        lock_label = display_lock_label(neuron_type{pop_row});
-        [acg_lag, acg_y, acg_found] = example_acg_curve(example_bank, ...
-            neuron_session{pop_row}, neuron_cluster_id(pop_row));
-        subplot(2, n_example, i)
-        if acg_found
-            plot(acg_lag, acg_y, 'k', 'LineWidth', 1.4)
-            ylim(acg_limits)
-        else
-            text(0.5, 0.5, 'ACG not in summary', 'HorizontalAlignment', 'center')
-            axis([0 1 0 1])
-        end
-        ylabel('Sum-to-1')
-        title({sprintf('%s, %s', area_label, lock_label), ...
-            sprintf('%s id %g', neuron_session{pop_row}, neuron_cluster_id(pop_row))}, ...
+        sgtitle({sprintf('Neurons %d-%d of %d, highest modulation first.', i0, i1, n_example), ...
+            'Top: autocorrelogram on its own scale. Bottom: high-power shuffle percentile.'}, ...
             'Interpreter', 'none')
-        box off
-        subplot(2, n_example, n_example + i)
-        plot(lag, shown_percentile.sum.power_high(i, :), 'Color', [0.15 0.35 0.7], ...
-            'LineWidth', 1.4)
-        ylim([0 100])
-        xlabel('Lag (s)')
-        ylabel('Percentile')
-        box off
-        example_lines{i} = example_neuron_summary(i, neuron_session{pop_row}, ...
-            neuron_cluster_id(pop_row), area_label, lock_label, osc_score(pop_row), ...
-            acg_found, feature_table, feature_table_low, pop_row, example_names);
+        save_script_figure(output_folder)
     end
-    sgtitle({sprintf('%d oscillatory neurons with the highest modulation.', n_example), ...
-        example_bank.note, ...
-        'Bottom row: high-power sum-to-1 shuffle percentile.'}, 'Interpreter', 'none')
-    save_script_figure(output_folder)
     write_summary_section(output_folder, '4. Example oscillatory neurons', join_summary_lines( ...
-        sprintf('n_example_neurons = %d. Drawn: %d.', n_example_neurons, n_example), ...
+        sprintf('n_example_neurons = %d. Drawn: %d. Subplots per figure: %d.', ...
+            n_example_neurons, n_example, 2 * neurons_per_figure), ...
+        sprintf('Figures: %d. Each figure holds up to %d neurons, autocorrelogram above percentile.', ...
+            n_example_figures, neurons_per_figure), ...
         'These are the oscillatory neurons with the highest modulation score.', ...
         example_bank.note, ...
+        'Each autocorrelogram uses the same lag window as the percentile.', ...
+        'Its y-axis is set from that neuron alone, using lags at and after 0.05 s, so the bin beside zero does not flatten the trace.', ...
         'The percentile is the high-power sum-to-1 shuffle percentile.', ...
         'Features are the high-power and low-power values for that neuron.', ...
         example_lines))
@@ -1443,6 +1448,47 @@ for i = 1:numel(bank.cluster_id)
         return
     end
 end
+end
+
+
+function x_lim = example_lag_limits(lag)
+lag = double(lag(isfinite(lag)));
+if isempty(lag)
+    x_lim = [0 1];
+    return
+end
+span = max(max(lag) - min(lag), eps);
+pad = 0.02 * span;
+x_lim = [min(lag) - pad, max(lag) + pad];
+if min(lag) >= 0
+    x_lim(1) = 0;
+end
+end
+
+
+function y_lim = example_acg_ylim(acg_lag, acg_y, lag_limits)
+%EXAMPLE_ACG_YLIM  Scale one autocorrelogram without the near-zero peak.
+
+acg_lag = double(acg_lag(:).');
+acg_y = double(acg_y(:).');
+shown = acg_lag >= lag_limits(1) & acg_lag <= lag_limits(2) & isfinite(acg_y);
+tail = shown & acg_lag >= 0.05;
+values = acg_y(tail);
+if numel(values) < 5
+    values = acg_y(shown);
+end
+if isempty(values)
+    y_lim = [0 1];
+    return
+end
+lo = min(values);
+hi = max(values);
+span = hi - lo;
+if span <= 1e-6 * max(abs(hi), 1)
+    span = max(abs(hi), eps);
+end
+pad = 0.08 * span;
+y_lim = [lo - pad, hi + pad];
 end
 
 
