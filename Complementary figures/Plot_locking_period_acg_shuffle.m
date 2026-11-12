@@ -8,13 +8,17 @@ function Plot_locking_period_acg_shuffle(checkpoint)
 % 'eligible' to open the eligible-spike checkpoint instead, or pass a
 % checkpoint path.
 %
-% The neuron percentile figure has four rows in each cell-type column.
-% The top row is an imagesc with one autocorrelogram percentile per row.
-% Under it are the same curves, with their mean drawn bold. The third row
-% is the percent of neurons at or above the 95th percentile, drawn on top
-% of the percent at or below the 5th. The bottom row is the mean across
-% neurons of log10(p/(1-p)), after percentiles of 0 and 100 are pulled
-% inside (0, 1).
+% Low 25% and high 25% each get their own figure. Within a figure, every
+% cell-type column has four rows. The top row is an imagesc with one
+% autocorrelogram percentile per row. Under it are the same curves, with
+% their mean drawn bold. The third row is the percent of neurons at or
+% above the 95th percentile, drawn on top of the percent at or below the
+% 5th. The bottom row is the mean across neurons of log10(p/(1-p)), after
+% percentiles of 0 and 100 are pulled inside (0, 1).
+%
+% A separate population figure ignores lock group. Its three columns are
+% every neuron's all-runs curve, every neuron's high 25% delta-power
+% curve, and every neuron's low 25% delta-power curve.
 
 if nargin < 1
     checkpoint = '';
@@ -490,35 +494,38 @@ row_note = ['Top to bottom: each neuron, individual curves with the mean in bold
     'percent of neurons at or above 95 (red) and at or below 5 (blue), mean logit.'];
 for k = 1:numel(scales)
     for s = 1:numel(splits)
-        figure('Name', ['Neuron shuffle percentile, ', split_labels{s}, ', ', scale_labels{k}], ...
-            'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.02 0.02 0.96 0.96])
         for t = 1:numel(tails)
+            figure('Name', ['Neuron shuffle percentile, ', split_labels{s}, ', ', ...
+                tail_labels{t}, ', ', scale_labels{k}], ...
+                'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.02 0.08 0.96 0.84])
             for g = 1:numel(group_order)
                 chosen = records_in_group(records, group_order{g});
                 plot_percentile_column(chosen, splits{s}, tails{t}, scales{k}, ...
-                    [group_title{g}, ', ', tail_labels{t}], n_shuffles, ...
-                    4 * numel(tails), numel(group_order), 4 * (t - 1), g)
+                    group_title{g}, n_shuffles, 4, numel(group_order), 0, g)
             end
+            sgtitle({['Each neuron against its own shuffles, ', split_labels{s}, ', ', ...
+                tail_labels{t}, ', ', scale_labels{k}], row_note})
         end
-        sgtitle({['Each neuron against its own shuffles, ', split_labels{s}, ', ', scale_labels{k}], ...
-            row_note})
     end
     for s = 1:numel(splits)
-        figure('Name', ['Grand-average shuffle percentile, ', split_labels{s}, ', ', scale_labels{k}], ...
-            'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.06 0.92 0.84])
         for t = 1:numel(tails)
+            figure('Name', ['Grand-average shuffle percentile, ', split_labels{s}, ', ', ...
+                tail_labels{t}, ', ', scale_labels{k}], ...
+                'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.18 0.92 0.5])
             for g = 1:numel(group_order)
                 block = grand.(scale_names{k}).(splits{s}).(tails{t}).(group_order{g});
-                subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
+                subplot(1, numel(group_order), g)
                 result = grand_peak_result(block, centers, smooth_n);
                 plot_grand_percentile(result, [group_title{g}, ', ', tail_labels{t}])
             end
+            sgtitle({['Grand mean against shuffled means, ', split_labels{s}, ', ', ...
+                tail_labels{t}, ', ', scale_labels{k}], ...
+                '100 means the mean autocorrelogram is above every shuffled mean.'})
         end
-        sgtitle({['Grand mean against shuffled means, ', split_labels{s}, ', ', scale_labels{k}], ...
-            '100 means the mean autocorrelogram is above every shuffled mean.'})
     end
 end
 plot_all_run_percentiles(records, grand, centers, smooth_n, group_order, group_title, n_shuffles);
+plot_population_percentiles(records, n_shuffles);
 end
 
 
@@ -552,6 +559,29 @@ for k = 1:numel(scales)
     end
     sgtitle({['Grand mean against shuffled means, all firing runs, ', scale_labels{k}], ...
         '100 means the mean autocorrelogram is above every shuffled mean.'})
+end
+end
+
+
+function plot_population_percentiles(records, n_shuffles)
+% Every lock group is pooled. Columns are all firing runs, then the high
+% and low 25% of delta power.
+scales = {'sum_pctl', 'ratio_pctl'};
+scale_labels = {'sum-to-1', 'rate ratio (Poisson = 1)'};
+row_note = ['Top to bottom: each neuron, individual curves with the mean in bold, ' ...
+    'percent of neurons at or above 95 (red) and at or below 5 (blue), mean logit.'];
+columns = { ...
+    struct('split', 'all', 'tail', '', 'title', 'All neurons'), ...
+    struct('split', 'power', 'tail', 'high', 'title', 'All neurons, high 25% power'), ...
+    struct('split', 'power', 'tail', 'low', 'title', 'All neurons, low 25% power')};
+for k = 1:numel(scales)
+    figure('Name', ['Neuron shuffle percentile, all neurons, ', scale_labels{k}], ...
+        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.06 0.08 0.88 0.84])
+    for c = 1:numel(columns)
+        plot_percentile_column(records, columns{c}.split, columns{c}.tail, scales{k}, ...
+            columns{c}.title, n_shuffles, 4, numel(columns), 0, c)
+    end
+    sgtitle({['All neurons together, ', scale_labels{k}], row_note})
 end
 end
 
