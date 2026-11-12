@@ -338,10 +338,12 @@ save_script_figure(output_folder)
 open_full_figure('Silhouette comparison')
 subplot(1, 2, 1)
 sil_kmeans = silhouette(Xz, idx_kmeans, 'euclidean');
-title('K-means')
+draw_silhouette(sil_kmeans, idx_kmeans)
+title(sprintf('K-means, mean = %.3g', mean(sil_kmeans)))
 subplot(1, 2, 2)
 sil_ward = silhouette(Xz, idx_ward, 'euclidean');
-title('Ward')
+draw_silhouette(sil_ward, idx_ward)
+title(sprintf('Ward, mean = %.3g', mean(sil_ward)))
 save_script_figure(output_folder)
 
 modulation_names = {'Modulation1', 'Modulation2'};
@@ -1001,14 +1003,22 @@ if ~exist('neuron_area', 'var') || numel(neuron_area) ~= numel(neuron_type)
 end
 [area_percent, area_observed, area_total, area_label] = ...
     area_osc_rate(neuron_area, osc_rows);
+area_test = area_enrichment(area_label, area_observed, area_total);
 open_full_figure('Oscillatory cells within each brain area')
 shown_area = area_percent;
 shown_area(~isfinite(shown_area)) = 0;
 hold on
 for k = 1:numel(area_label)
     bar(k, shown_area(k), 'FaceColor', [0.20 0.45 0.80], 'BarWidth', 0.8)
-    text(k, min(shown_area(k) + 4, 108), sprintf('%d/%d', area_observed(k), area_total(k)), ...
-        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
+    if area_test.tested(k) && isfinite(area_test.holm_p(k))
+        bar_text = sprintf('%d/%d\nHolm-Sidak p = %.3g', ...
+            area_observed(k), area_total(k), area_test.holm_p(k));
+    else
+        bar_text = sprintf('%d/%d', area_observed(k), area_total(k));
+    end
+    text(k, min(shown_area(k) + 4, 100), bar_text, ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
+        'Interpreter', 'none')
 end
 set(gca, 'XTick', 1:numel(area_label), 'XTickLabel', area_label)
 try
@@ -1016,14 +1026,21 @@ try
 catch
 end
 ylabel('Oscillatory within area (%)')
-ylim([0 115])
-title('Share of analysed neurons in each area that are oscillatory')
+ylim([0 130])
+title({'Share of analysed neurons in each area that are oscillatory', ...
+    'Holm-Sidak p: more oscillatory than the other analysed areas'})
 box off
 save_script_figure(output_folder)
 area_lines = cell(1, numel(area_label));
 for k = 1:numel(area_label)
-    area_lines{k} = sprintf('%-16s %d/%d   %.1f%%', area_label{k}, ...
-        area_observed(k), area_total(k), area_percent(k));
+    if area_test.tested(k)
+        area_lines{k} = sprintf('%-16s %4d/%-4d  expected %7.2f  raw p %8.3g  Holm-Sidak p %8.3g', ...
+            area_label{k}, area_observed(k), area_total(k), area_test.expected(k), ...
+            area_test.raw_p(k), area_test.holm_p(k));
+    else
+        area_lines{k} = sprintf('%-16s %4d/%-4d  not tested', ...
+            area_label{k}, area_observed(k), area_total(k));
+    end
 end
 missing_area = area_label(area_observed == 0);
 if isempty(missing_area)
@@ -1036,9 +1053,25 @@ if all(strcmp(area_label, 'area unknown'))
 else
     area_note = 'The denominator is every analysed neuron in that area. The numerator is how many of them are in the oscillatory group.';
 end
+if isfinite(area_test.chi2_p)
+    chi_line = sprintf('Pearson chi-square across tested areas: chi2 = %.4g, df = %.0f, p = %.4g. Smallest expected cell = %.2f.', ...
+        area_test.chi2, area_test.df, area_test.chi2_p, area_test.min_expected);
+else
+    chi_line = 'The chi-square test was not run. Fewer than two named areas had analysed neurons.';
+end
+if isfinite(area_test.min_expected) && area_test.min_expected < 5
+    chi_caution = 'An expected cell is below 5, so the chi-square p is a rough check. Use the Fisher p-values for each area.';
+else
+    chi_caution = 'The chi-square p asks whether the areas share one oscillatory rate.';
+end
 write_summary_section(output_folder, '4. Oscillatory share by brain area', join_summary_lines( ...
     area_note, ...
-    'These percentages are descriptive. They are not part of a Holm-Sidak family.', ...
+    'Each tested area is compared with the other analysed neurons by a one-sided Fisher exact test.', ...
+    'The alternative is a higher oscillatory count than expected from those other neurons.', ...
+    'The expected count is the area size times the oscillatory rate of all tested neurons.', ...
+    'Holm-Sidak adjusts the Fisher p-values across the tested areas. Area unknown is not tested.', ...
+    chi_line, ...
+    chi_caution, ...
     area_lines, ...
     missing_line))
 if ~exist('acg_method', 'var') || isempty(acg_method)
@@ -1260,6 +1293,147 @@ end
 mean_value = mean(y);
 plot([x_center - 0.36, x_center + 0.36], [mean_value, mean_value], ...
     'k', 'LineWidth', 2.8, 'HandleVisibility', 'off')
+end
+
+
+function draw_silhouette(score, cluster_id)
+%DRAW_SILHOUETTE  Horizontal silhouette bars in the current axes.
+%
+% silhouette returns values and does not draw when those values are
+% saved. This draws one bar per neuron, longest first within each cluster.
+
+score = score(:);
+cluster_id = cluster_id(:);
+ok = isfinite(score) & isfinite(cluster_id);
+score = score(ok);
+cluster_id = cluster_id(ok);
+hold on
+if isempty(score)
+    text(0.5, 0.5, 'No silhouette values', 'HorizontalAlignment', 'center')
+    axis([0 1 0 1])
+    return
+end
+groups = unique(cluster_id);
+colors = [0.00 0.45 0.74; 0.85 0.33 0.10; 0.47 0.67 0.19; 0.49 0.18 0.56];
+y_cursor = 0;
+tick_at = zeros(1, numel(groups));
+tick_label = cell(1, numel(groups));
+for g = 1:numel(groups)
+    this_score = sort(score(cluster_id == groups(g)), 'descend');
+    n_this = numel(this_score);
+    y_pos = y_cursor + (1:n_this).';
+    color = colors(mod(g - 1, size(colors, 1)) + 1, :);
+    barh(y_pos, this_score, 1, 'FaceColor', color, 'EdgeColor', 'none')
+    hold on
+    tick_at(g) = y_cursor + (n_this + 1) / 2;
+    tick_label{g} = sprintf('%g', groups(g));
+    y_cursor = y_cursor + n_this;
+end
+plot([0 0], [0, y_cursor + 1], '-', 'Color', [0.2 0.2 0.2], 'LineWidth', 0.8)
+ylim([0, y_cursor + 1])
+low = min(0, min(score));
+xlim([low - 0.05 * max(1 + abs(low), eps), 1])
+set(gca, 'YTick', tick_at, 'YTickLabel', tick_label, 'YDir', 'reverse')
+xlabel('Silhouette value')
+ylabel('Cluster')
+box off
+end
+
+
+function result = area_enrichment(area_label, area_observed, area_total)
+%AREA_ENRICHMENT  One-sided Fisher tests for extra oscillatory neurons.
+
+n = numel(area_label);
+result.expected = nan(1, n);
+result.raw_p = nan(1, n);
+result.holm_p = nan(1, n);
+result.tested = false(1, n);
+result.chi2 = nan;
+result.df = nan;
+result.chi2_p = nan;
+result.min_expected = nan;
+named = true(1, n);
+for k = 1:n
+    if strcmp(area_label{k}, 'area unknown') || area_total(k) < 1
+        named(k) = false;
+    end
+end
+osc_all = sum(area_observed(named));
+n_all = sum(area_total(named));
+non_all = n_all - osc_all;
+for k = 1:n
+    if ~named(k) || n_all < 1
+        continue
+    end
+    result.tested(k) = true;
+    a = area_observed(k);
+    b = area_total(k) - a;
+    c = osc_all - a;
+    d = non_all - b;
+    result.expected(k) = area_total(k) * osc_all / n_all;
+    result.raw_p(k) = fisher_exact_greater(a, b, c, d);
+end
+result.holm_p = holm_sidak_adjust(result.raw_p);
+if sum(named) >= 2 && osc_all > 0 && non_all > 0
+    observed = [area_observed(named); area_total(named) - area_observed(named)];
+    expected = [area_total(named) * osc_all / n_all; ...
+        area_total(named) * non_all / n_all];
+    result.min_expected = min(expected(:));
+    result.chi2 = sum((observed(:) - expected(:)) .^ 2 ./ expected(:));
+    result.df = sum(named) - 1;
+    result.chi2_p = chi2_survival(result.chi2, result.df);
+end
+end
+
+
+function p = fisher_exact_greater(a, b, c, d)
+%FISHER_EXACT_GREATER  One-sided probability of at least a oscillatory neurons.
+
+a = round(a);
+b = round(b);
+c = round(c);
+d = round(d);
+population = a + b + c + d;
+oscillatory = a + c;
+drawn = a + b;
+if population < 1 || drawn < 0 || oscillatory < 0 || drawn > population
+    p = nan;
+    return
+end
+lo = max(0, drawn - (population - oscillatory));
+hi = min(drawn, oscillatory);
+logs = -inf(hi - lo + 1, 1);
+for k = lo:hi
+    logs(k - lo + 1) = log_choose(oscillatory, k) ...
+        + log_choose(population - oscillatory, drawn - k) ...
+        - log_choose(population, drawn);
+end
+largest = max(logs);
+if ~isfinite(largest)
+    p = nan;
+    return
+end
+weights = exp(logs - largest);
+weights = weights / sum(weights);
+p = sum(weights((lo:hi).' >= a));
+end
+
+
+function value = log_choose(n, k)
+if k < 0 || n < 0 || k > n
+    value = -inf;
+    return
+end
+value = gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1);
+end
+
+
+function p = chi2_survival(x, df)
+if ~isfinite(x) || ~isfinite(df) || df < 1 || x < 0
+    p = nan;
+    return
+end
+p = gammainc(x / 2, df / 2, 'upper');
 end
 
 
