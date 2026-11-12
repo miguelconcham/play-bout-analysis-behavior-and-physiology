@@ -178,6 +178,20 @@ assert(aligned.counts.delta.session.n == 2 && aligned.counts.delta.session.n_osc
 assert(aligned.counts.trough.session.n_oscillates == 1 && aligned.counts.peak.session.n_oscillates == 0, ...
     'Group counts did not stay with their own neurons.');
 
+outside = crosscorr_acg_counts([0.2; 9.8], 0, 10, -1:0.1:1, true);
+assert(all(isnan(outside)), ...
+    'Spikes outside [1, 9] still formed a reference autocorrelogram.');
+interior = crosscorr_acg_counts([0.5; 1.2], 0, 10, -1:0.1:1, true);
+assert(isequal(interior, histcounts(-0.7, -1:0.1:1)), ...
+    'A spike before 1 s was used as a reference, or the partner in the window was missed.');
+both_sides = crosscorr_acg_counts([2; 2.4], 0, 10, -1:0.1:1, true);
+assert(isequal(both_sides, histcounts([-0.4 0.4], -1:0.1:1)), ...
+    'An interior pair did not appear on both sides of the crosscorrelogram.');
+one_window = crosscorr_acg_counts([2; 2.4], 0, 10, -1:0.1:1, false);
+pooled_windows = pool_crosscorr_acgs([2; 2.4; 12; 12.4], [0; 10], [10; 20], -1:0.1:1);
+assert(isequal(pooled_windows, 2 * one_window), ...
+    'Two interior windows did not add their crosscorrelogram counts.');
+
 missing = load_pag_recording(tempname);
 assert(~missing.ok, 'A missing session folder was treated as a recording.');
 
@@ -189,6 +203,10 @@ changed = options;
 changed.note = 'not part of the estimate';
 assert(session_acg_parameters_match(options, changed), ...
     'An extra note changed the estimate identity.');
+changed = options;
+changed.acg_method = 'crosscorr';
+assert(~session_acg_parameters_match(options, changed), ...
+    'The crosscorrelogram method matched the edge-corrected run.');
 
 disp('test_session_acg_shuffle passed')
 end
@@ -214,6 +232,7 @@ options = struct( ...
     'fooof_fit_range', [0.5 40], ...
     'filter_order', 64, ...
     'lfp_sample_rate', 250, ...
+    'acg_method', 'edge', ...
     'resume', false);
 end
 

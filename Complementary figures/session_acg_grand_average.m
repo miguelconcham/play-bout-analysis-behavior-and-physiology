@@ -211,9 +211,9 @@ stamp = char(datetime('now', 'TimeZone', 'Europe/Berlin', 'Format', 'yyyy-MM-dd 
 settings = grand.settings;
 lines = {
     sprintf('Session ACG grand average, %s Europe/Berlin', stamp)
-    sprintf('Shuffles %g, windows %g s, minimum spikes %g, tail %g%%, oscillation alpha %g.', ...
+    sprintf('Shuffles %g, windows %g s, minimum spikes %g, tail %g%%, oscillation alpha %g, method %s.', ...
         settings.n_shuffles, settings.window_s, settings.min_spikes, ...
-        settings.tail_percent, settings.oscillation_alpha)
+        settings.tail_percent, settings.oscillation_alpha, settings.acg_method)
     sprintf('Areas: %s.', strjoin(settings.areas_to_keep, ', '))
     'A neuron oscillates in delta when its autocorrelogram has a delta peak and that peak prominence is larger than the null.'
     'The grand-mean test scores the mean autocorrelogram against the mean of each saved shuffle row.'

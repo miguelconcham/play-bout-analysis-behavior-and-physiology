@@ -5,6 +5,14 @@ function settings = session_acg_settings(options)
 % bin_edges and smooth_n are stored so a later grand average uses the axis
 % the nulls were estimated on.
 
+if ~isfield(options, 'acg_method') || isempty(options.acg_method)
+    options.acg_method = 'edge';
+end
+options.acg_method = char(string(options.acg_method));
+if ~any(strcmp(options.acg_method, {'edge', 'crosscorr'}))
+    error('session_acg:method', ...
+        'acg_method must be ''edge'' or ''crosscorr''.');
+end
 if ~isfield(options, 'version') || isempty(options.version)
     options.version = 1;
 end
@@ -50,6 +58,7 @@ settings.fooof_max_peaks = double(options.fooof_max_peaks);
 settings.fooof_fit_range = double(options.fooof_fit_range(:))';
 settings.filter_order = double(options.filter_order);
 settings.lfp_sample_rate = double(options.lfp_sample_rate);
+settings.acg_method = options.acg_method;
 settings.bin_edges = bin_edges;
 settings.smooth_n = max(1, round(settings.smooth_half / settings.bin_w));
 end

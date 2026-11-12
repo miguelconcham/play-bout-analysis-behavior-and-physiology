@@ -5,6 +5,10 @@
 % trough-locked, peak-locked, and non-entrained neuron it saves the
 % autocorrelogram of all spikes, 500 uniform-time nulls, and the same pair
 % for the low and high tails of FOOOF delta and of Hilbert delta amplitude.
+% acg_method selects the autocorrelogram. 'edge' divides pair counts by
+% (T-|lag|). 'crosscorr' uses crosscorrelogram, with reference spikes inset
+% by acg_lag. On a 10 s window that is spikes in [1, 9] against spikes in
+% the whole window.
 % A stopped run continues from the neurons already saved when resume is
 % true. After the last session, the grand mean of each lock group is built
 % from those saved nulls. Delta-locked is trough-locked and peak-locked
@@ -49,6 +53,12 @@ fooof_max_peaks = 6;
 fooof_fit_range = [0.5 40];
 filter_order = 2000;
 lfp_sample_rate = 2500;
+% acg_method chooses the autocorrelogram.
+%   'edge'       every pair in the interval, divided by (T-|lag|)
+%   'crosscorr'  crosscorrelogram. Reference spikes are inset by acg_lag.
+%                For a 10 s window and +/- 1 s lags, references are in
+%                [1, 9] and partners are the spikes in the whole window.
+acg_method = 'edge';
 resume = true;
 grand_only = false;
 only_sessions = {};
@@ -73,6 +83,7 @@ options = struct( ...
     'fooof_fit_range', fooof_fit_range, ...
     'filter_order', filter_order, ...
     'lfp_sample_rate', lfp_sample_rate, ...
+    'acg_method', acg_method, ...
     'resume', resume);
 
 if exist(saving_folder, 'dir') ~= 7
@@ -100,8 +111,8 @@ else
 end
 
 session_acg_log(log_file, sprintf( ...
-    'Estimate folder %s. Shuffles %d, window %g s, minimum spikes %d, tail %g%%, resume %d, grand only %d.', ...
-    saving_folder, n_shuffles, window_s, min_spikes, tail_percent, resume, grand_only));
+    'Estimate folder %s. Method %s. Shuffles %d, window %g s, minimum spikes %d, tail %g%%, resume %d, grand only %d.', ...
+    saving_folder, acg_method, n_shuffles, window_s, min_spikes, tail_percent, resume, grand_only));
 
 %% Sessions
 if ~grand_only
