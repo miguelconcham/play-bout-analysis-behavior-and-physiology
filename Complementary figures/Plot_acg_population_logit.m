@@ -185,7 +185,9 @@ feature_mean = mean(X, 1);
 feature_sigma = std(X, 0, 1);
 Xz = (X - feature_mean) ./ feature_sigma;
 
-[pca_coeff, pca_score, pca_latent, ~, pca_explained] = pca(Xz);
+% pca_mu is the centering of this PCA. Section 4 uses it to place the
+% low-power features in the same plane. t-SNE has no equivalent transform.
+[pca_coeff, pca_score, pca_latent, ~, pca_explained, pca_mu] = pca(Xz);
 figure('Name', 'PCA variance explained', 'Color', 'w')
 subplot(1, 2, 1)
 bar(pca_explained)
@@ -438,7 +440,8 @@ disp('Run section 4 to draw.')
 
 %% 4. Figures
 % Re-run this section after editing the figure. Section 3 does not need
-% to run again while shown_logit is still in the workspace.
+% to run again while shown_logit is still in the workspace. The low-power
+% PCA figure and the paired feature figure also need the section 2 PCA.
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
 if ~exist('shown_logit', 'var')
@@ -600,6 +603,139 @@ xlabel('Lag (s)')
 ylabel('Mean logit difference')
 title('Red marks a paired difference at p < 0.05')
 box off
+
+% t-SNE cannot place a new point in an existing map. The low-power
+% features are projected into the PCA built from the high-power features.
+if ~exist('pca_coeff', 'var') || ~exist('pca_mu', 'var') ...
+        || ~exist('pca_score', 'var') || ~exist('pca_explained', 'var') ...
+        || ~exist('feature_mean', 'var') || ~exist('feature_sigma', 'var') ...
+        || ~exist('feature_names', 'var') || ~exist('complete_rows', 'var') ...
+        || ~exist('feature_table', 'var') || ~exist('imagesc_sum_power_low', 'var') ...
+        || ~exist('osc_rows', 'var')
+    error('Plot_acg_population_logit:pca', ...
+        'The high-power PCA is not in the workspace. Run sections 2 and 3 first.');
+end
+positive_lag = lag > 0;
+feature_table_low = acg2features( ...
+    imagesc_sum_power_low(:, positive_lag), lag(positive_lag));
+X_low = feature_table_low{complete_rows, feature_names};
+Xz_low = (X_low - feature_mean) ./ feature_sigma;
+score_low = (Xz_low - pca_mu) * pca_coeff;
+[in_complete, osc_pos] = ismember(osc_rows, complete_rows);
+osc_pos = osc_pos(in_complete);
+high_xy = pca_score(osc_pos, 1:2);
+low_xy = score_low(osc_pos, 1:2);
+finite_projection = all(isfinite(high_xy), 2) & all(isfinite(low_xy), 2);
+
+figure('Name', 'Low-power ACGs in the high-power PCA', ...
+    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.16 0.16 0.46 0.62])
+hold on
+high_cloud = scatter(pca_score(:, 1), pca_score(:, 2), 18, [0.75 0.75 0.75], ...
+    'filled', 'MarkerFaceAlpha', 0.35);
+paired_line = gobjects(0);
+if any(finite_projection)
+    paired_lines = plot( ...
+        [high_xy(finite_projection, 1).'; low_xy(finite_projection, 1).'], ...
+        [high_xy(finite_projection, 2).'; low_xy(finite_projection, 2).'], ...
+        '-', 'Color', [0.55 0.55 0.55]);
+    paired_line = paired_lines(1);
+    if numel(paired_lines) > 1
+        set(paired_lines(2:end), 'HandleVisibility', 'off')
+    end
+end
+high_points = scatter(high_xy(finite_projection, 1), high_xy(finite_projection, 2), ...
+    36, [0.85 0.25 0.20], 'filled');
+low_points = scatter(low_xy(finite_projection, 1), low_xy(finite_projection, 2), ...
+    36, [0.20 0.45 0.80], 'filled');
+xlabel(sprintf('PC1 (%.1f%%)', pca_explained(1)))
+ylabel(sprintf('PC2 (%.1f%%)', pca_explained(2)))
+title({'Oscillatory neurons in the high-power PCA', ...
+    'Red is high power. Blue is the same neuron at low power.'})
+if isempty(paired_line)
+    legend([high_cloud, high_points, low_points], ...
+        {'All neurons, high power', 'Oscillatory, high power', ...
+        'Oscillatory, low power'}, 'Location', 'best', 'Box', 'off')
+else
+    legend([high_cloud, paired_line, high_points, low_points], ...
+        {'All neurons, high power', 'Same neuron', 'Oscillatory, high power', ...
+        'Oscillatory, low power'}, 'Location', 'best', 'Box', 'off')
+end
+grid on
+axis square
+box off
+
+% Same columns as the cluster boxcharts. High values come from the
+% high-power feature table. Low values are the same neurons at low power.
+comparison_names = { ...
+    'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
+    'OscillationScore', 'Baseline', ...
+    'DominantFrequency', 'PeakFrequency', 'TroughFrequency', ...
+    'Persistence', 'Peak1', 'Peak2', 'Trough1', 'Trough2'};
+comparison_titles = { ...
+    'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
+    'OscillationScore', 'Baseline', ...
+    'DominantFrequency', 'PeakFrequency', 'TroughFrequency', ...
+    'Persistence (2nd / 1st modulation)', 'Peak1', 'Peak2', 'Trough1', 'Trough2'};
+low_names = feature_table_low.Properties.VariableNames;
+high_names = feature_table.Properties.VariableNames;
+high_compare = zeros(numel(osc_rows), 0);
+low_compare = zeros(numel(osc_rows), 0);
+compare_titles = {};
+for j = 1:numel(comparison_names)
+    this_name = comparison_names{j};
+    if ~ismember(this_name, high_names) || ~ismember(this_name, low_names)
+        continue
+    end
+    high_column = feature_table{osc_rows, this_name};
+    low_column = feature_table_low{osc_rows, this_name};
+    if ~isnumeric(high_column) || ~isnumeric(low_column)
+        continue
+    end
+    high_compare(:, end + 1) = high_column; %#ok<AGROW>
+    low_compare(:, end + 1) = low_column; %#ok<AGROW>
+    compare_titles{end + 1} = comparison_titles{j}; %#ok<AGROW>
+end
+if all(ismember({'Peak1', 'Peak2'}, high_names)) ...
+        && all(ismember({'Peak1', 'Peak2'}, low_names))
+    high_compare(:, end + 1) = feature_table{osc_rows, 'Peak1'} ...
+        - feature_table{osc_rows, 'Peak2'}; %#ok<AGROW>
+    low_compare(:, end + 1) = feature_table_low{osc_rows, 'Peak1'} ...
+        - feature_table_low{osc_rows, 'Peak2'}; %#ok<AGROW>
+    compare_titles{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
+end
+if ~isempty(compare_titles)
+    figure('Name', 'High versus low power features, oscillatory neurons', ...
+        'Color', 'w')
+    n_compare_cols = 5;
+    tiledlayout(ceil(numel(compare_titles) / n_compare_cols), n_compare_cols, ...
+        'TileSpacing', 'compact')
+    for j = 1:numel(compare_titles)
+        nexttile
+        high_vals = high_compare(:, j);
+        low_vals = low_compare(:, j);
+        pair = isfinite(high_vals) & isfinite(low_vals);
+        hold on
+        if any(pair)
+            boxchart(categorical( ...
+                [ones(sum(pair), 1); 2 * ones(sum(pair), 1)], ...
+                [1 2], {'High power', 'Low power'}), ...
+                [high_vals(pair); low_vals(pair)])
+            plot([1 2], [high_vals(pair), low_vals(pair)].', ...
+                '-', 'Color', [0.65 0.65 0.65])
+        end
+        if sum(pair) < 2
+            title({compare_titles{j}, 'Too few neurons'}, 'Interpreter', 'none')
+        else
+            [~, feature_p] = ttest(high_vals(pair), low_vals(pair));
+            title({compare_titles{j}, sprintf('uncorrected p = %.3g', feature_p)}, ...
+                'Interpreter', 'none')
+        end
+        xlim([0.5 2.5])
+        grid on
+    end
+    sgtitle({'Same oscillatory neurons at high and low power.', ...
+        'Each p is a paired t-test and is not corrected across features.'})
+end
 
 type_color = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45; 0.75 0.75 0.75];
 figure('Name', 'Oscillatory cells within each lock type', ...
