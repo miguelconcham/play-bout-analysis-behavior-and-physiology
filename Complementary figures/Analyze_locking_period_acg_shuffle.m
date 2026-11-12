@@ -29,26 +29,36 @@
 % Every analysis setting is read from the assignments at the top of
 % Analyze_locking_period_acg.m in this same folder: alpha, the
 % non-entrained threshold, the 25/75 tails, acg_lag, the delta window,
-% smooth_half, skip_abs_lag, the refractory blank, and areas_to_keep.
-% The lag axis is built from that acg_lag and the parsing bin width, the
-% same way Analyze_locking_period_acg builds it. No summary file is read.
+% smooth_half, skip_abs_lag, the refractory blank, areas_to_keep,
+% tail_percent, and acg_method. low_percent and high_percent follow
+% tail_percent when they are not written as numbers. The lag axis is
+% built from that acg_lag and the parsing bin
+% width, the same way Analyze_locking_period_acg builds it. No summary
+% file is read. 'eligible' counts partners of spikes that can see each
+% bin. 'overlap' keeps pair counts / (T-|lag|). The checkpoint name
+% follows that choice, so an eligible null does not replace the overlap
+% checkpoint. A checkpoint saved before the selector has no method and
+% is treated as overlap.
 %
 % Those same shuffles are averaged across neurons in two scales. The sum-to-1
 % mean gives every neuron the same weight. The rate-ratio mean divides
-% each curve by the square of that tail's firing rate and the bin width,
-% so a Poisson autocorrelogram sits at 1. Both means are smoothed with the
+% an overlap curve by the square of that tail's firing rate and the bin
+% width, and an eligible-spike curve by the firing rate times the bin
+% width, so a Poisson autocorrelogram sits at 1. Both means are smoothed with the
 % same Gaussian, and the first peak and second cycle of each mean are
 % compared with the same peaks of the shuffled means. With 500 shuffles,
 % 10 ms bins and both scales, the running sums are about 50 MB.
 %
-% At the end, each smoothed curve is also drawn with a shuffle-percentile
-% axis. One hundred means that lag is above every shuffle, so a high
-% autocorrelogram stays high. This is saved for every neuron and for the
-% grand mean of each cell type, on both scales, for the two tails and for
-% the all-runs curve.
+% Each smoothed curve is saved on a shuffle-percentile axis. One hundred
+% means that lag is above every shuffle, so a high autocorrelogram stays
+% high. The percentile is stored for every neuron. The grand mean of each
+% cell type is scored from the accumulated shuffles when the figures are
+% drawn, on both scales, for the two tails and for the all-runs curve.
 %
-% Run this file, not the unit test, to produce the figures:
-%   Analyze_locking_period_acg_shuffle
+% This file shuffles and saves the checkpoint. The figures are drawn by
+% Plot_locking_period_acg_shuffle, which this file calls at the end. Run
+% that file alone to redraw a saved checkpoint. Overlap is the standard
+% autocorrelogram and keeps locking_period_acg_shuffle_nN.mat.
 
 %% Paths and parameters
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
@@ -80,6 +90,8 @@ smooth_half = analysis.smooth_half;
 skip_abs_lag = analysis.skip_abs_lag;
 acg_refractory_s = analysis.acg_refractory_s;
 areas_to_keep = analysis.areas_to_keep;
+acg_method = analysis.acg_method;
+rate_exponent = acg_rate_exponent(acg_method);
 [edges, centers, bin_w] = axis_from_parsing(parsing_folder, acg_lag);
 n_bins = numel(centers);
 smooth_n = max(1, round(smooth_half / bin_w));
@@ -91,11 +103,8 @@ end
 disp_script_parameters(analysis, edges, bin_w, n_bins, smooth_n)
 
 group_order = {'trough', 'peak', 'nonentrained'};
-group_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
 grand_order = {'trough', 'peak', 'delta', 'nonentrained'};
-grand_title = {'Trough-locked', 'Peak-locked', 'Delta-locked', 'Non-entrained'};
-checkpoint = fullfile(parsing_folder, ...
-    sprintf('locking_period_acg_shuffle_n%d.mat', n_shuffles));
+checkpoint = fullfile(parsing_folder, locking_shuffle_filename(n_shuffles, acg_method));
 
 parameters = struct( ...
     'n_shuffles', n_shuffles, ...
@@ -118,6 +127,7 @@ parameters = struct( ...
     'rate_ratio', true, ...
     'percentile_curves', true, ...
     'all_runs', true, ...
+    'acg_method', acg_method, ...
     'null', 'uniform spike times inside each firing run');
 
 grand_bytes = (2 * numel(grand_order) * 2 * 2 + 2 * numel(grand_order)) ...
@@ -281,13 +291,14 @@ for f = 1:numel(parsing_files)
                     || ~ismember('RunEndTime', rt.Properties.VariableNames)
                 continue
             end
-            if saved_covers
+            if strcmp(acg_method, 'overlap') && saved_covers
                 acg = rt.autoccorrelograms;
+                n_eligible = [];
                 this_corrected = already_corrected;
             else
-                acg = run_window_acgs(session_times(session_clusters == this_id), ...
-                    rt.RunStartTime, rt.RunEndTime, edges);
-                this_corrected = true;
+                [acg, n_eligible, this_corrected] = firing_run_acgs( ...
+                    session_times(session_clusters == this_id), ...
+                    rt.RunStartTime, rt.RunEndTime, edges, acg_method);
             end
             if size(acg, 2) ~= n_bins || size(acg, 1) ~= height(rt)
                 warning('Analyze_locking_period_acg_shuffle:width', ...
@@ -298,10 +309,10 @@ for f = 1:numel(parsing_files)
             run_length = acg_run_lengths(rt);
             ppc = rt.phase_entrainment(:, ppc_col);
             power = run_delta_power(rt);
-            pooled = pool_locking_period_acgs(acg, edges, run_length, ppc, ...
-                this_corrected, low_percent, high_percent);
-            pooled_power = pool_locking_period_acgs(acg, edges, run_length, power, ...
-                this_corrected, low_percent, high_percent);
+            pooled = pool_period_acgs(acg, n_eligible, edges, run_length, ppc, ...
+                this_corrected, low_percent, high_percent, acg_method);
+            pooled_power = pool_period_acgs(acg, n_eligible, edges, run_length, power, ...
+                this_corrected, low_percent, high_percent, acg_method);
             lock_ok = split_is_usable(pooled);
             power_ok = split_is_usable(pooled_power);
             if ~lock_ok && ~power_ok
@@ -341,32 +352,37 @@ for f = 1:numel(parsing_files)
                 shuffled = shuffle_spikes_within_runs(spikes, ...
                     rt.RunStartTime(use), rt.RunEndTime(use));
                 acg_s = nan(height(rt), n_bins);
-                acg_s(use, :) = run_window_acgs(shuffled, ...
-                    rt.RunStartTime(use), rt.RunEndTime(use), edges);
+                n_s = nan(height(rt), n_bins);
+                [acg_use, n_use, sh_corrected] = firing_run_acgs(shuffled, ...
+                    rt.RunStartTime(use), rt.RunEndTime(use), edges, acg_method);
+                acg_s(use, :) = acg_use;
+                if ~isempty(n_use)
+                    n_s(use, :) = n_use;
+                end
                 if lock_ok
-                    sh_lock = pool_locking_period_acgs(acg_s, edges, run_length, ppc, ...
-                        true, low_percent, high_percent);
+                    sh_lock = pool_period_acgs(acg_s, n_s, edges, run_length, ppc, ...
+                        sh_corrected, low_percent, high_percent, acg_method);
                     [peaks, row, ratio] = score_tail_curves(sh_lock.low, centers, smooth_n, ...
-                        acg_refractory_s, rate_lock.low, bin_w);
+                        acg_refractory_s, rate_lock.low, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'locking', 'low', s, peaks);
                     null_curves.locking.low(s, :) = row;
                     null_ratio.locking.low(s, :) = ratio;
                     [peaks, row, ratio] = score_tail_curves(sh_lock.high, centers, smooth_n, ...
-                        acg_refractory_s, rate_lock.high, bin_w);
+                        acg_refractory_s, rate_lock.high, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'locking', 'high', s, peaks);
                     null_curves.locking.high(s, :) = row;
                     null_ratio.locking.high(s, :) = ratio;
                 end
                 if power_ok
-                    sh_power = pool_locking_period_acgs(acg_s, edges, run_length, power, ...
-                        true, low_percent, high_percent);
+                    sh_power = pool_period_acgs(acg_s, n_s, edges, run_length, power, ...
+                        sh_corrected, low_percent, high_percent, acg_method);
                     [peaks, row, ratio] = score_tail_curves(sh_power.low, centers, smooth_n, ...
-                        acg_refractory_s, rate_power.low, bin_w);
+                        acg_refractory_s, rate_power.low, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'power', 'low', s, peaks);
                     null_curves.power.low(s, :) = row;
                     null_ratio.power.low(s, :) = ratio;
                     [peaks, row, ratio] = score_tail_curves(sh_power.high, centers, smooth_n, ...
-                        acg_refractory_s, rate_power.high, bin_w);
+                        acg_refractory_s, rate_power.high, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'power', 'high', s, peaks);
                     null_curves.power.high(s, :) = row;
                     null_ratio.power.high(s, :) = ratio;
@@ -377,7 +393,7 @@ for f = 1:numel(parsing_files)
                     all_acg = sh_power.all;
                 end
                 [peaks, row, ratio] = score_tail_curves(all_acg, centers, smooth_n, ...
-                    acg_refractory_s, rate_all, bin_w);
+                    acg_refractory_s, rate_all, bin_w, rate_exponent);
                 nulls.all.first(s) = null_first_value(peaks);
                 nulls.all.second(s) = null_second_value(peaks);
                 null_curves.all(s, :) = row;
@@ -404,20 +420,20 @@ for f = 1:numel(parsing_files)
             obs_ratio = blank_obs_curves(n_bins);
             if lock_ok
                 [~, obs_curves.locking.low, obs_ratio.locking.low] = score_tail_curves( ...
-                    pooled.low, centers, smooth_n, acg_refractory_s, rate_lock.low, bin_w);
+                    pooled.low, centers, smooth_n, acg_refractory_s, rate_lock.low, bin_w, rate_exponent);
                 [~, obs_curves.locking.high, obs_ratio.locking.high] = score_tail_curves( ...
-                    pooled.high, centers, smooth_n, acg_refractory_s, rate_lock.high, bin_w);
+                    pooled.high, centers, smooth_n, acg_refractory_s, rate_lock.high, bin_w, rate_exponent);
             end
             if power_ok
                 [~, obs_curves.power.low, obs_ratio.power.low] = score_tail_curves( ...
-                    pooled_power.low, centers, smooth_n, acg_refractory_s, rate_power.low, bin_w);
+                    pooled_power.low, centers, smooth_n, acg_refractory_s, rate_power.low, bin_w, rate_exponent);
                 [~, obs_curves.power.high, obs_ratio.power.high] = score_tail_curves( ...
-                    pooled_power.high, centers, smooth_n, acg_refractory_s, rate_power.high, bin_w);
+                    pooled_power.high, centers, smooth_n, acg_refractory_s, rate_power.high, bin_w, rate_exponent);
             end
             rec.all = pack_tail(pooled.all, centers, smooth_n, acg_refractory_s, ...
                 nulls.all.first, nulls.all.second);
             [~, obs_curves.all, obs_ratio.all] = score_tail_curves( ...
-                pooled.all, centers, smooth_n, acg_refractory_s, rate_all, bin_w);
+                pooled.all, centers, smooth_n, acg_refractory_s, rate_all, bin_w, rate_exponent);
             grand = add_neuron_to_grand(grand, this_group, this_key, ...
                 obs_curves, null_curves, obs_ratio, null_ratio);
             rec = attach_percentile(rec, obs_curves, null_curves, ...
@@ -437,13 +453,7 @@ for f = 1:numel(parsing_files)
 end
 
 disp(['Neurons with a shuffle null: ', num2str(numel(records))])
-plot_shuffle_exception(records, group_order, group_title, 'locking', ...
-    'Mean PPC of the runs');
-plot_shuffle_exception(records, group_order, group_title, 'power', ...
-    'Mean delta power of the runs');
-plot_all_run_exception(records, group_order, group_title);
-report_grand_shuffle(grand, centers, smooth_n, grand_order, grand_title);
-plot_percentile_curves(records, grand, centers, smooth_n, grand_order, grand_title);
+Plot_locking_period_acg_shuffle(checkpoint);
 
 
 function rec = blank_record(n_shuffles)
@@ -561,10 +571,13 @@ peaks = acg_delta_peaks(row, centers, smooth_n);
 end
 
 
-function [peaks, row, ratio] = score_tail_curves(acg_row, centers, smooth_n, refractory, rate, bin_w)
+function [peaks, row, ratio] = score_tail_curves(acg_row, centers, smooth_n, refractory, rate, bin_w, rate_exponent)
+if nargin < 7 || isempty(rate_exponent)
+    rate_exponent = 2;
+end
 [row, mass] = normalized_pooled_row(acg_row, centers, refractory);
 peaks = acg_delta_peaks(row, centers, smooth_n);
-ratio = rate_ratio_curve(row, mass, rate, bin_w);
+ratio = rate_ratio_curve(row, mass, rate, bin_w, rate_exponent);
 end
 
 
@@ -580,14 +593,18 @@ row = normalize_acg_rows(blanked);
 end
 
 
-function ratio = rate_ratio_curve(row, mass, rate, bin_w)
-% Sum-to-1 row times its mass is pair counts / overlap. Dividing by
-% (tail firing rate ^ 2 * bin width) puts a Poisson autocorrelogram at 1.
+function ratio = rate_ratio_curve(row, mass, rate, bin_w, rate_exponent)
+% Sum-to-1 row times its mass restores the pooled autocorrelogram.
+% Overlap divides by rate ^ 2. Eligible-spike partner counts divide by
+% rate ^ 1. A Poisson autocorrelogram then sits at 1.
+if nargin < 5 || isempty(rate_exponent)
+    rate_exponent = 2;
+end
 ratio = nan(size(row));
 if ~isfinite(rate) || rate <= 0 || ~isfinite(mass) || mass <= 0 || ~isfinite(bin_w) || bin_w <= 0
     return
 end
-ratio = row .* (mass / ((rate ^ 2) * bin_w));
+ratio = row .* (mass / ((rate ^ rate_exponent) * bin_w));
 ratio(~isfinite(row)) = NaN;
 end
 
@@ -633,6 +650,13 @@ for i = 1:numel(flags)
         return
     end
 end
+stored_method = 'overlap';
+if isfield(stored.parameters, 'acg_method') && ~isempty(stored.parameters.acg_method)
+    stored_method = canonical_acg_method(stored.parameters.acg_method);
+end
+if ~strcmp(stored_method, canonical_acg_method(parameters.acg_method))
+    match = false;
+end
 end
 
 
@@ -653,177 +677,6 @@ function seed = neuron_shuffle_seed(session, cluster_id)
 letters = double(char(string(session)));
 seed = mod(sum(letters .* (1:numel(letters))) + round(double(cluster_id)) * 997, 2^31 - 2);
 seed = seed + 1;
-end
-
-
-function plot_shuffle_exception(records, group_order, group_title, split_name, score_label)
-if isempty(records)
-    return
-end
-if strcmp(split_name, 'locking')
-    split_label = 'locking';
-else
-    split_label = 'delta power';
-end
-measures = {'first_p', 'second_p'};
-measure_labels = {'First-peak exceptionality', 'Second-cycle exceptionality'};
-colors = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45];
-figure('Name', ['ACG peak shuffle, ', split_label], 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.08 0.08 0.84 0.8])
-for m = 1:numel(measures)
-    [p_low, p_high, ok, x_low, x_high, groups] = paired_shuffle_values( ...
-        records, split_name, measures{m});
-    y_low = -log10(p_low);
-    y_high = -log10(p_high);
-    subplot(2, 2, 2 * m - 1)
-    plot_paired_exception(groups(ok), y_low(ok), y_high(ok), ...
-        group_order, colors, measure_labels{m})
-    subplot(2, 2, 2 * m)
-    plot_exception_against_score(groups(ok), x_low(ok), x_high(ok), ...
-        y_low(ok), y_high(ok), group_order, colors, score_label, measure_labels{m})
-    report_exception_fraction(groups, p_low, p_high, ok, group_order, group_title, ...
-        split_label, measure_labels{m});
-end
-hold on
-handles = gobjects(1, numel(group_order));
-for g = 1:numel(group_order)
-    handles(g) = plot(nan, nan, '-', 'Color', colors(g, :), 'LineWidth', 2.5);
-end
-legend(handles, group_title, 'Location', 'eastoutside')
-end
-
-
-function plot_all_run_exception(records, group_order, group_title)
-if isempty(records)
-    return
-end
-measures = {'first_p', 'second_p'};
-measure_labels = {'First-peak exceptionality', 'Second-cycle exceptionality'};
-colors = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45];
-n = numel(records);
-groups = cell(n, 1);
-for i = 1:n
-    groups{i} = records{i}.lock_group;
-end
-figure('Name', 'ACG peak shuffle, all firing runs', 'Color', 'w', ...
-    'Units', 'normalized', 'OuterPosition', [0.12 0.15 0.7 0.55])
-for m = 1:numel(measures)
-    p = nan(n, 1);
-    for i = 1:n
-        if ~isfield(records{i}, 'all')
-            continue
-        end
-        p(i) = records{i}.all.(measures{m});
-        if strcmp(measures{m}, 'second_p') && ~records{i}.all.second_measurable
-            p(i) = NaN;
-        end
-    end
-    ok = isfinite(p) & p > 0;
-    subplot(1, 2, m)
-    hold on
-    plot([0.5, numel(group_order) + 0.5], [-log10(0.05), -log10(0.05)], '--', ...
-        'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
-    for g = 1:numel(group_order)
-        idx = ok & strcmp(groups, group_order{g});
-        if ~any(idx)
-            continue
-        end
-        plot(g * ones(sum(idx), 1), -log10(p(idx)), 'o', 'Color', colors(g, :), ...
-            'MarkerFaceColor', colors(g, :), 'MarkerSize', 5, 'HandleVisibility', 'off')
-        disp(sprintf('  %s, all firing runs, %s: p<0.05 = %d/%d', ...
-            group_title{g}, measure_labels{m}, sum(p(idx) < 0.05), sum(idx)))
-    end
-    xlim([0.5, numel(group_order) + 0.5])
-    set(gca, 'XTick', 1:numel(group_order), 'XTickLabel', group_title)
-    ylabel([measure_labels{m}, ', -log10 p'])
-    box off
-end
-sgtitle('All firing runs against shuffles of every firing run')
-end
-
-
-function [p_low, p_high, ok, x_low, x_high, groups] = paired_shuffle_values(records, split_name, measure_name)
-n = numel(records);
-p_low = nan(n, 1);
-p_high = nan(n, 1);
-x_low = nan(n, 1);
-x_high = nan(n, 1);
-groups = cell(n, 1);
-for i = 1:n
-    groups{i} = records{i}.lock_group;
-    block = records{i}.(split_name);
-    x_low(i) = block.score_low;
-    x_high(i) = block.score_high;
-    p_low(i) = block.low.(measure_name);
-    p_high(i) = block.high.(measure_name);
-    if strcmp(measure_name, 'second_p')
-        if ~block.low.second_measurable || ~block.high.second_measurable
-            p_low(i) = NaN;
-            p_high(i) = NaN;
-        end
-    end
-end
-ok = isfinite(p_low) & isfinite(p_high) & p_low > 0 & p_high > 0;
-end
-
-
-function plot_paired_exception(lock_group, y_low, y_high, group_order, colors, y_label)
-hold on
-threshold = -log10(0.05);
-plot([0.6 2.4], [threshold threshold], '--', 'Color', [0.45 0.45 0.45], ...
-    'HandleVisibility', 'off')
-for g = 1:numel(group_order)
-    idx = strcmp(lock_group, group_order{g});
-    if ~any(idx)
-        continue
-    end
-    plot([ones(sum(idx), 1), 2 * ones(sum(idx), 1)]', [y_low(idx), y_high(idx)]', '-', ...
-        'Color', [colors(g, :), 0.25], 'HandleVisibility', 'off')
-    plot([1 2], [mean(y_low(idx), 'omitnan'), mean(y_high(idx), 'omitnan')], '-', ...
-        'Color', colors(g, :), 'LineWidth', 2.5, 'HandleVisibility', 'off')
-end
-xlim([0.6 2.4])
-set(gca, 'XTick', [1 2], 'XTickLabel', {'Low 25%', 'High 25%'})
-ylabel([y_label, ', -log10 p'])
-title(sprintf('Paired, n = %d. Dashed line is p = 0.05', numel(y_low)))
-box off
-end
-
-
-function plot_exception_against_score(lock_group, x_low, x_high, y_low, y_high, group_order, colors, x_label, y_label)
-hold on
-span = [x_low(:); x_high(:)];
-span = span(isfinite(span));
-if numel(span) >= 2
-    plot([min(span) max(span)], [-log10(0.05) -log10(0.05)], '--', ...
-        'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
-end
-for g = 1:numel(group_order)
-    idx = strcmp(lock_group, group_order{g});
-    if ~any(idx)
-        continue
-    end
-    plot([x_low(idx), x_high(idx)]', [y_low(idx), y_high(idx)]', '-', ...
-        'Color', [colors(g, :), 0.3], 'HandleVisibility', 'off')
-end
-xlabel(x_label)
-ylabel([y_label, ', -log10 p'])
-title('Each line is one neuron')
-box off
-end
-
-
-function report_exception_fraction(groups, p_low, p_high, ok, group_order, group_title, split_label, measure_label)
-for g = 1:numel(group_order)
-    idx = ok & strcmp(groups, group_order{g});
-    n = sum(idx);
-    if n < 1
-        continue
-    end
-    disp(sprintf('  %s, %s, %s: low p<0.05 = %d/%d, high p<0.05 = %d/%d', ...
-        group_title{g}, split_label, measure_label, ...
-        sum(p_low(idx) < 0.05), n, sum(p_high(idx) < 0.05), n))
-end
 end
 
 
@@ -1008,10 +861,19 @@ if exist(script_path, 'file') ~= 2
     error('Analyze_locking_period_acg_shuffle:noscript', ...
         'Analyze_locking_period_acg.m was not found next to this script.');
 end
-names = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', ...
+names = {'alpha', 'non_entrained_p', 'tail_percent', ...
     'acg_lag', 'delta_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s'};
 analysis = read_script_assignments(script_path, names);
+analysis.low_percent = read_script_number(script_path, 'low_percent');
+analysis.high_percent = read_script_number(script_path, 'high_percent');
+if isempty(analysis.low_percent)
+    analysis.low_percent = analysis.tail_percent;
+end
+if isempty(analysis.high_percent)
+    analysis.high_percent = 100 - analysis.tail_percent;
+end
 analysis.areas_to_keep = read_script_areas(script_path);
+analysis.acg_method = canonical_acg_method(read_script_string(script_path, 'acg_method'));
 analysis.script_path = script_path;
 end
 
@@ -1066,6 +928,7 @@ end
 
 function disp_script_parameters(analysis, edges, bin_w, n_bins, smooth_n)
 disp(['Parameters from ', analysis.script_path])
+disp(['  acg_method = ', analysis.acg_method])
 disp(sprintf('  alpha = %g, non-entrained p = %g', analysis.alpha, analysis.non_entrained_p))
 disp(sprintf('  tails = %g / %g, acg_lag = %g s, delta window = %s s', ...
     analysis.low_percent, analysis.high_percent, analysis.acg_lag, mat2str(double(analysis.delta_lag))))
@@ -1092,6 +955,28 @@ for i = 1:numel(names)
             'Could not read %s from Analyze_locking_period_acg.m.', name);
     end
 end
+end
+
+
+function value = read_script_number(script_path, name)
+text = fileread(script_path);
+token = regexp(text, ['(?m)^', name, '\s*=\s*([^;%]+)'], 'tokens', 'once');
+value = [];
+if isempty(token)
+    return
+end
+value = str2num(token{1}); %#ok<ST2NM>
+end
+
+
+function value = read_script_string(script_path, name)
+text = fileread(script_path);
+token = regexp(text, ['(?m)^', name, '\s*=\s*''([^'']+)'''], 'tokens', 'once');
+if isempty(token)
+    error('Analyze_locking_period_acg_shuffle:script', ...
+        'Analyze_locking_period_acg.m has no quoted assignment for %s.', name);
+end
+value = token{1};
 end
 
 
@@ -1213,130 +1098,6 @@ end
 end
 
 
-function report_grand_shuffle(grand, centers, smooth_n, group_order, group_title)
-scales = {'sum_to_one', 'rate_ratio'};
-scale_labels = {'sum-to-1', 'rate ratio (Poisson = 1)'};
-y_labels = {'Smoothed mean ACG', 'Ratio to Poisson rate'};
-splits = {'locking', 'power'};
-split_labels = {'locking', 'delta power'};
-tails = {'low', 'high'};
-tail_labels = {'Low 25%', 'High 25%'};
-disp(' ')
-disp('Grand-average shuffle. Peaks are scored on the Gaussian-smoothed mean autocorrelogram.')
-disp('Sum-to-1 gives every neuron the same weight. Rate ratio divides each curve by its own firing rate squared.')
-disp('The all-runs curve pools every firing run. Its null shuffles those runs, including the ones between the tails.')
-for k = 1:numel(scales)
-    scale = grand.(scales{k});
-    for s = 1:numel(splits)
-        figure('Name', ['Grand average shuffle, ', split_labels{s}, ', ', scale_labels{k}], ...
-            'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.08 0.92 0.8])
-        for t = 1:numel(tails)
-            for g = 1:numel(group_order)
-                block = scale.(splits{s}).(tails{t}).(group_order{g});
-                subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
-                result = grand_peak_result(block, centers, smooth_n);
-                plot_grand_panel(result, [group_title{g}, ', ', tail_labels{t}], y_labels{k})
-                disp(sprintf(['  %s, %s, %s, %s: n = %d, first prom = %.3g, shuffle p = %.3g, ' ...
-                    'second prom = %.3g, shuffle p = %.3g'], ...
-                    scale_labels{k}, group_title{g}, split_labels{s}, tail_labels{t}, result.n, ...
-                    result.first_prominence, result.first_p, ...
-                    result.second_prominence, result.second_p))
-            end
-        end
-        sgtitle({['Grand mean versus shuffle, ', split_labels{s}, ', ', scale_labels{k}], ...
-            'Black is the observed mean. Grey is the central 95% of shuffled means.'})
-    end
-    figure('Name', ['Grand average shuffle, all firing runs, ', scale_labels{k}], ...
-        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.2 0.92 0.55])
-    for g = 1:numel(group_order)
-        block = scale.all.(group_order{g});
-        subplot(1, numel(group_order), g)
-        result = grand_peak_result(block, centers, smooth_n);
-        plot_grand_panel(result, [group_title{g}, ', all firing runs'], y_labels{k})
-        disp(sprintf(['  %s, %s, all firing runs: n = %d, first prom = %.3g, shuffle p = %.3g, ' ...
-            'second prom = %.3g, shuffle p = %.3g'], ...
-            scale_labels{k}, group_title{g}, result.n, ...
-            result.first_prominence, result.first_p, ...
-            result.second_prominence, result.second_p))
-    end
-    sgtitle({['Grand mean versus shuffle, all firing runs, ', scale_labels{k}], ...
-        'Black is the observed mean. Grey is the central 95% of shuffled means.'})
-end
-end
-
-
-function result = grand_peak_result(block, centers, smooth_n)
-result.n = block.n_neurons;
-result.first_prominence = NaN;
-result.first_p = NaN;
-result.second_prominence = NaN;
-result.second_p = NaN;
-result.first_lag = NaN;
-result.second_lag = NaN;
-result.fold_t = centers(centers > 0);
-result.observed = nan(size(result.fold_t));
-result.null_lo = result.observed;
-result.null_hi = result.observed;
-result.null_median = result.observed;
-result.percentile = result.observed;
-if block.n_neurons < 1
-    return
-end
-mu = block.sum_obs ./ block.n_obs;
-mu(block.n_obs == 0) = NaN;
-obs = acg_delta_peaks(mu, centers, smooth_n);
-result.fold_t = obs.fold_t;
-result.observed = obs.fold_y;
-result.first_lag = obs.first_lag;
-result.second_lag = obs.second_lag;
-result.first_prominence = obs.first_prominence;
-result.second_prominence = obs.second_prominence;
-n_s = size(block.sum_null, 1);
-null_fold = nan(n_s, numel(obs.fold_t));
-null_first = nan(n_s, 1);
-null_second = nan(n_s, 1);
-for s = 1:n_s
-    sample = block.sum_null(s, :) ./ block.n_null(s, :);
-    sample(block.n_null(s, :) == 0) = NaN;
-    pk = acg_delta_peaks(sample, centers, smooth_n);
-    null_first(s) = null_first_value(pk);
-    null_second(s) = null_second_value(pk);
-    if numel(pk.fold_y) == numel(obs.fold_t)
-        null_fold(s, :) = pk.fold_y;
-    end
-end
-result.first_p = exception_p(obs.first_prominence, null_first);
-if obs.second_measurable
-    result.second_p = exception_p(obs.second_prominence, null_second);
-end
-result.null_lo = prctile(null_fold, 2.5, 1);
-result.null_hi = prctile(null_fold, 97.5, 1);
-result.null_median = median(null_fold, 1, 'omitnan');
-result.percentile = amplitude_percentile(result.observed, null_fold);
-end
-
-
-function plot_grand_panel(result, panel_title, y_label)
-if result.n < 1
-    title({panel_title, 'n = 0'})
-    axis off
-    return
-end
-t = result.fold_t;
-hold on
-fill([t, fliplr(t)], [result.null_lo, fliplr(result.null_hi)], ...
-    [0.75 0.75 0.75], 'EdgeColor', 'none', 'HandleVisibility', 'off')
-plot(t, result.null_median, '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1)
-plot(t, result.observed, 'k', 'LineWidth', 1.6)
-mark_grand_peak(result.first_lag, result.observed, result.fold_t)
-mark_grand_peak(result.second_lag, result.observed, result.fold_t)
-xlabel('Lag (s)')
-ylabel(y_label)
-title({panel_title, sprintf('n = %d\nfirst p = %.3g, second p = %.3g', ...
-    result.n, result.first_p, result.second_p)})
-box off
-end
-
 
 function rec = attach_percentile(rec, obs_sum, null_sum, obs_ratio, null_ratio, centers, smooth_n)
 splits = {'locking', 'power'};
@@ -1403,179 +1164,6 @@ pctl(n == 0 | ~isfinite(observed)) = NaN;
 end
 
 
-function plot_percentile_curves(records, grand, centers, smooth_n, group_order, group_title)
-scales = {'sum_pctl', 'ratio_pctl'};
-scale_names = {'sum_to_one', 'rate_ratio'};
-scale_labels = {'sum-to-1', 'rate ratio (Poisson = 1)'};
-splits = {'locking', 'power'};
-split_labels = {'locking', 'delta power'};
-tails = {'low', 'high'};
-tail_labels = {'Low 25%', 'High 25%'};
-for k = 1:numel(scales)
-    for s = 1:numel(splits)
-        figure('Name', ['Neuron shuffle percentile, ', split_labels{s}, ', ', scale_labels{k}], ...
-            'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.06 0.92 0.84])
-        for t = 1:numel(tails)
-            for g = 1:numel(group_order)
-                subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
-                chosen = records_in_group(records, group_order{g});
-                plot_neuron_percentile(chosen, splits{s}, tails{t}, scales{k}, ...
-                    [group_title{g}, ', ', tail_labels{t}])
-            end
-        end
-        sgtitle({['Each neuron against its own shuffles, ', split_labels{s}, ', ', scale_labels{k}], ...
-            '100 means that lag is above every shuffle. The black line is the median neuron.'})
-    end
-    for s = 1:numel(splits)
-        figure('Name', ['Grand-average shuffle percentile, ', split_labels{s}, ', ', scale_labels{k}], ...
-            'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.06 0.92 0.84])
-        for t = 1:numel(tails)
-            for g = 1:numel(group_order)
-                block = grand.(scale_names{k}).(splits{s}).(tails{t}).(group_order{g});
-                subplot(numel(tails), numel(group_order), (t - 1) * numel(group_order) + g)
-                result = grand_peak_result(block, centers, smooth_n);
-                plot_grand_percentile(result, [group_title{g}, ', ', tail_labels{t}])
-            end
-        end
-        sgtitle({['Grand mean against shuffled means, ', split_labels{s}, ', ', scale_labels{k}], ...
-            '100 means the mean autocorrelogram is above every shuffled mean.'})
-    end
-end
-plot_all_run_percentiles(records, grand, centers, smooth_n, group_order, group_title);
-end
-
-
-function plot_all_run_percentiles(records, grand, centers, smooth_n, group_order, group_title)
-scales = {'sum_pctl', 'ratio_pctl'};
-scale_names = {'sum_to_one', 'rate_ratio'};
-scale_labels = {'sum-to-1', 'rate ratio (Poisson = 1)'};
-for k = 1:numel(scales)
-    figure('Name', ['Neuron shuffle percentile, all firing runs, ', scale_labels{k}], ...
-        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.18 0.92 0.5])
-    for g = 1:numel(group_order)
-        subplot(1, numel(group_order), g)
-        chosen = records_in_group(records, group_order{g});
-        plot_all_neuron_percentile(chosen, scales{k}, [group_title{g}, ', all firing runs'])
-    end
-    sgtitle({['Each neuron against its own shuffles, all firing runs, ', scale_labels{k}], ...
-        '100 means that lag is above every shuffle. The black line is the median neuron.'})
-    figure('Name', ['Grand-average shuffle percentile, all firing runs, ', scale_labels{k}], ...
-        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.04 0.18 0.92 0.5])
-    for g = 1:numel(group_order)
-        block = grand.(scale_names{k}).all.(group_order{g});
-        subplot(1, numel(group_order), g)
-        result = grand_peak_result(block, centers, smooth_n);
-        plot_grand_percentile(result, [group_title{g}, ', all firing runs'])
-    end
-    sgtitle({['Grand mean against shuffled means, all firing runs, ', scale_labels{k}], ...
-        '100 means the mean autocorrelogram is above every shuffled mean.'})
-end
-end
-
-
-function plot_all_neuron_percentile(records, field_name, panel_title)
-hold on
-drawn = 0;
-stack = [];
-lag = [];
-for i = 1:numel(records)
-    if ~isfield(records{i}, 'all')
-        continue
-    end
-    tail = records{i}.all;
-    if ~isfield(tail, field_name) || isempty(tail.(field_name)) || ~any(isfinite(tail.(field_name)))
-        continue
-    end
-    lag = tail.pctl_lag;
-    y = tail.(field_name);
-    plot(lag, y, 'Color', [0.25 0.45 0.75 0.28], 'LineWidth', 0.6, 'HandleVisibility', 'off')
-    stack(end + 1, :) = y; %#ok<AGROW>
-    drawn = drawn + 1;
-end
-if drawn < 1
-    title({panel_title, 'n = 0'})
-    axis off
-    return
-end
-plot(lag, median(stack, 1, 'omitnan'), 'k', 'LineWidth', 1.6)
-plot(lag([1 end]), [50 50], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
-plot(lag([1 end]), [95 95], '--', 'Color', [0.7 0.25 0.25], 'HandleVisibility', 'off')
-ylim([0 100])
-xlabel('Lag (s)')
-ylabel('Shuffle percentile')
-title({panel_title, sprintf('n = %d', drawn)})
-box off
-end
-
-
-function chosen = records_in_group(records, group_name)
-chosen = {};
-for i = 1:numel(records)
-    group = records{i}.lock_group;
-    if strcmp(group_name, 'delta')
-        keep = any(strcmp(group, {'trough', 'peak'}));
-    else
-        keep = strcmp(group, group_name);
-    end
-    if keep
-        chosen{end + 1, 1} = records{i}; %#ok<AGROW>
-    end
-end
-end
-
-
-function plot_neuron_percentile(records, split_name, tail_name, field_name, panel_title)
-hold on
-drawn = 0;
-stack = [];
-lag = [];
-for i = 1:numel(records)
-    tail = records{i}.(split_name).(tail_name);
-    if ~isfield(tail, field_name) || isempty(tail.(field_name)) || ~any(isfinite(tail.(field_name)))
-        continue
-    end
-    lag = tail.pctl_lag;
-    y = tail.(field_name);
-    plot(lag, y, 'Color', [0.25 0.45 0.75 0.28], 'LineWidth', 0.6, 'HandleVisibility', 'off')
-    stack(end + 1, :) = y; %#ok<AGROW>
-    drawn = drawn + 1;
-end
-if drawn < 1
-    title({panel_title, 'n = 0'})
-    axis off
-    return
-end
-plot(lag, median(stack, 1, 'omitnan'), 'k', 'LineWidth', 1.6)
-plot(lag([1 end]), [50 50], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
-plot(lag([1 end]), [95 95], '--', 'Color', [0.7 0.25 0.25], 'HandleVisibility', 'off')
-ylim([0 100])
-xlabel('Lag (s)')
-ylabel('Shuffle percentile')
-title({panel_title, sprintf('n = %d', drawn)})
-box off
-end
-
-
-function plot_grand_percentile(result, panel_title)
-if result.n < 1 || isempty(result.fold_t)
-    title({panel_title, 'n = 0'})
-    axis off
-    return
-end
-t = result.fold_t;
-hold on
-plot(t([1 end]), [50 50], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
-plot(t([1 end]), [95 95], '--', 'Color', [0.7 0.25 0.25], 'HandleVisibility', 'off')
-plot(t, result.percentile, 'k', 'LineWidth', 1.6)
-mark_grand_peak(result.first_lag, result.percentile, t)
-mark_grand_peak(result.second_lag, result.percentile, t)
-ylim([0 100])
-xlabel('Lag (s)')
-ylabel('Shuffle percentile')
-title({panel_title, sprintf('n = %d', result.n)})
-box off
-end
-
 
 function rate = tail_firing_rate(rt, idx)
 rate = NaN;
@@ -1595,12 +1183,3 @@ end
 rate = sum(n_spikes(ok)) / sum(duration(ok));
 end
 
-
-function mark_grand_peak(lag, y, t)
-if ~isfinite(lag) || isempty(t)
-    return
-end
-[~, idx] = min(abs(t - lag));
-plot(t(idx), y(idx), 'o', 'Color', 'k', 'MarkerFaceColor', 'k', ...
-    'MarkerSize', 5, 'HandleVisibility', 'off')
-end

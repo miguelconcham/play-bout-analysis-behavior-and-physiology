@@ -10,7 +10,9 @@ if isempty(X)
     return
 end
 X = double(X);
-mass = sum(X, 2, 'omitnan');
+filled = X;
+filled(isnan(filled)) = 0;
+mass = sum(filled, 2);
 mass(~isfinite(mass) | mass <= 0) = NaN;
 Y = X ./ mass;
 Y(~isfinite(Y)) = NaN;
