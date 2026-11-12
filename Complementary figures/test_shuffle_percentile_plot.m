@@ -133,31 +133,38 @@ member = [true; false; true; true];
 assert(isequal(member_rows, [3; 1; 4]), ...
     'Oscillatory rows were not strongest modulation first, with missing scores last.');
 
-feature_lag = 0.05:0.05:0.80;
-feature_logit = zeros(1, numel(feature_lag));
-feature_logit(2) = -2;
-feature_logit(6) = 4;
-feature_logit(9) = -1;
-feature_logit(12) = 2;
-[feature_values, feature_names] = acg_feature_values(feature_logit, feature_lag);
-feature_row = feature_values(1, :);
-name_at = @(name) feature_row(strcmp(feature_names, name));
-assert(abs(name_at('Modulation1') - 6) < 1e-12, ...
-    'Modulation1 was not the first peak minus the first trough.');
-assert(abs(name_at('Modulation2') - 3) < 1e-12, ...
-    'Modulation2 was not the second peak minus the second trough.');
-assert(abs(name_at('Persistence') - 0.5) < 1e-12, ...
-    'Persistence was not Modulation2 divided by Modulation1.');
-assert(abs(name_at('PeakInterval') - 0.30) < 1e-12, ...
-    'PeakInterval did not use the lag times in seconds.');
-assert(abs(name_at('PeakFrequency') - 1 / 0.30) < 1e-12, ...
-    'PeakFrequency was not the reciprocal of PeakInterval.');
-assert(abs(name_at('TroughInterval') - 0.35) < 1e-12, ...
-    'TroughInterval did not use the lag times in seconds.');
-assert(abs(name_at('OscillationScore') - 4.5) < 1e-12, ...
-    'OscillationScore was not the mean of the two modulations.');
-assert(abs(name_at('Baseline') - 0.4) < 1e-12, ...
-    'Baseline was not the mean logit from 0.60 s onward.');
+positive_lag = (0.01:0.01:1)';
+rhythm = 2 * ones(size(positive_lag));
+rhythm(10) = 0;
+rhythm(30) = 5;
+rhythm(40) = 1;
+rhythm(60) = 4;
+R = quantify_acg_rhythmicity(rhythm, positive_lag);
+assert(abs(R.FirstModulation - 5) < 1e-12, ...
+    'The first modulation was not the first peak minus the first trough.');
+assert(abs(R.SecondModulation - 3) < 1e-12, ...
+    'The second modulation was not the second peak minus the second trough.');
+assert(abs(R.Persistence - 0.6) < 1e-12, ...
+    'Persistence was not the second modulation divided by the first.');
+assert(abs(R.PeakInterval - (positive_lag(60) - positive_lag(30))) < 1e-12 ...
+    && abs(R.TroughInterval - (positive_lag(40) - positive_lag(10))) < 1e-12, ...
+    'The peak and trough intervals did not use the lag times.');
+assert(abs(R.Baseline - 2) < 1e-12, ...
+    'Baseline was not the median of the 0.8 to 1 s tail.');
+assert(isfinite(R.OscillationScore) && R.OscillationScore > 1, ...
+    'The spectral oscillation score was not above the mean spectrum.');
+
+full_lag = [-flipud(positive_lag); positive_lag];
+full_acg = [zeros(numel(positive_lag), 1); rhythm];
+if exist('array2table', 'file') == 2 && exist('movevars', 'file') == 2
+    feature_table = acg2features(full_acg', full_lag);
+    assert(feature_table.NeuronIndex == 1, ...
+        'The feature table did not keep the neuron row.');
+    assert(abs(feature_table.Modulation1 - R.FirstModulation) < 1e-12, ...
+        'Negative lags changed the positive-lag modulation.');
+    assert(abs(feature_table.OscillationScore - R.OscillationScore) < 1e-9, ...
+        'Negative lags changed the oscillation score.');
+end
 
 disp('test_shuffle_percentile_plot passed')
 end
