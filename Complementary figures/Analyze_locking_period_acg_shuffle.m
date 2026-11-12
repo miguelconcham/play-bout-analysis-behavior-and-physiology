@@ -100,6 +100,7 @@ parameters = struct( ...
     'low_percent', low_percent, ...
     'high_percent', high_percent, ...
     'acg_lag', acg_lag, ...
+    'acg_method', analysis.acg_method, ...
     'smooth_half', smooth_half, ...
     'skip_abs_lag', skip_abs_lag, ...
     'acg_refractory_s', acg_refractory_s, ...
@@ -273,7 +274,7 @@ for f = 1:numel(parsing_files)
                 this_corrected = already_corrected;
             else
                 acg = run_window_acgs(session_times(session_clusters == this_id), ...
-                    rt.RunStartTime, rt.RunEndTime, edges);
+                    rt.RunStartTime, rt.RunEndTime, edges, analysis.acg_method);
                 this_corrected = true;
             end
             if size(acg, 2) ~= n_bins || size(acg, 1) ~= height(rt)
@@ -325,7 +326,7 @@ for f = 1:numel(parsing_files)
                     rt.RunStartTime(use), rt.RunEndTime(use));
                 acg_s = nan(height(rt), n_bins);
                 acg_s(use, :) = run_window_acgs(shuffled, ...
-                    rt.RunStartTime(use), rt.RunEndTime(use), edges);
+                    rt.RunStartTime(use), rt.RunEndTime(use), edges, analysis.acg_method);
                 if lock_ok
                     sh_lock = pool_locking_period_acgs(acg_s, edges, run_length, ppc, ...
                         true, low_percent, high_percent);
@@ -578,11 +579,18 @@ if ~match
     return
 end
 names = {'n_shuffles', 'alpha', 'non_entrained_p', 'low_percent', 'high_percent', ...
-    'acg_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s', 'delta_lag', ...
+    'acg_lag', 'acg_method', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s', 'delta_lag', ...
     'areas_to_keep', 'summary_edge_start', 'summary_edge_end', 'n_bins', ...
     'bin_w', 'smooth_n'};
 for i = 1:numel(names)
     name = names{i};
+    if strcmp(name, 'acg_method') && ~isfield(stored.parameters, name)
+        if strcmp(char(parameters.acg_method), 'pairs')
+            continue
+        end
+        match = false;
+        return
+    end
     if ~isfield(stored.parameters, name) ...
             || ~same_setting(stored.parameters.(name), parameters.(name))
         match = false;
@@ -996,6 +1004,30 @@ if abs(edges(1) + acg_lag) > bin_w || abs(edges(end) - acg_lag) > bin_w
 end
 analysis.smooth_source = script_path;
 analysis.summary_path = summary_path;
+analysis.acg_method = locked_acg_method(analysis, script_path, summary_path);
+end
+
+
+function method = locked_acg_method(analysis, script_path, summary_path)
+from_script = read_script_assignments(script_path, {'acg_method'});
+method = from_script.acg_method;
+if ~isfield(analysis, 'acg_method') || isempty(analysis.acg_method)
+    if ~strcmp(char(method), 'pairs')
+        error('Analyze_locking_period_acg_shuffle:summary', ...
+            ['%s has no acg_method, so its curves used the pair count. ' ...
+            'Analyze_locking_period_acg.m is set to %s. The shuffle was not started.'], ...
+            summary_path, char(method));
+    end
+    method = 'pairs';
+    return
+end
+if ~same_setting(analysis.acg_method, method)
+    error('Analyze_locking_period_acg_shuffle:summary', ...
+        ['%s used the %s autocorrelogram, but Analyze_locking_period_acg.m ' ...
+        'is set to %s. The shuffle was not started.'], summary_path, ...
+        char(string(analysis.acg_method)), char(method));
+end
+method = char(string(analysis.acg_method));
 end
 
 
@@ -1003,6 +1035,10 @@ function ok = same_setting(a, b)
 if iscell(a) || iscell(b)
     ok = iscell(a) && iscell(b) && numel(a) == numel(b) ...
         && all(strcmp(a(:), b(:)));
+    return
+end
+if ischar(a) || isstring(a) || ischar(b) || isstring(b)
+    ok = strcmp(char(string(a)), char(string(b)));
     return
 end
 a = double(a(:));
@@ -1014,6 +1050,8 @@ end
 function text = setting_text(value)
 if iscell(value)
     text = strjoin(value(:)', ', ');
+elseif ischar(value) || isstring(value)
+    text = char(string(value));
 else
     text = mat2str(double(value));
 end
@@ -1024,8 +1062,9 @@ function disp_locked_parameters(analysis, summary_path, edges, bin_w, n_bins, sm
 disp(['Summary: ', summary_path])
 disp(sprintf('  axis %+g to %+g s, bin %g s, %d bins', edges(1), edges(end), bin_w, n_bins))
 disp(sprintf('  alpha = %g, non-entrained p = %g', analysis.alpha, analysis.non_entrained_p))
-disp(sprintf('  tails = %g / %g, acg_lag = %g s, delta window = %s s', ...
-    analysis.low_percent, analysis.high_percent, analysis.acg_lag, mat2str(double(analysis.delta_lag))))
+disp(sprintf('  tails = %g / %g, acg_lag = %g s, method = %s, delta window = %s s', ...
+    analysis.low_percent, analysis.high_percent, analysis.acg_lag, ...
+    analysis.acg_method, mat2str(double(analysis.delta_lag))))
 disp(['  areas = ', strjoin(analysis.areas_to_keep, ', ')])
 disp(['Smoothing and refractory blank from ', analysis.smooth_source])
 disp(sprintf('  smooth_half = %g s, skip_abs_lag = %g s, refractory = %g s, smooth_n = %d', ...
@@ -1048,10 +1087,15 @@ for i = 1:numel(names)
         error('Analyze_locking_period_acg_shuffle:script', ...
             'Analyze_locking_period_acg.m has no assignment for %s.', name);
     end
-    values.(name) = str2num(token{1}); %#ok<ST2NM>
+    raw = strtrim(token{1});
+    values.(name) = str2num(raw); %#ok<ST2NM>
     if isempty(values.(name))
-        error('Analyze_locking_period_acg_shuffle:script', ...
-            'Could not read %s from Analyze_locking_period_acg.m.', name);
+        quoted = regexp(raw, '^[''"](.+)[''"]$', 'tokens', 'once');
+        if isempty(quoted)
+            error('Analyze_locking_period_acg_shuffle:script', ...
+                'Could not read %s from Analyze_locking_period_acg.m.', name);
+        end
+        values.(name) = quoted{1};
     end
 end
 end

@@ -96,6 +96,11 @@ low_percent      = 25;
 high_percent     = 75;
 delta_lag        = [0.2 0.5];   % s, 5 Hz to 2 Hz
 acg_lag          = 1;       % s, half-width of the autocorrelogram axis
+% 'pairs' counts every spike in the run and divides by (T-|lag|).
+% 'fft' uses the same correction on a binned FFT.
+% 'crosscorr' calls crosscorrelogram. References are inset by acg_lag, so
+% a run from 0 to 10 s uses spikes in [1 9] against spikes in [0 10].
+acg_method       = 'pairs';
 smooth_half      = 0.04;        % s, full smooth width; Gaussian sigma is a quarter of this
 skip_abs_lag     = 0.02;        % s, do not smooth across the lag-0 gap
 acg_refractory_s = 0.005;
@@ -273,7 +278,8 @@ for f = 1:numel(parsing_files)
                 clear ps
                 continue
             end
-            disp(['  recomputing autocorrelograms to +/- ', num2str(acg_lag), ' s'])
+            disp(['  recomputing autocorrelograms to +/- ', num2str(acg_lag), ...
+                ' s (', acg_method, ')'])
         end
 
         for nn = 1:height(ci)
@@ -319,7 +325,7 @@ for f = 1:numel(parsing_files)
                 this_corrected = true;
             else
                 acg = run_window_acgs(session_times(session_clusters == this_id), ...
-                    rt.RunStartTime, rt.RunEndTime, edges);
+                    rt.RunStartTime, rt.RunEndTime, edges, acg_method);
                 this_corrected = true;
             end
             if size(acg, 2) ~= n_bins || size(acg, 1) ~= height(rt)
@@ -382,6 +388,7 @@ parameters = struct( ...
     'high_percent', high_percent, ...
     'delta_lag', delta_lag, ...
     'acg_lag', acg_lag, ...
+    'acg_method', acg_method, ...
     'smooth_half', smooth_half, ...
     'skip_abs_lag', skip_abs_lag, ...
     'acg_refractory_s', acg_refractory_s, ...
