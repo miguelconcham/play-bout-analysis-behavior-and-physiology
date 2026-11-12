@@ -13,6 +13,9 @@
 % where this script writes each figure as jpg and svg, and where it writes
 % analysis_summary.txt. Later sections keep that folder when it is already
 % in the workspace.
+% n_example_neurons is set at the start of section 4. It chooses how many
+% of the strongest oscillatory neurons are drawn with their autocorrelogram
+% and shuffle percentile.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -80,6 +83,8 @@ end
     percentile.sum.all, lag, sort_window_s, n_shuffles);
 neuron_type = neuron_type(row_order);
 neuron_record_index = neuron_record_index(row_order);
+[neuron_session, neuron_area, neuron_cluster_id] = ...
+    neuron_identity_from_records(records, neuron_record_index);
 
 imagesc_logit = struct();
 sort_score = struct();
@@ -113,7 +118,8 @@ feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positi
 
 save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
-    'neuron_type', 'neuron_record_index', 'feature_table', ...
+    'neuron_type', 'neuron_record_index', 'neuron_session', 'neuron_area', ...
+    'neuron_cluster_id', 'feature_table', ...
     'column_id', 'column_title', 'scale_id', 'scale_title', ...
     'n_shuffles', 'sort_window_s', 'checkpoint', 'prep_file');
 disp(['Section 1 saved the matrices to ', prep_file])
@@ -569,6 +575,7 @@ write_summary_section(output_folder, '3. Oscillatory neurons kept for the figure
 if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
+n_example_neurons = 10;
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
 if ~exist('shown_logit', 'var')
@@ -967,6 +974,99 @@ title(sprintf('Trough %d/%d, peak %d/%d, unlocked %d/%d, non-classified %d/%d', 
     type_observed(3), type_total(3), type_observed(4), type_total(4)))
 box off
 save_script_figure(output_folder)
+if ~exist('neuron_area', 'var') || numel(neuron_area) ~= numel(neuron_type)
+    if exist('records', 'var') && exist('neuron_record_index', 'var')
+        [neuron_session, neuron_area, neuron_cluster_id] = ...
+            neuron_identity_from_records(records, neuron_record_index);
+    elseif exist('checkpoint', 'var') && exist('neuron_record_index', 'var')
+        stored_id = load(checkpoint, 'shuffle_records');
+        id_records = stored_id.shuffle_records;
+        if ~iscell(id_records)
+            id_records = num2cell(id_records(:));
+        end
+        [neuron_session, neuron_area, neuron_cluster_id] = ...
+            neuron_identity_from_records(id_records(:), neuron_record_index);
+    else
+        neuron_session = repmat({''}, numel(neuron_type), 1);
+        neuron_area = repmat({''}, numel(neuron_type), 1);
+        neuron_cluster_id = nan(numel(neuron_type), 1);
+    end
+end
+if ~exist('acg_method', 'var') || isempty(acg_method)
+    acg_method = 'overlap';
+end
+if exist('checkpoint', 'var')
+    example_summary_path = fullfile(fileparts(checkpoint), ...
+        locking_summary_filename(false, acg_method));
+else
+    example_summary_path = '';
+end
+example_bank = load_example_acg_bank(example_summary_path);
+n_example = min(n_example_neurons, numel(osc_rows));
+example_names = [comparison_names, {'Peak1 - Peak2'}];
+if n_example > 0
+    open_full_figure('Example oscillatory neurons')
+    example_lines = cell(n_example, 1);
+    acg_values = [];
+    for i = 1:n_example
+        pop_row = osc_rows(i);
+        [acg_lag, acg_y, acg_found] = example_acg_curve(example_bank, ...
+            neuron_session{pop_row}, neuron_cluster_id(pop_row));
+        if acg_found
+            acg_values = [acg_values, acg_y(:).']; %#ok<AGROW>
+        end
+    end
+    if isempty(acg_values)
+        acg_limits = [0 1];
+    else
+        acg_pad = 0.05 * max(max(acg_values) - min(acg_values), eps);
+        acg_limits = [min(acg_values) - acg_pad, max(acg_values) + acg_pad];
+    end
+    for i = 1:n_example
+        pop_row = osc_rows(i);
+        area_label = neuron_area{pop_row};
+        if isempty(area_label)
+            area_label = 'area unknown';
+        end
+        lock_label = display_lock_label(neuron_type{pop_row});
+        [acg_lag, acg_y, acg_found] = example_acg_curve(example_bank, ...
+            neuron_session{pop_row}, neuron_cluster_id(pop_row));
+        subplot(2, n_example, i)
+        if acg_found
+            plot(acg_lag, acg_y, 'k', 'LineWidth', 1.4)
+            ylim(acg_limits)
+        else
+            text(0.5, 0.5, 'ACG not in summary', 'HorizontalAlignment', 'center')
+            axis([0 1 0 1])
+        end
+        ylabel('Sum-to-1')
+        title({sprintf('%s, %s', area_label, lock_label), ...
+            sprintf('%s id %g', neuron_session{pop_row}, neuron_cluster_id(pop_row))}, ...
+            'Interpreter', 'none')
+        box off
+        subplot(2, n_example, n_example + i)
+        plot(lag, shown_percentile.sum.power_high(i, :), 'Color', [0.15 0.35 0.7], ...
+            'LineWidth', 1.4)
+        ylim([0 100])
+        xlabel('Lag (s)')
+        ylabel('Percentile')
+        box off
+        example_lines{i} = example_neuron_summary(i, neuron_session{pop_row}, ...
+            neuron_cluster_id(pop_row), area_label, lock_label, osc_score(pop_row), ...
+            acg_found, feature_table, feature_table_low, pop_row, example_names);
+    end
+    sgtitle({sprintf('%d oscillatory neurons with the highest modulation.', n_example), ...
+        example_bank.note, ...
+        'Bottom row: high-power sum-to-1 shuffle percentile.'}, 'Interpreter', 'none')
+    save_script_figure(output_folder)
+    write_summary_section(output_folder, '4. Example oscillatory neurons', join_summary_lines( ...
+        sprintf('n_example_neurons = %d. Drawn: %d.', n_example_neurons, n_example), ...
+        'These are the oscillatory neurons with the highest modulation score.', ...
+        example_bank.note, ...
+        'The percentile is the high-power sum-to-1 shuffle percentile.', ...
+        'Features are the high-power and low-power values for that neuron.', ...
+        example_lines))
+end
 write_section_4_summary(output_folder, column_title, cycle_n, cycle_r, cycle_p, ...
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
     sum(osc_in_complete), sum(~osc_in_complete), sum(finite_projection), ...
@@ -1155,6 +1255,235 @@ if n_points <= 1
     return
 end
 offset = linspace(-0.12, 0.12, n_points).';
+end
+
+
+function [session, area, cluster_id] = neuron_identity_from_records(records, record_index)
+%NEURON_IDENTITY_FROM_RECORDS  Session, area, and cluster id in population order.
+
+n = numel(record_index);
+session = cell(n, 1);
+area = cell(n, 1);
+cluster_id = nan(n, 1);
+for i = 1:n
+    record = records{record_index(i)};
+    session{i} = record_text(record, 'session');
+    area{i} = record_text(record, 'area');
+    cluster_id(i) = record_number(record, 'cluster_id');
+end
+end
+
+
+function text = record_text(record, field_name)
+text = '';
+if ~isfield(record, field_name) || isempty(record.(field_name))
+    return
+end
+text = value_text(record.(field_name));
+end
+
+
+function number = record_number(record, field_name)
+number = nan;
+if ~isfield(record, field_name) || isempty(record.(field_name))
+    return
+end
+value = record.(field_name);
+if iscell(value)
+    if isempty(value)
+        return
+    end
+    value = value{1};
+end
+if isnumeric(value) && isfinite(value)
+    number = double(value);
+end
+end
+
+
+function text = value_text(value)
+if iscell(value)
+    if isempty(value)
+        text = '';
+        return
+    end
+    value = value{1};
+end
+text = strtrim(char(value(:).'));
+end
+
+
+function label = display_lock_label(raw)
+name = lower(value_text(raw));
+if strcmp(name, 'trough')
+    label = 'Trough';
+elseif strcmp(name, 'peak')
+    label = 'Peak';
+elseif strcmp(name, 'nonentrained')
+    label = 'Unlocked';
+elseif isempty(name)
+    label = 'Non-classified';
+else
+    label = value_text(raw);
+end
+end
+
+
+function bank = load_example_acg_bank(summary_path)
+%LOAD_EXAMPLE_ACG_BANK  Mirrored sum-to-1 autocorrelograms keyed by neuron.
+
+bank = empty_acg_bank('The locking summary file was not found, so the original autocorrelogram is not drawn.');
+if isempty(summary_path) || exist(summary_path, 'file') ~= 2
+    return
+end
+try
+    stored = load(summary_path, 'power_acg');
+catch
+    bank.note = 'The locking summary file could not be read.';
+    return
+end
+if isfield(stored, 'power_acg') && has_neuron_curve(stored.power_acg, 'high')
+    bank = bank_from_curves(stored.power_acg.all_neurons, stored.power_acg.centers, 'high', ...
+        'Top row: high-power sum-to-1 autocorrelogram, positive lags, both sides averaged.');
+    return
+end
+try
+    stored = load(summary_path, 'locking_acg');
+catch
+    bank.note = 'The locking summary file could not be read.';
+    return
+end
+if isfield(stored, 'locking_acg') && has_neuron_curve(stored.locking_acg, 'all')
+    bank = bank_from_curves(stored.locking_acg.all_neurons, stored.locking_acg.centers, 'all', ...
+        'Top row: all-runs autocorrelogram, positive lags, both sides averaged. The high-power curve was not in the summary.');
+    return
+end
+bank.note = 'The summary file has no per-neuron autocorrelogram.';
+end
+
+
+function ok = has_neuron_curve(summary, curve_name)
+ok = isfield(summary, 'all_neurons') && isfield(summary.all_neurons, curve_name) ...
+    && isfield(summary, 'centers') && ~isempty(summary.all_neurons.(curve_name));
+end
+
+
+function bank = empty_acg_bank(note)
+bank.lag = zeros(1, 0);
+bank.y = zeros(0, 0);
+bank.session = {};
+bank.cluster_id = zeros(0, 1);
+bank.note = note;
+end
+
+
+function bank = bank_from_curves(block, centers, curve_name, note)
+bank = empty_acg_bank(note);
+centers = double(centers(:).');
+curves = double(block.(curve_name));
+if size(curves, 2) ~= numel(centers)
+    bank.note = 'The autocorrelogram width does not match its lag axis.';
+    return
+end
+[folded, pos_lag] = mirror_acg_matrix(curves, centers);
+bank.lag = pos_lag;
+bank.y = folded;
+if iscell(block.session)
+    bank.session = block.session(:);
+else
+    bank.session = cellstr(block.session);
+end
+bank.cluster_id = double(block.cluster_id(:));
+end
+
+
+function [folded, pos_lag] = mirror_acg_matrix(curves, centers)
+%MIRROR_ACG_MATRIX  Average each positive lag with its negative-lag partner.
+
+centers = double(centers(:).');
+pos = find(centers > 0);
+neg = find(centers < 0);
+neg = neg(end:-1:1);
+n = min(numel(pos), numel(neg));
+pos = pos(1:n);
+neg = neg(1:n);
+if n < 1 || max(abs(centers(pos) + centers(neg))) > 1e-6
+    folded = zeros(size(curves, 1), 0);
+    pos_lag = zeros(1, 0);
+    return
+end
+folded = (curves(:, pos) + curves(:, neg)) / 2;
+pos_lag = centers(pos);
+end
+
+
+function [acg_lag, acg_y, found] = example_acg_curve(bank, session, cluster_id)
+acg_lag = bank.lag;
+acg_y = nan(1, numel(bank.lag));
+found = false;
+row = find_example_neuron(bank, session, cluster_id);
+if isempty(row)
+    return
+end
+acg_y = bank.y(row, :);
+found = any(isfinite(acg_y));
+end
+
+
+function row = find_example_neuron(bank, session, cluster_id)
+row = [];
+if isempty(bank.cluster_id) || ~isfinite(cluster_id)
+    return
+end
+session = value_text(session);
+for i = 1:numel(bank.cluster_id)
+    if abs(bank.cluster_id(i) - double(cluster_id)) < 1e-6 ...
+            && strcmp(value_text(bank.session{i}), session)
+        row = i;
+        return
+    end
+end
+end
+
+
+function text = example_neuron_summary(index, session, cluster_id, area_label, ...
+    lock_label, modulation, acg_found, feature_table, feature_table_low, row, names)
+header = sprintf('Neuron %d   session %s   id %g   area %s   lock %s   modulation %.4g', ...
+    index, session, cluster_id, area_label, lock_label, modulation);
+lines = {header};
+if ~acg_found
+    lines{end + 1} = 'Original autocorrelogram was not matched in the summary file.'; %#ok<AGROW>
+end
+lines{end + 1} = sprintf('%-42s %14s %14s', 'Feature', 'high power', 'low power'); %#ok<AGROW>
+for j = 1:numel(names)
+    high_value = table_feature_value(feature_table, row, names{j});
+    low_value = table_feature_value(feature_table_low, row, names{j});
+    lines{end + 1} = sprintf('%-42s %14s %14s', names{j}, ...
+        stat_num(high_value, '%.4g'), stat_num(low_value, '%.4g')); %#ok<AGROW>
+end
+lines{end + 1} = ''; %#ok<AGROW>
+text = strjoin(lines, newline);
+end
+
+
+function value = table_feature_value(feature_table, row, name)
+value = nan;
+if isempty(feature_table)
+    return
+end
+if strcmp(name, 'Peak1 - Peak2')
+    value = table_feature_value(feature_table, row, 'Peak1') ...
+        - table_feature_value(feature_table, row, 'Peak2');
+    return
+end
+names = feature_table.Properties.VariableNames;
+if ~ismember(name, names)
+    return
+end
+column = feature_table{row, name};
+if isnumeric(column) && isscalar(column) && isfinite(column)
+    value = double(column);
+end
 end
 
 
