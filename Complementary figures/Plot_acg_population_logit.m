@@ -383,24 +383,45 @@ if ~isempty(shown_titles)
     for j = 1:numel(shown_titles)
         nexttile
         hold on
+        group_values = cell(1, 2);
+        group_mean = nan(1, 2);
         for group = 1:2
             this_group = descriptor_values(idx_cluster == group, j);
             this_group = this_group(isfinite(this_group));
+            group_values{group} = this_group;
+            if ~isempty(this_group)
+                group_mean(group) = mean(this_group);
+            end
             draw_one_violin(group, this_group, [0.75 0.75 0.75])
-            if isempty(this_group)
+        end
+        if all(isfinite(group_mean))
+            plot([1 2], group_mean, '-', 'Color', [0.1 0.1 0.1], ...
+                'LineWidth', 2.4, 'HandleVisibility', 'off')
+        end
+        for group = 1:2
+            draw_violin_mean_bar(group, group_values{group})
+            if isempty(group_values{group})
                 continue
             end
-            point_x = group + violin_point_offset(numel(this_group));
-            scatter(point_x, this_group, 12, [0 0 0], 'filled', ...
+            point_x = group + violin_point_offset(numel(group_values{group}));
+            scatter(point_x, group_values{group}, 12, [0 0 0], 'filled', ...
                 'MarkerFaceAlpha', 0.55, 'MarkerEdgeColor', 'none')
         end
         set(gca, 'XTick', [1 2])
         xlim([0.4 2.6])
-        title({shown_titles{j}, shown_roles{j}}, 'Interpreter', 'none')
+        if numel(group_values{1}) < 2 || numel(group_values{2}) < 2
+            p_text = 'Too few neurons';
+        else
+            [~, feature_p] = ttest2(group_values{1}, group_values{2});
+            p_text = sprintf('uncorrected unpaired p = %.3g', feature_p);
+        end
+        title({shown_titles{j}, shown_roles{j}, p_text}, 'Interpreter', 'none')
         xlabel([cluster_method_label, ' group'])
         grid on
     end
     sgtitle({[cluster_method_label, ' cluster 1 is the higher modulation.'], ...
+        'Black bars are means, joined to show the group difference.', ...
+        'Each p is an unpaired t-test and is not corrected across features.', ...
         'Peak1 - Peak2 is the drop from the first peak to the second.'})
 end
 
@@ -801,7 +822,12 @@ if ~isempty(compare_titles)
             draw_one_violin(1, y_high, [0.84 0.37 0.00])
             draw_one_violin(2, y_low, [0.00 0.45 0.70])
             plot([1 + point_offset.'; 2 + point_offset.'], ...
-                [y_high.'; y_low.'], '-', 'Color', [0.55 0.55 0.55])
+                [y_high.'; y_low.'], '-', 'Color', [0.62 0.62 0.62], ...
+                'LineWidth', 0.3)
+            plot([1 2], [mean(y_high), mean(y_low)], '-', ...
+                'Color', [0.1 0.1 0.1], 'LineWidth', 2.4, 'HandleVisibility', 'off')
+            draw_violin_mean_bar(1, y_high)
+            draw_violin_mean_bar(2, y_low)
             scatter(1 + point_offset, y_high, 12, [0 0 0], 'filled', ...
                 'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
             scatter(2 + point_offset, y_low, 12, [0 0 0], 'filled', ...
@@ -819,6 +845,7 @@ if ~isempty(compare_titles)
         grid on
     end
     sgtitle({'Same oscillatory neurons at high and low power.', ...
+        'Thin lines join one neuron. Thick bars are means and the line between them.', ...
         'Each p is a paired t-test and is not corrected across features.'})
 end
 
@@ -932,31 +959,48 @@ function draw_one_violin(x_center, y, face_color)
 %
 % The shape does not place the observations. Callers scatter those points
 % at x positions they keep, so a later line can join a pair exactly.
+% A long black bar marks the mean.
 
 y = y(:);
 y = y(isfinite(y));
-if numel(y) < 2 || ~(max(y) > min(y))
+if isempty(y)
     return
 end
-try
-    [density, support] = ksdensity(y, 'NumPoints', 100);
-catch
+if numel(y) >= 2 && max(y) > min(y)
+    density = [];
+    try
+        [density, support] = ksdensity(y, 'NumPoints', 100);
+    catch
+        density = [];
+    end
+    if ~isempty(density)
+        density = density(:).';
+        support = support(:).';
+        if max(density) > 0
+            half_width = 0.32;
+            density = density / max(density) * half_width;
+            fill([x_center + density, x_center - density(end:-1:1)], ...
+                [support, support(end:-1:1)], face_color, ...
+                'FaceAlpha', 0.22, 'EdgeColor', face_color, 'LineWidth', 1, ...
+                'HandleVisibility', 'off')
+        end
+    end
+end
+draw_violin_mean_bar(x_center, y)
+end
+
+
+function draw_violin_mean_bar(x_center, y)
+%DRAW_VIOLIN_MEAN_BAR  Long thick bar at the mean of one violin.
+
+y = y(:);
+y = y(isfinite(y));
+if isempty(y)
     return
 end
-density = density(:).';
-support = support(:).';
-if isempty(density) || max(density) <= 0
-    return
-end
-half_width = 0.32;
-density = density / max(density) * half_width;
-fill([x_center + density, x_center - density(end:-1:1)], ...
-    [support, support(end:-1:1)], face_color, ...
-    'FaceAlpha', 0.22, 'EdgeColor', face_color, 'LineWidth', 1, ...
-    'HandleVisibility', 'off')
-median_value = median(y);
-plot([x_center - 0.12, x_center + 0.12], [median_value, median_value], ...
-    'k', 'LineWidth', 1.4, 'HandleVisibility', 'off')
+mean_value = mean(y);
+plot([x_center - 0.36, x_center + 0.36], [mean_value, mean_value], ...
+    'k', 'LineWidth', 2.8, 'HandleVisibility', 'off')
 end
 
 
