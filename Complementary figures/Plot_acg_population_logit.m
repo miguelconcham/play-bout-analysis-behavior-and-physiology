@@ -634,47 +634,29 @@ group_label = { ...
     'Non-oscillatory, high power', ...
     'Oscillatory, low power'};
 
+pca_all = [pca_score(:, 1:2); low_xy(finite_projection, :)];
+pca_groups = { ...
+    pca_score(osc_in_complete, 1:2), ...
+    pca_score(~osc_in_complete, 1:2), ...
+    low_xy(finite_projection, :)};
 figure('Name', 'Low-power ACGs in the high-power PCA', ...
-    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.16 0.16 0.46 0.62])
-hold on
-if any(finite_projection)
-    paired_lines = plot( ...
-        [high_xy(finite_projection, 1).'; low_xy(finite_projection, 1).'], ...
-        [high_xy(finite_projection, 2).'; low_xy(finite_projection, 2).'], ...
-        '-', 'Color', [0.55 0.55 0.55]);
-    set(paired_lines, 'HandleVisibility', 'off')
+    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.06 0.18 0.88 0.48])
+pca_axes = gobjects(1, 3);
+for g = 1:3
+    pca_axes(g) = subplot(1, 3, g);
+    draw_iso_probability(pca_all, pca_groups{g}, group_color(g, :))
+    title(group_label{g}, 'Interpreter', 'none')
+    xlabel(sprintf('PC1 (%.1f%%)', pca_explained(1)))
+    ylabel(sprintf('PC2 (%.1f%%)', pca_explained(2)))
+    grid on
+    box off
 end
-pca_handle = gobjects(3, 1);
-pca_shown = false(3, 1);
-if any(~osc_in_complete)
-    pca_handle(2) = scatter( ...
-        pca_score(~osc_in_complete, 1), pca_score(~osc_in_complete, 2), ...
-        28, group_color(2, :), 'filled', 'MarkerFaceAlpha', 0.75);
-    pca_shown(2) = true;
+pca_limits = embedding_axis_limits(pca_all);
+for g = 1:3
+    set(pca_axes(g), 'XLim', pca_limits(1:2), 'YLim', pca_limits(3:4))
 end
-if any(osc_in_complete)
-    pca_handle(1) = scatter( ...
-        pca_score(osc_in_complete, 1), pca_score(osc_in_complete, 2), ...
-        28, group_color(1, :), 'filled', 'MarkerFaceAlpha', 0.75);
-    pca_shown(1) = true;
-end
-if any(finite_projection)
-    pca_handle(3) = scatter( ...
-        low_xy(finite_projection, 1), low_xy(finite_projection, 2), ...
-        28, group_color(3, :), 'filled', 'MarkerFaceAlpha', 0.75);
-    pca_shown(3) = true;
-end
-xlabel(sprintf('PC1 (%.1f%%)', pca_explained(1)))
-ylabel(sprintf('PC2 (%.1f%%)', pca_explained(2)))
-title({'High-power PCA', ...
-    'Lines join the same oscillatory neuron at low power.'})
-if any(pca_shown)
-    legend(pca_handle(pca_shown), group_label(find(pca_shown)), ...
-        'Location', 'best', 'Box', 'off')
-end
-grid on
-axis square
-box off
+linkaxes(pca_axes, 'xy')
+sgtitle('Black points are every neuron. Filled bands are that group''s iso-probability.')
 
 low_member = osc_in_complete & all(isfinite(Xz_low), 2);
 X_embed = [Xz; Xz_low(low_member, :)];
@@ -703,31 +685,29 @@ fprintf(['Low-power oscillatory neurons in the new t-SNE: %d. ', ...
     'Omitted for missing low-power features: %d.\n'], ...
     sum(low_member), sum(osc_in_complete) - sum(low_member))
 
+tsne_groups = { ...
+    Y_power(group_id == 1, :), ...
+    Y_power(group_id == 2, :), ...
+    Y_power(group_id == 3, :)};
 figure('Name', 't-SNE with low-power oscillatory neurons', ...
-    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.18 0.16 0.46 0.62])
-hold on
-tsne_handle = gobjects(3, 1);
-tsne_shown = false(3, 1);
-for g = [2 1 3]
-    in_group = group_id == g;
-    if ~any(in_group)
-        continue
-    end
-    tsne_handle(g) = scatter(Y_power(in_group, 1), Y_power(in_group, 2), ...
-        28, group_color(g, :), 'filled', 'MarkerFaceAlpha', 0.75);
-    tsne_shown(g) = true;
+    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.06 0.16 0.88 0.48])
+tsne_axes = gobjects(1, 3);
+for g = 1:3
+    tsne_axes(g) = subplot(1, 3, g);
+    draw_iso_probability(Y_power, tsne_groups{g}, group_color(g, :))
+    title({group_label{g}, sprintf('Perplexity = %g', embed_perplexity)}, ...
+        'Interpreter', 'none')
+    xlabel('t-SNE 1')
+    ylabel('t-SNE 2')
+    grid on
+    box off
 end
-xlabel('t-SNE 1')
-ylabel('t-SNE 2')
-title({sprintf('Perplexity = %g', embed_perplexity), ...
-    'High-power neurons plus oscillatory neurons at low power.'})
-if any(tsne_shown)
-    legend(tsne_handle(tsne_shown), group_label(find(tsne_shown)), ...
-        'Location', 'best', 'Box', 'off')
+tsne_limits = embedding_axis_limits(Y_power);
+for g = 1:3
+    set(tsne_axes(g), 'XLim', tsne_limits(1:2), 'YLim', tsne_limits(3:4))
 end
-axis square
-grid on
-box off
+linkaxes(tsne_axes, 'xy')
+sgtitle('Black points are every neuron. Filled bands are that group''s iso-probability.')
 
 % Same columns as the cluster boxcharts. High values come from the
 % high-power feature table. Low values are the same neurons at low power.
@@ -823,3 +803,71 @@ title(sprintf('Trough %d/%d, peak %d/%d, unlocked %d/%d, non-classified %d/%d', 
     type_observed(1), type_total(1), type_observed(2), type_total(2), ...
     type_observed(3), type_total(3), type_observed(4), type_total(4)))
 box off
+
+
+function draw_iso_probability(all_xy, group_xy, face_color)
+%DRAW_ISO_PROBABILITY  Filled density bands for one group on a black cloud.
+%
+% The levels follow Figure 1 LDA: a kernel density on a shared grid, then
+% the density values that enclose 10% to 80% of that density, in steps of
+% 10%. Darker bands are the higher-density core.
+
+all_xy = all_xy(all(isfinite(all_xy), 2), :);
+group_xy = group_xy(all(isfinite(group_xy), 2), :);
+if isempty(all_xy)
+    return
+end
+scatter(all_xy(:, 1), all_xy(:, 2), 12, [0 0 0], 'filled', ...
+    'MarkerFaceAlpha', 0.4, 'MarkerEdgeColor', 'none')
+hold on
+if size(group_xy, 1) < 3
+    return
+end
+span = max(all_xy, [], 1) - min(all_xy, [], 1);
+span(span <= 0) = 1;
+pad = 0.05 * span;
+x1 = linspace(min(all_xy(:, 1)) - pad(1), max(all_xy(:, 1)) + pad(1), 100);
+x2 = linspace(min(all_xy(:, 2)) - pad(2), max(all_xy(:, 2)) + pad(2), 100);
+[xg, yg] = meshgrid(x1, x2);
+try
+    density = ksdensity(group_xy, [xg(:), yg(:)]);
+catch
+    return
+end
+density_grid = reshape(density, size(xg));
+if ~any(density_grid(:) > 0)
+    return
+end
+density_sorted = sort(density_grid(:), 'descend');
+cumulative = cumsum(density_sorted) / sum(density_sorted);
+probability_levels = 0.1:0.1:0.8;
+thresholds = nan(size(probability_levels));
+for level_n = 1:numel(probability_levels)
+    level_index = find(cumulative >= probability_levels(level_n), 1, 'first');
+    if ~isempty(level_index)
+        thresholds(level_n) = density_sorted(level_index);
+    end
+end
+thresholds = unique(thresholds(isfinite(thresholds)));
+if numel(thresholds) < 2
+    return
+end
+sorted_thresholds = sort(thresholds(:));
+n_thresholds = numel(sorted_thresholds);
+for band_n = (n_thresholds - 1):-1:1
+    contourf(x1, x2, density_grid, sorted_thresholds([band_n band_n + 1]), ...
+        'LineWidth', 0.5, 'FaceColor', face_color, 'EdgeColor', 'none', ...
+        'FaceAlpha', 0.4 * band_n / n_thresholds);
+end
+end
+
+
+function limits = embedding_axis_limits(xy)
+xy = xy(all(isfinite(xy), 2), :);
+span = max(xy, [], 1) - min(xy, [], 1);
+span(span <= 0) = 1;
+pad = 0.08 * span;
+limits = [ ...
+    min(xy(:, 1)) - pad(1), max(xy(:, 1)) + pad(1), ...
+    min(xy(:, 2)) - pad(2), max(xy(:, 2)) + pad(2)];
+end
