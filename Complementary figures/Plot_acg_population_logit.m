@@ -17,7 +17,7 @@
 %
 % Section 2 builds ACG features from the high-power sum-to-1 logit and
 % splits the neurons with k-means. Cluster 1 is the group with the higher
-% modulation. shown_logit is that group, strongest modulation first.
+% modulation. shown_logit is that group, in the order find returns.
 % imagesc_osc_sum_all is the same sum-to-1 image under a plain name.
 % osc_neuron_type is its lock group. feature_table has one row per neuron.
 
@@ -98,10 +98,7 @@ imagesc_sum_power_high = imagesc_logit.sum.power_high;
 imagesc_sum_power_low = imagesc_logit.sum.power_low;
 
 prep_file = fullfile(parsing_folder, 'acg_population_logit_prep.mat');
-% acg2features scores the lags it is given. The checkpoint axis is
-% two-sided, and the rhythmicity function uses the positive side.
-positive_lag = lag > 0;
-feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positive_lag));
+feature_table = acg2features(imagesc_sum_power_high, lag);
 
 save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
@@ -129,8 +126,7 @@ if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
     load(prep_file)
 end
 if ~exist('feature_table', 'var')
-    positive_lag = lag > 0;
-    feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positive_lag));
+    feature_table = acg2features(imagesc_sum_power_high, lag);
 end
 
 rng(42);
@@ -345,25 +341,18 @@ ACG_PCA = struct( ...
 disp('Run section 3 to keep k-means cluster 1.')
 
 %% 3. Choose the oscillatory neurons
-% Cluster 1 is the higher-modulation k-means group. Its rows are the
-% complete feature rows, not yet the image rows. The strongest modulation
-% is placed first.
+% Cluster 1 is the higher-modulation k-means group. idx_kmeans numbers
+% the complete feature rows, and find uses that order.
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
-if ~exist('idx_kmeans', 'var') || ~exist('complete_rows', 'var') ...
-        || ~exist('modulation_score', 'var') || ~exist('neuron_type', 'var')
+if ~exist('idx_kmeans', 'var') || ~exist('neuron_type', 'var')
     error('Plot_acg_population_logit:cluster', ...
         'The k-means split is not in the workspace. Run section 2 first.');
 end
 
-osc_score = nan(numel(neuron_type), 1);
-osc_score(complete_rows) = modulation_score;
-osc_member = false(numel(neuron_type), 1);
-osc_member(complete_rows(idx_kmeans == 1)) = true;
-osc_rows = oscillatory_member_rows(osc_member, osc_score);
+osc_rows = find(idx_kmeans == 1);
 osc_neuron_type = neuron_type(osc_rows);
-[type_percent, type_observed, type_total, lock_type_label] = ...
-    lock_type_osc_rate(neuron_type, osc_rows);
+[lock_type_count, lock_type_proportion, lock_type_label] = lock_type_proportion(osc_neuron_type);
 n_osc = numel(osc_rows);
 n_before_osc = numel(neuron_type);
 
@@ -378,8 +367,8 @@ for s = 1:numel(scale_id)
     end
 end
 high_minus_low = shown_logit.sum.power_high - shown_logit.sum.power_low;
-% Plain names for the oscillatory sum-to-1 images. Row 1 is the strongest
-% modulation. The same rows are neuron_type(osc_rows).
+% Plain names for the oscillatory sum-to-1 images. Row order is the
+% order of find(idx_kmeans == 1). The same rows are neuron_type(osc_rows).
 imagesc_osc_sum_all = shown_logit.sum.all;
 imagesc_osc_sum_power_high = shown_logit.sum.power_high;
 imagesc_osc_sum_power_low = shown_logit.sum.power_low;
@@ -465,19 +454,18 @@ for s = 1
         second_diff = mean(this_logit(:, second_peak_lag), 2, 'omitnan') ...
             - mean(this_logit(:, second_trough_lag), 2, 'omitnan');
         subplot(n_rows, n_cols, n_cols + c)
+        lm_fit = fitlm(first_diff, second_diff);
+        plot(lm_fit)
+        legend('off')
+        xlabel('First cycle, peak - trough')
+        ylabel('Second cycle, peak - trough')
         finite_pair = isfinite(first_diff) & isfinite(second_diff);
         if sum(finite_pair) < 3
-            plot(first_diff, second_diff, '.k')
             title('Too few neurons')
         else
-            cycle_fit = fitlm(first_diff(finite_pair), second_diff(finite_pair));
-            plot(cycle_fit)
-            legend off
             [r_mat, p_mat] = corrcoef(first_diff(finite_pair), second_diff(finite_pair));
             title(sprintf('r = %.2f, p = %.3g', r_mat(1, 2), p_mat(1, 2)))
         end
-        xlabel('First cycle, peak - trough')
-        ylabel('Second cycle, peak - trough')
         box off
 
         [high_percent, low_percent] = percentile_tail_fractions(this_pctl, high_cut, low_cut);
@@ -505,7 +493,7 @@ for s = 1
         box off
     end
     sgtitle({['Oscillatory neurons, ', scale_title{s}], ...
-        'K-means group with the higher modulation, strongest first.'})
+        'Sorted by high-power first peak minus first trough, shown as logit.'})
 end
 
 figure('Name', 'ACG population logit, high minus low power', ...
@@ -554,23 +542,25 @@ title('Red marks a paired difference at p < 0.05')
 box off
 
 type_color = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45; 0.75 0.75 0.75];
-figure('Name', 'Oscillatory cells within each lock type', ...
-    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.22 0.22 0.48 0.46])
-shown_percent = type_percent;
-shown_percent(~isfinite(shown_percent)) = 0;
-hold on
-type_legend = cell(1, 4);
-for k = 1:4
-    bar(k, shown_percent(k), 'FaceColor', type_color(k, :), 'BarWidth', 0.8)
-    type_legend{k} = sprintf('%s %d/%d', lock_type_label{k}, type_observed(k), type_total(k));
-    text(k, min(shown_percent(k) + 4, 108), sprintf('%d/%d', type_observed(k), type_total(k)), ...
-        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
+figure('Name', 'Oscillatory neuron lock types', ...
+    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.28 0.28 0.38 0.42])
+type_percent = 100 * lock_type_proportion;
+if n_osc < 1
+    type_percent = zeros(1, 4);
 end
-legend(type_legend, 'Location', 'northeast', 'Box', 'off')
+type_bar = bar(type_percent);
+type_bar.FaceColor = 'flat';
+type_bar.CData = type_color;
 set(gca, 'XTick', 1:4, 'XTickLabel', lock_type_label)
-ylabel('Oscillatory within type (%)')
-ylim([0 115])
-title(sprintf('Trough %d/%d, peak %d/%d, unlocked %d/%d, non-classified %d/%d', ...
-    type_observed(1), type_total(1), type_observed(2), type_total(2), ...
-    type_observed(3), type_total(3), type_observed(4), type_total(4)))
+ylabel('Oscillatory neurons (%)')
+ylim([0 100])
+if n_osc < 1
+    title('No oscillatory neurons')
+else
+    title(sprintf('Lock type among %d oscillatory neurons', n_osc))
+    for k = 1:4
+        text(k, min(type_percent(k) + 3, 96), sprintf('n = %d', lock_type_count(k)), ...
+            'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
+    end
+end
 box off
