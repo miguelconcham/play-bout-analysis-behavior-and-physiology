@@ -98,6 +98,8 @@ imagesc_sum_power_high = imagesc_logit.sum.power_high;
 imagesc_sum_power_low = imagesc_logit.sum.power_low;
 
 prep_file = fullfile(parsing_folder, 'acg_population_logit_prep.mat');
+% Positive lags are scored by quantify_acg_rhythmicity. A two-sided lag
+% axis is accepted.
 feature_table = acg2features(imagesc_sum_power_high, lag);
 
 save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
