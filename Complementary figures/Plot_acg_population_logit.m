@@ -375,6 +375,18 @@ if all(ismember({'Peak1', 'Peak2'}, table_names))
     shown_roles{end + 1} = 'not used in the split'; %#ok<AGROW>
 end
 if ~isempty(shown_titles)
+    n_shown = numel(shown_titles);
+    cluster_raw_p = nan(n_shown, 1);
+    for j = 1:n_shown
+        group_one = descriptor_values(idx_cluster == 1, j);
+        group_two = descriptor_values(idx_cluster == 2, j);
+        group_one = group_one(isfinite(group_one));
+        group_two = group_two(isfinite(group_two));
+        if numel(group_one) >= 2 && numel(group_two) >= 2
+            [~, cluster_raw_p(j)] = ttest2(group_one, group_two);
+        end
+    end
+    cluster_adjusted_p = holm_sidak_adjust(cluster_raw_p);
     figure('Name', ['Feature distributions by ', cluster_method_label, ' group'], ...
         'Color', 'w')
     n_descriptor_cols = 5;
@@ -409,11 +421,11 @@ if ~isempty(shown_titles)
         end
         set(gca, 'XTick', [1 2])
         xlim([0.4 2.6])
-        if numel(group_values{1}) < 2 || numel(group_values{2}) < 2
+        if ~isfinite(cluster_raw_p(j))
             p_text = 'Too few neurons';
         else
-            [~, feature_p] = ttest2(group_values{1}, group_values{2});
-            p_text = sprintf('uncorrected unpaired p = %.3g', feature_p);
+            p_text = sprintf('raw p = %.3g, Holm-Sidak p = %.3g', ...
+                cluster_raw_p(j), cluster_adjusted_p(j));
         end
         title({shown_titles{j}, shown_roles{j}, p_text}, 'Interpreter', 'none')
         xlabel([cluster_method_label, ' group'])
@@ -421,7 +433,7 @@ if ~isempty(shown_titles)
     end
     sgtitle({[cluster_method_label, ' cluster 1 is the higher modulation.'], ...
         'Black bars are means, joined to show the group difference.', ...
-        'Each p is an unpaired t-test and is not corrected across features.', ...
+        'Each test is unpaired. Holm-Sidak is across the panels of this figure.', ...
         'Peak1 - Peak2 is the drop from the first peak to the second.'})
 end
 
@@ -804,6 +816,15 @@ if all(ismember({'Peak1', 'Peak2'}, high_names)) ...
     compare_titles{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
 end
 if ~isempty(compare_titles)
+    n_compare = numel(compare_titles);
+    paired_raw_p = nan(n_compare, 1);
+    for j = 1:n_compare
+        pair = isfinite(high_compare(:, j)) & isfinite(low_compare(:, j));
+        if sum(pair) >= 2
+            [~, paired_raw_p(j)] = ttest(high_compare(pair, j), low_compare(pair, j));
+        end
+    end
+    paired_adjusted_p = holm_sidak_adjust(paired_raw_p);
     figure('Name', 'High versus low power features, oscillatory neurons', ...
         'Color', 'w')
     n_compare_cols = 5;
@@ -833,12 +854,11 @@ if ~isempty(compare_titles)
             scatter(2 + point_offset, y_low, 12, [0 0 0], 'filled', ...
                 'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
         end
-        if sum(pair) < 2
+        if ~isfinite(paired_raw_p(j))
             title({compare_titles{j}, 'Too few neurons'}, 'Interpreter', 'none')
         else
-            [~, feature_p] = ttest(high_vals(pair), low_vals(pair));
-            title({compare_titles{j}, sprintf('uncorrected p = %.3g', feature_p)}, ...
-                'Interpreter', 'none')
+            title({compare_titles{j}, sprintf('raw p = %.3g, Holm-Sidak p = %.3g', ...
+                paired_raw_p(j), paired_adjusted_p(j))}, 'Interpreter', 'none')
         end
         xlim([0.4 2.6])
         set(gca, 'XTick', [1 2], 'XTickLabel', {'High power', 'Low power'})
@@ -846,7 +866,7 @@ if ~isempty(compare_titles)
     end
     sgtitle({'Same oscillatory neurons at high and low power.', ...
         'Thin lines join one neuron. Thick bars are means and the line between them.', ...
-        'Each p is a paired t-test and is not corrected across features.'})
+        'Each test is paired. Holm-Sidak is across the panels of this figure.'})
 end
 
 type_color = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45; 0.75 0.75 0.75];
@@ -1001,6 +1021,44 @@ end
 mean_value = mean(y);
 plot([x_center - 0.36, x_center + 0.36], [mean_value, mean_value], ...
     'k', 'LineWidth', 2.8, 'HandleVisibility', 'off')
+end
+
+
+function adjusted = holm_sidak_adjust(raw_p)
+%HOLM_SIDAK_ADJUST  Step-down Holm-Sidak adjusted p-values.
+%
+% Non-finite raw p-values stay out of the family. For the rank-r test in
+% a family of m, the Sidak value is 1 - (1 - p)^(m - r + 1). The adjusted
+% values then cannot decrease as the raw p increases, and they are capped
+% at 1. One finite p is returned unchanged.
+
+adjusted = nan(size(raw_p));
+usable = isfinite(raw_p);
+p = raw_p(usable);
+p = p(:);
+n_tests = numel(p);
+if n_tests == 0
+    return
+end
+p = min(max(p, 0), 1);
+[sorted_p, order] = sort(p);
+sorted_adjusted = zeros(n_tests, 1);
+running_max = 0;
+for rank = 1:n_tests
+    remaining = n_tests - rank + 1;
+    this_adjusted = 1 - (1 - sorted_p(rank)) ^ remaining;
+    if this_adjusted < running_max
+        this_adjusted = running_max;
+    end
+    if this_adjusted > 1
+        this_adjusted = 1;
+    end
+    running_max = this_adjusted;
+    sorted_adjusted(rank) = this_adjusted;
+end
+unsorted = nan(n_tests, 1);
+unsorted(order) = sorted_adjusted;
+adjusted(usable) = unsorted;
 end
 
 
