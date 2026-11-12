@@ -203,7 +203,7 @@ fprintf('Features retained after variance check:\n');
 disp(feature_names(:)')
 
 feature_correlation = corr(X, 'Rows', 'complete');
-figure('Name', 'ACG feature correlations', 'Color', 'w')
+open_full_figure('ACG feature correlations')
 heatmap(feature_names, feature_names, feature_correlation, 'ColorLimits', [-1 1])
 title('Correlation between ACG features')
 save_script_figure(output_folder)
@@ -215,7 +215,7 @@ Xz = (X - feature_mean) ./ feature_sigma;
 % pca_mu is the centering of this PCA. Section 4 uses it to place the
 % low-power features in the same plane. t-SNE has no equivalent transform.
 [pca_coeff, pca_score, pca_latent, ~, pca_explained, pca_mu] = pca(Xz);
-figure('Name', 'PCA variance explained', 'Color', 'w')
+open_full_figure('PCA variance explained')
 subplot(1, 2, 1)
 bar(pca_explained)
 xlabel('Principal component')
@@ -230,7 +230,7 @@ ylim([0 100])
 grid on
 save_script_figure(output_folder)
 
-figure('Name', 'PCA population structure', 'Color', 'w')
+open_full_figure('PCA population structure')
 scatter(pca_score(:, 1), pca_score(:, 2), 35, 'filled', 'MarkerFaceAlpha', 0.7)
 xlabel(sprintf('PC1 (%.1f%%)', pca_explained(1)))
 ylabel(sprintf('PC2 (%.1f%%)', pca_explained(2)))
@@ -239,7 +239,7 @@ grid on
 axis square
 save_script_figure(output_folder)
 
-figure('Name', 'PCA feature loadings', 'Color', 'w')
+open_full_figure('PCA feature loadings')
 biplot(pca_coeff(:, 1:2), 'Scores', pca_score(:, 1:2), 'VarLabels', feature_names)
 title('PCA loadings and neuron scores')
 save_script_figure(output_folder)
@@ -260,7 +260,7 @@ for k = 1:numel(perplexity_values)
         'Distance', 'euclidean');
 end
 
-figure('Name', 'ACG t-SNE', 'Color', 'w')
+open_full_figure('ACG t-SNE')
 for k = 1:numel(perplexity_values)
     subplot(1, numel(perplexity_values), k)
     scatter(Y_tsne{k}(:, 1), Y_tsne{k}(:, 2), 30, 'filled', 'MarkerFaceAlpha', 0.7)
@@ -289,7 +289,7 @@ if numel(unique(idx_kmeans)) < 2 || numel(unique(idx_ward)) < 2
         'One of the two-group splits did not use both groups.');
 end
 
-figure('Name', 'Comparison of exploratory partitions', 'Color', 'w')
+open_full_figure('Comparison of exploratory partitions')
 tiledlayout(2, 3, 'TileSpacing', 'compact')
 nexttile
 gscatter(pca_score(:, 1), pca_score(:, 2), idx_kmeans)
@@ -323,7 +323,7 @@ colorbar
 disp(group_counts)
 save_script_figure(output_folder)
 
-figure('Name', 'Silhouette comparison', 'Color', 'w')
+open_full_figure('Silhouette comparison')
 subplot(1, 2, 1)
 sil_kmeans = silhouette(Xz, idx_kmeans, 'euclidean');
 title('K-means')
@@ -430,8 +430,7 @@ if ~isempty(shown_titles)
     for j = 1:n_shown
         cluster_stats(j).holm_p = cluster_adjusted_p(j);
     end
-    figure('Name', ['Feature distributions by ', cluster_method_label, ' group'], ...
-        'Color', 'w')
+    open_full_figure(['Feature distributions by ', cluster_method_label, ' group'])
     n_descriptor_cols = 5;
     tiledlayout(ceil(numel(shown_titles) / n_descriptor_cols), n_descriptor_cols, ...
         'TileSpacing', 'compact')
@@ -556,11 +555,12 @@ for k = 1:numel(lock_type_label)
     type_lines{k} = sprintf('%-16s %d/%d   %.1f%%', lock_type_label{k}, ...
         type_observed(k), type_total(k), type_percent(k));
 end
-write_summary_section(output_folder, '3. Oscillatory neurons kept for the figures', strjoin([{ ...
+write_summary_section(output_folder, '3. Oscillatory neurons kept for the figures', join_summary_lines( ...
     ['Output folder: ', output_folder], ...
     sprintf('Oscillatory neurons: %d of %d', n_osc, n_before_osc), ...
     'Cluster 1 of the chosen split, strongest modulation first.', ...
-    'Share of each lock type that is in that group:'}, type_lines], newline))
+    'Share of each lock type that is in that group:', ...
+    type_lines))
 
 %% 4. Figures
 % Re-run this section after editing the figure. Section 3 does not need
@@ -606,8 +606,7 @@ cycle_r = nan(1, n_cols);
 cycle_p = nan(1, n_cols);
 
 for s = 1
-    figure('Name', ['ACG population logit, ', scale_title{s}], ...
-        'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.06 0.08 0.88 0.84])
+    open_full_figure(['ACG population logit, ', scale_title{s}])
     for c = 1:n_cols
         this_logit = shown_logit.(scale_id{s}).(column_id{c});
         this_pctl = shown_percentile.(scale_id{s}).(column_id{c});
@@ -693,8 +692,7 @@ for s = 1
     save_script_figure(output_folder)
 end
 
-figure('Name', 'ACG population logit, high minus low power', ...
-    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.18 0.16 0.52 0.68])
+open_full_figure('ACG population logit, high minus low power')
 subplot(2, 1, 1)
 if n_osc < 1
     title('No oscillatory neurons')
@@ -774,8 +772,7 @@ pca_groups = { ...
     pca_score(osc_in_complete, 1:2), ...
     pca_score(~osc_in_complete, 1:2), ...
     low_xy(finite_projection, :)};
-figure('Name', 'Low-power ACGs in the high-power PCA', ...
-    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.06 0.18 0.88 0.48])
+open_full_figure('Low-power ACGs in the high-power PCA')
 pca_axes = gobjects(1, 3);
 for g = 1:3
     pca_axes(g) = subplot(1, 3, g);
@@ -827,8 +824,7 @@ tsne_groups = { ...
     Y_power(group_id == 1, :), ...
     Y_power(group_id == 2, :), ...
     Y_power(group_id == 3, :)};
-figure('Name', 't-SNE with low-power oscillatory neurons', ...
-    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.06 0.16 0.88 0.48])
+open_full_figure('t-SNE with low-power oscillatory neurons')
 tsne_axes = gobjects(1, 3);
 for g = 1:3
     tsne_axes(g) = subplot(1, 3, g);
@@ -903,8 +899,7 @@ if ~isempty(compare_titles)
     for j = 1:n_compare
         paired_stats(j).holm_p = paired_adjusted_p(j);
     end
-    figure('Name', 'High versus low power features, oscillatory neurons', ...
-        'Color', 'w')
+    open_full_figure('High versus low power features, oscillatory neurons')
     n_compare_cols = 5;
     tiledlayout(ceil(numel(compare_titles) / n_compare_cols), n_compare_cols, ...
         'TileSpacing', 'compact')
@@ -952,8 +947,7 @@ else
 end
 
 type_color = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45; 0.75 0.75 0.75];
-figure('Name', 'Oscillatory cells within each lock type', ...
-    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.22 0.22 0.48 0.46])
+open_full_figure('Oscillatory cells within each lock type')
 shown_percent = type_percent;
 shown_percent(~isfinite(shown_percent)) = 0;
 hold on
@@ -1164,6 +1158,89 @@ offset = linspace(-0.12, 0.12, n_points).';
 end
 
 
+function fig = open_full_figure(name)
+%OPEN_FULL_FIGURE  White figure that fills the screen.
+
+fig = figure('Name', name, 'Color', 'w');
+make_figure_fullscreen(fig)
+end
+
+
+function make_figure_fullscreen(fig)
+set(fig, 'Units', 'normalized', 'OuterPosition', [0 0 1 1])
+if isprop(fig, 'WindowState')
+    set(fig, 'WindowState', 'maximized')
+end
+end
+
+
+function square_plot_boxes(fig)
+%SQUARE_PLOT_BOXES  Keep each panel square inside the full-screen figure.
+
+ax = findall(fig, 'Type', 'axes');
+for k = 1:numel(ax)
+    this_class = class(ax(k));
+    if ~isempty(strfind(this_class, 'ColorBar'))
+        continue
+    end
+    tag = '';
+    try
+        tag = get(ax(k), 'Tag');
+    catch
+    end
+    if strcmpi(tag, 'legend') || strcmpi(tag, 'Colorbar')
+        continue
+    end
+    try
+        axis(ax(k), 'square')
+    catch
+    end
+end
+charts = findall(fig, 'Type', 'heatmap');
+for k = 1:numel(charts)
+    square_chart_position(charts(k))
+end
+end
+
+
+function square_chart_position(chart)
+try
+    pos = get(chart, 'Position');
+catch
+    return
+end
+if numel(pos) < 4 || min(pos(3:4)) <= 0
+    return
+end
+side = min(pos(3), pos(4));
+pos(1) = pos(1) + (pos(3) - side) / 2;
+pos(2) = pos(2) + (pos(4) - side) / 2;
+pos(3) = side;
+pos(4) = side;
+try
+    set(chart, 'Position', pos)
+catch
+end
+end
+
+
+function text = join_summary_lines(varargin)
+%JOIN_SUMMARY_LINES  One summary string from text and from a row or column of lines.
+
+lines = cell(1, 0);
+for k = 1:nargin
+    piece = varargin{k};
+    if iscell(piece)
+        piece = piece(:).';
+    else
+        piece = {piece};
+    end
+    lines = [lines, piece]; %#ok<AGROW>
+end
+text = strjoin(lines, newline);
+end
+
+
 function save_script_figure(folder)
 %SAVE_SCRIPT_FIGURE  Write the current figure as svg and jpg.
 
@@ -1174,6 +1251,8 @@ if exist(folder, 'dir') ~= 7
     mkdir(folder);
 end
 fig = gcf;
+make_figure_fullscreen(fig)
+square_plot_boxes(fig)
 drawnow
 name = regexprep(strtrim(get(fig, 'Name')), '[^\w]+', '_');
 name = regexprep(name, '^_|_$', '');
@@ -1274,7 +1353,7 @@ for k = 1:numel(pca_explained)
 end
 perplexity_text = sprintf('%g ', perplexity_values);
 perplexity_text = strtrim(perplexity_text);
-write_summary_section(folder, '2. Features kept for the split', strjoin({ ...
+write_summary_section(folder, '2. Features kept for the split', join_summary_lines( ...
     ['Output folder: ', folder], ...
     'Figures from this section are saved there as jpg and svg.', ...
     sprintf('Neurons in the feature table: %d', n_neurons), ...
@@ -1282,15 +1361,14 @@ write_summary_section(folder, '2. Features kept for the split', strjoin({ ...
     sprintf('Rows excluded for a missing feature: %d', n_excluded), ...
     ['Features in the split: ', strjoin(feature_names, ', ')], ...
     'Correlation of those standardized features:', ...
-    labeled_number_matrix('Feature', feature_names, feature_names, feature_correlation, '%.3f')}, ...
-    newline))
-write_summary_section(folder, '2. PCA', strjoin([{ ...
+    labeled_number_matrix('Feature', feature_names, feature_names, feature_correlation, '%.3f')))
+write_summary_section(folder, '2. PCA', join_summary_lines( ...
     'PCA of the standardized features that entered the split.', ...
-    'Variance explained:'}, pca_lines], newline))
-write_summary_section(folder, '2. t-SNE', strjoin({ ...
+    'Variance explained:', pca_lines))
+write_summary_section(folder, '2. t-SNE', join_summary_lines( ...
     't-SNE of the same standardized features. Distance: Euclidean. Seed: 42.', ...
-    ['Perplexities: ', perplexity_text]}, newline))
-write_summary_section(folder, '2. K-means and Ward', strjoin({ ...
+    ['Perplexities: ', perplexity_text]))
+write_summary_section(folder, '2. K-means and Ward', join_summary_lines( ...
     'Both splits use two groups. The count figure is drawn before relabeling.', ...
     'K-means by Ward, before relabeling:', ...
     labeled_number_matrix('K-means', {'cluster 1', 'cluster 2'}, ...
@@ -1307,7 +1385,7 @@ write_summary_section(folder, '2. K-means and Ward', strjoin({ ...
         {'Ward 1', 'Ward 2'}, counts_after, '%.0f'), ...
     sprintf('Mean silhouette, Euclidean: k-means = %.4g, Ward = %.4g', ...
         mean_sil_kmeans, mean_sil_ward), ...
-    ['The oscillatory group is ', cluster_method_label, ' cluster 1.']}, newline))
+    ['The oscillatory group is ', cluster_method_label, ' cluster 1.']))
 write_summary_section(folder, ...
     '2. Feature comparison, oscillatory versus non-oscillatory', ...
     feature_comparison_report(cluster_stats, 'unpaired'))
@@ -1345,28 +1423,29 @@ for k = 1:numel(lock_type_label)
     type_lines{k} = sprintf('%-16s %d/%d   %.1f%%', lock_type_label{k}, ...
         type_observed(k), type_total(k), type_percent(k));
 end
-write_summary_section(folder, '4. Oscillatory logit figure', strjoin([{ ...
+write_summary_section(folder, '4. Oscillatory logit figure', join_summary_lines( ...
     ['Output folder: ', folder], ...
     'Figures from this section are saved there as jpg and svg.', ...
     'Pearson correlation of the first cycle (peak minus trough) with the second cycle.', ...
-    'The p on the figure is uncorrected. These three correlations are not in the Holm-Sidak family.'}, ...
-    cycle_lines], newline))
-write_summary_section(folder, '4. High power minus low power across lag', strjoin({ ...
+    'The p on the figure is uncorrected. These three correlations are not in the Holm-Sidak family.', ...
+    cycle_lines))
+write_summary_section(folder, '4. High power minus low power across lag', join_summary_lines( ...
     'Each lag is a paired t-test of the same oscillatory neurons, high power minus low power.', ...
     'Red points on the figure mark uncorrected p < 0.05.', ...
     'These lag tests are not part of the Holm-Sidak correction used for the feature panels.', ...
-    lag_line}, newline))
-write_summary_section(folder, '4. Low-power points in the PCA and t-SNE', strjoin({ ...
+    lag_line))
+write_summary_section(folder, '4. Low-power points in the PCA and t-SNE', join_summary_lines( ...
     sprintf('PCA counts. Oscillatory high power: %d. Other high-power group: %d. Oscillatory low power with a finite projection: %d.', ...
         n_osc_high, n_other_high, n_osc_low_pca), ...
     sprintf('New t-SNE perplexity: %g.', embed_perplexity), ...
     sprintf('Low-power oscillatory neurons included: %d. Omitted for missing low-power features: %d.', ...
-        n_osc_low_tsne, n_omitted)}, newline))
+        n_osc_low_tsne, n_omitted)))
 write_summary_section(folder, '4. Feature comparison, high versus low power', ...
     feature_comparison_report(paired_stats, 'paired'))
-write_summary_section(folder, '4. Oscillatory share of each lock type', strjoin([{ ...
+write_summary_section(folder, '4. Oscillatory share of each lock type', join_summary_lines( ...
     'Percent of each lock type that belongs to the oscillatory group.', ...
-    'The label is observed/total.'}, type_lines], newline))
+    'The label is observed/total.', ...
+    type_lines))
 end
 
 
