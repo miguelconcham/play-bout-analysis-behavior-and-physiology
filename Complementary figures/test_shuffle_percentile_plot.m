@@ -60,6 +60,20 @@ mismatch = make_record('trough', [0.1 0.2], [8 9]);
 [~, matched] = percentile_curve_stack({early, mismatch}, 'locking', 'low', 'sum_pctl');
 assert(isequal(size(matched), [1 3]), 'A curve on a different lag axis was kept.');
 
+lag = [0.05 0.25 0.35 0.60];
+unsorted = [90 10 10 90; 10 80 70 10; NaN NaN NaN 40];
+[sorted_pctl, sorted_logit, score] = order_percentile_rows(unsorted, lag, [0.2 0.4], 500);
+assert(abs(score(1) - mean([80 70])) < 1e-12, ...
+    'The sort score was not the mean percentile from 200 to 400 ms.');
+assert(abs(score(2) - mean([10 10])) < 1e-12, ...
+    'Lags outside 200 to 400 ms changed the sort score.');
+assert(isequal(sorted_pctl(1, :), unsorted(2, :)), ...
+    'The higher 200-400 ms percentile was not the first row.');
+assert(all(isnan(sorted_pctl(3, 1:3))), ...
+    'A neuron with no percentile in the window was not placed last.');
+assert(all(isfinite(sorted_logit(1:2, :))), ...
+    'A sorted percentile of 0 or 100 made the logit infinite.');
+
 disp('test_shuffle_percentile_plot passed')
 end
 
