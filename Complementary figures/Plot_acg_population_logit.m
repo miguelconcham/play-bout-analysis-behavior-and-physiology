@@ -2,9 +2,11 @@
 % All neurons together, on a logit scale, from a saved ACG shuffle.
 %
 % Overlap is the standard method. Section 1 loads
-% locking_period_acg_shuffle_n500.mat and builds the matrices. Section 2
-% chooses the oscillatory neurons. Section 3 only draws. After section 2
-% has run, edit section 3 and run that section alone.
+% locking_period_acg_shuffle_n500.mat and builds the matrices and
+% feature_table. Section 2 runs PCA, t-SNE, and the two-group split.
+% Section 3 keeps k-means cluster 1, the higher-modulation group.
+% Section 4 only draws. After section 3 has run, edit section 4 and run
+% that section alone.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -13,11 +15,11 @@
 % classified. sort_score.* is the mean percentile from 200 to 400 ms.
 % Row 1 is the highest all-runs sum-to-1 score.
 %
-% Section 2 keeps a neuron when, on the high 25% power sum-to-1 logit,
-% the mean in the first peak window exceeds the mean in the first trough
-% window by more than osc_difference_threshold. shown_logit is that
-% subset, strongest difference first. imagesc_osc_sum_all is the same
-% sum-to-1 image under a plain name. osc_neuron_type is its lock group.
+% Section 2 builds ACG features from the high-power sum-to-1 logit and
+% splits the neurons with k-means. Cluster 1 is the group with the higher
+% modulation. shown_logit is that group, strongest modulation first.
+% imagesc_osc_sum_all is the same sum-to-1 image under a plain name.
+% osc_neuron_type is its lock group. feature_table has one row per neuron.
 
 %% 1. Load the checkpoint and build the imagesc matrices
 this_dir = fileparts(mfilename('fullpath'));
@@ -96,44 +98,268 @@ imagesc_sum_power_high = imagesc_logit.sum.power_high;
 imagesc_sum_power_low = imagesc_logit.sum.power_low;
 
 prep_file = fullfile(parsing_folder, 'acg_population_logit_prep.mat');
+feature_table = acg2features(imagesc_sum_power_high, lag);
+
 save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
-    'neuron_type', 'neuron_record_index', ...
+    'neuron_type', 'neuron_record_index', 'feature_table', ...
     'column_id', 'column_title', 'scale_id', 'scale_title', ...
     'n_shuffles', 'sort_window_s', 'checkpoint', 'prep_file');
 disp(['Section 1 saved the matrices to ', prep_file])
 disp('imagesc_sum_all is neurons by lag. neuron_type is the lock group of each row.')
-disp('Run section 2 to choose the oscillatory neurons.')
+disp('feature_table is one row of ACG features per neuron. Run section 2 to classify.')
 
-%% 2. Choose the oscillatory neurons
-% Re-run this section after changing the windows or the threshold.
-% Section 1 does not need to run again while its variables are loaded.
+%% 2. ACG features, PCA, t-SNE, and the two-group split
+% Re-run this section after changing the feature list. Section 1 does not
+% need to run again while feature_table is still in the workspace.
+% Cluster 1 is the k-means group with the higher modulation. Section 3
+% uses that group. The PCA and t-SNE figures are there to see whether the
+% same split is visible. They do not choose the neurons.
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
-if ~exist('imagesc_logit', 'var') || ~exist('neuron_type', 'var')
+if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
+        || ~exist('imagesc_sum_power_high', 'var')
     data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
         'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
     parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
     prep_file = fullfile(parsing_folder, 'acg_population_logit_prep.mat');
     load(prep_file)
 end
-if ~exist('neuron_type', 'var')
-    error('Plot_acg_population_logit:neuronType', ...
-        'The prep file has no neuron type. Run section 1 again.');
+if ~exist('feature_table', 'var')
+    feature_table = acg2features(imagesc_sum_power_high, lag);
 end
 
-% Open intervals, in seconds. Row 1 is the first cycle. Row 2 is the second.
-trough_windows_s = [0.05 0.15; 0.35 0.45];
-peak_windows_s = [0.25 0.35; 0.45 0.55];
-% High-power sum-to-1 logit: mean(first peak) - mean(first trough) must
-% exceed this value. The same neurons are then used for every column.
-osc_difference_threshold = 0;
+rng(42);
 
-[osc_rows, osc_score] = oscillatory_row_index( ...
-    imagesc_logit.sum.power_high, lag, peak_windows_s(1, :), trough_windows_s(1, :), ...
-    osc_difference_threshold);
+candidate_features = { ...
+    'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
+    'OscillationScore', 'Baseline'};
+feature_names = candidate_features( ...
+    ismember(candidate_features, feature_table.Properties.VariableNames));
+if isempty(feature_names)
+    error('Plot_acg_population_logit:features', ...
+        'No candidate features were found in feature_table.');
+end
+X_raw = feature_table{:, feature_names};
+if ~isnumeric(X_raw)
+    error('Plot_acg_population_logit:features', 'Selected features must be numeric.');
+end
+fprintf('Selected features:\n');
+disp(feature_names(:)')
+
+% K-means below numbers only these complete rows. Section 3 maps them
+% back onto the image rows.
+valid_rows = all(isfinite(X_raw), 2);
+X = X_raw(valid_rows, :);
+fprintf('Total neurons: %d\n', size(X_raw, 1));
+fprintf('Neurons retained: %d\n', size(X, 1));
+fprintf('Neurons excluded: %d\n', sum(~valid_rows));
+if size(X, 1) < 10
+    error('Plot_acg_population_logit:features', ...
+        'Too few complete neurons for a meaningful PCA or t-SNE analysis.');
+end
+
+feature_sd = std(X, 0, 1);
+keep_features = feature_sd > eps(max(abs(X(:))));
+X = X(:, keep_features);
+feature_names = feature_names(keep_features);
+if numel(feature_names) < 2
+    error('Plot_acg_population_logit:features', ...
+        'Fewer than two variable features remain.');
+end
+fprintf('Features retained after variance check:\n');
+disp(feature_names(:)')
+
+feature_correlation = corr(X, 'Rows', 'complete');
+figure('Name', 'ACG feature correlations', 'Color', 'w')
+heatmap(feature_names, feature_names, feature_correlation, 'ColorLimits', [-1 1])
+title('Correlation between ACG features')
+
+feature_mean = mean(X, 1);
+feature_sigma = std(X, 0, 1);
+Xz = (X - feature_mean) ./ feature_sigma;
+
+[pca_coeff, pca_score, pca_latent, ~, pca_explained] = pca(Xz);
+figure('Name', 'PCA variance explained', 'Color', 'w')
+subplot(1, 2, 1)
+bar(pca_explained)
+xlabel('Principal component')
+ylabel('Variance explained (%)')
+title('Variance explained')
+subplot(1, 2, 2)
+plot(cumsum(pca_explained), '-o', 'LineWidth', 1.5)
+xlabel('Number of components')
+ylabel('Cumulative variance explained (%)')
+title('Cumulative variance')
+ylim([0 100])
+grid on
+
+figure('Name', 'PCA population structure', 'Color', 'w')
+scatter(pca_score(:, 1), pca_score(:, 2), 35, 'filled', 'MarkerFaceAlpha', 0.7)
+xlabel(sprintf('PC1 (%.1f%%)', pca_explained(1)))
+ylabel(sprintf('PC2 (%.1f%%)', pca_explained(2)))
+title('ACG features: PCA')
+grid on
+axis square
+
+figure('Name', 'PCA feature loadings', 'Color', 'w')
+biplot(pca_coeff(:, 1:2), 'Scores', pca_score(:, 1:2), 'VarLabels', feature_names)
+title('PCA loadings and neuron scores')
+
+n_complete = size(Xz, 1);
+perplexity_values = [5 15 30 50];
+perplexity_values = perplexity_values(perplexity_values < (n_complete - 1) / 3);
+if isempty(perplexity_values)
+    perplexity_values = max(2, floor((n_complete - 1) / 3));
+end
+Y_tsne = cell(numel(perplexity_values), 1);
+for k = 1:numel(perplexity_values)
+    rng(42);
+    Y_tsne{k} = tsne(Xz, ...
+        'NumDimensions', 2, ...
+        'Perplexity', perplexity_values(k), ...
+        'Standardize', false, ...
+        'Distance', 'euclidean');
+end
+
+figure('Name', 'ACG t-SNE', 'Color', 'w')
+for k = 1:numel(perplexity_values)
+    subplot(1, numel(perplexity_values), k)
+    scatter(Y_tsne{k}(:, 1), Y_tsne{k}(:, 2), 30, 'filled', 'MarkerFaceAlpha', 0.7)
+    xlabel('t-SNE 1')
+    ylabel('t-SNE 2')
+    title(sprintf('Perplexity = %d', perplexity_values(k)))
+    axis square
+    grid on
+end
+
+rng(42);
+[idx_kmeans, kmeans_centers] = kmeans(Xz, 2, ...
+    'Distance', 'sqeuclidean', ...
+    'Replicates', 100, ...
+    'MaxIter', 1000);
+fprintf('\nK-means cluster sizes:\n');
+disp(accumarray(idx_kmeans, 1))
+
+ward_tree = linkage(Xz, 'ward');
+idx_ward = cluster(ward_tree, 'maxclust', 2);
+fprintf('\nWard cluster sizes:\n');
+disp(accumarray(idx_ward, 1))
+if numel(unique(idx_kmeans)) < 2 || numel(unique(idx_ward)) < 2
+    error('Plot_acg_population_logit:cluster', ...
+        'One of the two-group splits did not use both groups.');
+end
+
+figure('Name', 'Comparison of exploratory partitions', 'Color', 'w')
+tiledlayout(2, 3, 'TileSpacing', 'compact')
+nexttile
+gscatter(pca_score(:, 1), pca_score(:, 2), idx_kmeans)
+title('PCA: k-means')
+xlabel('PC1')
+ylabel('PC2')
+grid on
+nexttile
+gscatter(pca_score(:, 1), pca_score(:, 2), idx_ward)
+title('PCA: Ward')
+xlabel('PC1')
+ylabel('PC2')
+grid on
+nexttile
+tsne_for_groups = Y_tsne{min(2, numel(Y_tsne))};
+gscatter(tsne_for_groups(:, 1), tsne_for_groups(:, 2), idx_kmeans)
+title('t-SNE: k-means assignments')
+grid on
+nexttile
+gscatter(tsne_for_groups(:, 1), tsne_for_groups(:, 2), idx_ward)
+title('t-SNE: Ward assignments')
+grid on
+nexttile
+group_counts = crosstab(idx_kmeans, idx_ward);
+imagesc(group_counts)
+set(gca, 'XTick', 1:size(group_counts, 2), 'YTick', 1:size(group_counts, 1))
+xlabel('Ward')
+ylabel('K-means')
+title('K-means vs Ward counts')
+colorbar
+disp(group_counts)
+
+figure('Name', 'Feature distributions by k-means group', 'Color', 'w')
+tiledlayout(2, ceil(numel(feature_names) / 2), 'TileSpacing', 'compact')
+for j = 1:numel(feature_names)
+    nexttile
+    boxchart(categorical(idx_kmeans), X(:, j))
+    title(feature_names{j}, 'Interpreter', 'none')
+    xlabel('K-means group')
+    grid on
+end
+
+figure('Name', 'Silhouette comparison', 'Color', 'w')
+subplot(1, 2, 1)
+silhouette(Xz, idx_kmeans, 'euclidean')
+title('K-means')
+subplot(1, 2, 2)
+silhouette(Xz, idx_ward, 'euclidean')
+title('Ward')
+
+modulation_names = {'Modulation1', 'Modulation2'};
+modulation_column = find(ismember(feature_names, modulation_names));
+if isempty(modulation_column)
+    error('Plot_acg_population_logit:features', 'No modulation features remain.');
+end
+modulation_score = mean(Xz(:, modulation_column), 2, 'omitnan');
+kmeans_modulation = [ ...
+    mean(modulation_score(idx_kmeans == 1)); ...
+    mean(modulation_score(idx_kmeans == 2))];
+if kmeans_modulation(2) > kmeans_modulation(1)
+    idx_kmeans = 3 - idx_kmeans;
+end
+ward_modulation = [ ...
+    mean(modulation_score(idx_ward == 1)); ...
+    mean(modulation_score(idx_ward == 2))];
+if ward_modulation(2) > ward_modulation(1)
+    idx_ward = 3 - idx_ward;
+end
+fprintf('\nAfter relabeling, cluster 1 is the higher-modulation group.\n')
+
+complete_rows = find(valid_rows);
+ACG_PCA = struct( ...
+    'feature_names', {feature_names}, ...
+    'complete_rows', complete_rows, ...
+    'X', X, ...
+    'Xz', Xz, ...
+    'coeff', pca_coeff, ...
+    'score', pca_score, ...
+    'explained', pca_explained, ...
+    'latent', pca_latent, ...
+    'Y_tsne', {Y_tsne}, ...
+    'perplexity', perplexity_values, ...
+    'idx_kmeans', idx_kmeans, ...
+    'idx_ward', idx_ward, ...
+    'kmeans_centers', kmeans_centers, ...
+    'modulation_score', modulation_score, ...
+    'valid_rows', valid_rows);
+disp('Run section 3 to keep k-means cluster 1.')
+
+%% 3. Choose the oscillatory neurons
+% Cluster 1 is the higher-modulation k-means group. Its rows are the
+% complete feature rows, not yet the image rows. The strongest modulation
+% is placed first.
+this_dir = fileparts(mfilename('fullpath'));
+addpath(this_dir);
+if ~exist('idx_kmeans', 'var') || ~exist('complete_rows', 'var') ...
+        || ~exist('modulation_score', 'var') || ~exist('neuron_type', 'var')
+    error('Plot_acg_population_logit:cluster', ...
+        'The k-means split is not in the workspace. Run section 2 first.');
+end
+
+osc_score = nan(numel(neuron_type), 1);
+osc_score(complete_rows) = modulation_score;
+osc_member = false(numel(neuron_type), 1);
+osc_member(complete_rows(idx_kmeans == 1)) = true;
+osc_rows = oscillatory_member_rows(osc_member, osc_score);
 osc_neuron_type = neuron_type(osc_rows);
-[lock_type_count, lock_type_proportion, lock_type_label] = lock_type_proportion(osc_neuron_type);
+[type_percent, type_observed, type_total, lock_type_label] = ...
+    lock_type_osc_rate(neuron_type, osc_rows);
 n_osc = numel(osc_rows);
 n_before_osc = numel(neuron_type);
 
@@ -147,27 +373,30 @@ for s = 1:numel(scale_id)
             percentile.(scale_id{s}).(column_id{c})(osc_rows, :);
     end
 end
-% High-power minus low-power logit for the oscillatory neurons.
 high_minus_low = shown_logit.sum.power_high - shown_logit.sum.power_low;
 % Plain names for the oscillatory sum-to-1 images. Row 1 is the strongest
-% first-cycle peak minus trough. The same rows are neuron_type(osc_rows).
+% modulation. The same rows are neuron_type(osc_rows).
 imagesc_osc_sum_all = shown_logit.sum.all;
 imagesc_osc_sum_power_high = shown_logit.sum.power_high;
 imagesc_osc_sum_power_low = shown_logit.sum.power_low;
 
 disp(sprintf('Oscillatory neurons: %d of %d. shown_logit uses that row order.', ...
     n_osc, n_before_osc))
-disp('Run section 3 to draw.')
+disp('Run section 4 to draw.')
 
-%% 3. Figures
-% Re-run this section after editing the figure. Section 2 does not need
+%% 4. Figures
+% Re-run this section after editing the figure. Section 3 does not need
 % to run again while shown_logit is still in the workspace.
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
 if ~exist('shown_logit', 'var')
     error('Plot_acg_population_logit:shown', ...
-        'shown_logit is not in the workspace. Run section 2 first.');
+        'shown_logit is not in the workspace. Run section 3 first.');
 end
+
+% Open intervals, in seconds, for the cycle scatter below.
+trough_windows_s = [0.05 0.15; 0.35 0.45];
+peak_windows_s = [0.25 0.35; 0.45 0.55];
 
 % Symmetric color range for the logit image. 1 is about the 9th and 91st
 % percentiles. 2 is about the 1st and 99th.
@@ -191,7 +420,7 @@ if ~any(first_peak_lag) || ~any(first_trough_lag) ...
         'A peak or trough window contains no lag bin.')
 end
 
-for s = 1:numel(scale_id)
+for s = 1
     figure('Name', ['ACG population logit, ', scale_title{s}], ...
         'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.06 0.08 0.88 0.84])
     for c = 1:n_cols
@@ -232,16 +461,19 @@ for s = 1:numel(scale_id)
         second_diff = mean(this_logit(:, second_peak_lag), 2, 'omitnan') ...
             - mean(this_logit(:, second_trough_lag), 2, 'omitnan');
         subplot(n_rows, n_cols, n_cols + c)
-        plot(first_diff, second_diff, '.k')
-        xlabel('First cycle, peak - trough')
-        ylabel('Second cycle, peak - trough')
         finite_pair = isfinite(first_diff) & isfinite(second_diff);
         if sum(finite_pair) < 3
+            plot(first_diff, second_diff, '.k')
             title('Too few neurons')
         else
+            cycle_fit = fitlm(first_diff(finite_pair), second_diff(finite_pair));
+            plot(cycle_fit)
+            legend off
             [r_mat, p_mat] = corrcoef(first_diff(finite_pair), second_diff(finite_pair));
             title(sprintf('r = %.2f, p = %.3g', r_mat(1, 2), p_mat(1, 2)))
         end
+        xlabel('First cycle, peak - trough')
+        ylabel('Second cycle, peak - trough')
         box off
 
         [high_percent, low_percent] = percentile_tail_fractions(this_pctl, high_cut, low_cut);
@@ -269,7 +501,7 @@ for s = 1:numel(scale_id)
         box off
     end
     sgtitle({['Oscillatory neurons, ', scale_title{s}], ...
-        'Sorted by high-power first peak minus first trough, shown as logit.'})
+        'K-means group with the higher modulation, strongest first.'})
 end
 
 figure('Name', 'ACG population logit, high minus low power', ...
@@ -318,25 +550,23 @@ title('Red marks a paired difference at p < 0.05')
 box off
 
 type_color = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45; 0.75 0.75 0.75];
-figure('Name', 'Oscillatory neuron lock types', ...
-    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.28 0.28 0.38 0.42])
-type_percent = 100 * lock_type_proportion;
-if n_osc < 1
-    type_percent = zeros(1, 4);
+figure('Name', 'Oscillatory cells within each lock type', ...
+    'Color', 'w', 'Units', 'normalized', 'OuterPosition', [0.22 0.22 0.48 0.46])
+shown_percent = type_percent;
+shown_percent(~isfinite(shown_percent)) = 0;
+hold on
+type_legend = cell(1, 4);
+for k = 1:4
+    bar(k, shown_percent(k), 'FaceColor', type_color(k, :), 'BarWidth', 0.8)
+    type_legend{k} = sprintf('%s %d/%d', lock_type_label{k}, type_observed(k), type_total(k));
+    text(k, min(shown_percent(k) + 4, 108), sprintf('%d/%d', type_observed(k), type_total(k)), ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
 end
-type_bar = bar(type_percent);
-type_bar.FaceColor = 'flat';
-type_bar.CData = type_color;
+legend(type_legend, 'Location', 'northeast', 'Box', 'off')
 set(gca, 'XTick', 1:4, 'XTickLabel', lock_type_label)
-ylabel('Oscillatory neurons (%)')
-ylim([0 100])
-if n_osc < 1
-    title('No oscillatory neurons')
-else
-    title(sprintf('Lock type among %d oscillatory neurons', n_osc))
-    for k = 1:4
-        text(k, min(type_percent(k) + 3, 96), sprintf('n = %d', lock_type_count(k)), ...
-            'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
-    end
-end
+ylabel('Oscillatory within type (%)')
+ylim([0 115])
+title(sprintf('Trough %d/%d, peak %d/%d, unlocked %d/%d, non-classified %d/%d', ...
+    type_observed(1), type_total(1), type_observed(2), type_total(2), ...
+    type_observed(3), type_total(3), type_observed(4), type_total(4)))
 box off
