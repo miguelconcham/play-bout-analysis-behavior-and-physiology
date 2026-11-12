@@ -657,7 +657,8 @@ figure('Name', 'Low-power ACGs in the high-power PCA', ...
 pca_axes = gobjects(1, 3);
 for g = 1:3
     pca_axes(g) = subplot(1, 3, g);
-    draw_iso_probability(pca_all, pca_groups{g}, group_color(g, :))
+    draw_iso_probability(pca_all, pca_groups{g}, group_color(g, :), ...
+        low_xy(finite_projection, :), group_color(3, :))
     title(group_label{g}, 'Interpreter', 'none')
     xlabel(sprintf('PC1 (%.1f%%)', pca_explained(1)))
     ylabel(sprintf('PC2 (%.1f%%)', pca_explained(2)))
@@ -669,7 +670,8 @@ for g = 1:3
     set(pca_axes(g), 'XLim', pca_limits(1:2), 'YLim', pca_limits(3:4))
 end
 linkaxes(pca_axes, 'xy')
-sgtitle('Black points are every neuron. Filled bands are that group''s iso-probability.')
+sgtitle(['Black points are every neuron. Blue points are oscillatory neurons at low power. ', ...
+    'Filled bands are that panel''s group.'])
 
 low_member = osc_in_complete & all(isfinite(Xz_low), 2);
 X_embed = [Xz; Xz_low(low_member, :)];
@@ -707,7 +709,8 @@ figure('Name', 't-SNE with low-power oscillatory neurons', ...
 tsne_axes = gobjects(1, 3);
 for g = 1:3
     tsne_axes(g) = subplot(1, 3, g);
-    draw_iso_probability(Y_power, tsne_groups{g}, group_color(g, :))
+    draw_iso_probability(Y_power, tsne_groups{g}, group_color(g, :), ...
+        tsne_groups{3}, group_color(3, :))
     title({group_label{g}, sprintf('Perplexity = %g', embed_perplexity)}, ...
         'Interpreter', 'none')
     xlabel('t-SNE 1')
@@ -720,7 +723,8 @@ for g = 1:3
     set(tsne_axes(g), 'XLim', tsne_limits(1:2), 'YLim', tsne_limits(3:4))
 end
 linkaxes(tsne_axes, 'xy')
-sgtitle('Black points are every neuron. Filled bands are that group''s iso-probability.')
+sgtitle(['Black points are every neuron. Blue points are oscillatory neurons at low power. ', ...
+    'Filled bands are that panel''s group.'])
 
 % Same columns as the cluster violins. High values come from the
 % high-power feature table. Low values are the same neurons at low power.
@@ -824,59 +828,73 @@ title(sprintf('Trough %d/%d, peak %d/%d, unlocked %d/%d, non-classified %d/%d', 
 box off
 
 
-function draw_iso_probability(all_xy, group_xy, face_color)
+function draw_iso_probability(all_xy, group_xy, face_color, highlight_xy, highlight_color)
 %DRAW_ISO_PROBABILITY  Filled density bands for one group on a black cloud.
 %
 % The levels follow Figure 1 LDA: a kernel density on a shared grid, then
-% the density values that enclose 10% to 80% of that density, in steps of
-% 10%. Darker bands are the higher-density core.
+% the density values that enclose 10% to 90% of that density, in steps of
+% 10%. Darker bands are the higher-density core. highlight_xy is drawn
+% after the bands so those points stay visible on every panel.
 
+if nargin < 4
+    highlight_xy = zeros(0, 2);
+    highlight_color = [0 0 0];
+end
 all_xy = all_xy(all(isfinite(all_xy), 2), :);
 group_xy = group_xy(all(isfinite(group_xy), 2), :);
-if isempty(all_xy)
+highlight_xy = highlight_xy(all(isfinite(highlight_xy), 2), :);
+if isempty(all_xy) && isempty(highlight_xy)
     return
 end
-scatter(all_xy(:, 1), all_xy(:, 2), 12, [0 0 0], 'filled', ...
-    'MarkerFaceAlpha', 0.4, 'MarkerEdgeColor', 'none')
-hold on
-if size(group_xy, 1) < 3
-    return
+if ~isempty(all_xy)
+    scatter(all_xy(:, 1), all_xy(:, 2), 12, [0 0 0], 'filled', ...
+        'MarkerFaceAlpha', 0.4, 'MarkerEdgeColor', 'none')
+    hold on
 end
-span = max(all_xy, [], 1) - min(all_xy, [], 1);
-span(span <= 0) = 1;
-pad = 0.05 * span;
-x1 = linspace(min(all_xy(:, 1)) - pad(1), max(all_xy(:, 1)) + pad(1), 100);
-x2 = linspace(min(all_xy(:, 2)) - pad(2), max(all_xy(:, 2)) + pad(2), 100);
-[xg, yg] = meshgrid(x1, x2);
-try
-    density = ksdensity(group_xy, [xg(:), yg(:)]);
-catch
-    return
-end
-density_grid = reshape(density, size(xg));
-if ~any(density_grid(:) > 0)
-    return
-end
-density_sorted = sort(density_grid(:), 'descend');
-cumulative = cumsum(density_sorted) / sum(density_sorted);
-probability_levels = 0.1:0.1:0.8;
-thresholds = nan(size(probability_levels));
-for level_n = 1:numel(probability_levels)
-    level_index = find(cumulative >= probability_levels(level_n), 1, 'first');
-    if ~isempty(level_index)
-        thresholds(level_n) = density_sorted(level_index);
+if size(group_xy, 1) >= 3 && ~isempty(all_xy)
+    span = max(all_xy, [], 1) - min(all_xy, [], 1);
+    span(span <= 0) = 1;
+    pad = 0.05 * span;
+    x1 = linspace(min(all_xy(:, 1)) - pad(1), max(all_xy(:, 1)) + pad(1), 100);
+    x2 = linspace(min(all_xy(:, 2)) - pad(2), max(all_xy(:, 2)) + pad(2), 100);
+    [xg, yg] = meshgrid(x1, x2);
+    density = [];
+    try
+        density = ksdensity(group_xy, [xg(:), yg(:)]);
+    catch
+        density = [];
+    end
+    if ~isempty(density)
+        density_grid = reshape(density, size(xg));
+        if any(density_grid(:) > 0)
+            density_sorted = sort(density_grid(:), 'descend');
+            cumulative = cumsum(density_sorted) / sum(density_sorted);
+            probability_levels = 0.1:0.1:0.9;
+            thresholds = nan(size(probability_levels));
+            for level_n = 1:numel(probability_levels)
+                level_index = find(cumulative >= probability_levels(level_n), 1, 'first');
+                if ~isempty(level_index)
+                    thresholds(level_n) = density_sorted(level_index);
+                end
+            end
+            thresholds = unique(thresholds(isfinite(thresholds)));
+            if numel(thresholds) >= 2
+                sorted_thresholds = sort(thresholds(:));
+                n_thresholds = numel(sorted_thresholds);
+                for band_n = (n_thresholds - 1):-1:1
+                    contourf(x1, x2, density_grid, ...
+                        sorted_thresholds([band_n band_n + 1]), ...
+                        'LineWidth', 0.5, 'FaceColor', face_color, ...
+                        'EdgeColor', 'none', ...
+                        'FaceAlpha', 0.28 + 0.42 * band_n / n_thresholds);
+                end
+            end
+        end
     end
 end
-thresholds = unique(thresholds(isfinite(thresholds)));
-if numel(thresholds) < 2
-    return
-end
-sorted_thresholds = sort(thresholds(:));
-n_thresholds = numel(sorted_thresholds);
-for band_n = (n_thresholds - 1):-1:1
-    contourf(x1, x2, density_grid, sorted_thresholds([band_n band_n + 1]), ...
-        'LineWidth', 0.5, 'FaceColor', face_color, 'EdgeColor', 'none', ...
-        'FaceAlpha', 0.4 * band_n / n_thresholds);
+if ~isempty(highlight_xy)
+    scatter(highlight_xy(:, 1), highlight_xy(:, 2), 18, highlight_color, ...
+        'filled', 'MarkerFaceAlpha', 0.95, 'MarkerEdgeColor', 'none')
 end
 end
 
