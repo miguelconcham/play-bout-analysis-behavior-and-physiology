@@ -29,14 +29,22 @@
 % Every analysis setting is read from the assignments at the top of
 % Analyze_locking_period_acg.m in this same folder: alpha, the
 % non-entrained threshold, the 25/75 tails, acg_lag, the delta window,
-% smooth_half, skip_abs_lag, the refractory blank, and areas_to_keep.
-% The lag axis is built from that acg_lag and the parsing bin width, the
-% same way Analyze_locking_period_acg builds it. No summary file is read.
+% smooth_half, skip_abs_lag, the refractory blank, areas_to_keep,
+% tail_percent, and acg_method. low_percent and high_percent follow
+% tail_percent when they are not written as numbers. The lag axis is
+% built from that acg_lag and the parsing bin
+% width, the same way Analyze_locking_period_acg builds it. No summary
+% file is read. 'eligible' counts partners of spikes that can see each
+% bin. 'overlap' keeps pair counts / (T-|lag|). The checkpoint name
+% follows that choice, so an eligible null does not replace the overlap
+% checkpoint. A checkpoint saved before the selector has no method and
+% is treated as overlap.
 %
 % Those same shuffles are averaged across neurons in two scales. The sum-to-1
 % mean gives every neuron the same weight. The rate-ratio mean divides
-% each curve by the square of that tail's firing rate and the bin width,
-% so a Poisson autocorrelogram sits at 1. Both means are smoothed with the
+% an overlap curve by the square of that tail's firing rate and the bin
+% width, and an eligible-spike curve by the firing rate times the bin
+% width, so a Poisson autocorrelogram sits at 1. Both means are smoothed with the
 % same Gaussian, and the first peak and second cycle of each mean are
 % compared with the same peaks of the shuffled means. With 500 shuffles,
 % 10 ms bins and both scales, the running sums are about 50 MB.
@@ -82,6 +90,8 @@ smooth_half = analysis.smooth_half;
 skip_abs_lag = analysis.skip_abs_lag;
 acg_refractory_s = analysis.acg_refractory_s;
 areas_to_keep = analysis.areas_to_keep;
+acg_method = analysis.acg_method;
+rate_exponent = acg_rate_exponent(acg_method);
 [edges, centers, bin_w] = axis_from_parsing(parsing_folder, acg_lag);
 n_bins = numel(centers);
 smooth_n = max(1, round(smooth_half / bin_w));
@@ -94,8 +104,7 @@ disp_script_parameters(analysis, edges, bin_w, n_bins, smooth_n)
 
 group_order = {'trough', 'peak', 'nonentrained'};
 grand_order = {'trough', 'peak', 'delta', 'nonentrained'};
-checkpoint = fullfile(parsing_folder, ...
-    sprintf('locking_period_acg_shuffle_n%d.mat', n_shuffles));
+checkpoint = fullfile(parsing_folder, locking_shuffle_filename(n_shuffles, acg_method));
 
 parameters = struct( ...
     'n_shuffles', n_shuffles, ...
@@ -118,6 +127,7 @@ parameters = struct( ...
     'rate_ratio', true, ...
     'percentile_curves', true, ...
     'all_runs', true, ...
+    'acg_method', acg_method, ...
     'null', 'uniform spike times inside each firing run');
 
 grand_bytes = (2 * numel(grand_order) * 2 * 2 + 2 * numel(grand_order)) ...
@@ -281,13 +291,14 @@ for f = 1:numel(parsing_files)
                     || ~ismember('RunEndTime', rt.Properties.VariableNames)
                 continue
             end
-            if saved_covers
+            if strcmp(acg_method, 'overlap') && saved_covers
                 acg = rt.autoccorrelograms;
+                n_eligible = [];
                 this_corrected = already_corrected;
             else
-                acg = run_window_acgs(session_times(session_clusters == this_id), ...
-                    rt.RunStartTime, rt.RunEndTime, edges);
-                this_corrected = true;
+                [acg, n_eligible, this_corrected] = firing_run_acgs( ...
+                    session_times(session_clusters == this_id), ...
+                    rt.RunStartTime, rt.RunEndTime, edges, acg_method);
             end
             if size(acg, 2) ~= n_bins || size(acg, 1) ~= height(rt)
                 warning('Analyze_locking_period_acg_shuffle:width', ...
@@ -298,10 +309,10 @@ for f = 1:numel(parsing_files)
             run_length = acg_run_lengths(rt);
             ppc = rt.phase_entrainment(:, ppc_col);
             power = run_delta_power(rt);
-            pooled = pool_locking_period_acgs(acg, edges, run_length, ppc, ...
-                this_corrected, low_percent, high_percent);
-            pooled_power = pool_locking_period_acgs(acg, edges, run_length, power, ...
-                this_corrected, low_percent, high_percent);
+            pooled = pool_period_acgs(acg, n_eligible, edges, run_length, ppc, ...
+                this_corrected, low_percent, high_percent, acg_method);
+            pooled_power = pool_period_acgs(acg, n_eligible, edges, run_length, power, ...
+                this_corrected, low_percent, high_percent, acg_method);
             lock_ok = split_is_usable(pooled);
             power_ok = split_is_usable(pooled_power);
             if ~lock_ok && ~power_ok
@@ -341,32 +352,37 @@ for f = 1:numel(parsing_files)
                 shuffled = shuffle_spikes_within_runs(spikes, ...
                     rt.RunStartTime(use), rt.RunEndTime(use));
                 acg_s = nan(height(rt), n_bins);
-                acg_s(use, :) = run_window_acgs(shuffled, ...
-                    rt.RunStartTime(use), rt.RunEndTime(use), edges);
+                n_s = nan(height(rt), n_bins);
+                [acg_use, n_use, sh_corrected] = firing_run_acgs(shuffled, ...
+                    rt.RunStartTime(use), rt.RunEndTime(use), edges, acg_method);
+                acg_s(use, :) = acg_use;
+                if ~isempty(n_use)
+                    n_s(use, :) = n_use;
+                end
                 if lock_ok
-                    sh_lock = pool_locking_period_acgs(acg_s, edges, run_length, ppc, ...
-                        true, low_percent, high_percent);
+                    sh_lock = pool_period_acgs(acg_s, n_s, edges, run_length, ppc, ...
+                        sh_corrected, low_percent, high_percent, acg_method);
                     [peaks, row, ratio] = score_tail_curves(sh_lock.low, centers, smooth_n, ...
-                        acg_refractory_s, rate_lock.low, bin_w);
+                        acg_refractory_s, rate_lock.low, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'locking', 'low', s, peaks);
                     null_curves.locking.low(s, :) = row;
                     null_ratio.locking.low(s, :) = ratio;
                     [peaks, row, ratio] = score_tail_curves(sh_lock.high, centers, smooth_n, ...
-                        acg_refractory_s, rate_lock.high, bin_w);
+                        acg_refractory_s, rate_lock.high, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'locking', 'high', s, peaks);
                     null_curves.locking.high(s, :) = row;
                     null_ratio.locking.high(s, :) = ratio;
                 end
                 if power_ok
-                    sh_power = pool_locking_period_acgs(acg_s, edges, run_length, power, ...
-                        true, low_percent, high_percent);
+                    sh_power = pool_period_acgs(acg_s, n_s, edges, run_length, power, ...
+                        sh_corrected, low_percent, high_percent, acg_method);
                     [peaks, row, ratio] = score_tail_curves(sh_power.low, centers, smooth_n, ...
-                        acg_refractory_s, rate_power.low, bin_w);
+                        acg_refractory_s, rate_power.low, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'power', 'low', s, peaks);
                     null_curves.power.low(s, :) = row;
                     null_ratio.power.low(s, :) = ratio;
                     [peaks, row, ratio] = score_tail_curves(sh_power.high, centers, smooth_n, ...
-                        acg_refractory_s, rate_power.high, bin_w);
+                        acg_refractory_s, rate_power.high, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'power', 'high', s, peaks);
                     null_curves.power.high(s, :) = row;
                     null_ratio.power.high(s, :) = ratio;
@@ -377,7 +393,7 @@ for f = 1:numel(parsing_files)
                     all_acg = sh_power.all;
                 end
                 [peaks, row, ratio] = score_tail_curves(all_acg, centers, smooth_n, ...
-                    acg_refractory_s, rate_all, bin_w);
+                    acg_refractory_s, rate_all, bin_w, rate_exponent);
                 nulls.all.first(s) = null_first_value(peaks);
                 nulls.all.second(s) = null_second_value(peaks);
                 null_curves.all(s, :) = row;
@@ -404,20 +420,20 @@ for f = 1:numel(parsing_files)
             obs_ratio = blank_obs_curves(n_bins);
             if lock_ok
                 [~, obs_curves.locking.low, obs_ratio.locking.low] = score_tail_curves( ...
-                    pooled.low, centers, smooth_n, acg_refractory_s, rate_lock.low, bin_w);
+                    pooled.low, centers, smooth_n, acg_refractory_s, rate_lock.low, bin_w, rate_exponent);
                 [~, obs_curves.locking.high, obs_ratio.locking.high] = score_tail_curves( ...
-                    pooled.high, centers, smooth_n, acg_refractory_s, rate_lock.high, bin_w);
+                    pooled.high, centers, smooth_n, acg_refractory_s, rate_lock.high, bin_w, rate_exponent);
             end
             if power_ok
                 [~, obs_curves.power.low, obs_ratio.power.low] = score_tail_curves( ...
-                    pooled_power.low, centers, smooth_n, acg_refractory_s, rate_power.low, bin_w);
+                    pooled_power.low, centers, smooth_n, acg_refractory_s, rate_power.low, bin_w, rate_exponent);
                 [~, obs_curves.power.high, obs_ratio.power.high] = score_tail_curves( ...
-                    pooled_power.high, centers, smooth_n, acg_refractory_s, rate_power.high, bin_w);
+                    pooled_power.high, centers, smooth_n, acg_refractory_s, rate_power.high, bin_w, rate_exponent);
             end
             rec.all = pack_tail(pooled.all, centers, smooth_n, acg_refractory_s, ...
                 nulls.all.first, nulls.all.second);
             [~, obs_curves.all, obs_ratio.all] = score_tail_curves( ...
-                pooled.all, centers, smooth_n, acg_refractory_s, rate_all, bin_w);
+                pooled.all, centers, smooth_n, acg_refractory_s, rate_all, bin_w, rate_exponent);
             grand = add_neuron_to_grand(grand, this_group, this_key, ...
                 obs_curves, null_curves, obs_ratio, null_ratio);
             rec = attach_percentile(rec, obs_curves, null_curves, ...
@@ -555,10 +571,13 @@ peaks = acg_delta_peaks(row, centers, smooth_n);
 end
 
 
-function [peaks, row, ratio] = score_tail_curves(acg_row, centers, smooth_n, refractory, rate, bin_w)
+function [peaks, row, ratio] = score_tail_curves(acg_row, centers, smooth_n, refractory, rate, bin_w, rate_exponent)
+if nargin < 7 || isempty(rate_exponent)
+    rate_exponent = 2;
+end
 [row, mass] = normalized_pooled_row(acg_row, centers, refractory);
 peaks = acg_delta_peaks(row, centers, smooth_n);
-ratio = rate_ratio_curve(row, mass, rate, bin_w);
+ratio = rate_ratio_curve(row, mass, rate, bin_w, rate_exponent);
 end
 
 
@@ -574,14 +593,18 @@ row = normalize_acg_rows(blanked);
 end
 
 
-function ratio = rate_ratio_curve(row, mass, rate, bin_w)
-% Sum-to-1 row times its mass is pair counts / overlap. Dividing by
-% (tail firing rate ^ 2 * bin width) puts a Poisson autocorrelogram at 1.
+function ratio = rate_ratio_curve(row, mass, rate, bin_w, rate_exponent)
+% Sum-to-1 row times its mass restores the pooled autocorrelogram.
+% Overlap divides by rate ^ 2. Eligible-spike partner counts divide by
+% rate ^ 1. A Poisson autocorrelogram then sits at 1.
+if nargin < 5 || isempty(rate_exponent)
+    rate_exponent = 2;
+end
 ratio = nan(size(row));
 if ~isfinite(rate) || rate <= 0 || ~isfinite(mass) || mass <= 0 || ~isfinite(bin_w) || bin_w <= 0
     return
 end
-ratio = row .* (mass / ((rate ^ 2) * bin_w));
+ratio = row .* (mass / ((rate ^ rate_exponent) * bin_w));
 ratio(~isfinite(row)) = NaN;
 end
 
@@ -626,6 +649,13 @@ for i = 1:numel(flags)
         match = false;
         return
     end
+end
+stored_method = 'overlap';
+if isfield(stored.parameters, 'acg_method') && ~isempty(stored.parameters.acg_method)
+    stored_method = canonical_acg_method(stored.parameters.acg_method);
+end
+if ~strcmp(stored_method, canonical_acg_method(parameters.acg_method))
+    match = false;
 end
 end
 
@@ -831,10 +861,19 @@ if exist(script_path, 'file') ~= 2
     error('Analyze_locking_period_acg_shuffle:noscript', ...
         'Analyze_locking_period_acg.m was not found next to this script.');
 end
-names = {'alpha', 'non_entrained_p', 'low_percent', 'high_percent', ...
+names = {'alpha', 'non_entrained_p', 'tail_percent', ...
     'acg_lag', 'delta_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s'};
 analysis = read_script_assignments(script_path, names);
+analysis.low_percent = read_script_number(script_path, 'low_percent');
+analysis.high_percent = read_script_number(script_path, 'high_percent');
+if isempty(analysis.low_percent)
+    analysis.low_percent = analysis.tail_percent;
+end
+if isempty(analysis.high_percent)
+    analysis.high_percent = 100 - analysis.tail_percent;
+end
 analysis.areas_to_keep = read_script_areas(script_path);
+analysis.acg_method = canonical_acg_method(read_script_string(script_path, 'acg_method'));
 analysis.script_path = script_path;
 end
 
@@ -889,6 +928,7 @@ end
 
 function disp_script_parameters(analysis, edges, bin_w, n_bins, smooth_n)
 disp(['Parameters from ', analysis.script_path])
+disp(['  acg_method = ', analysis.acg_method])
 disp(sprintf('  alpha = %g, non-entrained p = %g', analysis.alpha, analysis.non_entrained_p))
 disp(sprintf('  tails = %g / %g, acg_lag = %g s, delta window = %s s', ...
     analysis.low_percent, analysis.high_percent, analysis.acg_lag, mat2str(double(analysis.delta_lag))))
@@ -915,6 +955,28 @@ for i = 1:numel(names)
             'Could not read %s from Analyze_locking_period_acg.m.', name);
     end
 end
+end
+
+
+function value = read_script_number(script_path, name)
+text = fileread(script_path);
+token = regexp(text, ['(?m)^', name, '\s*=\s*([^;%]+)'], 'tokens', 'once');
+value = [];
+if isempty(token)
+    return
+end
+value = str2num(token{1}); %#ok<ST2NM>
+end
+
+
+function value = read_script_string(script_path, name)
+text = fileread(script_path);
+token = regexp(text, ['(?m)^', name, '\s*=\s*''([^'']+)'''], 'tokens', 'once');
+if isempty(token)
+    error('Analyze_locking_period_acg_shuffle:script', ...
+        'Analyze_locking_period_acg.m has no quoted assignment for %s.', name);
+end
+value = token{1};
 end
 
 

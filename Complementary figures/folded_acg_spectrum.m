@@ -29,7 +29,7 @@ folded = nan(n_rows, numel(t_pos));
 for k = 1:numel(t_pos)
     [~, ip] = min(abs(centers - t_pos(k)));
     [~, ineg] = min(abs(centers + t_pos(k)));
-    folded(:, k) = mean(acg(:, [ip, ineg]), 2, 'omitnan');
+    folded(:, k) = mean_pair_omitnan(acg(:, [ip, ineg]));
 end
 keep = t_pos > 0.1;
 t_pos = t_pos(keep);
@@ -68,4 +68,14 @@ for row = 1:n_rows
     end
     band_power(row) = sum((2 * abs(coef(band)) .^ 2) / (n ^ 2));
 end
+end
+
+
+function mu = mean_pair_omitnan(pair)
+finite = ~isnan(pair);
+filled = pair;
+filled(~finite) = 0;
+n = sum(finite, 2);
+mu = sum(filled, 2) ./ n;
+mu(n == 0) = NaN;
 end

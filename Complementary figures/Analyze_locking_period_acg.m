@@ -22,8 +22,17 @@
 % and spaces. VLPAG and DLPAG are not treated as LPAG, and DMPAG, InfCol,
 % isRt, and PAG are left out.
 %
-% Run autocorrelograms are overlap-weighted (pair counts / (T-|lag|)), the
-% lag-0 bins are blanked, and each neuron is scaled to sum to 1 so a cell
+% acg_method selects the autocorrelogram. 'overlap' is the default:
+% every pair whose spikes both fall in the run, divided by T-|lag|.
+% 'eligible' keeps one observation per spike that can see the whole bin.
+% A spike contributes to a lag bin only when the whole bin lies inside its
+% firing run. Spikes that cannot see the bin are left out, and a bin that
+% no spike can see stays missing rather than zero. The pooled value is the
+% mean partner count of the spikes that could see it. Set acg_method to
+% 'eligible' to use that estimator. It writes its own summary, so it does
+% not replace the overlap file.
+%
+% The lag-0 bins are blanked, and each neuron is scaled to sum to 1 so a cell
 % with more spikes does not dominate the mean. One figure per lock group
 % for the locking split, and one figure per lock group for the power split.
 % Each split also has a figure of all plotted neurons together.
@@ -85,12 +94,14 @@
 % under its autocorrelogram. A second example figure takes the next neuron
 % in each lock group.
 % The sum-to-1 scaling is not a division by firing rate. Set
-% plot_rate_scaled_peaks to also score the same peaks on
+% plot_rate_scaled_peaks to also score the same peaks on the rate-ratio
+% curve. For acg_method 'overlap' that curve is
 % (pair counts / overlap) / (firing rate of those runs ^ 2 * bin width).
-% Each curve uses the firing rate of its own tail. A flat Poisson
-% autocorrelogram then sits at 1, so a change in rate does not lift the
-% curve. The same switch also redraws the mean autocorrelograms in that
-% ratio, with their own y limit and the same low-versus-high cluster test.
+% For 'eligible' it is the mean partner count divided by that firing rate
+% times the bin width. Each curve uses the firing rate of its own tail.
+% A flat Poisson autocorrelogram then sits at 1, so a change in rate does
+% not lift the curve. The same switch also redraws the mean autocorrelograms
+% in that ratio, with their own y limit and the same low-versus-high cluster test.
 % The same all-runs autocorrelogram is then used in a linear model of
 % mean delta power. Predictors are the mean firing rate of those runs,
 % the 0-50 ms burst, the first-peak and second-cycle prominences, and
@@ -113,21 +124,27 @@
 % and 500 spikes, how many neurons would receive each stratum count.
 % Beside that exact count is the cumulative: how many neurons have at
 % least that many strata. strata_preview_only stops after those figures.
-% The 4-then-2-then-1 rule is saved as locking_period_acg_summary.mat.
-% The maximized rule is locking_period_acg_summary_max_strata.mat. These
-% files hold the strata, the models, and the per-neuron slopes. They do
-% not depend on tail_percent. The low-versus-high autocorrelograms are
-% saved apart from them, as locking_period_acg_tails_25.mat or
-% locking_period_acg_tails_10.mat. A later run that only changes the
-% tail loads the strata file and does not estimate it again. A later
-% run that only changes the stratum rule loads the tail file and does
-% not estimate those tails again. A reprint or a figures-only redraw
-% loads each file that matches the current switch.
+% The 4-then-2-then-1 rule with acg_method 'overlap' is saved as
+% locking_period_acg_summary.mat. The maximized rule is
+% locking_period_acg_summary_max_strata.mat. 'eligible' inserts
+% _eligible before .mat, so a new estimate does not replace an overlap
+% file. These files hold the strata, the models, and the per-neuron
+% slopes. They do not depend on tail_percent. The low-versus-high
+% autocorrelograms are saved apart from them, as
+% locking_period_acg_tails_25.mat or locking_period_acg_tails_10.mat
+% for overlap, and locking_period_acg_tails_eligible_25.mat for the
+% eligible-spike method. A later run that only changes the tail loads
+% the strata file for the same method and does not estimate it again.
+% A later run that only changes the stratum rule loads the tail file
+% for the same method. A reprint or a figures-only redraw loads each
+% file that matches the current switch and acg_method. A summary saved
+% before this selector has no method and is treated as overlap.
 % Stratum power is the
 % duration-weighted mean. Burst, both prominences, firing rate, and the
 % folded autocorrelogram delta power are recomputed in the stratum. The
-% category is the neuron, and a neuron with fewer than two usable strata
-% does not enter. That model is fit again after neuron identity is
+% category is the neuron, and a neuron with fewer than
+% min_strata_in_model usable strata does not enter. That model is fit
+% again after neuron identity is
 % removed and every predictor except firing rate is then residualized on
 % the within-neuron firing rate. A third strata fit, and only that fit,
 % orthogonalizes the predictors one at a time. The order is neuron,
@@ -234,6 +251,7 @@ mean_acg_peak_height = 0.02; % mean ACG labels only. Fraction of the 10-90% rang
 stratum_min_spikes = 200;   % spikes required in each power stratum
 stratum_min_lag_s = 0.5;    % a stratum needs a run longer than this
 min_strata_per_neuron = 10; % strata required for a within-neuron LFP-to-ACG slope
+min_strata_in_model = 2;     % usable strata required before a neuron enters the strata models
 neuron_slope_alpha = 0.05;  % per-neuron threshold for a significant slope or rank correlation
 maximize_strata_number = false; % true: largest valid stratum count for each neuron
                                  % false: try 4, then 2, then 1
@@ -283,6 +301,11 @@ reprint_stats_only = false;
 % bars are computed from the saved curves when the summary does not
 % already contain them.
 redraw_figures_only = false;
+% 'overlap' is the default: pair counts / (T-|lag|), and the summaries
+% already saved under that method. 'eligible': one observation per spike
+% that can see the whole bin. Eligible summaries use their own file name.
+acg_method = 'overlap';
+acg_method = canonical_acg_method(acg_method);
 
 source_order = {'trough', 'peak', 'nonentrained'};
 source_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -302,14 +325,20 @@ setappdata(0, 'locking_acg_figures', struct( ...
     'strata_preview', show_strata_preview, ...
     'neuron_slopes', show_neuron_slopes));
 setappdata(0, 'locking_acg_min_strata', min_strata_per_neuron);
+setappdata(0, 'locking_acg_model_min_strata', min_strata_in_model);
 setappdata(0, 'locking_acg_slope_alpha', neuron_slope_alpha);
 setappdata(0, 'locking_acg_models_to_plot', models_to_plot(:).');
 if ~(isfinite(tail_percent) && tail_percent > 0 && tail_percent < 50)
     error('Analyze_locking_period_acg:tail', ...
         'tail_percent must be greater than 0 and less than 50. The high tail is 100 minus that value.');
 end
+if ~(isfinite(min_strata_in_model) && min_strata_in_model >= 2)
+    error('Analyze_locking_period_acg:modelStrata', ...
+        'min_strata_in_model must be at least 2. A neuron factor needs two strata.');
+end
 setappdata(0, 'locking_acg_tail_percent', tail_percent);
 setappdata(0, 'locking_acg_mean_peak_height', mean_acg_peak_height);
+setappdata(0, 'locking_acg_method', acg_method);
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -320,11 +349,12 @@ if reprint_stats_only
     end
     setappdata(0, 'locking_acg_figures', flags);
     setappdata(0, 'locking_acg_models_to_plot', []);
-    tail_path = tail_summary_path(parsing_folder, tail_percent);
-    base_path = base_summary_path(parsing_folder, maximize_strata_number);
+    tail_path = tail_summary_path(parsing_folder, tail_percent, acg_method);
+    base_path = base_summary_path(parsing_folder, maximize_strata_number, acg_method);
     if exist(tail_path, 'file') == 2
         [tail_locking, tail_power] = load_analysis_summary(tail_path);
         assert_summary_tail(tail_locking, tail_percent, tail_path);
+        assert_summary_method(tail_locking, acg_method, tail_path);
         smooth_n = max(1, round(smooth_half / median(diff(tail_locking.centers))));
         reprint_saved_statistics(tail_locking, tail_power, ...
             group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
@@ -336,6 +366,7 @@ if reprint_stats_only
     if exist(base_path, 'file') == 2
         [base_locking, base_power] = load_analysis_summary(base_path);
         assert_summary_strata_rule(base_locking, maximize_strata_number, base_path);
+        assert_summary_method(base_locking, acg_method, base_path);
         reprint_saved_statistics(base_locking, base_power, ...
             group_order, group_title, false, 1, skip_abs_lag, ...
             acg_cluster_alpha, acg_cluster_perm, 'models');
@@ -348,8 +379,8 @@ if reprint_stats_only
 end
 
 if redraw_figures_only
-    tail_path = tail_summary_path(parsing_folder, tail_percent);
-    base_path = base_summary_path(parsing_folder, maximize_strata_number);
+    tail_path = tail_summary_path(parsing_folder, tail_percent, acg_method);
+    base_path = base_summary_path(parsing_folder, maximize_strata_number, acg_method);
     if exist(tail_path, 'file') ~= 2 && exist(base_path, 'file') ~= 2
         error('Analyze_locking_period_acg:nosummary', ...
             'No tail file at %s and no strata file at %s.', tail_path, base_path);
@@ -357,6 +388,7 @@ if redraw_figures_only
     if exist(tail_path, 'file') == 2
         [locking_acg, power_acg] = load_analysis_summary(tail_path);
         assert_summary_tail(locking_acg, tail_percent, tail_path);
+        assert_summary_method(locking_acg, acg_method, tail_path);
         smooth_n = max(1, round(smooth_half / median(diff(locking_acg.centers))));
         [locking_acg, power_acg] = redraw_saved_figures(locking_acg, power_acg, ...
             group_order, group_title, plot_rate_scaled_peaks, smooth_n, ...
@@ -370,6 +402,7 @@ if redraw_figures_only
     if exist(base_path, 'file') == 2
         [base_locking, base_power] = load_analysis_summary(base_path);
         assert_summary_strata_rule(base_locking, maximize_strata_number, base_path);
+        assert_summary_method(base_locking, acg_method, base_path);
         redraw_saved_figures(base_locking, base_power, ...
             group_order, group_title, false, 1, skip_abs_lag, delta_lag, ...
             acg_cluster_alpha, acg_cluster_perm, n_example_neurons, 'models');
@@ -435,10 +468,12 @@ parameters = struct( ...
     'stratum_min_lag_s', stratum_min_lag_s, ...
     'maximize_strata_number', maximize_strata_number, ...
     'min_strata_per_neuron', min_strata_per_neuron, ...
+    'min_strata_in_model', min_strata_in_model, ...
     'neuron_slope_alpha', neuron_slope_alpha, ...
+    'acg_method', acg_method, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
-base_path = base_summary_path(parsing_folder, maximize_strata_number);
-tail_path = tail_summary_path(parsing_folder, tail_percent);
+base_path = base_summary_path(parsing_folder, maximize_strata_number, acg_method);
+tail_path = tail_summary_path(parsing_folder, tail_percent, acg_method);
 reuse_base = summary_is_reusable(base_path, parameters, 'base');
 reuse_tail = summary_is_reusable(tail_path, parameters, 'tail');
 collect_strata = ~reuse_base;
@@ -538,17 +573,28 @@ for f = 1:numel(parsing_files)
 
         session_times = [];
         session_clusters = [];
-        if ~saved_covers
+        if ~saved_covers || strcmp(acg_method, 'eligible')
             [session_times, session_clusters] = load_pag_spikes(npx_root, animal_code);
             if isempty(session_times)
-                warning('Analyze_locking_period_acg:spikes', ...
-                    ['Spike times for %s were not found, so the autocorrelogram ' ...
-                    'could not be extended to +/- %g s. Session skipped.'], ...
-                    animal_code, acg_lag);
+                if strcmp(acg_method, 'eligible')
+                    warning('Analyze_locking_period_acg:spikes', ...
+                        ['Spike times for %s were not found. The eligible-spike ' ...
+                        'autocorrelogram cannot be rebuilt from saved histograms. ' ...
+                        'Session skipped.'], animal_code);
+                else
+                    warning('Analyze_locking_period_acg:spikes', ...
+                        ['Spike times for %s were not found, so the autocorrelogram ' ...
+                        'could not be extended to +/- %g s. Session skipped.'], ...
+                        animal_code, acg_lag);
+                end
                 clear ps
                 continue
             end
-            disp(['  recomputing autocorrelograms to +/- ', num2str(acg_lag), ' s'])
+            if strcmp(acg_method, 'eligible')
+                disp(['  eligible-spike autocorrelograms to +/- ', num2str(acg_lag), ' s'])
+            else
+                disp(['  recomputing autocorrelograms to +/- ', num2str(acg_lag), ' s'])
+            end
         end
 
         for nn = 1:height(ci)
@@ -585,17 +631,19 @@ for f = 1:numel(parsing_files)
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
                 continue
             end
-            if saved_covers
+            if strcmp(acg_method, 'overlap') && saved_covers
                 acg = rt.autoccorrelograms;
+                n_eligible = [];
                 this_corrected = already_corrected;
             elseif ~ismember('RunStartTime', rt.Properties.VariableNames) ...
                     || ~ismember('RunEndTime', rt.Properties.VariableNames)
                 acg = [];
+                n_eligible = [];
                 this_corrected = true;
             else
-                acg = run_window_acgs(session_times(session_clusters == this_id), ...
-                    rt.RunStartTime, rt.RunEndTime, edges);
-                this_corrected = true;
+                [acg, n_eligible, this_corrected] = firing_run_acgs( ...
+                    session_times(session_clusters == this_id), ...
+                    rt.RunStartTime, rt.RunEndTime, edges, acg_method);
             end
             if size(acg, 2) ~= n_bins || size(acg, 1) ~= height(rt)
                 warning('Analyze_locking_period_acg:width', ...
@@ -613,7 +661,7 @@ for f = 1:numel(parsing_files)
                     run_length, this_power, rt, this_corrected, ...
                     max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
                     stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
-                    this_ppc, maximize_strata_number);
+                    this_ppc, maximize_strata_number, acg_method, n_eligible);
                 run_rows = append_run_rate_rows(run_rows, run_length, this_power, rt, ...
                     animal_code, this_id, this_group);
             end
@@ -621,8 +669,8 @@ for f = 1:numel(parsing_files)
                 continue
             end
             run_means = all_run_means(rt, acg, run_length, this_ppc, this_power);
-            pooled = pool_locking_period_acgs(acg, edges, run_length, ...
-                this_ppc, this_corrected, low_percent, high_percent);
+            pooled = pool_period_acgs(acg, n_eligible, edges, run_length, ...
+                this_ppc, this_corrected, low_percent, high_percent, acg_method);
             if split_is_usable(pooled)
                 acg_raw.(source_order{g}) = append_pooled( ...
                     acg_raw.(source_order{g}), pooled, animal_code, this_id, this_area, ...
@@ -632,8 +680,8 @@ for f = 1:numel(parsing_files)
                 n_unsplit(g) = n_unsplit(g) + 1;
             end
 
-            pooled_power = pool_locking_period_acgs(acg, edges, run_length, ...
-                this_power, this_corrected, low_percent, high_percent);
+            pooled_power = pool_period_acgs(acg, n_eligible, edges, run_length, ...
+                this_power, this_corrected, low_percent, high_percent, acg_method);
             if split_is_usable(pooled_power)
                 acg_power.(source_order{g}) = append_pooled( ...
                     acg_power.(source_order{g}), pooled_power, animal_code, this_id, this_area, ...
@@ -764,22 +812,50 @@ save_open_figures(figure_folder)
 stop_statistics_diary()
 
 
-function summary_path = base_summary_path(parsing_folder, maximize_strata_number)
-if maximize_strata_number
-    file_name = 'locking_period_acg_summary_max_strata.mat';
-else
-    file_name = 'locking_period_acg_summary.mat';
+function summary_path = base_summary_path(parsing_folder, maximize_strata_number, method)
+if nargin < 3 || isempty(method)
+    method = acg_method_now();
 end
-summary_path = fullfile(parsing_folder, file_name);
+summary_path = fullfile(parsing_folder, ...
+    locking_summary_filename(maximize_strata_number, method));
 end
 
 
-function summary_path = tail_summary_path(parsing_folder, tail_percent)
+function summary_path = tail_summary_path(parsing_folder, tail_percent, method)
 if nargin < 2 || isempty(tail_percent)
     tail_percent = tail_percent_now();
 end
-summary_path = fullfile(parsing_folder, ...
-    sprintf('locking_period_acg_tails_%g.mat', tail_percent));
+if nargin < 3 || isempty(method)
+    method = acg_method_now();
+end
+summary_path = fullfile(parsing_folder, locking_tail_filename(tail_percent, method));
+end
+
+
+function method = acg_method_now()
+method = 'overlap';
+if isappdata(0, 'locking_acg_method')
+    stored = getappdata(0, 'locking_acg_method');
+    if ~isempty(stored)
+        method = canonical_acg_method(stored);
+    end
+end
+end
+
+
+function assert_summary_method(locking_acg, method, summary_path)
+method = canonical_acg_method(method);
+saved = 'overlap';
+if isstruct(locking_acg) && isfield(locking_acg, 'parameters') ...
+        && isfield(locking_acg.parameters, 'acg_method') ...
+        && ~isempty(locking_acg.parameters.acg_method)
+    saved = canonical_acg_method(locking_acg.parameters.acg_method);
+end
+if ~strcmp(saved, method)
+    error('Analyze_locking_period_acg:method', ...
+        'Summary %s was saved with acg_method ''%s'', and the script is set to ''%s''.', ...
+        summary_path, saved, method);
+end
 end
 
 
@@ -846,7 +922,14 @@ else
         'delta_lag', 'acg_lag', 'smooth_half', 'skip_abs_lag', 'acg_refractory_s', ...
         'acg_cluster_alpha', 'acg_cluster_perm', 'areas_to_keep'};
 end
-ok = true;
+ok = saved_method_matches(saved, current);
+if ~ok
+    return
+end
+if strcmp(kind, 'base') && ~saved_model_min_matches(saved, current)
+    ok = false;
+    return
+end
 for i = 1:numel(fields)
     name = fields{i};
     if ~isfield(saved, name) || ~isfield(current, name) || ~isequaln(saved.(name), current.(name))
@@ -854,6 +937,32 @@ for i = 1:numel(fields)
         return
     end
 end
+end
+
+
+function ok = saved_method_matches(saved, current)
+saved_method = 'overlap';
+if isfield(saved, 'acg_method') && ~isempty(saved.acg_method)
+    saved_method = canonical_acg_method(saved.acg_method);
+end
+current_method = 'overlap';
+if isfield(current, 'acg_method') && ~isempty(current.acg_method)
+    current_method = canonical_acg_method(current.acg_method);
+end
+ok = strcmp(saved_method, current_method);
+end
+
+
+function ok = saved_model_min_matches(saved, current)
+saved_n = 2;
+if isfield(saved, 'min_strata_in_model') && isfinite(saved.min_strata_in_model)
+    saved_n = saved.min_strata_in_model;
+end
+current_n = 2;
+if isfield(current, 'min_strata_in_model') && isfinite(current.min_strata_in_model)
+    current_n = current.min_strata_in_model;
+end
+ok = abs(saved_n - current_n) < 1e-9;
 end
 
 
@@ -3263,6 +3372,10 @@ end
 function summary = rate_scale_summary(summary, bin_w, group_order)
 names = [group_order, {'all_neurons'}];
 curve_names = {'low', 'high', 'all'};
+rate_exponent = 2;
+if isfield(summary, 'parameters') && isfield(summary.parameters, 'acg_method')
+    rate_exponent = acg_rate_exponent(summary.parameters.acg_method);
+end
 for k = 1:numel(names)
     if ~isfield(summary, names{k}) || ~isfield(summary.(names{k}), 'low')
         continue
@@ -3271,19 +3384,23 @@ for k = 1:numel(names)
     for c = 1:numel(curve_names)
         curve = curve_names{c};
         group.(curve) = scale_acg_by_rate(group.(curve), ...
-            group.(['mass_', curve]), group.(['rate_', curve]), bin_w);
+            group.(['mass_', curve]), group.(['rate_', curve]), bin_w, rate_exponent);
     end
     summary.(names{k}) = group;
 end
 end
 
 
-function Y = scale_acg_by_rate(Y, mass, rate, bin_w)
-% (pair counts / overlap) / (tail firing rate ^ 2 * bin width).
-% Y is the sum-to-1 curve and mass restores pair counts / overlap.
+function Y = scale_acg_by_rate(Y, mass, rate, bin_w, rate_exponent)
+% Y is the sum-to-1 curve and mass restores the pooled autocorrelogram.
+% Overlap uses rate ^ 2. Eligible-spike partner counts use rate ^ 1.
 % The rate is the firing rate of the runs in that curve. A Poisson
-% autocorrelogram then sits at 1.
-factor = mass(:) ./ ((rate(:) .^ 2) * bin_w);
+% autocorrelogram then sits at 1. A summary saved before the selector
+% has no method and keeps the overlap exponent.
+if nargin < 5 || isempty(rate_exponent)
+    rate_exponent = 2;
+end
+factor = mass(:) ./ ((rate(:) .^ rate_exponent) * bin_w);
 factor(~isfinite(factor) | rate(:) <= 0 | mass(:) <= 0) = NaN;
 Y = Y .* factor;
 end
@@ -4057,12 +4174,10 @@ if ~isfield(strata, 'n') || strata.n < 2
 end
 [X0, y0, neuron0, lock0, row_names] = strata_regression_rows(strata);
 if isempty(y0) || size(X0, 2) ~= numel(names)
-    note_oscillation_model('Model13 equal neuron', ...
-        'Too few neurons have two strata for this model.');
-    note_oscillation_model('Model14 row weight', ...
-        'Too few neurons have two strata for this model.');
-    note_oscillation_model('Model15 group slopes', ...
-        'Too few neurons have two strata for this model.');
+    few_neurons = sprintf('Too few neurons have %g strata for this model.', model_min_strata());
+    note_oscillation_model('Model13 equal neuron', few_neurons);
+    note_oscillation_model('Model14 row weight', few_neurons);
+    note_oscillation_model('Model15 group slopes', few_neurons);
     return
 end
 names = row_names;
@@ -4466,7 +4581,7 @@ end
 function [fit, X, y, neuron, lock_group] = fit_common_sample(X, y, neuron, lock_group, equal_weight, names, short_names, osc_names, tag, label, weight_sentence)
 [X, y, neuron, n_outliers, keep] = drop_clear_outliers(X, y, neuron);
 lock_group = lock_group(keep);
-[X, y, neuron, lock_group] = keep_neuron_rows(X, y, neuron, lock_group, 2);
+[X, y, neuron, lock_group] = keep_neuron_rows(X, y, neuron, lock_group, model_min_strata());
 if equal_weight
     weights = neuron_stratum_weights(neuron);
 else
@@ -5128,7 +5243,8 @@ end
 if include_lfp && ~isfield(strata, 'power')
     return
 end
-keep = rows_of_repeated_groups(strata.neuron, 2);
+min_n = model_min_strata();
+keep = rows_of_repeated_groups(strata.neuron, min_n);
 X = [strata.rate(keep), strata.burst(keep), strata.first_prominence(keep), ...
     strata.second_prominence(keep), strata.acg_delta(keep)];
 if include_lfp
@@ -5142,7 +5258,7 @@ X = X(finite_row, :);
 y = y(finite_row);
 groups = groups(finite_row);
 lock_group = lock_group(finite_row);
-keep_again = rows_of_repeated_groups(groups, 2);
+keep_again = rows_of_repeated_groups(groups, min_n);
 X = X(keep_again, :);
 y = y(keep_again);
 groups = groups(keep_again);
@@ -5475,7 +5591,7 @@ end
 function in_group = stratum_group_rows(lock_group, groups, group_name)
 in_group = in_lock_group(lock_group, group_name);
 selected = find(in_group);
-keep_local = rows_of_repeated_groups(groups(in_group), 2);
+keep_local = rows_of_repeated_groups(groups(in_group), model_min_strata());
 in_group(selected(~keep_local)) = false;
 end
 
@@ -5802,9 +5918,22 @@ if ~isfield(strata, 'neuron') || isempty(strata.neuron)
 end
 [~, ~, idx] = unique(strata.neuron, 'stable');
 counts = accumarray(idx, 1);
+min_n = model_min_strata();
 disp(sprintf('  Neurons with both prominences in one stratum only: %d', sum(counts == 1)))
-disp(sprintf('  Neurons entering the within-neuron model: %d', sum(counts >= 2)))
-disp(sprintf('  Strata entering that model: %d', sum(counts(idx) >= 2)))
+disp(sprintf('  Neurons entering the within-neuron model, at least %g strata: %d', ...
+    min_n, sum(counts >= min_n)))
+disp(sprintf('  Strata entering that model: %d', sum(counts(idx) >= min_n)))
+end
+
+
+function n = model_min_strata()
+n = 2;
+if isappdata(0, 'locking_acg_model_min_strata')
+    stored = getappdata(0, 'locking_acg_model_min_strata');
+    if isfinite(stored) && stored >= 2
+        n = stored;
+    end
+end
 end
 
 
@@ -5820,7 +5949,7 @@ keep = counts(idx) >= min_count;
 end
 
 
-function store = append_neuron_power_strata(store, acg, edges, centers, run_length, power, rt, already_corrected, smooth_n, delta_lag, refractory_s, min_spikes, min_lag_s, animal_code, cluster_id, lock_group, ppc, maximize)
+function store = append_neuron_power_strata(store, acg, edges, centers, run_length, power, rt, already_corrected, smooth_n, delta_lag, refractory_s, min_spikes, min_lag_s, animal_code, cluster_id, lock_group, ppc, maximize, acg_method, n_eligible)
 if ~ismember('RunNumSpikes', rt.Properties.VariableNames) ...
         || size(acg, 1) ~= numel(run_length) || numel(power) ~= numel(run_length)
     store.n_at_k(1) = store.n_at_k(1) + 1;
@@ -5829,6 +5958,18 @@ end
 spikes = double(rt.RunNumSpikes(:));
 if nargin < 18 || isempty(maximize)
     maximize = false;
+end
+if nargin < 19 || isempty(acg_method)
+    acg_method = 'overlap';
+end
+if nargin < 20
+    n_eligible = [];
+end
+acg_method = canonical_acg_method(acg_method);
+if strcmp(acg_method, 'eligible') && (isempty(n_eligible) ...
+        || size(n_eligible, 1) ~= size(acg, 1) || size(n_eligible, 2) ~= size(acg, 2))
+    store.n_at_k(1) = store.n_at_k(1) + 1;
+    return
 end
 plan = power_run_strata(power, spikes, run_length, min_spikes, min_lag_s, maximize);
 slot = plan.k + 1;
@@ -5844,7 +5985,13 @@ for b = 1:plan.k
     in = plan.index == b;
     sub_acg = acg(in, :);
     sub_len = run_length(in);
-    pooled = pool_locking_period_acgs(sub_acg, edges, sub_len, ones(sum(in), 1), already_corrected);
+    if strcmp(acg_method, 'eligible')
+        sub_eligible = n_eligible(in, :);
+    else
+        sub_eligible = [];
+    end
+    pooled = pool_period_acgs(sub_acg, sub_eligible, edges, sub_len, ...
+        ones(sum(in), 1), already_corrected, [], [], acg_method);
     curve = blank_acg_zero_lag(pooled.all, centers, refractory_s);
     curve = normalize_acg_rows(curve);
     peaks = acg_delta_peaks(curve, centers, smooth_n);
