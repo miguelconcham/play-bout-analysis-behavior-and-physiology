@@ -1074,6 +1074,119 @@ write_summary_section(output_folder, '4. Oscillatory share by brain area', join_
     chi_caution, ...
     area_lines, ...
     missing_line))
+area_feature_names = [comparison_names, {'Peak1 - Peak2'}];
+area_feature_titles = [comparison_titles, {'Peak1 - Peak2'}];
+n_area_features = numel(area_feature_names);
+area_anova = repmat(empty_area_anova(), n_area_features, 1);
+for j = 1:n_area_features
+    [groups, names] = values_by_area(feature_table, neuron_area, ...
+        area_feature_names{j}, {'VLPAG', 'area unknown'}, 2);
+    area_anova(j).feature = area_feature_titles{j};
+    area_anova(j).areas = names;
+    area_anova(j).groups = groups;
+    stats = one_way_anova(groups);
+    area_anova(j).n = stats.n;
+    area_anova(j).mean = stats.mean;
+    area_anova(j).F = stats.F;
+    area_anova(j).df1 = stats.df1;
+    area_anova(j).df2 = stats.df2;
+    area_anova(j).raw_p = stats.p;
+    area_anova(j).eta = stats.eta;
+end
+area_anova_holm = holm_sidak_adjust([area_anova.raw_p]);
+for j = 1:n_area_features
+    area_anova(j).holm_p = area_anova_holm(j);
+    names = area_anova(j).areas;
+    groups = area_anova(j).groups;
+    if ~isfinite(area_anova(j).holm_p) || area_anova(j).holm_p >= 0.05 || numel(names) < 2
+        continue
+    end
+    pair_list = empty_feature_stats();
+    pair_list(1) = [];
+    pair_index = zeros(0, 2);
+    for a = 1:numel(names)
+        for b = a + 1:numel(names)
+            pair = compare_two_samples(groups{a}, groups{b}, 'unpaired');
+            pair.feature = sprintf('%s vs %s', names{a}, names{b});
+            pair.role = area_anova(j).feature;
+            pair_list(end + 1) = pair; %#ok<AGROW>
+            pair_index(end + 1, :) = [a, b]; %#ok<AGROW>
+        end
+    end
+    if isempty(pair_list)
+        continue
+    end
+    pair_holm = holm_sidak_adjust([pair_list.raw_p]);
+    for p = 1:numel(pair_list)
+        pair_list(p).holm_p = pair_holm(p);
+    end
+    area_anova(j).pairs = pair_list;
+    area_anova(j).pair_index = pair_index;
+end
+open_full_figure('Oscillatory features by brain area')
+n_descriptor_cols = 5;
+tiledlayout(ceil(n_area_features / n_descriptor_cols), n_descriptor_cols, ...
+    'TileSpacing', 'compact')
+for j = 1:n_area_features
+    nexttile
+    hold on
+    names = area_anova(j).areas;
+    groups = area_anova(j).groups;
+    for a = 1:numel(names)
+        y = groups{a}(:);
+        y = y(isfinite(y));
+        if isempty(y)
+            continue
+        end
+        scatter(a + violin_point_offset(numel(y)), y, 12, [0 0 0], 'filled', ...
+            'MarkerFaceAlpha', 0.45, 'MarkerEdgeColor', 'none')
+    end
+    for a = 1:numel(names)
+        if ~isfinite(area_anova(j).mean(a))
+            continue
+        end
+        bar(a, area_anova(j).mean(a), 0.55, 'FaceColor', area_bar_color(names{a}), ...
+            'FaceAlpha', 0.45, 'EdgeColor', 'none')
+        hold on
+    end
+    y_top = nan;
+    if ~isempty(area_anova(j).pairs)
+        show = find([area_anova(j).pairs.holm_p] < 0.05);
+        if ~isempty(show)
+            pooled = [];
+            for a = 1:numel(groups)
+                pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
+            end
+            y_top = draw_sig_brackets(area_anova(j).pair_index(show, :), ...
+                [area_anova(j).pairs(show).holm_p], pooled);
+        end
+    end
+    if ~isempty(names)
+        set(gca, 'XTick', 1:numel(names), 'XTickLabel', names)
+        xlim([0.4, numel(names) + 0.6])
+    end
+    try
+        set(gca, 'TickLabelInterpreter', 'none')
+    catch
+    end
+    if isfinite(y_top)
+        yl = ylim;
+        ylim([yl(1), max(yl(2), y_top)])
+    end
+    if ~isfinite(area_anova(j).holm_p)
+        p_text = 'Too few neurons';
+    else
+        p_text = sprintf('Holm-Sidak p = %.3g', area_anova(j).holm_p);
+    end
+    title({area_anova(j).feature, p_text}, 'Interpreter', 'none')
+    grid on
+    box off
+end
+sgtitle({'High-power oscillatory features by brain area. VLPAG is left out.', ...
+    'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
+save_script_figure(output_folder)
+write_summary_section(output_folder, '4. Oscillatory features by brain area', ...
+    area_feature_report(area_anova))
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
@@ -1293,6 +1406,240 @@ end
 mean_value = mean(y);
 plot([x_center - 0.36, x_center + 0.36], [mean_value, mean_value], ...
     'k', 'LineWidth', 2.8, 'HandleVisibility', 'off')
+end
+
+
+function s = empty_area_anova()
+s = struct('feature', '', 'areas', {{}}, 'groups', {{}}, ...
+    'n', [], 'mean', [], 'F', nan, 'df1', nan, 'df2', nan, ...
+    'raw_p', nan, 'holm_p', nan, 'eta', nan, ...
+    'pairs', empty_feature_stats(), 'pair_index', zeros(0, 2));
+s.pairs(1) = [];
+end
+
+
+function [groups, names] = values_by_area(feature_table, neuron_area, feature_name, skip_names, min_n)
+values = feature_column(feature_table, feature_name);
+labels = cell(numel(neuron_area), 1);
+for i = 1:numel(neuron_area)
+    labels{i} = area_display_name(neuron_area{i});
+end
+ordered = {'SC', 'LPAG', 'DLPAG', 'DR'};
+for i = 1:numel(labels)
+    if ~any(strcmp(ordered, labels{i}))
+        ordered{end + 1} = labels{i}; %#ok<AGROW>
+    end
+end
+groups = {};
+names = {};
+for k = 1:numel(ordered)
+    if any(strcmpi(skip_names, ordered{k}))
+        continue
+    end
+    y = values(strcmp(labels, ordered{k}));
+    y = y(isfinite(y));
+    if numel(y) < min_n
+        continue
+    end
+    groups{end + 1} = y(:); %#ok<AGROW>
+    names{end + 1} = ordered{k}; %#ok<AGROW>
+end
+end
+
+
+function values = feature_column(feature_table, name)
+if strcmp(name, 'Peak1 - Peak2')
+    values = feature_column(feature_table, 'Peak1') - feature_column(feature_table, 'Peak2');
+    return
+end
+n = size(feature_table, 1);
+if ~ismember(name, feature_table.Properties.VariableNames)
+    values = nan(n, 1);
+    return
+end
+values = double(feature_table{:, name});
+values = values(:);
+end
+
+
+function stats = one_way_anova(groups)
+%ONE_WAY_ANOVA  Between-area F test for one feature.
+
+n_groups = numel(groups);
+ns = zeros(1, n_groups);
+means = nan(1, n_groups);
+ss_within = 0;
+all_y = zeros(0, 1);
+for g = 1:n_groups
+    y = groups{g}(:);
+    y = y(isfinite(y));
+    ns(g) = numel(y);
+    if ns(g) > 0
+        means(g) = mean(y);
+        all_y = [all_y; y]; %#ok<AGROW>
+    end
+    if ns(g) > 1
+        ss_within = ss_within + (ns(g) - 1) * var(y, 0);
+    end
+end
+n_total = numel(all_y);
+stats.n = ns;
+stats.mean = means;
+stats.df1 = n_groups - 1;
+stats.df2 = n_total - n_groups;
+stats.F = nan;
+stats.p = nan;
+stats.eta = nan;
+if n_groups < 2 || stats.df2 < 1 || n_total < 1
+    return
+end
+grand = mean(all_y);
+ss_between = sum(ns .* (means - grand) .^ 2);
+ss_total = ss_between + ss_within;
+if ss_total > 0
+    stats.eta = ss_between / ss_total;
+end
+if ss_within <= 0
+    if ss_between > 0
+        stats.F = inf;
+        stats.p = 0;
+        stats.eta = 1;
+    else
+        stats.F = 0;
+        stats.p = 1;
+        stats.eta = 0;
+    end
+    return
+end
+stats.F = (ss_between / stats.df1) / (ss_within / stats.df2);
+stats.p = f_survival(stats.F, stats.df1, stats.df2);
+end
+
+
+function p = f_survival(F, df1, df2)
+if ~isfinite(df1) || ~isfinite(df2) || df1 <= 0 || df2 <= 0
+    p = nan;
+    return
+end
+if ~isfinite(F)
+    if F > 0
+        p = 0;
+    else
+        p = nan;
+    end
+    return
+end
+if F < 0
+    p = nan;
+    return
+end
+p = betainc(df2 / (df2 + df1 * F), df2 / 2, df1 / 2);
+end
+
+
+function color = area_bar_color(name)
+switch name
+    case 'SC'
+        color = [0.20 0.45 0.80];
+    case 'LPAG'
+        color = [0.85 0.33 0.10];
+    case 'DLPAG'
+        color = [0.47 0.67 0.19];
+    case 'DR'
+        color = [0.49 0.18 0.56];
+    otherwise
+        color = [0.45 0.45 0.45];
+end
+end
+
+
+function y_top = draw_sig_brackets(index_pairs, p_values, y_values)
+%DRAW_SIG_BRACKETS  Stacked lines and stars for significant area pairs.
+
+y_values = y_values(isfinite(y_values));
+y_top = nan;
+if isempty(y_values) || isempty(index_pairs)
+    return
+end
+y_hi = max(y_values);
+y_lo = min(y_values);
+span = y_hi - y_lo;
+if span <= 0
+    span = max(abs(y_hi), 1);
+end
+step = 0.16 * span;
+tick = 0.035 * span;
+base = y_hi + 0.1 * span;
+distance = index_pairs(:, 2) - index_pairs(:, 1);
+[~, order] = sort(distance);
+index_pairs = index_pairs(order, :);
+p_values = p_values(order);
+y_top = base;
+for r = 1:size(index_pairs, 1)
+    y = base + (r - 1) * step;
+    x1 = index_pairs(r, 1);
+    x2 = index_pairs(r, 2);
+    plot([x1, x1, x2, x2], [y - tick, y, y, y - tick], 'k-', 'LineWidth', 1.1, ...
+        'HandleVisibility', 'off')
+    text((x1 + x2) / 2, y, star_text(p_values(r)), ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
+        'Interpreter', 'none')
+    y_top = y + 0.12 * span;
+end
+end
+
+
+function label = star_text(p)
+if ~isfinite(p) || p >= 0.05
+    label = '';
+elseif p < 0.001
+    label = '***';
+elseif p < 0.01
+    label = '**';
+else
+    label = '*';
+end
+end
+
+
+function text = area_feature_report(area_anova)
+%AREA_FEATURE_REPORT  ANOVA and, when it is significant, its pairwise tests.
+
+lines = { ...
+    'One-way ANOVA of each high-power oscillatory feature, with brain area as the factor.', ...
+    'VLPAG is excluded. Neurons without a stored area are excluded.', ...
+    'An area is included in a feature only when it has at least two finite values.', ...
+    'Holm-Sidak adjusts the ANOVA p-values across features.', ...
+    'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
+    'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'};
+for j = 1:numel(area_anova)
+    row = area_anova(j);
+    if isempty(row.areas)
+        n_text = 'none';
+    else
+        n_bits = cell(1, numel(row.areas));
+        for a = 1:numel(row.areas)
+            n_bits{a} = sprintf('%s %g', row.areas{a}, row.n(a));
+        end
+        n_text = strjoin(n_bits, ', ');
+    end
+    lines{end + 1} = sprintf('%-28s F(%s, %s) = %s   eta2 = %s   raw p = %s   Holm-Sidak p = %s   n: %s', ...
+        row.feature, stat_num(row.df1, '%.0f'), stat_num(row.df2, '%.0f'), ...
+        stat_num(row.F, '%.4g'), stat_num(row.eta, '%.4g'), ...
+        stat_num(row.raw_p, '%.4g'), stat_num(row.holm_p, '%.4g'), n_text); %#ok<AGROW>
+    if ~isfinite(row.holm_p) || row.holm_p >= 0.05
+        lines{end + 1} = '  Pairwise tests were not run.'; %#ok<AGROW>
+        continue
+    end
+    for p = 1:numel(row.pairs)
+        pair = row.pairs(p);
+        lines{end + 1} = sprintf('  %-20s t = %s   df = %s   d = %s   raw p = %s   Holm-Sidak p = %s', ...
+            pair.feature, stat_num(pair.t, '%.4g'), stat_num(pair.df, '%.0f'), ...
+            stat_num(pair.effect, '%.4g'), stat_num(pair.raw_p, '%.4g'), ...
+            stat_num(pair.holm_p, '%.4g')); %#ok<AGROW>
+    end
+end
+text = strjoin(lines, newline);
 end
 
 
