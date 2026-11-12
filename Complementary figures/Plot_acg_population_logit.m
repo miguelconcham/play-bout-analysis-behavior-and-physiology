@@ -117,7 +117,7 @@ disp('feature_table is one row of ACG features per neuron. Run section 2 to clas
 % need to run again while feature_table is still in the workspace.
 % Cluster 1 is the k-means group with the higher modulation. Section 3
 % uses that group. The PCA and t-SNE figures are there to see whether the
-% same split is visible. They do not choose the neurons. The boxcharts
+% same split is visible. They do not choose the neurons. The violins
 % after the split also show frequency, amplitude, and the peak-to-peak
 % drop. Those extra columns do not enter the split.
 this_dir = fileparts(mfilename('fullpath'));
@@ -367,7 +367,20 @@ if ~isempty(shown_titles)
         'TileSpacing', 'compact')
     for j = 1:numel(shown_titles)
         nexttile
-        boxchart(categorical(idx_kmeans), descriptor_values(:, j))
+        hold on
+        for group = 1:2
+            this_group = descriptor_values(idx_kmeans == group, j);
+            this_group = this_group(isfinite(this_group));
+            draw_one_violin(group, this_group, [0.75 0.75 0.75])
+            if isempty(this_group)
+                continue
+            end
+            point_x = group + violin_point_offset(numel(this_group));
+            scatter(point_x, this_group, 12, [0 0 0], 'filled', ...
+                'MarkerFaceAlpha', 0.55, 'MarkerEdgeColor', 'none')
+        end
+        set(gca, 'XTick', [1 2])
+        xlim([0.4 2.6])
         title({shown_titles{j}, shown_roles{j}}, 'Interpreter', 'none')
         xlabel('K-means group')
         grid on
@@ -709,7 +722,7 @@ end
 linkaxes(tsne_axes, 'xy')
 sgtitle('Black points are every neuron. Filled bands are that group''s iso-probability.')
 
-% Same columns as the cluster boxcharts. High values come from the
+% Same columns as the cluster violins. High values come from the
 % high-power feature table. Low values are the same neurons at low power.
 comparison_names = { ...
     'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
@@ -761,12 +774,17 @@ if ~isempty(compare_titles)
         pair = isfinite(high_vals) & isfinite(low_vals);
         hold on
         if any(pair)
-            boxchart(categorical( ...
-                [ones(sum(pair), 1); 2 * ones(sum(pair), 1)], ...
-                [1 2], {'High power', 'Low power'}), ...
-                [high_vals(pair); low_vals(pair)])
-            plot([1 2], [high_vals(pair), low_vals(pair)].', ...
-                '-', 'Color', [0.65 0.65 0.65])
+            y_high = high_vals(pair);
+            y_low = low_vals(pair);
+            point_offset = violin_point_offset(numel(y_high));
+            draw_one_violin(1, y_high, [0.84 0.37 0.00])
+            draw_one_violin(2, y_low, [0.00 0.45 0.70])
+            plot([1 + point_offset.'; 2 + point_offset.'], ...
+                [y_high.'; y_low.'], '-', 'Color', [0.55 0.55 0.55])
+            scatter(1 + point_offset, y_high, 12, [0 0 0], 'filled', ...
+                'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
+            scatter(2 + point_offset, y_low, 12, [0 0 0], 'filled', ...
+                'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
         end
         if sum(pair) < 2
             title({compare_titles{j}, 'Too few neurons'}, 'Interpreter', 'none')
@@ -775,7 +793,8 @@ if ~isempty(compare_titles)
             title({compare_titles{j}, sprintf('uncorrected p = %.3g', feature_p)}, ...
                 'Interpreter', 'none')
         end
-        xlim([0.5 2.5])
+        xlim([0.4 2.6])
+        set(gca, 'XTick', [1 2], 'XTickLabel', {'High power', 'Low power'})
         grid on
     end
     sgtitle({'Same oscillatory neurons at high and low power.', ...
@@ -870,4 +889,51 @@ pad = 0.08 * span;
 limits = [ ...
     min(xy(:, 1)) - pad(1), max(xy(:, 1)) + pad(1), ...
     min(xy(:, 2)) - pad(2), max(xy(:, 2)) + pad(2)];
+end
+
+
+function draw_one_violin(x_center, y, face_color)
+%DRAW_ONE_VIOLIN  Kernel-density violin centered on a chosen x.
+%
+% The shape does not place the observations. Callers scatter those points
+% at x positions they keep, so a later line can join a pair exactly.
+
+y = y(:);
+y = y(isfinite(y));
+if numel(y) < 2 || ~(max(y) > min(y))
+    return
+end
+try
+    [density, support] = ksdensity(y, 'NumPoints', 100);
+catch
+    return
+end
+density = density(:).';
+support = support(:).';
+if isempty(density) || max(density) <= 0
+    return
+end
+half_width = 0.32;
+density = density / max(density) * half_width;
+fill([x_center + density, x_center - density(end:-1:1)], ...
+    [support, support(end:-1:1)], face_color, ...
+    'FaceAlpha', 0.22, 'EdgeColor', face_color, 'LineWidth', 1, ...
+    'HandleVisibility', 'off')
+median_value = median(y);
+plot([x_center - 0.12, x_center + 0.12], [median_value, median_value], ...
+    'k', 'LineWidth', 1.4, 'HandleVisibility', 'off')
+end
+
+
+function offset = violin_point_offset(n_points)
+%VIOLIN_POINT_OFFSET  Fixed x offsets inside a violin.
+%
+% The same offset vector is used for both members of a pair, so the line
+% and the two scatters share one x on each side.
+
+if n_points <= 1
+    offset = zeros(n_points, 1);
+    return
+end
+offset = linspace(-0.12, 0.12, n_points).';
 end
