@@ -1,50 +1,88 @@
-function ACG_features = acg2features(ACG_matrix, lags)
-%ACG2FEATURES  Rhythmicity features for each neuron in an ACG matrix.
-%
-% ACG_matrix is neurons by lags. lags may include the negative side. Only
-% lags greater than 0 are scored, by quantify_acg_rhythmicity. The table
-% has one row per neuron, in the same order as ACG_matrix.
+function ACG_features = acg2features(imagesc_sum_power_high, lags)
+%% Input
+ACG_matrix = imagesc_sum_power_high;
 
-lags_s = double(lags(:));
-ACG_matrix = double(ACG_matrix);
-if size(ACG_matrix, 2) ~= numel(lags_s)
-    error('acg2features:axis', ...
-        'Number of ACG columns must match number of lags.');
-end
-positive = lags_s > 0;
-if ~any(positive)
-    error('acg2features:lag', 'The lag axis has no positive lags.');
-end
-lags_s = lags_s(positive);
-ACG_matrix = ACG_matrix(:, positive);
+% Lags in seconds (one value per ACG column)
+lags_s = lags(:);
 
-feature_names = { ...
-    'Baseline', 'Peak1', 'Trough1', 'Peak2', 'Trough2', ...
-    'PeakLag1', 'TroughLag1', 'PeakLag2', 'TroughLag2', ...
-    'Modulation1', 'Modulation2', 'Persistence', ...
-    'NormModulation1', 'NormModulation2', ...
-    'PeakInterval', 'TroughInterval', 'PeakFrequency', 'TroughFrequency', ...
-    'OscillationScore', 'DominantFrequency', 'FrequencyResolution'};
-n_neurons = size(ACG_matrix, 1);
-features = nan(n_neurons, numel(feature_names));
-for i = 1:n_neurons
-    R = quantify_acg_rhythmicity(ACG_matrix(i, :)', lags_s, ...
+nNeurons = size(ACG_matrix, 1);
+
+assert(size(ACG_matrix, 2) == numel(lags_s), ...
+    'Number of ACG columns must match number of lags.');
+
+%% Preallocate
+featureNames = {
+    'Baseline'
+    'Peak1'
+    'Trough1'
+    'Peak2'
+    'Trough2'
+    'PeakLag1'
+    'TroughLag1'
+    'PeakLag2'
+    'TroughLag2'
+    'Modulation1'
+    'Modulation2'
+    'Persistence'
+    'NormModulation1'
+    'NormModulation2'
+    'PeakInterval'
+    'TroughInterval'
+    'PeakFrequency'
+    'TroughFrequency'
+    'OscillationScore'
+    'DominantFrequency'
+    'FrequencyResolution'
+};
+
+features = nan(nNeurons, numel(featureNames));
+
+%% Analyze each neuron
+
+for i = 1:nNeurons
+
+    acg = ACG_matrix(i, :)';
+
+    R = quantify_acg_rhythmicity(acg, lags_s, ...
         'TroughWindows', [0.05 0.15; 0.35 0.45], ...
         'PeakWindows', [0.25 0.35; 0.55 0.65], ...
         'BaselineWindow', [0.8 1.0], ...
         'FrequencyBand', [2 5]);
-    features(i, :) = [ ...
-        R.Baseline, ...
-        R.PeakValues(1), R.TroughValues(1), R.PeakValues(2), R.TroughValues(2), ...
-        R.PeakLags(1), R.TroughLags(1), R.PeakLags(2), R.TroughLags(2), ...
-        R.FirstModulation, R.SecondModulation, R.Persistence, ...
-        R.BaselineNormalizedFirstModulation, R.BaselineNormalizedSecondModulation, ...
-        R.PeakInterval, R.TroughInterval, ...
-        R.PeakBasedFrequencyHz, R.TroughBasedFrequencyHz, ...
-        R.OscillationScore, R.DominantFrequencyHz, R.FrequencyResolutionHz];
+
+    features(i,:) = [
+        R.Baseline
+        R.PeakValues(1)
+        R.TroughValues(1)
+        R.PeakValues(2)
+        R.TroughValues(2)
+        R.PeakLags(1)
+        R.TroughLags(1)
+        R.PeakLags(2)
+        R.TroughLags(2)
+        R.FirstModulation
+        R.SecondModulation
+        R.Persistence
+        R.BaselineNormalizedFirstModulation
+        R.BaselineNormalizedSecondModulation
+        R.PeakInterval
+        R.TroughInterval
+        R.PeakBasedFrequencyHz
+        R.TroughBasedFrequencyHz
+        R.OscillationScore
+        R.DominantFrequencyHz
+        R.FrequencyResolutionHz
+    ];
+
 end
 
-ACG_features = array2table(features, 'VariableNames', feature_names);
-ACG_features.NeuronIndex = (1:n_neurons)';
-ACG_features = movevars(ACG_features, 'NeuronIndex', 'Before', 1);
+%% Create feature table
+
+ACG_features = array2table(features, ...
+    'VariableNames', featureNames);
+
+ACG_features.NeuronIndex = (1:nNeurons)';
+
+% Put neuron index first
+ACG_features = movevars(ACG_features, ...
+    'NeuronIndex', 'Before', 1);
 end
