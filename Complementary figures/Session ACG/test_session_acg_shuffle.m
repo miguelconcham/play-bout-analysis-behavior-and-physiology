@@ -6,8 +6,10 @@ function test_session_acg_shuffle()
 % after add_repo_paths, or run it directly.
 
 this_dir = fileparts(mfilename('fullpath'));
-repo_root = fileparts(this_dir);
+complementary_dir = fileparts(this_dir);
+repo_root = fileparts(complementary_dir);
 addpath(this_dir);
+addpath(complementary_dir);
 addpath(genpath(fullfile(repo_root, 'Custom functions')));
 addpath(genpath(fullfile(repo_root, 'Figure 2', 'Supporting codes')));
 

@@ -27,7 +27,8 @@
 % resume false does not delete an existing folder.
 %
 % Check the helpers first, without the experiment files, by running
-% test_session_acg_shuffle.
+% test_session_acg_shuffle. This folder is Session ACG, next to the other
+% complementary-figure scripts. add_repo_paths puts it on the path.
 
 %% Parameters
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
