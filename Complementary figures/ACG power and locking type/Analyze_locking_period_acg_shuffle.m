@@ -482,6 +482,7 @@ function split = blank_split(n_shuffles)
 split.usable = false;
 split.score_low = NaN;
 split.score_high = NaN;
+split.score_all = NaN;
 split.low = blank_tail(n_shuffles);
 split.high = blank_tail(n_shuffles);
 end
@@ -550,6 +551,9 @@ split = blank_split(numel(null_split.low.first));
 split.usable = true;
 split.score_low = pooled.score_low;
 split.score_high = pooled.score_high;
+if isfield(pooled, 'score_all')
+    split.score_all = pooled.score_all;
+end
 split.low = pack_tail(pooled.low, centers, smooth_n, refractory, ...
     null_split.low.first, null_split.low.second);
 split.high = pack_tail(pooled.high, centers, smooth_n, refractory, ...
