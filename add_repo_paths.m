@@ -18,6 +18,7 @@ addpath(fullfile(repo_root, 'Figure 6', 'Supplementary codes'));
 addpath(fullfile(repo_root, 'Complementary figures'));
 addpath(fullfile(repo_root, 'Complementary figures', 'ACG power and locking type'));
 addpath(fullfile(repo_root, 'Complementary figures', 'Session ACG'));
+addpath(fullfile(repo_root, 'Complementary figures', 'Group cross correlation'));
 addpath(fullfile(repo_root, 'CSD analysis'));
 addpath(fullfile(repo_root, 'Synchronous spike artifacts'));
 
