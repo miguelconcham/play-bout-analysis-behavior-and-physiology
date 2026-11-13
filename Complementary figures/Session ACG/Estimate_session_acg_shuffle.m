@@ -21,6 +21,12 @@
 % and that peak's prominence is larger than its own null at
 % oscillation_alpha. The same call is made on the grand mean.
 %
+% Analyze_session_acg_shuffle draws this folder after the estimate. It
+% reads grand_average.mat and the neuron files. The grand-mean panels, the
+% shuffle-percentile panels, and one row per neuron come from those saved
+% curves. Spike times are not read again. test_analyze_session_acg checks
+% that selection without the experiment files.
+%
 % Set grand_only to true to rebuild the grand average without shuffling.
 % only_sessions limits which folders are estimated on this run. Sessions
 % already saved in the output folder still enter the grand average.
