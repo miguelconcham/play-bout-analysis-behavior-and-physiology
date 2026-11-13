@@ -15,16 +15,18 @@
 % lock-type model cache are written to
 % Data\Analysis results\acg population logit. A cache or matrix saved by
 % an earlier run is read from output_folder or from spike train parsing.
-% n_example_neurons, n_neurons_per_figure, example_smooth_ms, and
-% plot_example_neurons_only are set at the start of section 4.
-% n_example_neurons chooses how many of the strongest oscillatory neurons
-% are drawn. The examples also keep the strongest oscillatory neuron from
-% each analysed area except VLPAG, so that count can be larger than
-% n_example_neurons. n_neurons_per_figure is how many neurons go on each
-% figure. Each neuron is one column: both autocorrelograms on the top row,
-% both shuffle percentiles on the bottom row. example_smooth_ms is the
-% Gaussian smoothing width in milliseconds. plot_example_neurons_only
-% draws those neurons and leaves the other section 4 figures unrun.
+% n_example_neurons, n_neurons_per_figure, and example_smooth_ms are set
+% at the start of section 4. n_example_neurons chooses how many of the
+% strongest oscillatory neurons are drawn. The examples also keep the
+% strongest oscillatory neuron from each analysed area except VLPAG, so
+% that count can be larger than n_example_neurons. n_neurons_per_figure
+% is how many neurons go on each figure. Each neuron is one column: both
+% autocorrelograms on the top row, both shuffle percentiles on the bottom
+% row. example_smooth_ms is the Gaussian smoothing width in milliseconds.
+% Set plot_example_neurons_only = true in the workspace before running.
+% Section 4 keeps that value. Only the example-neuron figures are drawn
+% or saved. Figures from sections 2, 4, 5, and 6 are skipped, and section
+% 4 does not run the lock-type classifier.
 % classifier_method is set just before the lock-type classifier.
 % The default is naive Bayes, LDA, and a medium Gaussian SVM.
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
@@ -671,7 +673,17 @@ end
 n_example_neurons = 10;
 n_neurons_per_figure = 3;
 example_smooth_ms = 0.05;
-plot_example_neurons_only = false;
+if ~exist('plot_example_neurons_only', 'var') || isempty(plot_example_neurons_only)
+    plot_example_neurons_only = false;
+elseif ischar(plot_example_neurons_only) || isstring(plot_example_neurons_only)
+    plot_example_neurons_only = any(strcmpi(strtrim(char(plot_example_neurons_only)), ...
+        {'true', '1', 'yes'}));
+else
+    plot_example_neurons_only = logical(plot_example_neurons_only(1));
+end
+if plot_example_neurons_only
+    disp('plot_example_neurons_only is true. Only the example-neuron figures are drawn.')
+end
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
@@ -6423,8 +6435,38 @@ end
 function fig = open_full_figure(name)
 %OPEN_FULL_FIGURE  White figure that fills the screen.
 
+if plotting_example_neurons_only() && ~is_example_neuron_figure(name)
+    fig = figure('Name', name, 'Color', 'w', 'Visible', 'off', ...
+        'UserData', 'skip_save');
+    return
+end
 fig = figure('Name', name, 'Color', 'w');
 make_figure_fullscreen(fig)
+end
+
+
+function only = plotting_example_neurons_only()
+%PLOTTING_EXAMPLE_NEURONS_ONLY  Workspace switch for the example figures.
+
+only = false;
+try
+    value = evalin('base', 'plot_example_neurons_only');
+catch
+    return
+end
+if isempty(value)
+    return
+end
+if ischar(value) || isstring(value)
+    only = any(strcmpi(strtrim(char(value)), {'true', '1', 'yes'}));
+    return
+end
+only = logical(value(1));
+end
+
+
+function yes = is_example_neuron_figure(name)
+yes = ~isempty(regexp(char(name), '^Example oscillatory neurons', 'once'));
 end
 
 
@@ -6513,6 +6555,10 @@ if exist(folder, 'dir') ~= 7
     mkdir(folder);
 end
 fig = gcf;
+if isequal(get(fig, 'UserData'), 'skip_save')
+    close(fig)
+    return
+end
 make_figure_fullscreen(fig)
 square_plot_boxes(fig)
 drawnow
