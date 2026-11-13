@@ -1353,6 +1353,40 @@ write_summary_section(output_folder, '4. Two-factor ANOVA without interaction', 
     'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
     'Holm-Sidak adjusts every term in this figure together.', ...
     'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
+classifier_names = area_feature_names(two_way_panels);
+classifier_titles = area_feature_titles(two_way_panels);
+[classifier_X, classifier_y] = lock_classifier_data(feature_table, neuron_type, classifier_names);
+lock_class_names = {'Trough', 'Peak', 'Unlocked'};
+classifier_result = lda_crossval(classifier_X, classifier_y, lock_class_names);
+if classifier_result.ok
+    open_full_figure('Lock type classifier')
+    imagesc(classifier_result.counts)
+    set(gca, 'XTick', 1:numel(classifier_result.class_names), ...
+        'XTickLabel', classifier_result.class_names, ...
+        'YTick', 1:numel(classifier_result.class_names), ...
+        'YTickLabel', classifier_result.class_names)
+    try
+        set(gca, 'TickLabelInterpreter', 'none')
+    catch
+    end
+    colormap(gca, [linspace(0.97, 0.20, 64)', linspace(0.97, 0.45, 64)', linspace(0.97, 0.75, 64)'])
+    for r = 1:size(classifier_result.counts, 1)
+        for c = 1:size(classifier_result.counts, 2)
+            text(c, r, sprintf('%d', classifier_result.counts(r, c)), ...
+                'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle')
+        end
+    end
+    xlabel('Predicted lock type')
+    ylabel('True lock type')
+    title({sprintf('Cross-validated accuracy %.1f%%', 100 * classifier_result.accuracy), ...
+        sprintf('Majority-class chance %.1f%%', 100 * classifier_result.chance)})
+    box off
+    save_script_figure(output_folder)
+    fprintf('Lock-type classifier accuracy: %.1f%%. Majority-class chance: %.1f%%.\n', ...
+        100 * classifier_result.accuracy, 100 * classifier_result.chance)
+end
+write_summary_section(output_folder, '4. Lock-type classifier', ...
+    lock_classifier_report(classifier_titles, classifier_result))
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
@@ -2017,6 +2051,166 @@ for j = 1:numel(samples)
             stat_num(term.p, '%.4g'), stat_num(term.holm_p, '%.4g')); %#ok<AGROW>
     end
 end
+text = strjoin(lines, newline);
+end
+
+
+function [X, y] = lock_classifier_data(feature_table, neuron_type, feature_names)
+%LOCK_CLASSIFIER_DATA  Six features and the trough, peak, or unlocked label.
+
+n = size(feature_table, 1);
+X = nan(n, numel(feature_names));
+for j = 1:numel(feature_names)
+    column = feature_column(feature_table, feature_names{j});
+    n_copy = min(n, numel(column));
+    X(1:n_copy, j) = column(1:n_copy);
+end
+class_names = {'Trough', 'Peak', 'Unlocked'};
+y = zeros(n, 1);
+for i = 1:min(n, numel(neuron_type))
+    hit = find(strcmp(class_names, display_lock_label(neuron_type{i})), 1);
+    if ~isempty(hit)
+        y(i) = hit;
+    end
+end
+keep = y > 0 & all(isfinite(X), 2);
+X = X(keep, :);
+y = y(keep);
+end
+
+
+function result = lda_crossval(X, y, class_names)
+%LDA_CROSSVAL  Stratified cross-validated linear discriminant accuracy.
+
+result.ok = false;
+result.note = '';
+result.accuracy = nan;
+result.chance = nan;
+result.n_folds = 0;
+result.n = numel(y);
+result.class_names = class_names;
+result.counts = zeros(numel(class_names));
+result.recall = nan(1, numel(class_names));
+result.class_n = zeros(1, numel(class_names));
+if isempty(y) || size(X, 2) < 1
+    result.note = 'No neurons had a lock type and finite values on all six features.';
+    return
+end
+for c = 1:numel(class_names)
+    result.class_n(c) = sum(y == c);
+end
+present = find(result.class_n > 0);
+if numel(present) < 2
+    result.note = 'Fewer than two lock types had neurons with all six features.';
+    return
+end
+result.n_folds = min(10, min(result.class_n(present)));
+if result.n_folds < 2
+    result.note = 'A lock type has fewer than two neurons, so cross-validation was not run.';
+    return
+end
+folds = stratified_folds(y, result.n_folds);
+prediction = nan(size(y));
+for fold = 1:result.n_folds
+    test = folds == fold;
+    prediction(test) = lda_predict(X(~test, :), y(~test), X(test, :));
+end
+result.ok = true;
+result.accuracy = mean(prediction == y);
+result.chance = max(result.class_n) / result.n;
+for c = 1:numel(class_names)
+    for p = 1:numel(class_names)
+        result.counts(c, p) = sum(y == c & prediction == p);
+    end
+    if result.class_n(c) > 0
+        result.recall(c) = result.counts(c, c) / result.class_n(c);
+    end
+end
+end
+
+
+function folds = stratified_folds(y, n_folds)
+folds = zeros(size(y));
+classes = unique(y(:))';
+for c = classes
+    idx = find(y == c);
+    for i = 1:numel(idx)
+        folds(idx(i)) = mod(i - 1, n_folds) + 1;
+    end
+end
+end
+
+
+function prediction = lda_predict(X_train, y_train, X_test)
+%LDA_PREDICT  Linear discriminant using the pooled within-class covariance.
+
+classes = unique(y_train(:))';
+n_class = numel(classes);
+n_feature = size(X_train, 2);
+center = mean(X_train, 1);
+scale = std(X_train, 0, 1);
+scale(scale < eps(max(abs(center) + 1))) = 1;
+X_train = (X_train - center) ./ scale;
+X_test = (X_test - center) ./ scale;
+means = zeros(n_class, n_feature);
+priors = zeros(n_class, 1);
+covariance = zeros(n_feature, n_feature);
+for c = 1:n_class
+    rows = y_train == classes(c);
+    priors(c) = sum(rows) / numel(y_train);
+    means(c, :) = mean(X_train(rows, :), 1);
+    centered = X_train(rows, :) - means(c, :);
+    covariance = covariance + centered' * centered;
+end
+df = numel(y_train) - n_class;
+if df < 1
+    df = 1;
+end
+covariance = covariance / df;
+ridge = 1e-6 * trace(covariance) / n_feature;
+if ~isfinite(ridge) || ridge <= 0
+    ridge = 1e-6;
+end
+covariance = covariance + ridge * eye(n_feature);
+weighted_means = covariance \ means';
+quadratic = 0.5 * sum(means' .* weighted_means, 1);
+scores = X_test * weighted_means - quadratic + log(max(priors, realmin)).';
+[~, pick] = max(scores, [], 2);
+prediction = classes(pick);
+prediction = prediction(:);
+end
+
+
+function text = lock_classifier_report(feature_titles, result)
+lines = { ...
+    'Linear discriminant classifier of lock type from six high-power features.', ...
+    'The features are subplot numbers 1, 2, 6, 12, 13, and 15:', ...
+    strjoin(feature_titles, ', '), ...
+    'Classes are trough, peak, and unlocked. Non-classified cells are excluded.', ...
+    'Neurons from every analysed area are included, including VLPAG.', ...
+    'A neuron is used only when all six features are finite.', ...
+    'Accuracy is stratified cross-validation. Each class is split across the folds in stored order.', ...
+    'Within each training fold the features are standardized, and the pooled covariance has a small ridge.'};
+if ~result.ok
+    lines{end + 1} = result.note; %#ok<AGROW>
+    text = strjoin(lines, newline);
+    return
+end
+lines{end + 1} = sprintf('Neurons: %d. Folds: %d.', result.n, result.n_folds); %#ok<AGROW>
+count_bits = cell(1, numel(result.class_names));
+for c = 1:numel(result.class_names)
+    count_bits{c} = sprintf('%s %d', result.class_names{c}, result.class_n(c));
+end
+lines{end + 1} = ['Class counts: ', strjoin(count_bits, ', ')]; %#ok<AGROW>
+lines{end + 1} = sprintf('Cross-validated accuracy: %.1f%%.', 100 * result.accuracy); %#ok<AGROW>
+lines{end + 1} = sprintf('Majority-class chance: %.1f%%.', 100 * result.chance); %#ok<AGROW>
+for c = 1:numel(result.class_names)
+    lines{end + 1} = sprintf('%-16s recall %s', result.class_names{c}, ...
+        stat_num(100 * result.recall(c), '%.1f%%')); %#ok<AGROW>
+end
+lines{end + 1} = 'Confusion counts, rows true and columns predicted, order trough, peak, unlocked:'; %#ok<AGROW>
+lines{end + 1} = labeled_number_matrix('True', result.class_names, ...
+    result.class_names, result.counts, '%.0f'); %#ok<AGROW>
 text = strjoin(lines, newline);
 end
 
