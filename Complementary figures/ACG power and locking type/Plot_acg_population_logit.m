@@ -25,7 +25,8 @@
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
 % Each classifier is run on every trough, peak, and unlocked neuron, and
 % again on the oscillatory neurons only. n_accuracy_permutations label
-% shuffles test each accuracy. The default is 1000.
+% shuffles test the accuracy of the whole model and of each lock type.
+% The default is 1000. A bar is filled when that permutation p is below 0.05.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -1458,6 +1459,11 @@ for p = 1:numel(classifier_populations)
                 classifier_populations{p}.name, classifier_results{m}.method_label, ...
                 100 * classifier_results{m}.accuracy, 100 * classifier_results{m}.chance, ...
                 classifier_results{m}.perm_p)
+            for c = 1:numel(lock_class_names)
+                fprintf('  %s accuracy: %.1f%%. Permutation p = %.3g.\n', ...
+                    lock_class_names{c}, 100 * classifier_results{m}.recall(c), ...
+                    classifier_results{m}.class_perm_p(c))
+            end
         else
             fprintf('%s, %s: %s\n', classifier_populations{p}.name, ...
                 classifier_results{m}.method_label, classifier_results{m}.note)
@@ -1469,6 +1475,7 @@ for p = 1:numel(classifier_populations)
         classifier_populations{p}.name)
 end
 draw_accuracy_null(classifier_populations, output_folder, classifier_method_name)
+draw_class_accuracy_bars(classifier_populations, output_folder)
 write_summary_section(output_folder, '4. Lock-type classifier', ...
     lock_classifier_report(classifier_titles, classifier_method_name, ...
     n_accuracy_permutations, classifier_populations))
@@ -2568,7 +2575,10 @@ lines = { ...
     'tree is the default classification tree. logit is multinomial logistic regression.', ...
     sprintf('The permutation test shuffles the lock-type labels %d times and repeats the same cross-validation.', n_perm), ...
     'The features stay fixed. The random stream is reset to 42 before the first shuffle.', ...
-    'p = (1 + number of shuffled accuracies at or above the real accuracy) / (1 + number of shuffles).'};
+    'The same shuffles give the p-value of the whole model and of each lock type.', ...
+    'A lock-type accuracy is the fraction of neurons of that type that were classified as that type.', ...
+    'p = (1 + number of shuffled accuracies at or above the real accuracy) / (1 + number of shuffles).', ...
+    'A bar is filled when that permutation p is below 0.05. Otherwise only the border is drawn.'};
 for p = 1:numel(populations)
     lines{end + 1} = populations{p}.name; %#ok<AGROW>
     results = populations{p}.results;
@@ -2596,21 +2606,25 @@ for p = 1:numel(populations)
             continue
         end
         lines{end + 1} = sprintf('    Cross-validated accuracy: %.1f%%.', 100 * result.accuracy); %#ok<AGROW>
+        if result.n_perm < 1 || ~isfinite(result.perm_p)
+            lines{end + 1} = ['    ', result.perm_note]; %#ok<AGROW>
+        else
+            lines{end + 1} = sprintf('    Permutation shuffles: %d.', result.n_perm); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model null mean: %.1f%%.', 100 * result.null_mean); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model null 95th percentile: %.1f%%.', 100 * result.null_p95); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model permutation p: %.4g.', result.perm_p); %#ok<AGROW>
+        end
         for c = 1:numel(result.class_names)
-            lines{end + 1} = sprintf('    %-16s recall %s', result.class_names{c}, ...
-                stat_num(100 * result.recall(c), '%.1f%%')); %#ok<AGROW>
+            lines{end + 1} = sprintf('    %-16s accuracy %s   null mean %s   null 95th %s   permutation p %s', ...
+                result.class_names{c}, ...
+                stat_num(100 * result.recall(c), '%.1f%%'), ...
+                stat_num(100 * result.class_null_mean(c), '%.1f%%'), ...
+                stat_num(100 * result.class_null_p95(c), '%.1f%%'), ...
+                stat_num(result.class_perm_p(c), '%.4g')); %#ok<AGROW>
         end
         lines{end + 1} = '    Confusion counts, rows true and columns predicted:'; %#ok<AGROW>
         lines{end + 1} = labeled_number_matrix('True', result.class_names, ...
             result.class_names, result.counts, '%.0f'); %#ok<AGROW>
-        if result.n_perm < 1 || ~isfinite(result.perm_p)
-            lines{end + 1} = ['    ', result.perm_note]; %#ok<AGROW>
-            continue
-        end
-        lines{end + 1} = sprintf('    Permutation shuffles: %d.', result.n_perm); %#ok<AGROW>
-        lines{end + 1} = sprintf('    Null mean accuracy: %.1f%%.', 100 * result.null_mean); %#ok<AGROW>
-        lines{end + 1} = sprintf('    Null 95th percentile: %.1f%%.', 100 * result.null_p95); %#ok<AGROW>
-        lines{end + 1} = sprintf('    Permutation p: %.4g.', result.perm_p); %#ok<AGROW>
     end
 end
 text = strjoin(lines, newline);
@@ -2618,13 +2632,18 @@ end
 
 
 function result = attach_accuracy_permutation(result, X, y, class_names, n_perm)
-%ATTACH_ACCURACY_PERMUTATION  Label-shuffle null for one cross-validated accuracy.
+%ATTACH_ACCURACY_PERMUTATION  Label-shuffle null for the model and each lock type.
 
+n_class = numel(result.class_names);
 result.n_perm = 0;
 result.null_mean = nan;
 result.null_p95 = nan;
 result.perm_p = nan;
 result.null_accuracy = zeros(0, 1);
+result.null_recall = zeros(0, n_class);
+result.class_null_mean = nan(1, n_class);
+result.class_null_p95 = nan(1, n_class);
+result.class_perm_p = nan(1, n_class);
 result.perm_note = '';
 if ~result.ok
     result.perm_note = 'The permutation test was skipped because the classifier did not run.';
@@ -2635,22 +2654,41 @@ if n_perm < 1
     return
 end
 null_accuracy = nan(n_perm, 1);
+null_recall = nan(n_perm, n_class);
 for shuffle = 1:n_perm
     shuffled = classifier_crossval(X, y(randperm(numel(y))), class_names, result.method);
     if shuffled.ok
         null_accuracy(shuffle) = shuffled.accuracy;
+        null_recall(shuffle, :) = shuffled.recall(:).';
     end
 end
-null_accuracy = null_accuracy(isfinite(null_accuracy));
+kept = isfinite(null_accuracy);
+null_accuracy = null_accuracy(kept);
+null_recall = null_recall(kept, :);
 result.n_perm = numel(null_accuracy);
 result.null_accuracy = null_accuracy;
+result.null_recall = null_recall;
 if isempty(null_accuracy)
     result.perm_note = 'Every label shuffle failed, so the permutation p was not computed.';
     return
 end
 result.null_mean = mean(null_accuracy);
 result.null_p95 = upper_percentile(null_accuracy, 0.95);
-result.perm_p = (1 + sum(null_accuracy >= result.accuracy - 1e-12)) / (1 + result.n_perm);
+result.perm_p = permutation_p(null_accuracy, result.accuracy);
+for c = 1:n_class
+    samples = null_recall(isfinite(null_recall(:, c)), c);
+    if isempty(samples) || ~isfinite(result.recall(c))
+        continue
+    end
+    result.class_null_mean(c) = mean(samples);
+    result.class_null_p95(c) = upper_percentile(samples, 0.95);
+    result.class_perm_p(c) = permutation_p(samples, result.recall(c));
+end
+end
+
+
+function p = permutation_p(null_values, observed)
+p = (1 + sum(null_values >= observed - 1e-12)) / (1 + numel(null_values));
 end
 
 
@@ -2666,37 +2704,116 @@ end
 
 
 function draw_accuracy_null(populations, folder, method)
-open_full_figure('Lock-type accuracy permutation')
-n_pop = numel(populations);
-n_methods = numel(populations{1}.results);
-for m = 1:n_methods
-    for p = 1:n_pop
-        subplot(n_methods, n_pop, (m - 1) * n_pop + p)
-        result = populations{p}.results{m};
-        if ~result.ok || isempty(result.null_accuracy)
+for p = 1:numel(populations)
+    open_full_figure(['Lock-type accuracy permutation, ', populations{p}.name])
+    results = populations{p}.results;
+    n_methods = numel(results);
+    n_class = 0;
+    for m = 1:n_methods
+        n_class = max(n_class, numel(results{m}.class_names));
+    end
+    n_columns = 1 + n_class;
+    for m = 1:n_methods
+        result = results{m};
+        for column = 1:n_columns
+            subplot(n_methods, n_columns, (m - 1) * n_columns + column)
+            if column == 1
+                samples = result.null_accuracy;
+                observed = result.accuracy;
+                p_value = result.perm_p;
+                panel_name = 'All';
+            else
+                samples = result.null_recall(:, column - 1);
+                samples = samples(isfinite(samples));
+                observed = result.recall(column - 1);
+                p_value = result.class_perm_p(column - 1);
+                panel_name = result.class_names{column - 1};
+            end
+            if ~result.ok || isempty(samples) || ~isfinite(observed)
+                axis off
+                title({result.method_label, panel_name}, 'Interpreter', 'none')
+                if ~isempty(result.perm_note)
+                    text(0.5, 0.5, result.perm_note, 'HorizontalAlignment', 'center', ...
+                        'Interpreter', 'none')
+                end
+                continue
+            end
+            histogram(100 * samples, 'FaceColor', [0.75 0.75 0.75], 'EdgeColor', 'none')
+            hold on
+            y_limit = ylim;
+            plot(100 * [observed observed], y_limit, 'Color', [0.8 0.15 0.15], 'LineWidth', 1.6)
+            xlabel('Cross-validated accuracy (%)')
+            ylabel('Shuffles')
+            title({sprintf('p = %.3g', p_value), result.method_label, panel_name}, ...
+                'Interpreter', 'none')
+            box off
+        end
+    end
+    sgtitle({populations{p}.name, ...
+        sprintf('Gray bars are label shuffles. The red line is the real accuracy. classifier_method = %s.', method)}, ...
+        'Interpreter', 'none')
+    save_script_figure(folder)
+end
+end
+
+
+function draw_class_accuracy_bars(populations, folder)
+for p = 1:numel(populations)
+    open_full_figure(['Lock-type accuracy by cell type, ', populations{p}.name])
+    results = populations{p}.results;
+    n_methods = numel(results);
+    for m = 1:n_methods
+        subplot(1, n_methods, m)
+        result = results{m};
+        if ~result.ok
             axis off
-            title({populations{p}.name, result.method_label}, 'Interpreter', 'none')
-            if ~isempty(result.perm_note)
-                text(0.5, 0.5, result.perm_note, 'HorizontalAlignment', 'center', ...
+            title(result.method_label, 'Interpreter', 'none')
+            if ~isempty(result.note)
+                text(0.5, 0.5, result.note, 'HorizontalAlignment', 'center', ...
                     'Interpreter', 'none')
             end
             continue
         end
-        histogram(result.null_accuracy, 'FaceColor', [0.75 0.75 0.75], 'EdgeColor', 'none')
         hold on
-        y_limit = ylim;
-        plot([result.accuracy result.accuracy], y_limit, ...
-            'Color', [0.8 0.15 0.15], 'LineWidth', 1.6)
-        xlabel('Cross-validated accuracy')
-        ylabel('Shuffles')
-        title({sprintf('p = %.3g', result.perm_p), ...
-            result.method_label, populations{p}.name}, 'Interpreter', 'none')
+        y_top = 0;
+        for c = 1:numel(result.class_names)
+            if ~isfinite(result.recall(c))
+                continue
+            end
+            height = 100 * result.recall(c);
+            color = lock_bar_color(result.class_names{c});
+            significant = isfinite(result.class_perm_p(c)) && result.class_perm_p(c) < 0.05;
+            if significant
+                bar(c, height, 0.72, 'FaceColor', color, 'EdgeColor', color, ...
+                    'FaceAlpha', 0.9, 'LineWidth', 1.2)
+            else
+                bar(c, height, 0.72, 'FaceColor', 'none', 'EdgeColor', color, ...
+                    'LineWidth', 1.6)
+            end
+            if isfinite(result.class_perm_p(c))
+                text(c, height, sprintf('p = %.3g', result.class_perm_p(c)), ...
+                    'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
+                    'Interpreter', 'none')
+            end
+            y_top = max(y_top, height);
+        end
+        set(gca, 'XTick', 1:numel(result.class_names), 'XTickLabel', result.class_names)
+        try
+            set(gca, 'TickLabelInterpreter', 'none')
+        catch
+        end
+        ylim([0, max(110, y_top + 15)])
+        xlim([0.4, numel(result.class_names) + 0.6])
+        ylabel('Accuracy (%)')
+        title({result.method_label, sprintf('All p = %.3g', result.perm_p)}, ...
+            'Interpreter', 'none')
         box off
     end
+    sgtitle({populations{p}.name, ...
+        'Filled bars have permutation p < 0.05. Open bars do not.'}, ...
+        'Interpreter', 'none')
+    save_script_figure(folder)
 end
-sgtitle({sprintf('Gray bars are label shuffles. The red line is the real accuracy. classifier_method = %s.', method)}, ...
-    'Interpreter', 'none')
-save_script_figure(folder)
 end
 
 
