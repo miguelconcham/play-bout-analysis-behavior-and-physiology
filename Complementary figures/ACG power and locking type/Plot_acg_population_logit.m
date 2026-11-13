@@ -9,12 +9,12 @@
 % Section 4 only draws. After section 3 has run, edit section 4 and run
 % that section alone.
 %
-% output_folder is set at the start of section 1. Figures, analysis_summary.txt,
-% the neuron table, the population matrices, and the lock-type model cache
-% are written to Data\Analysis results\acg population logit. Later sections
-% keep that folder when it is already in the workspace. A file saved by an
-% earlier run next to this script, or a population matrix saved in spike
-% train parsing, is copied or read from there.
+% output_folder is set at the start of section 1. Change that path to choose
+% where each figure and analysis_summary.txt are written. Later sections
+% keep that folder when it is already in the workspace. The neuron table,
+% the population matrices, and the lock-type model cache are written to
+% Data\Analysis results\acg population logit. A cache or matrix saved by
+% an earlier run is read from the figure folder or from spike train parsing.
 % n_example_neurons and n_example_subplots are set at the start of section 4.
 % n_example_neurons chooses how many of the strongest oscillatory neurons
 % are drawn. The examples also keep the strongest oscillatory neuron from
@@ -37,7 +37,7 @@
 % reused for all nine models. The default is 1000. The model accuracy is
 % the mean of the three lock-type accuracies. A bar is filled when that
 % permutation p is below 0.05. A finished fit is written to
-% lock_type_model_cache.mat in the output folder. The same code version,
+% lock_type_model_cache.mat under Analysis results\acg population logit. The same code version,
 % features, neurons, and permutation count load that file instead of
 % fitting again. lock_model_cache_version is 1 for this fit.
 %
@@ -82,10 +82,10 @@
 % Kolmogorov-Smirnov test.
 
 %% 1. Load the checkpoint and build the imagesc matrices
-output_folder = logit_result_folder();
-if exist(output_folder, 'dir') ~= 7
-    mkdir(output_folder);
-end
+output_folder = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
+    'NPX-OPTO PLAY NMM\PlayBout Analysis\Figures organized by version\' ...
+    'Reviewer Figures\Delta oscillation validation\autocorrelogram as a function of power'];
+[output_folder, estimate_folder] = logit_folders(output_folder);
 this_dir = fileparts(mfilename('fullpath'));
 figures_dir = fileparts(this_dir);
 repo_root = fileparts(figures_dir);
@@ -167,7 +167,7 @@ imagesc_sum_all = imagesc_logit.sum.all;
 imagesc_sum_power_high = imagesc_logit.sum.power_high;
 imagesc_sum_power_low = imagesc_logit.sum.power_low;
 
-prep_file = fullfile(output_folder, 'acg_population_logit_prep.mat');
+prep_file = fullfile(estimate_folder, 'acg_population_logit_prep.mat');
 % acg2features scores the lags it is given. The checkpoint axis is
 % two-sided, and the rhythmicity function uses the positive side.
 positive_lag = lag > 0;
@@ -217,13 +217,13 @@ cluster_method = 'ward';
 if ~exist('output_folder', 'var')
     output_folder = '';
 end
-output_folder = resolve_logit_output_folder(output_folder);
+[output_folder, estimate_folder] = logit_folders(output_folder);
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
 if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
         || ~exist('imagesc_sum_power_high', 'var')
-    prep_file = logit_prep_file(output_folder);
+    prep_file = logit_prep_file(estimate_folder, output_folder);
     load(prep_file)
 end
 if ~exist('feature_table', 'var')
@@ -586,7 +586,7 @@ disp(['Run section 3 to keep ', cluster_method_label, ' cluster 1.'])
 if ~exist('output_folder', 'var')
     output_folder = '';
 end
-output_folder = resolve_logit_output_folder(output_folder);
+[output_folder, estimate_folder] = logit_folders(output_folder);
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
@@ -612,7 +612,7 @@ if ~exist('neuron_session', 'var') || ~exist('neuron_cluster_id', 'var') ...
     [neuron_session, ~, neuron_cluster_id] = ...
         neuron_identity_from_records(records, neuron_record_index);
 end
-oscillatory_label_file = save_oscillatory_label_table(output_folder, ...
+oscillatory_label_file = save_oscillatory_label_table(estimate_folder, ...
     neuron_session, neuron_cluster_id, osc_member, complete_rows);
 [type_percent, type_observed, type_total, lock_type_label] = ...
     lock_type_osc_rate(neuron_type, osc_rows);
@@ -661,7 +661,7 @@ write_summary_section(output_folder, '3. Oscillatory neurons kept for the figure
 if ~exist('output_folder', 'var')
     output_folder = '';
 end
-output_folder = resolve_logit_output_folder(output_folder);
+[output_folder, estimate_folder] = logit_folders(output_folder);
 n_example_neurons = 10;
 n_example_subplots = 6;
 this_dir = fileparts(mfilename('fullpath'));
@@ -1307,7 +1307,7 @@ if isempty(classifier_names)
 else
 % Bump this when the fit itself changes. A file from another version is not loaded.
 lock_model_cache_version = 1;
-lock_model_cache_file = lock_cache_file(output_folder);
+lock_model_cache_file = lock_cache_file(estimate_folder, output_folder);
 classifier_populations = { ...
     struct('name', 'All classified neurons', 'rows', (1:size(feature_table, 1)).'), ...
     struct('name', 'Oscillatory neurons', 'rows', osc_rows(:))};
@@ -1504,7 +1504,7 @@ write_section_4_summary(output_folder, stratum_titles, cycle_n, cycle_r, cycle_p
 if ~exist('output_folder', 'var')
     output_folder = '';
 end
-output_folder = resolve_logit_output_folder(output_folder);
+[output_folder, estimate_folder] = logit_folders(output_folder);
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
@@ -1723,7 +1723,7 @@ area_power_conditions = {'high', 'low', 'all'};
 if ~exist('output_folder', 'var')
     output_folder = '';
 end
-output_folder = resolve_logit_output_folder(output_folder);
+[output_folder, estimate_folder] = logit_folders(output_folder);
 if ~exist('neuron_area', 'var') || ~exist('neuron_session', 'var') ...
         || ~exist('neuron_cluster_id', 'var') || ~exist('high_power_delta', 'var') ...
         || ~exist('low_power_delta', 'var')
@@ -4965,54 +4965,82 @@ root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
 end
 
 
+function folder = default_figure_folder()
+%DEFAULT_FIGURE_FOLDER  Figures and analysis_summary.txt.
+folder = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
+    'NPX-OPTO PLAY NMM\PlayBout Analysis\Figures organized by version\' ...
+    'Reviewer Figures\Delta oscillation validation\autocorrelogram as a function of power'];
+end
+
+
 function folder = logit_result_folder()
-%LOGIT_RESULT_FOLDER  Saved figures and estimates for this script.
+%LOGIT_RESULT_FOLDER  Neuron table, population matrices, and the lock-type cache.
 folder = fullfile(experiment_data_root(), 'Analysis results', 'acg population logit');
 end
 
 
-function folder = resolve_logit_output_folder(folder)
-%RESOLVE_LOGIT_OUTPUT_FOLDER  Use the analysis-results folder unless another folder was chosen.
+function [figure_folder, estimate_folder] = logit_folders(figure_folder)
+%LOGIT_FOLDERS  Keep the chosen figure folder and prepare the estimate folder.
+estimate_folder = logit_result_folder();
 legacy = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
-if isempty(folder) || strcmpi(char(folder), legacy)
-    folder = logit_result_folder();
+if isempty(figure_folder) || strcmpi(char(figure_folder), legacy) ...
+        || strcmpi(char(figure_folder), estimate_folder)
+    figure_folder = default_figure_folder();
 end
-if exist(folder, 'dir') ~= 7
-    mkdir(folder);
+if exist(figure_folder, 'dir') ~= 7
+    mkdir(figure_folder);
+end
+if exist(estimate_folder, 'dir') ~= 7
+    mkdir(estimate_folder);
 end
 end
 
 
-function path = logit_prep_file(output_folder)
-%LOGIT_PREP_FILE  Population matrices, including one saved with the parsing files.
-path = fullfile(output_folder, 'acg_population_logit_prep.mat');
+function path = logit_prep_file(estimate_folder, figure_folder)
+%LOGIT_PREP_FILE  Population matrices, including one saved with an older run.
+path = fullfile(estimate_folder, 'acg_population_logit_prep.mat');
 if exist(path, 'file') == 2
     return
 end
-legacy = fullfile(default_parsing_folder(), 'acg_population_logit_prep.mat');
-if exist(legacy, 'file') == 2
-    path = legacy;
+candidates = { ...
+    fullfile(default_parsing_folder(), 'acg_population_logit_prep.mat'), ...
+    fullfile(figure_folder, 'acg_population_logit_prep.mat')};
+for i = 1:numel(candidates)
+    if exist(candidates{i}, 'file') == 2
+        path = candidates{i};
+        return
+    end
 end
 end
 
 
-function path = lock_cache_file(output_folder)
-%LOCK_CACHE_FILE  Lock-type fit, copied forward from the old figure folder.
-path = fullfile(output_folder, 'lock_type_model_cache.mat');
-legacy = fullfile(fileparts(mfilename('fullpath')), ...
-    'acg_population_logit_figures', 'lock_type_model_cache.mat');
-if exist(path, 'file') == 2 || exist(legacy, 'file') ~= 2 || strcmpi(path, legacy)
+function path = lock_cache_file(estimate_folder, figure_folder)
+%LOCK_CACHE_FILE  Lock-type fit, copied into the estimate folder when found elsewhere.
+path = fullfile(estimate_folder, 'lock_type_model_cache.mat');
+if exist(path, 'file') == 2
     return
 end
-if exist(output_folder, 'dir') ~= 7
-    mkdir(output_folder);
-end
-try
-    copyfile(legacy, path);
-    fprintf('Copied the saved lock-type models to %s\n', path)
-catch
-    path = legacy;
-    fprintf('Using the saved lock-type models at %s\n', path)
+candidates = { ...
+    fullfile(figure_folder, 'lock_type_model_cache.mat'), ...
+    fullfile(fileparts(mfilename('fullpath')), ...
+        'acg_population_logit_figures', 'lock_type_model_cache.mat')};
+for i = 1:numel(candidates)
+    legacy = candidates{i};
+    if exist(legacy, 'file') ~= 2 || strcmpi(legacy, path)
+        continue
+    end
+    if exist(estimate_folder, 'dir') ~= 7
+        mkdir(estimate_folder);
+    end
+    try
+        copyfile(legacy, path);
+        fprintf('Copied the saved lock-type models to %s\n', path)
+        return
+    catch
+        fprintf('Using the saved lock-type models at %s\n', legacy)
+        path = legacy;
+        return
+    end
 end
 end
 
