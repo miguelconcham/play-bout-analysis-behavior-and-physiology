@@ -20,6 +20,10 @@
 % n_example_neurons. n_example_subplots is how many panels go on each figure.
 % Each neuron uses two panels, so the figures continue until every
 % requested neuron is drawn.
+% classifier_method is set just before the lock-type classifier.
+% 'all' reports every option. The other values are 'lda', 'naivebayes',
+% 'svm', 'tree', and 'logit'. 'svm' is a Gaussian-kernel SVM at medium scale.
+% Only oscillatory neurons are classified.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -1353,40 +1357,28 @@ write_summary_section(output_folder, '4. Two-factor ANOVA without interaction', 
     'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
     'Holm-Sidak adjusts every term in this figure together.', ...
     'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
+classifier_method = 'all';
 classifier_names = area_feature_names(two_way_panels);
 classifier_titles = area_feature_titles(two_way_panels);
-[classifier_X, classifier_y] = lock_classifier_data(feature_table, neuron_type, classifier_names);
+[classifier_X, classifier_y] = lock_classifier_data(feature_table, neuron_type, ...
+    classifier_names, osc_rows);
 lock_class_names = {'Trough', 'Peak', 'Unlocked'};
-classifier_result = lda_crossval(classifier_X, classifier_y, lock_class_names);
-if classifier_result.ok
-    open_full_figure('Lock type classifier')
-    imagesc(classifier_result.counts)
-    set(gca, 'XTick', 1:numel(classifier_result.class_names), ...
-        'XTickLabel', classifier_result.class_names, ...
-        'YTick', 1:numel(classifier_result.class_names), ...
-        'YTickLabel', classifier_result.class_names)
-    try
-        set(gca, 'TickLabelInterpreter', 'none')
-    catch
+classifier_methods = classifier_method_list(classifier_method);
+classifier_results = cell(numel(classifier_methods), 1);
+for m = 1:numel(classifier_methods)
+    classifier_results{m} = classifier_crossval(classifier_X, classifier_y, ...
+        lock_class_names, classifier_methods{m});
+    if classifier_results{m}.ok
+        fprintf('%s accuracy: %.1f%%. Majority-class chance: %.1f%%.\n', ...
+            classifier_results{m}.method_label, 100 * classifier_results{m}.accuracy, ...
+            100 * classifier_results{m}.chance)
+    else
+        fprintf('%s: %s\n', classifier_results{m}.method_label, classifier_results{m}.note)
     end
-    colormap(gca, [linspace(0.97, 0.20, 64)', linspace(0.97, 0.45, 64)', linspace(0.97, 0.75, 64)'])
-    for r = 1:size(classifier_result.counts, 1)
-        for c = 1:size(classifier_result.counts, 2)
-            text(c, r, sprintf('%d', classifier_result.counts(r, c)), ...
-                'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle')
-        end
-    end
-    xlabel('Predicted lock type')
-    ylabel('True lock type')
-    title({sprintf('Cross-validated accuracy %.1f%%', 100 * classifier_result.accuracy), ...
-        sprintf('Majority-class chance %.1f%%', 100 * classifier_result.chance)})
-    box off
-    save_script_figure(output_folder)
-    fprintf('Lock-type classifier accuracy: %.1f%%. Majority-class chance: %.1f%%.\n', ...
-        100 * classifier_result.accuracy, 100 * classifier_result.chance)
 end
+draw_lock_classifier(classifier_results, output_folder, classifier_method)
 write_summary_section(output_folder, '4. Lock-type classifier', ...
-    lock_classifier_report(classifier_titles, classifier_result))
+    lock_classifier_report(classifier_titles, classifier_method, classifier_results))
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
@@ -2055,8 +2047,8 @@ text = strjoin(lines, newline);
 end
 
 
-function [X, y] = lock_classifier_data(feature_table, neuron_type, feature_names)
-%LOCK_CLASSIFIER_DATA  Six features and the trough, peak, or unlocked label.
+function [X, y] = lock_classifier_data(feature_table, neuron_type, feature_names, osc_rows)
+%LOCK_CLASSIFIER_DATA  Six features for oscillatory trough, peak, or unlocked neurons.
 
 n = size(feature_table, 1);
 X = nan(n, numel(feature_names));
@@ -2073,17 +2065,38 @@ for i = 1:min(n, numel(neuron_type))
         y(i) = hit;
     end
 end
-keep = y > 0 & all(isfinite(X), 2);
+osc_keep = false(n, 1);
+osc_rows = osc_rows(:);
+osc_rows = osc_rows(osc_rows >= 1 & osc_rows <= n);
+osc_keep(round(osc_rows)) = true;
+keep = osc_keep & y > 0 & all(isfinite(X), 2);
 X = X(keep, :);
 y = y(keep);
 end
 
 
-function result = lda_crossval(X, y, class_names)
-%LDA_CROSSVAL  Stratified cross-validated linear discriminant accuracy.
+function methods = classifier_method_list(method)
+allowed = {'lda', 'naivebayes', 'svm', 'tree', 'logit'};
+if strcmpi(method, 'all')
+    methods = allowed;
+    return
+end
+hit = strcmpi(allowed, method);
+if ~any(hit)
+    error('Plot_acg_population_logit:classifier', ...
+        'classifier_method must be all, lda, naivebayes, svm, tree, or logit.');
+end
+methods = allowed(hit);
+end
+
+
+function result = classifier_crossval(X, y, class_names, method)
+%CLASSIFIER_CROSSVAL  Stratified cross-validated accuracy for one method.
 
 result.ok = false;
 result.note = '';
+result.method = method;
+result.method_label = classifier_method_label(method);
 result.accuracy = nan;
 result.chance = nan;
 result.n_folds = 0;
@@ -2092,8 +2105,12 @@ result.class_names = class_names;
 result.counts = zeros(numel(class_names));
 result.recall = nan(1, numel(class_names));
 result.class_n = zeros(1, numel(class_names));
+if ~classifier_method_available(method)
+    result.note = 'This option needs the Statistics and Machine Learning Toolbox.';
+    return
+end
 if isempty(y) || size(X, 2) < 1
-    result.note = 'No neurons had a lock type and finite values on all six features.';
+    result.note = 'No oscillatory neuron had a lock type and finite values on all six features.';
     return
 end
 for c = 1:numel(class_names)
@@ -2101,19 +2118,25 @@ for c = 1:numel(class_names)
 end
 present = find(result.class_n > 0);
 if numel(present) < 2
-    result.note = 'Fewer than two lock types had neurons with all six features.';
+    result.note = 'Fewer than two lock types had oscillatory neurons with all six features.';
     return
 end
 result.n_folds = min(10, min(result.class_n(present)));
 if result.n_folds < 2
-    result.note = 'A lock type has fewer than two neurons, so cross-validation was not run.';
+    result.note = 'A lock type has fewer than two oscillatory neurons, so cross-validation was not run.';
     return
 end
 folds = stratified_folds(y, result.n_folds);
 prediction = nan(size(y));
 for fold = 1:result.n_folds
     test = folds == fold;
-    prediction(test) = lda_predict(X(~test, :), y(~test), X(test, :));
+    try
+        predicted = classifier_predict(method, X(~test, :), y(~test), X(test, :));
+        prediction(test) = predicted(:);
+    catch err
+        result.note = err.message;
+        return
+    end
 end
 result.ok = true;
 result.accuracy = mean(prediction == y);
@@ -2141,17 +2164,87 @@ end
 end
 
 
+function label = classifier_method_label(method)
+switch lower(method)
+    case 'lda'
+        label = 'Linear discriminant';
+    case 'naivebayes'
+        label = 'Gaussian naive Bayes';
+    case 'svm'
+        label = 'Medium Gaussian SVM';
+    case 'tree'
+        label = 'Classification tree';
+    case 'logit'
+        label = 'Multinomial logit';
+    otherwise
+        label = method;
+end
+end
+
+
+function available = classifier_method_available(method)
+switch lower(method)
+    case {'lda', 'naivebayes', 'logit'}
+        available = true;
+    case 'svm'
+        available = exist('fitcecoc', 'file') == 2 && exist('templateSVM', 'file') == 2;
+    case 'tree'
+        available = exist('fitctree', 'file') == 2;
+    otherwise
+        available = false;
+end
+end
+
+
+function prediction = classifier_predict(method, X_train, y_train, X_test)
+%CLASSIFIER_PREDICT  One fold. Features are standardized on the training fold.
+
+[X_train, X_test] = standardize_fold(X_train, X_test);
+switch lower(method)
+    case 'lda'
+        prediction = lda_predict(X_train, y_train, X_test);
+    case 'naivebayes'
+        prediction = naive_bayes_predict(X_train, y_train, X_test);
+    case 'svm'
+        prediction = gaussian_svm_predict(X_train, y_train, X_test);
+    case 'tree'
+        model = fitctree(X_train, y_train);
+        prediction = predict(model, X_test);
+    case 'logit'
+        prediction = logit_predict(X_train, y_train, X_test);
+    otherwise
+        error('Plot_acg_population_logit:classifier', ...
+            'Unknown classifier method.');
+end
+prediction = prediction(:);
+end
+
+
+function [X_train, X_test] = standardize_fold(X_train, X_test)
+center = mean(X_train, 1);
+scale = std(X_train, 0, 1);
+scale(~isfinite(scale) | scale < eps(max(abs(center) + 1))) = 1;
+X_train = (X_train - center) ./ scale;
+X_test = (X_test - center) ./ scale;
+end
+
+
 function prediction = lda_predict(X_train, y_train, X_test)
 %LDA_PREDICT  Linear discriminant using the pooled within-class covariance.
 
+if exist('fitcdiscr', 'file') == 2
+    try
+        model = fitcdiscr(X_train, y_train, 'DiscrimType', 'linear');
+    catch
+        model = fitcdiscr(X_train, y_train, 'DiscrimType', 'pseudoLinear');
+    end
+    prediction = predict(model, X_test);
+    prediction = prediction(:);
+    return
+end
 classes = unique(y_train(:))';
 n_class = numel(classes);
 n_feature = size(X_train, 2);
-center = mean(X_train, 1);
-scale = std(X_train, 0, 1);
-scale(scale < eps(max(abs(center) + 1))) = 1;
-X_train = (X_train - center) ./ scale;
-X_test = (X_test - center) ./ scale;
 means = zeros(n_class, n_feature);
 priors = zeros(n_class, 1);
 covariance = zeros(n_feature, n_feature);
@@ -2181,36 +2274,217 @@ prediction = prediction(:);
 end
 
 
-function text = lock_classifier_report(feature_titles, result)
-lines = { ...
-    'Linear discriminant classifier of lock type from six high-power features.', ...
-    'The features are subplot numbers 1, 2, 6, 12, 13, and 15:', ...
-    strjoin(feature_titles, ', '), ...
-    'Classes are trough, peak, and unlocked. Non-classified cells are excluded.', ...
-    'Neurons from every analysed area are included, including VLPAG.', ...
-    'A neuron is used only when all six features are finite.', ...
-    'Accuracy is stratified cross-validation. Each class is split across the folds in stored order.', ...
-    'Within each training fold the features are standardized, and the pooled covariance has a small ridge.'};
-if ~result.ok
-    lines{end + 1} = result.note; %#ok<AGROW>
-    text = strjoin(lines, newline);
+function prediction = naive_bayes_predict(X_train, y_train, X_test)
+%NAIVE_BAYES_PREDICT  Gaussian naive Bayes, one normal per feature and class.
+
+if exist('fitcnb', 'file') == 2
+    model = fitcnb(X_train, y_train, 'DistributionNames', 'normal');
+    prediction = predict(model, X_test);
+    prediction = prediction(:);
     return
 end
-lines{end + 1} = sprintf('Neurons: %d. Folds: %d.', result.n, result.n_folds); %#ok<AGROW>
-count_bits = cell(1, numel(result.class_names));
-for c = 1:numel(result.class_names)
-    count_bits{c} = sprintf('%s %d', result.class_names{c}, result.class_n(c));
+classes = unique(y_train(:))';
+n_class = numel(classes);
+log_score = zeros(size(X_test, 1), n_class);
+for c = 1:n_class
+    rows = y_train == classes(c);
+    mu = mean(X_train(rows, :), 1);
+    sigma = var(X_train(rows, :), 0, 1);
+    sigma(~isfinite(sigma) | sigma < 1e-6) = 1e-6;
+    prior = sum(rows) / numel(y_train);
+    z = (X_test - mu) ./ sqrt(sigma);
+    log_score(:, c) = log(max(prior, realmin)) - 0.5 * sum(z .^ 2, 2) ...
+        - 0.5 * sum(log(2 * pi * sigma));
 end
-lines{end + 1} = ['Class counts: ', strjoin(count_bits, ', ')]; %#ok<AGROW>
-lines{end + 1} = sprintf('Cross-validated accuracy: %.1f%%.', 100 * result.accuracy); %#ok<AGROW>
-lines{end + 1} = sprintf('Majority-class chance: %.1f%%.', 100 * result.chance); %#ok<AGROW>
-for c = 1:numel(result.class_names)
-    lines{end + 1} = sprintf('%-16s recall %s', result.class_names{c}, ...
-        stat_num(100 * result.recall(c), '%.1f%%')); %#ok<AGROW>
+[~, pick] = max(log_score, [], 2);
+prediction = classes(pick);
+prediction = prediction(:);
 end
-lines{end + 1} = 'Confusion counts, rows true and columns predicted, order trough, peak, unlocked:'; %#ok<AGROW>
-lines{end + 1} = labeled_number_matrix('True', result.class_names, ...
-    result.class_names, result.counts, '%.0f'); %#ok<AGROW>
+
+
+function prediction = gaussian_svm_predict(X_train, y_train, X_test)
+%GAUSSIAN_SVM_PREDICT  Medium Gaussian SVM. Kernel scale is sqrt(n features).
+
+kernel_scale = sqrt(size(X_train, 2));
+template = templateSVM('KernelFunction', 'gaussian', ...
+    'KernelScale', kernel_scale, 'BoxConstraint', 1, 'Standardize', false);
+model = fitcecoc(X_train, y_train, 'Learners', template);
+prediction = predict(model, X_test);
+prediction = prediction(:);
+end
+
+
+function prediction = logit_predict(X_train, y_train, X_test)
+%LOGIT_PREDICT  Multinomial logistic regression.
+
+if exist('mnrfit', 'file') == 2 && exist('mnrval', 'file') == 2
+    coefficients = mnrfit(X_train, y_train);
+    probability = mnrval(coefficients, X_test);
+    [~, pick] = max(probability, [], 2);
+    classes = unique(y_train(:));
+    prediction = classes(pick);
+    prediction = prediction(:);
+    return
+end
+prediction = logit_irls_predict(X_train, y_train, X_test);
+end
+
+
+function prediction = logit_irls_predict(X_train, y_train, X_test)
+classes = unique(y_train(:));
+n_class = numel(classes);
+y_index = zeros(size(y_train));
+for c = 1:n_class
+    y_index(y_train == classes(c)) = c;
+end
+Z = [ones(size(X_train, 1), 1), X_train];
+q = size(Z, 2);
+n_coef = n_class - 1;
+beta = zeros(q, n_coef);
+penalty = 1e-4;
+for iter = 1:40 %#ok<NASGU>
+    eta = [Z * beta, zeros(size(X_train, 1), 1)];
+    eta = eta - max(eta, [], 2);
+    probability = exp(eta);
+    probability = probability ./ sum(probability, 2);
+    gradient = zeros(q * n_coef, 1);
+    information = zeros(q * n_coef);
+    for k = 1:n_coef
+        gradient((k - 1) * q + (1:q)) = Z' * (double(y_index == k) - probability(:, k)) ...
+            - penalty * beta(:, k);
+        for m = 1:n_coef
+            if k == m
+                weight = probability(:, k) .* (1 - probability(:, k));
+            else
+                weight = -probability(:, k) .* probability(:, m);
+            end
+            information((k - 1) * q + (1:q), (m - 1) * q + (1:q)) = (Z .* weight)' * Z;
+        end
+    end
+    information = information + penalty * eye(q * n_coef);
+    step = information \ gradient;
+    if ~all(isfinite(step))
+        break
+    end
+    if max(abs(step)) > 5
+        step = 5 * step / max(abs(step));
+    end
+    beta = beta + reshape(step, q, n_coef);
+    if max(abs(step)) < 1e-8
+        break
+    end
+end
+eta = [([ones(size(X_test, 1), 1), X_test]) * beta, zeros(size(X_test, 1), 1)];
+eta = eta - max(eta, [], 2);
+probability = exp(eta);
+probability = probability ./ sum(probability, 2);
+[~, pick] = max(probability, [], 2);
+prediction = classes(pick);
+prediction = prediction(:);
+end
+
+
+function draw_lock_classifier(results, folder, method)
+open_full_figure('Lock type classifier')
+n_methods = numel(results);
+for m = 1:n_methods
+    if n_methods > 1
+        subplot(2, 3, m)
+    end
+    result = results{m};
+    if ~result.ok
+        axis off
+        title(result.method_label, 'Interpreter', 'none')
+        text(0.5, 0.5, result.note, 'HorizontalAlignment', 'center', ...
+            'Interpreter', 'none')
+        continue
+    end
+    imagesc(result.counts)
+    set(gca, 'XTick', 1:numel(result.class_names), 'XTickLabel', result.class_names, ...
+        'YTick', 1:numel(result.class_names), 'YTickLabel', result.class_names)
+    try
+        set(gca, 'TickLabelInterpreter', 'none')
+    catch
+    end
+    colormap(gca, [linspace(0.97, 0.20, 64)', linspace(0.97, 0.45, 64)', linspace(0.97, 0.75, 64)'])
+    for r = 1:size(result.counts, 1)
+        for c = 1:size(result.counts, 2)
+            text(c, r, sprintf('%d', result.counts(r, c)), ...
+                'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle')
+        end
+    end
+    xlabel('Predicted lock type')
+    ylabel('True lock type')
+    title({result.method_label, sprintf('Accuracy %.1f%%', 100 * result.accuracy)}, ...
+        'Interpreter', 'none')
+    box off
+end
+chance = nan;
+for m = 1:n_methods
+    if results{m}.ok
+        chance = results{m}.chance;
+        break
+    end
+end
+if isfinite(chance)
+    chance_line = sprintf('Majority-class chance %.1f%%. Rows are the true lock type.', ...
+        100 * chance);
+else
+    chance_line = 'Rows are the true lock type.';
+end
+sgtitle({sprintf('Oscillatory neurons. classifier_method = %s.', method), chance_line}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function text = lock_classifier_report(feature_titles, method, results)
+lines = { ...
+    'Classifier of lock type from six high-power features.', ...
+    'The features are subplot numbers 1, 2, 6, 12, 13, and 15:', ...
+    strjoin(feature_titles, ', '), ...
+    'Only oscillatory neurons are classified. They are cluster 1 from section 3.', ...
+    'Classes are trough, peak, and unlocked. Non-classified cells are excluded.', ...
+    'A neuron is used only when all six features are finite.', ...
+    'Accuracy is stratified cross-validation. Each class is split across the folds in stored order.', ...
+    'Within each training fold the features are standardized.', ...
+    sprintf('classifier_method = %s.', method), ...
+    'lda is a linear discriminant. naivebayes is Gaussian naive Bayes.', ...
+    'svm is a Gaussian-kernel SVM with medium scale sqrt(number of features) and box constraint 1.', ...
+    'Three SVM classes are compared one against one.', ...
+    'tree is the default classification tree. logit is multinomial logistic regression.'};
+shared = [];
+for m = 1:numel(results)
+    if results{m}.ok
+        shared = results{m};
+        break
+    end
+end
+if ~isempty(shared)
+    lines{end + 1} = sprintf('Neurons: %d. Folds: %d.', shared.n, shared.n_folds); %#ok<AGROW>
+    count_bits = cell(1, numel(shared.class_names));
+    for c = 1:numel(shared.class_names)
+        count_bits{c} = sprintf('%s %d', shared.class_names{c}, shared.class_n(c));
+    end
+    lines{end + 1} = ['Class counts: ', strjoin(count_bits, ', ')]; %#ok<AGROW>
+    lines{end + 1} = sprintf('Majority-class chance: %.1f%%.', 100 * shared.chance); %#ok<AGROW>
+end
+for m = 1:numel(results)
+    result = results{m};
+    lines{end + 1} = result.method_label; %#ok<AGROW>
+    if ~result.ok
+        lines{end + 1} = ['  ', result.note]; %#ok<AGROW>
+        continue
+    end
+    lines{end + 1} = sprintf('  Cross-validated accuracy: %.1f%%.', 100 * result.accuracy); %#ok<AGROW>
+    for c = 1:numel(result.class_names)
+        lines{end + 1} = sprintf('  %-16s recall %s', result.class_names{c}, ...
+            stat_num(100 * result.recall(c), '%.1f%%')); %#ok<AGROW>
+    end
+    lines{end + 1} = '  Confusion counts, rows true and columns predicted:'; %#ok<AGROW>
+    lines{end + 1} = labeled_number_matrix('True', result.class_names, ...
+        result.class_names, result.counts, '%.0f'); %#ok<AGROW>
+end
 text = strjoin(lines, newline);
 end
 
