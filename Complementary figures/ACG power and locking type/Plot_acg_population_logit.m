@@ -6435,6 +6435,15 @@ n_rows = 2;
 cycle_n = nan(1, n_cols);
 cycle_r = nan(1, n_cols);
 cycle_p = nan(1, n_cols);
+y_limit = color_limit;
+for c = 1:n_cols
+    column_mean = mean(logit.sum.(columns{c})(rows, :), 1, 'omitnan');
+    column_peak = max(abs(column_mean(isfinite(column_mean))));
+    if isfinite(column_peak)
+        y_limit = max(y_limit, column_peak);
+    end
+end
+y_limit = y_limit * 1.08;
 open_full_figure(['ACG population logit, ', group_name, ', ', scale_name])
 for c = 1:n_cols
     this_logit = logit.sum.(columns{c})(rows, :);
@@ -6486,7 +6495,7 @@ for c = 1:n_cols
     end
     xlabel('Lag (s)')
     ylabel('Mean logit')
-    ylim([-color_limit color_limit])
+    ylim([-y_limit y_limit])
     box off
 end
 figure_group = group_name;
