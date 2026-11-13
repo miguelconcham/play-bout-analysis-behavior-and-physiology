@@ -33,7 +33,10 @@
 % n_accuracy_permutations label shuffles are drawn once per population and
 % reused for all nine models. The default is 1000. The model accuracy is
 % the mean of the three lock-type accuracies. A bar is filled when that
-% permutation p is below 0.05.
+% permutation p is below 0.05. A finished fit is written to
+% lock_type_model_cache.mat in the output folder. The same code version,
+% features, neurons, and permutation count load that file instead of
+% fitting again. lock_model_cache_version is 1 for this fit.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -1310,57 +1313,73 @@ if isempty(classifier_names)
         'A feature is used when its lock-type ANOVA Holm-Sidak p is below 0.05 for all classified neurons or for oscillatory neurons only.', ...
         'Neither comparison marked a feature.'))
 else
+% Bump this when the fit itself changes. A file from another version is not loaded.
+lock_model_cache_version = 1;
+lock_model_cache_file = fullfile(output_folder, 'lock_type_model_cache.mat');
 classifier_populations = { ...
     struct('name', 'All classified neurons', 'rows', (1:size(feature_table, 1)).'), ...
     struct('name', 'Oscillatory neurons', 'rows', osc_rows(:))};
-rng(42);
-for p = 1:numel(classifier_populations)
-    [classifier_X, classifier_y] = lock_classifier_data(feature_table, neuron_type, ...
-        classifier_names, classifier_populations{p}.rows);
-    shuffled_labels = shared_label_shuffles(classifier_y, n_accuracy_permutations);
-    model_grid = cell(3, numel(classifier_methods));
-    for m = 1:numel(classifier_methods)
-        observed = classifier_weight_trio(classifier_X, classifier_y, ...
-            lock_class_names, classifier_methods{m});
-        null_accuracy = nan(n_accuracy_permutations, 3);
-        null_recall = nan(n_accuracy_permutations, 3, numel(lock_class_names));
-        if observed{1}.ok || observed{2}.ok
-            for shuffle = 1:n_accuracy_permutations
-                shuffled = classifier_weight_trio(classifier_X, ...
-                    shuffled_labels(shuffle, :).', lock_class_names, classifier_methods{m});
-                for row = 1:3
-                    if shuffled{row}.ok
-                        null_accuracy(shuffle, row) = shuffled{row}.accuracy;
-                        null_recall(shuffle, row, :) = shuffled{row}.recall;
+[classifier_populations, cache_loaded] = try_load_lock_model_cache( ...
+    lock_model_cache_file, lock_model_cache_version, 42, n_accuracy_permutations, ...
+    classifier_methods, lock_class_names, classifier_names, ...
+    feature_table, neuron_type, classifier_populations);
+if ~cache_loaded
+    rng(42);
+    fprintf(['Lock-type models: %d shuffles, shared by the weighted, unweighted, ', ...
+        'and joint fits of each classifier.\n'], n_accuracy_permutations)
+    for p = 1:numel(classifier_populations)
+        [classifier_X, classifier_y] = lock_classifier_data(feature_table, neuron_type, ...
+            classifier_names, classifier_populations{p}.rows);
+        classifier_populations{p}.X = classifier_X;
+        classifier_populations{p}.y = classifier_y;
+        fprintf('%s: %d neurons, %d features.\n', ...
+            classifier_populations{p}.name, numel(classifier_y), size(classifier_X, 2))
+        shuffled_labels = shared_label_shuffles(classifier_y, n_accuracy_permutations);
+        model_grid = cell(3, numel(classifier_methods));
+        for m = 1:numel(classifier_methods)
+            method_label = classifier_method_label(classifier_methods{m});
+            fprintf('%s, %s: real labels.\n', classifier_populations{p}.name, method_label)
+            observed = classifier_weight_trio(classifier_X, classifier_y, ...
+                lock_class_names, classifier_methods{m});
+            null_accuracy = nan(n_accuracy_permutations, 3);
+            null_recall = nan(n_accuracy_permutations, 3, numel(lock_class_names));
+            if observed{1}.ok || observed{2}.ok
+                shuffle_clock = tic;
+                for shuffle = 1:n_accuracy_permutations
+                    shuffled = classifier_weight_trio(classifier_X, ...
+                        shuffled_labels(shuffle, :).', lock_class_names, classifier_methods{m});
+                    for row = 1:3
+                        if shuffled{row}.ok
+                            null_accuracy(shuffle, row) = shuffled{row}.accuracy;
+                            null_recall(shuffle, row, :) = shuffled{row}.recall;
+                        end
                     end
-                end
-            end
-        end
-        for row = 1:3
-            recall_null = reshape(null_recall(:, row, :), n_accuracy_permutations, []);
-            model_grid{row, m} = apply_shared_null(observed{row}, ...
-                null_accuracy(:, row), recall_null);
-            if model_grid{row, m}.ok
-                fprintf(['%s, %s mean lock-type accuracy: %.1f%%. ', ...
-                    'Equal-type reference: %.1f%%. Neuron-weighted accuracy: %.1f%%. ', ...
-                    'Permutation p = %.3g.\n'], ...
-                    classifier_populations{p}.name, model_grid{row, m}.method_label, ...
-                    100 * model_grid{row, m}.accuracy, 100 * model_grid{row, m}.chance, ...
-                    100 * model_grid{row, m}.neuron_accuracy, model_grid{row, m}.perm_p)
-                for c = 1:numel(lock_class_names)
-                    fprintf('  %s accuracy: %.1f%%. Permutation p = %.3g.\n', ...
-                        lock_class_names{c}, 100 * model_grid{row, m}.recall(c), ...
-                        model_grid{row, m}.class_perm_p(c))
+                    if shuffle == 1 || mod(shuffle, 25) == 0 || shuffle == n_accuracy_permutations
+                        fprintf('%s, %s: shuffle %d of %d (%.0f s).\n', ...
+                            classifier_populations{p}.name, method_label, shuffle, ...
+                            n_accuracy_permutations, toc(shuffle_clock))
+                    end
                 end
             else
                 fprintf('%s, %s: %s\n', classifier_populations{p}.name, ...
-                    model_grid{row, m}.method_label, model_grid{row, m}.note)
+                    method_label, observed{1}.note)
+            end
+            for row = 1:3
+                recall_null = reshape(null_recall(:, row, :), n_accuracy_permutations, []);
+                model_grid{row, m} = apply_shared_null(observed{row}, ...
+                    null_accuracy(:, row), recall_null);
             end
         end
+        classifier_populations{p}.grid = model_grid;
+        classifier_populations{p}.results = model_grid(:);
     end
-    classifier_populations{p}.grid = model_grid;
-    classifier_populations{p}.results = model_grid(:);
-    draw_lock_classifier(model_grid, output_folder, classifier_method_name, ...
+    write_lock_model_cache(lock_model_cache_file, lock_model_cache_version, 42, ...
+        n_accuracy_permutations, classifier_methods, lock_class_names, ...
+        classifier_names, classifier_populations)
+end
+for p = 1:numel(classifier_populations)
+    report_lock_model_population(classifier_populations{p}, lock_class_names)
+    draw_lock_classifier(classifier_populations{p}.grid, output_folder, classifier_method_name, ...
         ['Lock type classifier, ', classifier_populations{p}.name], ...
         classifier_populations{p}.name)
 end
@@ -2450,6 +2469,137 @@ end
 end
 
 
+function [populations, loaded] = try_load_lock_model_cache(file, version, seed, n_perm, methods, class_names, feature_names, feature_table, neuron_type, populations)
+%TRY_LOAD_LOCK_MODEL_CACHE  Use a saved fit only when the conditions match.
+
+loaded = false;
+if exist(file, 'file') ~= 2
+    fprintf('No saved lock-type model at %s. The fit will run.\n', file)
+    return
+end
+stored = load(file, 'lock_model_cache');
+if ~isfield(stored, 'lock_model_cache')
+    fprintf(['%s has no lock_model_cache variable. The fit will run.\n'], file)
+    return
+end
+reason = lock_model_cache_mismatch(stored.lock_model_cache, version, seed, ...
+    n_perm, methods, class_names, feature_names, feature_table, neuron_type, populations);
+if ~isempty(reason)
+    fprintf('Saved lock-type model was not used: %s The fit will run.\n', reason)
+    return
+end
+populations = stored.lock_model_cache.populations;
+loaded = true;
+fprintf(['Loaded lock-type models from %s (code version %d, %d shuffles). ', ...
+    'The fit was not repeated.\n'], file, version, n_perm)
+end
+
+
+function reason = lock_model_cache_mismatch(cache, version, seed, n_perm, methods, class_names, feature_names, feature_table, neuron_type, populations)
+reason = '';
+if ~isstruct(cache) || ~isfield(cache, 'version') || cache.version ~= version
+    reason = 'the code version differs.';
+    return
+end
+if ~isfield(cache, 'seed') || cache.seed ~= seed
+    reason = 'the random seed differs.';
+    return
+end
+if ~isfield(cache, 'n_permutations') || cache.n_permutations ~= n_perm
+    reason = 'the number of shuffles differs.';
+    return
+end
+if ~isfield(cache, 'methods') || ~isequal(cache.methods, methods)
+    reason = 'the classifier list differs.';
+    return
+end
+if ~isfield(cache, 'class_names') || ~isequal(cache.class_names, class_names)
+    reason = 'the lock-type names differ.';
+    return
+end
+if ~isfield(cache, 'feature_names') || ~isequal(cache.feature_names, feature_names)
+    reason = 'the feature list differs.';
+    return
+end
+if ~isfield(cache, 'populations') || numel(cache.populations) ~= numel(populations)
+    reason = 'the neuron groups differ.';
+    return
+end
+for p = 1:numel(populations)
+    saved = cache.populations{p};
+    if ~isstruct(saved) || ~isfield(saved, 'name') || ~strcmp(saved.name, populations{p}.name)
+        reason = 'a neuron group name differs.';
+        return
+    end
+    [X, y] = lock_classifier_data(feature_table, neuron_type, feature_names, populations{p}.rows);
+    if ~isfield(saved, 'X') || ~isfield(saved, 'y') || ~isequal(saved.X, X) || ~isequal(saved.y, y)
+        reason = 'the neurons or their feature values differ.';
+        return
+    end
+    if ~isfield(saved, 'grid') || ~lock_model_grid_complete(saved.grid, n_perm)
+        reason = 'the saved fit is incomplete.';
+        return
+    end
+end
+end
+
+
+function complete = lock_model_grid_complete(grid, n_perm)
+complete = iscell(grid) && isequal(size(grid), [3, 3]);
+if ~complete
+    return
+end
+for i = 1:numel(grid)
+    item = grid{i};
+    if ~isstruct(item) || ~isfield(item, 'ok')
+        complete = false;
+        return
+    end
+    if item.ok && (~isfield(item, 'n_perm') || item.n_perm ~= n_perm)
+        complete = false;
+        return
+    end
+end
+end
+
+
+function write_lock_model_cache(file, version, seed, n_perm, methods, class_names, feature_names, populations)
+lock_model_cache.version = version;
+lock_model_cache.seed = seed;
+lock_model_cache.n_permutations = n_perm;
+lock_model_cache.methods = methods;
+lock_model_cache.class_names = class_names;
+lock_model_cache.feature_names = feature_names;
+lock_model_cache.populations = populations;
+save(file, 'lock_model_cache')
+fprintf('Saved lock-type models to %s (code version %d).\n', file, version)
+end
+
+
+function report_lock_model_population(population, class_names)
+grid = population.grid;
+for row = 1:size(grid, 1)
+    for col = 1:size(grid, 2)
+        result = grid{row, col};
+        if result.ok
+            fprintf(['%s, %s mean lock-type accuracy: %.1f%%. ', ...
+                'Equal-type reference: %.1f%%. Neuron-weighted accuracy: %.1f%%. ', ...
+                'Permutation p = %.3g.\n'], ...
+                population.name, result.method_label, ...
+                100 * result.accuracy, 100 * result.chance, ...
+                100 * result.neuron_accuracy, result.perm_p)
+            for c = 1:numel(class_names)
+                fprintf('  %s accuracy: %.1f%%. Permutation p = %.3g.\n', ...
+                    class_names{c}, 100 * result.recall(c), result.class_perm_p(c))
+            end
+        else
+            fprintf('%s, %s: %s\n', population.name, result.method_label, result.note)
+        end
+    end
+end
+end
+
+
 function results = classifier_weight_trio(X, y, class_names, method)
 %CLASSIFIER_WEIGHT_TRIO  Weighted, unweighted, and joint decisions for one method.
 %
@@ -3017,6 +3167,9 @@ lines = [{ ...
     'Three SVM classes are compared one against one. Its class probabilities are a softmax of the SVM scores.', ...
     'naivebayes is Gaussian naive Bayes. lda is a linear discriminant.', ...
     sprintf('The permutation test draws %d shuffled label lists once per population.', n_perm), ...
+    'During the fit the command window reports each model and every 25th shuffle.', ...
+    'A finished fit is saved as lock_type_model_cache.mat in the output folder.', ...
+    'The same code version, features, neurons, labels, and permutation count load that file instead of fitting again.', ...
     'Every model in that population is tested on those same lists.', ...
     'The features stay fixed. The random stream is reset to 42 before the first population.', ...
     'The same shuffles give the p-value of each model and of each lock type.', ...
