@@ -60,7 +60,11 @@
 % The intercept is the gap expected when those predictors do not change.
 % The scale is the less skewed of the raw gap and the log gap. The same
 % fit is repeated on the non-oscillatory neurons alone. Pearson
-% correlations of the predictors are saved with each fit. It also reads the saved
+% correlations of the predictors are saved with each fit. Each feature
+% change is also compared with the firing-rate change. Section 6 tests
+% delta power across areas. Neurons on one channel are repeated
+% measurements of that channel, and channels in one area in one session
+% are repeated measurements of that area in that session. It also reads the saved
 % power summary and compares, within each neuron, the firing rate of the
 % low-power runs, the high-power runs, and the runs in the all-runs
 % autocorrelogram. Each pair is tested with a paired t-test, a
@@ -1649,6 +1653,25 @@ write_summary_section(output_folder, ...
         non_gap.n, n_power_osc), ...
     gap_fit_lines(non_gap)))
 
+% Does the within-neuron firing-rate change track the feature changes?
+rate_link = feature_change_vs_rate(gap_x, gap_names);
+fprintf('Feature change versus firing-rate change, n = %d neurons.\n', rate_link.n)
+for i = 1:numel(rate_link.lines)
+    fprintf('%s\n', rate_link.lines{i})
+end
+draw_feature_rate_link(rate_link, output_folder)
+write_summary_section(output_folder, '5d. Feature changes and the firing-rate change', ...
+    join_summary_lines( ...
+    ['Output folder: ', output_folder], ...
+    'Each row is one neuron with both power tails and a positive firing rate in each tail.', ...
+    'A feature change is the high-power autocorrelogram value minus the low-power value.', ...
+    'The firing-rate change is the high-power rate minus the low-power rate, in spikes per second.', ...
+    'Pearson and Spearman correlations test whether those two changes move together.', ...
+    'The slope is from the within-neuron regression of the feature change on the firing-rate change, with an intercept.', ...
+    'Holm-Sidak adjusted p-values are for the Pearson tests across the features in this table.', ...
+    sprintf('Neurons: %d.', rate_link.n), ...
+    rate_link.lines))
+
 % Firing rates are already stored on the power-split summary. This block
 % only reads them. It does not rebuild the autocorrelograms.
 if ~exist('acg_method', 'var') || isempty(acg_method)
@@ -1680,6 +1703,49 @@ if numel(rate_report.low) >= 2
 end
 write_summary_section(output_folder, '5b. Firing rates of the power strata', ...
     join_summary_lines(rate_report.lines))
+
+
+%% 6. Nested comparison of delta power across areas
+% Re-run this section after section 1. area_power_conditions chooses the
+% tail. 'high' uses the high-power mean. 'low' uses the low-power mean.
+% High is first. Add or remove entries to change which conditions run.
+area_power_conditions = {'high', 'low'};
+if ~exist('output_folder', 'var') || isempty(output_folder)
+    output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+end
+if ~exist('neuron_area', 'var') || ~exist('neuron_session', 'var') ...
+        || ~exist('neuron_cluster_id', 'var') || ~exist('high_power_delta', 'var') ...
+        || ~exist('low_power_delta', 'var')
+    error('Plot_acg_population_logit:areaNest', ...
+        'The population and its delta power are not in the workspace. Run section 1 first.');
+end
+if ~exist('parsing_folder', 'var') || isempty(parsing_folder)
+    parsing_folder = default_parsing_folder();
+end
+neuron_channel = channels_for_neurons(parsing_folder, neuron_session, neuron_cluster_id);
+for condition_index = 1:numel(area_power_conditions)
+    area_power_condition = area_power_conditions{condition_index};
+    if strcmp(area_power_condition, 'low')
+        area_power_values = low_power_delta;
+    elseif strcmp(area_power_condition, 'high')
+        area_power_values = high_power_delta;
+    else
+        error('Plot_acg_population_logit:areaNest', ...
+            'area_power_conditions accepts ''high'' and ''low''.');
+    end
+    area_nest = nested_area_power(area_power_values, neuron_area, neuron_session, ...
+        neuron_channel, area_power_condition);
+    fprintf('Nested area comparison, %s power.\n', area_power_condition)
+    for line_index = 1:numel(area_nest.lines)
+        fprintf('%s\n', area_nest.lines{line_index})
+    end
+    if area_nest.ok
+        draw_nested_area_power(area_nest, output_folder)
+    end
+    write_summary_section(output_folder, ...
+        ['6. Nested area comparison of delta power, ', area_power_condition], ...
+        join_summary_lines(area_nest.lines))
+end
 
 
 function draw_power_embedding(xy, group_id, shown, colors, labels, folder, figure_name, x_label, y_label, caption)
@@ -4528,6 +4594,595 @@ high(use) = rate_high(loc(use));
 bad = ~(isfinite(low) & isfinite(high) & low > 0 & high > 0);
 low(bad) = nan;
 high(bad) = nan;
+end
+
+
+function report = feature_change_vs_rate(gap_x, names)
+%FEATURE_CHANGE_VS_RATE  Relate each feature gap to the firing-rate gap.
+
+names = names(:)';
+rate_col = find(strcmp(names, 'FiringRate'), 1);
+report.n = 0;
+report.lines = {'FiringRate is not among the predictors, so the feature comparison was not run.'};
+if isempty(rate_col)
+    return
+end
+rate = gap_x(:, rate_col);
+feature_names = names;
+feature_names(rate_col) = [];
+features = gap_x;
+features(:, rate_col) = [];
+n_features = numel(feature_names);
+pearson = nan(n_features, 1);
+pearson_p = nan(n_features, 1);
+spearman = nan(n_features, 1);
+spearman_p = nan(n_features, 1);
+slope = nan(n_features, 1);
+slope_se = nan(n_features, 1);
+slope_p = nan(n_features, 1);
+rsq = nan(n_features, 1);
+for j = 1:n_features
+    x = features(:, j);
+    ok = isfinite(x) & isfinite(rate);
+    n = sum(ok);
+    pearson(j) = column_pearson(x(ok), rate(ok));
+    pearson_p(j) = correlation_p(pearson(j), n);
+    spearman(j) = column_pearson(average_rank(x(ok)), average_rank(rate(ok)));
+    spearman_p(j) = correlation_p(spearman(j), n);
+    if n >= 3
+        fit = fit_power_feature_model(x(ok), rate(ok), {'FiringRate'});
+        slope(j) = fit.beta(2);
+        slope_se(j) = fit.se(2);
+        slope_p(j) = fit.p_value(2);
+        rsq(j) = fit.rsq;
+    end
+end
+holm = holm_sidak_adjust(pearson_p);
+report.n = sum(isfinite(rate));
+report.names = feature_names;
+report.pearson = pearson;
+report.slope = slope;
+report.slope_se = slope_se;
+report.lines = cell(n_features + 1, 1);
+report.lines{1} = sprintf('%-18s %8s %10s %10s %8s %10s %10s %10s %8s', ...
+    'Feature', 'Pearson', 'p', 'Holm', 'Spearman', 'p', 'Slope', 'SE', 'R^2');
+for j = 1:n_features
+    report.lines{j + 1} = sprintf('%-18s %8.3f %10.3g %10.3g %8.3f %10.3g %10.3g %10.3g %8.3f', ...
+        feature_names{j}, pearson(j), pearson_p(j), holm(j), ...
+        spearman(j), spearman_p(j), slope(j), slope_se(j), rsq(j));
+end
+end
+
+
+function r = column_pearson(a, b)
+a = a(:) - mean(a);
+b = b(:) - mean(b);
+denom = sqrt(sum(a .^ 2) * sum(b .^ 2));
+if ~(denom > 0)
+    r = nan;
+    return
+end
+r = sum(a .* b) / denom;
+end
+
+
+function p = correlation_p(r, n)
+if n < 3 || ~isfinite(r)
+    p = nan;
+    return
+end
+if abs(r) >= 1
+    p = 0;
+    return
+end
+tstat = r * sqrt((n - 2) / (1 - r ^ 2));
+p = two_sided_t_p(tstat, n - 2);
+end
+
+
+function ranks = average_rank(x)
+x = x(:);
+n = numel(x);
+ranks = nan(n, 1);
+if n == 0
+    return
+end
+[sorted, order] = sort(x);
+ranks_in_order = zeros(n, 1);
+k = 1;
+while k <= n
+    j = k;
+    while j < n && sorted(j + 1) == sorted(k)
+        j = j + 1;
+    end
+    ranks_in_order(k:j) = (k + j) / 2;
+    k = j + 1;
+end
+ranks(order) = ranks_in_order;
+end
+
+
+function draw_feature_rate_link(report, folder)
+if ~isfield(report, 'pearson') || isempty(report.pearson)
+    return
+end
+open_full_figure('Feature change versus firing-rate change')
+hold on
+color = [0.25 0.35 0.55];
+for i = 1:numel(report.pearson)
+    plot(i, report.pearson(i), 'o', 'MarkerFaceColor', color, 'MarkerEdgeColor', color)
+end
+plot([0.5, numel(report.pearson) + 0.5], [0 0], 'Color', [0.5 0.5 0.5])
+set(gca, 'XTick', 1:numel(report.names), 'XTickLabel', report.names)
+try
+    set(gca, 'TickLabelInterpreter', 'none')
+    xtickangle(30)
+catch
+end
+ylabel('Pearson r, feature change vs firing-rate change')
+ylim([-1 1])
+box off
+sgtitle({'Each correlation uses one neuron with both power tails.', ...
+    'The feature change and the firing-rate change are high minus low.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function folder = default_parsing_folder()
+data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
+    'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
+folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
+end
+
+
+function channel = channels_for_neurons(parsing_folder, session, cluster_id)
+%CHANNELS_FOR_NEURONS  Channel number from the parsing cluster tables.
+%
+% The stored channel number is used as-is. Neurons with the same session
+% and the same number are treated as one channel.
+
+n = min(numel(session), numel(cluster_id));
+channel = nan(n, 1);
+if isempty(parsing_folder) || exist(parsing_folder, 'dir') ~= 7
+    error('Plot_acg_population_logit:areaNest', ...
+        'The parsing folder was not found at %s.', parsing_folder);
+end
+files = parsing_mat_files(parsing_folder);
+if isempty(files)
+    error('Plot_acg_population_logit:areaNest', ...
+        'No spike-train parsing file was found in %s.', parsing_folder);
+end
+map_keys = cell(0, 1);
+map_channel = zeros(0, 1);
+seen_session = {};
+for f = 1:numel(files)
+    try
+        stored = load(files(f).path, 'parsing_struct');
+    catch
+        continue
+    end
+    if ~isfield(stored, 'parsing_struct')
+        continue
+    end
+    blocks = stored.parsing_struct;
+    for b = 1:numel(blocks)
+        block = blocks(b);
+        if ~isfield(block, 'animal_code') || ~isfield(block, 'cluster_info')
+            continue
+        end
+        animal = strtrim(value_text(block.animal_code));
+        if isempty(animal) || any(strcmp(seen_session, animal))
+            continue
+        end
+        [id_col, ch_col] = cluster_channel_columns(block.cluster_info);
+        if isempty(id_col)
+            continue
+        end
+        seen_session{end + 1} = animal; %#ok<AGROW>
+        n_row = min(numel(id_col), numel(ch_col));
+        new_keys = neuron_keys(repmat({animal}, n_row, 1), id_col(1:n_row));
+        map_keys = [map_keys; new_keys]; %#ok<AGROW>
+        map_channel = [map_channel; double(ch_col(1:n_row))]; %#ok<AGROW>
+    end
+    clear stored
+end
+if isempty(map_keys)
+    error('Plot_acg_population_logit:areaNest', ...
+        'The parsing files have no cluster channel column.');
+end
+pop_keys = neuron_keys(session(1:n), cluster_id(1:n));
+[found, loc] = ismember(pop_keys, map_keys);
+use = found(:) & loc(:) >= 1;
+channel(use) = map_channel(loc(use));
+end
+
+
+function files = parsing_mat_files(parsing_folder)
+files = struct('path', {}, 'name', {});
+combined = fullfile(parsing_folder, 'spike_train_parsing_structure.mat');
+if exist(combined, 'file') == 2
+    files(end + 1) = struct('path', combined, ...
+        'name', 'spike_train_parsing_structure.mat'); %#ok<AGROW>
+end
+flist = dir(fullfile(parsing_folder, '*spike_train_parsing*.mat'));
+skip = {'spike_train_parsing_structure.mat', 'spike_train_parsing_animal_names.mat', ...
+    'spike_train_parsing_animal_names_v1.mat'};
+for f = 1:numel(flist)
+    if ismember(flist(f).name, skip)
+        continue
+    end
+    files(end + 1) = struct( ...
+        'path', fullfile(flist(f).folder, flist(f).name), ...
+        'name', flist(f).name); %#ok<AGROW>
+end
+end
+
+
+function [id_col, ch_col] = cluster_channel_columns(info)
+id_col = [];
+ch_col = [];
+names = cluster_table_names(info);
+if isempty(names)
+    return
+end
+id_name = first_present(names, {'cluster_id', 'id'});
+ch_name = first_present(names, {'ch', 'channel'});
+if isempty(id_name) || isempty(ch_name)
+    return
+end
+id_col = double(cluster_table_column(info, id_name));
+ch_col = double(cluster_table_column(info, ch_name));
+end
+
+
+function names = cluster_table_names(info)
+names = {};
+if isstruct(info)
+    names = fieldnames(info);
+    return
+end
+if exist('istable', 'file') == 2
+    try
+        if istable(info)
+            names = info.Properties.VariableNames;
+        end
+    catch
+    end
+end
+end
+
+
+function column = cluster_table_column(info, name)
+if isstruct(info)
+    column = info.(name);
+else
+    column = info.(name);
+end
+column = column(:);
+end
+
+
+function name = first_present(names, candidates)
+name = '';
+for i = 1:numel(candidates)
+    if any(strcmp(names, candidates{i}))
+        name = candidates{i};
+        return
+    end
+end
+end
+
+
+function result = nested_area_power(power, area, session, channel, condition)
+%NESTED_AREA_POWER  Area test after collapsing the nested repeated measures.
+%
+% Neurons on one channel are averaged. Those channel means, within one
+% area in one session, are then averaged. Area is tested on that
+% session-area table after a session term.
+
+result.ok = false;
+result.condition = condition;
+result.lines = {['Condition: ', condition, ' power.']};
+n = min([numel(power), numel(area), numel(session), numel(channel)]);
+power = power(1:n);
+area = area(1:n);
+session = session(1:n);
+channel = channel(1:n);
+area = area_labels(area);
+session = session_labels(session);
+positive = isfinite(power) & power > 0;
+scale = choose_level_scale(power(positive));
+if strcmp(scale.name, 'log')
+    analyzed = nan(size(power));
+    analyzed(positive) = log(power(positive));
+    scale_label = ['log ', condition, ' delta power'];
+else
+    analyzed = power;
+    scale_label = [condition, ' delta power'];
+end
+result.scale_label = scale_label;
+packed = collapse_to_session_area(analyzed, area, session, channel);
+result.packed = packed;
+result.lines = [result.lines, { ...
+    'Neurons that share a session and a channel are averaged. That mean is the channel measurement.', ...
+    'Channel measurements that share a session and an area are averaged. That mean is the area measurement for that session.', ...
+    'The ANOVA is fit to those session-area means. Area is tested after a session term.', ...
+    'The error is the remaining variation of the area differences across sessions.', ...
+    sprintf('Neurons with a finite %s and a known channel: %d.', condition, packed.n_neurons), ...
+    sprintf('Channels: %d. Session-area rows: %d.', packed.n_channels, numel(packed.y)), ...
+    sprintf('Neurons with no channel match: %d.', packed.n_unmatched), ...
+    sprintf('Channels whose neurons were not all labeled with one area: %d. Those channels use the majority area.', ...
+        packed.n_area_conflict), ...
+    scale.reason, ...
+    sprintf('Fitted values: %s.', scale_label)}];
+if numel(packed.y) < 4 || numel(unique(packed.area)) < 2 || numel(unique(packed.session)) < 2
+    result.lines{end + 1} = 'Too few session-area rows, areas, or sessions for the nested area test.';
+    return
+end
+tested = test_session_area(packed.y, packed.area, packed.session, ...
+    packed.row_channels, packed.row_neurons);
+result.ok = tested.ok;
+result.tested = tested;
+result.lines = [result.lines, tested.lines];
+end
+
+
+function labels = area_labels(raw)
+labels = cell(numel(raw), 1);
+for i = 1:numel(raw)
+    labels{i} = area_display_name(raw{i});
+end
+end
+
+
+function labels = session_labels(raw)
+labels = cell(numel(raw), 1);
+for i = 1:numel(raw)
+    labels{i} = strtrim(value_text(raw{i}));
+end
+end
+
+
+function scale = choose_level_scale(y)
+y = y(isfinite(y));
+scale.skew_raw = moment_skewness(y);
+scale.skew_log = nan;
+scale.name = 'raw';
+if numel(y) < 3 || any(y <= 0) || ~isfinite(scale.skew_raw)
+    scale.reason = 'The power is not positive for every used neuron, so the nested test uses the power itself.';
+    return
+end
+scale.skew_log = moment_skewness(log(y));
+if isfinite(scale.skew_log) && abs(scale.skew_log) < abs(scale.skew_raw)
+    scale.name = 'log';
+    scale.reason = sprintf(['Absolute skewness is %.3f for the power and %.3f for its logarithm. ', ...
+        'The logarithm is less skewed, so the nested test uses log power. ', ...
+        'The logarithm is taken before the channel and session-area averages.'], ...
+        abs(scale.skew_raw), abs(scale.skew_log));
+    return
+end
+scale.reason = sprintf(['Absolute skewness is %.3f for the power and %.3f for its logarithm. ', ...
+    'The power is less skewed, so the nested test uses the power itself.'], ...
+    abs(scale.skew_raw), abs(scale.skew_log));
+end
+
+
+function packed = collapse_to_session_area(y, area, session, channel)
+y = y(:);
+channel = channel(:);
+area = area(:);
+session = session(:);
+n = numel(y);
+known = isfinite(y) & isfinite(channel) & ~strcmp(area, 'area unknown');
+for i = 1:n
+    if isempty(session{i})
+        known(i) = false;
+    end
+end
+packed.n_neurons = sum(known);
+packed.n_unmatched = sum(isfinite(y) & ~isfinite(channel));
+channel_key = cell(n, 1);
+for i = 1:n
+    if ~known(i)
+        channel_key{i} = '';
+        continue
+    end
+    channel_key{i} = [session{i}, '|', rate_id_text(channel(i))];
+end
+keys = unique(channel_key(known), 'stable');
+n_channel = numel(keys);
+channel_y = nan(n_channel, 1);
+channel_area = cell(n_channel, 1);
+channel_session = cell(n_channel, 1);
+channel_n = zeros(n_channel, 1);
+n_conflict = 0;
+for c = 1:n_channel
+    in = known & strcmp(channel_key, keys{c});
+    channel_y(c) = mean(y(in));
+    channel_n(c) = sum(in);
+    channel_area{c} = majority_label(area(in));
+    channel_session{c} = session{find(in, 1)};
+    if numel(unique(area(in))) > 1
+        n_conflict = n_conflict + 1;
+    end
+end
+packed.n_channels = n_channel;
+packed.n_area_conflict = n_conflict;
+pair_key = cell(n_channel, 1);
+for c = 1:n_channel
+    pair_key{c} = [channel_session{c}, '|', channel_area{c}];
+end
+if n_channel == 0
+    pairs = cell(0, 1);
+else
+    pairs = unique(pair_key, 'stable');
+end
+n_pair = numel(pairs);
+packed.y = nan(n_pair, 1);
+packed.area = cell(n_pair, 1);
+packed.session = cell(n_pair, 1);
+packed.row_channels = zeros(n_pair, 1);
+packed.row_neurons = zeros(n_pair, 1);
+for p = 1:n_pair
+    in = strcmp(pair_key, pairs{p});
+    packed.y(p) = mean(channel_y(in));
+    packed.row_channels(p) = sum(in);
+    packed.row_neurons(p) = sum(channel_n(in));
+    hit = find(in, 1);
+    packed.area{p} = channel_area{hit};
+    packed.session{p} = channel_session{hit};
+end
+end
+
+
+function label = majority_label(labels)
+labels = labels(:);
+levels = unique(labels);
+counts = zeros(numel(levels), 1);
+for i = 1:numel(levels)
+    counts(i) = sum(strcmp(labels, levels{i}));
+end
+[~, pick] = max(counts);
+label = levels{pick};
+end
+
+
+function tested = test_session_area(y, area, session, n_channels, n_neurons)
+y = y(:);
+area_levels = sort(unique(area));
+session_levels = sort(unique(session));
+n_area = numel(area_levels);
+n_session = numel(session_levels);
+X = session_area_design(area, area_levels, session, session_levels);
+[rss_full, rank_full] = ols_rss(X, y);
+n_a = n_area - 1;
+keep = true(1, size(X, 2));
+keep(2:(1 + n_a)) = false;
+[rss_reduced, rank_reduced] = ols_rss(X(:, keep), y);
+df1 = rank_full - rank_reduced;
+df2 = numel(y) - rank_full;
+tested.ok = df1 >= 1 && df2 >= 1;
+tested.areas = area_levels;
+tested.y = y;
+tested.area = area;
+tested.session = session;
+tested.lines = { ...
+    sprintf('Areas: %d. Sessions: %d. Session-area rows: %d.', n_area, n_session, numel(y)), ...
+    sprintf('%-12s %8s %8s %8s %12s', 'Area', 'Sessions', 'Channels', 'Neurons', 'Mean')};
+for a = 1:n_area
+    in = strcmp(area, area_levels{a});
+    tested.lines{end + 1} = sprintf('%-12s %8d %8d %8d %12.4g', ...
+        area_levels{a}, numel(unique(session(in))), sum(n_channels(in)), ...
+        sum(n_neurons(in)), mean(y(in))); %#ok<AGROW>
+end
+if ~tested.ok
+    tested.lines{end + 1} = 'The session and area terms do not leave a residual, so the area test was not computed.';
+    return
+end
+ss = rss_reduced - rss_full;
+scale = max([1, abs(rss_reduced), abs(rss_full)]);
+if ss < 0 && ss > -1e-8 * scale
+    ss = 0;
+end
+if rss_full <= 1e-10 * scale && ss > 1e-10 * scale
+    F = inf;
+    p = 0;
+else
+    F = (ss / df1) / (rss_full / df2);
+    p = f_survival(F, df1, df2);
+end
+tested.F = F;
+tested.df1 = df1;
+tested.df2 = df2;
+tested.p = p;
+tested.lines{end + 1} = sprintf(['Area after session: F(%g, %g) = %.3f, p = %.3g. ', ...
+    'This is the nested test of area differences.'], df1, df2, F, p);
+beta = X \ y;
+sigma2 = rss_full / df2;
+xtx = X' * X;
+if ~isfinite(rcond(xtx)) || rcond(xtx) < 1e-8
+    C = pinv(xtx);
+else
+    C = inv(xtx);
+end
+C = sigma2 * C;
+area_cov = C(2:(1 + n_a), 2:(1 + n_a));
+area_beta = beta(2:(1 + n_a));
+effect = [area_beta; -sum(area_beta)];
+se = nan(n_area, 1);
+for a = 1:n_a
+    se(a) = sqrt(max(real(area_cov(a, a)), 0));
+end
+contrast = -ones(n_a, 1);
+se(n_area) = sqrt(max(real(contrast' * area_cov * contrast), 0));
+tstat = effect ./ se;
+tstat(~isfinite(se) | se <= 0) = nan;
+raw_p = nan(n_area, 1);
+for a = 1:n_area
+    raw_p(a) = two_sided_t_p(tstat(a), df2);
+end
+holm = holm_sidak_adjust(raw_p);
+tested.effect = effect;
+tested.lines{end + 1} = ['Each area deviation is that area minus the unweighted mean of the areas, ', ...
+    'from the model that also contains the session term.'];
+tested.lines{end + 1} = sprintf('%-12s %12s %12s %10s %10s %10s', ...
+    'Area', 'Deviation', 'SE', 't', 'p', 'Holm');
+for a = 1:n_area
+    tested.lines{end + 1} = sprintf('%-12s %12.4g %12.4g %10.3f %10.3g %10.3g', ...
+        area_levels{a}, effect(a), se(a), tstat(a), raw_p(a), holm(a)); %#ok<AGROW>
+end
+end
+
+
+function X = session_area_design(area, area_levels, session, session_levels)
+n = numel(area);
+n_a = numel(area_levels) - 1;
+n_s = numel(session_levels) - 1;
+X = zeros(n, 1 + n_a + n_s);
+X(:, 1) = 1;
+for a = 1:n_a
+    code = zeros(n, 1);
+    code(strcmp(area, area_levels{a})) = 1;
+    code(strcmp(area, area_levels{end})) = -1;
+    X(:, 1 + a) = code;
+end
+for s = 1:n_s
+    code = zeros(n, 1);
+    code(strcmp(session, session_levels{s})) = 1;
+    code(strcmp(session, session_levels{end})) = -1;
+    X(:, 1 + n_a + s) = code;
+end
+end
+
+
+function draw_nested_area_power(result, folder)
+open_full_figure(['Delta power by area, ', result.condition])
+packed = result.packed;
+areas = result.tested.areas;
+hold on
+for a = 1:numel(areas)
+    in = strcmp(packed.area, areas{a});
+    values = packed.y(in);
+    x = a + violin_point_offset(numel(values));
+    color = area_bar_color(areas{a});
+    plot(x, values, 'o', 'MarkerFaceColor', color, 'MarkerEdgeColor', 'none')
+    plot([a - 0.25, a + 0.25], mean(values) * [1 1], 'Color', [0.1 0.1 0.1], 'LineWidth', 1.6)
+end
+xlim([0.4, numel(areas) + 0.6])
+set(gca, 'XTick', 1:numel(areas), 'XTickLabel', areas)
+try
+    set(gca, 'TickLabelInterpreter', 'none')
+catch
+end
+ylabel(result.scale_label)
+box off
+sgtitle({sprintf('%s power. Area after session: F(%g, %g) = %.3f, p = %.3g.', ...
+    result.condition, result.tested.df1, result.tested.df2, result.tested.F, result.tested.p), ...
+    'Each point is one session. It is the mean of that session''s channel means in the area.', ...
+    'The line is the mean of those session values.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
 end
 
 
