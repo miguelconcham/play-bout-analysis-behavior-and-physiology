@@ -43,6 +43,57 @@
 % features, neurons, and permutation count load that file instead of
 % fitting again. lock_model_cache_version is 1 for this fit.
 %
+% Backup. After an ACG run, paste the block below into the command window.
+% It copies the ACG inputs and the saved models into
+% Data\Analysis results\acg unin back up. Run it again to refresh that
+% folder. To put a folder back, copy it from there into Analysis results.
+% The large parts are spike train parsing and phase locking data.
+% acg population logit holds lock_type_model_cache.mat,
+% acg_population_logit_prep.mat, and oscillatory_neuron_labels.csv.
+% The shuffle checkpoint and the power summary are in spike train parsing.
+% A copy of those model files still sitting in output_folder is copied too.
+%
+% data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
+% results_folder = fullfile(data_root, 'Analysis results');
+% backup_folder = fullfile(results_folder, 'acg unin back up');
+% if exist(backup_folder, 'dir') ~= 7
+%     mkdir(backup_folder);
+% end
+% source_names = { ...
+%     'spike train parsing', ...
+%     'phase locking data', ...
+%     'play power acg', ...
+%     'session acg shuffle', ...
+%     'acg population logit'};
+% for i = 1:numel(source_names)
+%     source = fullfile(results_folder, source_names{i});
+%     if exist(source, 'dir') ~= 7
+%         fprintf('Missing, left out: %s\n', source);
+%         continue
+%     end
+%     destination = fullfile(backup_folder, source_names{i});
+%     if exist(destination, 'dir') ~= 7
+%         mkdir(destination);
+%     end
+%     copyfile(source, destination);
+%     fprintf('Backed up %s\n', destination);
+% end
+% model_names = {'lock_type_model_cache.mat', 'acg_population_logit_prep.mat', 'oscillatory_neuron_labels.csv'};
+% if exist('output_folder', 'var') && ~isempty(output_folder) && exist(output_folder, 'dir') == 7
+%     model_destination = fullfile(backup_folder, 'acg population logit');
+%     if exist(model_destination, 'dir') ~= 7
+%         mkdir(model_destination);
+%     end
+%     for i = 1:numel(model_names)
+%         model_file = fullfile(output_folder, model_names{i});
+%         if exist(model_file, 'file') == 2
+%             copyfile(model_file, fullfile(model_destination, model_names{i}));
+%             fprintf('Backed up %s\n', model_file);
+%         end
+%     end
+% end
+% fprintf('Backup folder: %s\n', backup_folder);
+%
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
 % and the rate-ratio matrices. neuron_type{i} is that neuron's lock group:
