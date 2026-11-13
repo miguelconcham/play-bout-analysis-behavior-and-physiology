@@ -62,9 +62,11 @@
 % fit is repeated on the non-oscillatory neurons alone. Pearson
 % correlations of the predictors are saved with each fit. Each feature
 % change is also compared with the firing-rate change. Section 6 tests
-% delta power across areas. Neurons on one channel are repeated
-% measurements of that channel, and channels in one area in one session
-% are repeated measurements of that area in that session. It also reads the saved
+% delta power across areas for the high-power tail, the low-power tail,
+% and all runs. Neurons on one channel are averaged, then channels in one
+% area and session are averaged. A session intercept is removed before
+% area is tested, and the figure shows those session-adjusted values.
+% It also reads the saved
 % power summary and compares, within each neuron, the firing rate of the
 % low-power runs, the high-power runs, and the runs in the all-runs
 % autocorrelogram. Each pair is tested with a paired t-test, a
@@ -128,7 +130,8 @@ neuron_type = neuron_type(row_order);
 neuron_record_index = neuron_record_index(row_order);
 [neuron_session, neuron_area, neuron_cluster_id] = ...
     neuron_identity_from_records(records, neuron_record_index);
-[high_power_delta, low_power_delta] = stratum_mean_delta(records, neuron_record_index);
+[high_power_delta, low_power_delta, all_power_delta] = ...
+    stratum_mean_delta(records, neuron_record_index);
 
 imagesc_logit = struct();
 sort_score = struct();
@@ -164,6 +167,7 @@ save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
     'neuron_type', 'neuron_record_index', 'neuron_session', 'neuron_area', ...
     'neuron_cluster_id', 'feature_table', 'high_power_delta', 'low_power_delta', ...
+    'all_power_delta', ...
     'column_id', 'column_title', 'scale_id', 'scale_title', ...
     'n_shuffles', 'sort_window_s', 'checkpoint', 'prep_file');
 disp(['Section 1 saved the matrices to ', prep_file])
@@ -179,8 +183,10 @@ write_summary_section(output_folder, '1. Checkpoint and population matrices', st
     sprintf('Neurons with all, high-power, and low-power curves: %d', numel(neuron_type)), ...
     sprintf('Neurons with a finite high-power mean delta power: %d', sum(isfinite(high_power_delta))), ...
     sprintf('Neurons with a finite low-power mean delta power: %d', sum(isfinite(low_power_delta))), ...
+    sprintf('Neurons with a finite all-runs mean delta power: %d', sum(isfinite(all_power_delta))), ...
     'high_power_delta is the mean, across that neuron''s high-power runs, of the squared median delta-band envelope on the neuron channel.', ...
     'low_power_delta is that mean for the runs at or below the neuron''s 25th percentile.', ...
+    'all_power_delta is that mean over every run with a finite score. Older checkpoints leave it missing, and section 6 then reads score_all from the power summary.', ...
     sprintf('Lag axis: %.3f to %.3f s, %d bins', lag(1), lag(end), numel(lag)), ...
     sprintf('Sort window for the stored row order: %.3f to %.3f s', ...
         sort_window_s(1), sort_window_s(2)), ...
@@ -1522,7 +1528,8 @@ if ~exist('high_power_delta', 'var') || ~exist('low_power_delta', 'var') ...
         error('Plot_acg_population_logit:powerModel', ...
             'The low-power and high-power means are not in the workspace. Run section 1 first.');
     end
-    [high_power_delta, low_power_delta] = stratum_mean_delta(records, neuron_record_index);
+    [high_power_delta, low_power_delta, all_power_delta] = ...
+        stratum_mean_delta(records, neuron_record_index);
 end
 if ~exist('feature_table_low', 'var') || size(feature_table_low, 1) ~= numel(neuron_type)
     if ~exist('imagesc_sum_power_low', 'var') || ~exist('lag', 'var')
@@ -1707,9 +1714,9 @@ write_summary_section(output_folder, '5b. Firing rates of the power strata', ...
 
 %% 6. Nested comparison of delta power across areas
 % Re-run this section after section 1. area_power_conditions chooses the
-% tail. 'high' uses the high-power mean. 'low' uses the low-power mean.
-% High is first. Add or remove entries to change which conditions run.
-area_power_conditions = {'high', 'low'};
+% set of runs. 'high' is the high-power mean, 'low' is the low-power mean,
+% and 'all' is the mean over every run with a finite score.
+area_power_conditions = {'high', 'low', 'all'};
 if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
@@ -1722,6 +1729,15 @@ end
 if ~exist('parsing_folder', 'var') || isempty(parsing_folder)
     parsing_folder = default_parsing_folder();
 end
+if ~exist('acg_method', 'var') || isempty(acg_method)
+    acg_method = 'overlap';
+end
+if ~exist('acg_count', 'var') || isempty(acg_count)
+    acg_count = 'pairs';
+end
+if ~exist('checkpoint', 'var')
+    checkpoint = '';
+end
 neuron_channel = channels_for_neurons(parsing_folder, neuron_session, neuron_cluster_id);
 for condition_index = 1:numel(area_power_conditions)
     area_power_condition = area_power_conditions{condition_index};
@@ -1729,9 +1745,17 @@ for condition_index = 1:numel(area_power_conditions)
         area_power_values = low_power_delta;
     elseif strcmp(area_power_condition, 'high')
         area_power_values = high_power_delta;
+    elseif strcmp(area_power_condition, 'all')
+        if ~exist('all_power_delta', 'var') || numel(all_power_delta) ~= numel(neuron_session) ...
+                || ~any(isfinite(all_power_delta))
+            all_power_delta = population_summary_field( ...
+                stratum_summary_path(checkpoint, acg_method, acg_count), ...
+                neuron_session, neuron_cluster_id, 'score_all');
+        end
+        area_power_values = all_power_delta;
     else
         error('Plot_acg_population_logit:areaNest', ...
-            'area_power_conditions accepts ''high'' and ''low''.');
+            'area_power_conditions accepts ''high'', ''low'', and ''all''.');
     end
     area_nest = nested_area_power(area_power_values, neuron_area, neuron_session, ...
         neuron_channel, area_power_condition);
@@ -4140,16 +4164,19 @@ end
 end
 
 
-function [power_high, power_low] = stratum_mean_delta(records, record_index)
-%STRATUM_MEAN_DELTA  Mean channel delta power of the high and low tails.
+function [power_high, power_low, power_all] = stratum_mean_delta(records, record_index)
+%STRATUM_MEAN_DELTA  Mean channel delta power of the high, low, and all-run sets.
 %
 % score_high is the mean of the squared median delta-band envelopes of
 % the runs at or above that neuron's 75th percentile. score_low is the
-% same mean for the runs at or below the 25th percentile.
+% same mean for the runs at or below the 25th percentile. score_all is
+% that mean over every run with a finite score. Older checkpoints have
+% no score_all, and those entries stay NaN.
 
 n = numel(record_index);
 power_high = nan(n, 1);
 power_low = nan(n, 1);
+power_all = nan(n, 1);
 for i = 1:n
     record = records{record_index(i)};
     if ~isstruct(record) || ~isfield(record, 'power') || ~isstruct(record.power)
@@ -4157,6 +4184,7 @@ for i = 1:n
     end
     power_high(i) = scalar_power_field(record.power, 'score_high');
     power_low(i) = scalar_power_field(record.power, 'score_low');
+    power_all(i) = scalar_power_field(record.power, 'score_all');
 end
 end
 
@@ -4729,6 +4757,44 @@ save_script_figure(folder)
 end
 
 
+function values = population_summary_field(summary_path, session, cluster_id, field_name)
+%POPULATION_SUMMARY_FIELD  One saved power-summary column, aligned to the population.
+
+n = min(numel(session), numel(cluster_id));
+values = nan(n, 1);
+if isempty(summary_path) || exist(summary_path, 'file') ~= 2
+    error('Plot_acg_population_logit:areaNest', ...
+        'The locking summary was not found at %s.', summary_path);
+end
+try
+    stored = load(summary_path, 'power_acg');
+catch
+    error('Plot_acg_population_logit:areaNest', ...
+        'The locking summary could not be read.');
+end
+if ~isfield(stored, 'power_acg') || ~isfield(stored.power_acg, 'all_neurons')
+    error('Plot_acg_population_logit:areaNest', ...
+        'The summary has no power_acg.all_neurons.');
+end
+block = stored.power_acg.all_neurons;
+if ~isfield(block, field_name) || ~isfield(block, 'session') || ~isfield(block, 'cluster_id')
+    error('Plot_acg_population_logit:areaNest', ...
+        'The power summary has no %s aligned by session and cluster id.', field_name);
+end
+score = double(block.(field_name)(:));
+summary_keys = neuron_keys(block.session, block.cluster_id);
+n_score = min(numel(score), numel(summary_keys));
+pop_keys = neuron_keys(session(1:n), cluster_id(1:n));
+[found, loc] = ismember(pop_keys, summary_keys(1:n_score));
+use = found(:) & loc(:) >= 1 & loc(:) <= n_score;
+values(use) = score(loc(use));
+if ~any(isfinite(values))
+    error('Plot_acg_population_logit:areaNest', ...
+        'No population neuron matched a finite %s in the power summary.', field_name);
+end
+end
+
+
 function folder = default_parsing_folder()
 data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
     'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
@@ -4883,7 +4949,17 @@ function result = nested_area_power(power, area, session, channel, condition)
 
 result.ok = false;
 result.condition = condition;
-result.lines = {['Condition: ', condition, ' power.']};
+if strcmp(condition, 'all')
+    condition_label = 'all runs';
+else
+    condition_label = [condition, '-power tail'];
+end
+result.condition_label = condition_label;
+result.lines = {['Condition: ', condition_label, '.']};
+if strcmp(condition, 'all')
+    result.lines{end + 1} = ['All-runs power is the mean delta power of every run with a finite score. ', ...
+        'Those runs are not restricted to the outer power percentiles.'];
+end
 n = min([numel(power), numel(area), numel(session), numel(channel)]);
 power = power(1:n);
 area = area(1:n);
@@ -4896,20 +4972,21 @@ scale = choose_level_scale(power(positive));
 if strcmp(scale.name, 'log')
     analyzed = nan(size(power));
     analyzed(positive) = log(power(positive));
-    scale_label = ['log ', condition, ' delta power'];
+    scale_label = ['log ', condition_label, ' delta power'];
 else
     analyzed = power;
-    scale_label = [condition, ' delta power'];
+    scale_label = [condition_label, ' delta power'];
 end
 result.scale_label = scale_label;
 packed = collapse_to_session_area(analyzed, area, session, channel);
 result.packed = packed;
 result.lines = [result.lines, { ...
-    'Neurons that share a session and a channel are averaged. That mean is the channel measurement.', ...
-    'Channel measurements that share a session and an area are averaged. That mean is the area measurement for that session.', ...
-    'The ANOVA is fit to those session-area means. Area is tested after a session term.', ...
-    'The error is the remaining variation of the area differences across sessions.', ...
-    sprintf('Neurons with a finite %s and a known channel: %d.', condition, packed.n_neurons), ...
+    'Individual neuron values are not the rows of the test. Neurons that share a session and a channel are averaged first.', ...
+    'Those channel means that share a session and an area are then averaged. Each remaining row is one area in one session.', ...
+    'The model has a separate intercept for each session, because sessions differ in overall power.', ...
+    'Area is tested after those session intercepts. The error is the remaining variation of the area differences across sessions.', ...
+    'The figure subtracts the fitted session intercept from each point.', ...
+    sprintf('Neurons with a finite %s value and a known channel: %d.', condition_label, packed.n_neurons), ...
     sprintf('Channels: %d. Session-area rows: %d.', packed.n_channels, numel(packed.y)), ...
     sprintf('Neurons with no channel match: %d.', packed.n_unmatched), ...
     sprintf('Channels whose neurons were not all labeled with one area: %d. Those channels use the majority area.', ...
@@ -5069,7 +5146,8 @@ tested.area = area;
 tested.session = session;
 tested.lines = { ...
     sprintf('Areas: %d. Sessions: %d. Session-area rows: %d.', n_area, n_session, numel(y)), ...
-    sprintf('%-12s %8s %8s %8s %12s', 'Area', 'Sessions', 'Channels', 'Neurons', 'Mean')};
+    sprintf('%-12s %8s %8s %8s %12s', 'Area', 'Sessions', 'Channels', 'Neurons', 'Raw mean')};
+tested.lines{end + 1} = 'The raw mean still includes each session''s power level.';
 for a = 1:n_area
     in = strcmp(area, area_levels{a});
     tested.lines{end + 1} = sprintf('%-12s %8d %8d %8d %12.4g', ...
@@ -5096,9 +5174,12 @@ tested.F = F;
 tested.df1 = df1;
 tested.df2 = df2;
 tested.p = p;
-tested.lines{end + 1} = sprintf(['Area after session: F(%g, %g) = %.3f, p = %.3g. ', ...
+tested.lines{end + 1} = sprintf(['Area after the session intercepts: F(%g, %g) = %.3f, p = %.3g. ', ...
     'This is the nested test of area differences.'], df1, df2, F, p);
 beta = X \ y;
+n_s = n_session - 1;
+session_cols = (2 + n_a):(1 + n_a + n_s);
+tested.adjusted = y - X(:, session_cols) * beta(session_cols);
 sigma2 = rss_full / df2;
 xtx = X' * X;
 if ~isfinite(rcond(xtx)) || rcond(xtx) < 1e-8
@@ -5124,13 +5205,14 @@ for a = 1:n_area
 end
 holm = holm_sidak_adjust(raw_p);
 tested.effect = effect;
-tested.lines{end + 1} = ['Each area deviation is that area minus the unweighted mean of the areas, ', ...
-    'from the model that also contains the session term.'];
-tested.lines{end + 1} = sprintf('%-12s %12s %12s %10s %10s %10s', ...
-    'Area', 'Deviation', 'SE', 't', 'p', 'Holm');
+tested.area_level = beta(1) + effect;
+tested.lines{end + 1} = ['Each area level is the intercept plus that area''s deviation. ', ...
+    'The deviation is the area minus the unweighted mean of the areas, after the session intercepts.'];
+tested.lines{end + 1} = sprintf('%-12s %12s %12s %12s %10s %10s %10s', ...
+    'Area', 'Level', 'Deviation', 'SE', 't', 'p', 'Holm');
 for a = 1:n_area
-    tested.lines{end + 1} = sprintf('%-12s %12.4g %12.4g %10.3f %10.3g %10.3g', ...
-        area_levels{a}, effect(a), se(a), tstat(a), raw_p(a), holm(a)); %#ok<AGROW>
+    tested.lines{end + 1} = sprintf('%-12s %12.4g %12.4g %12.4g %10.3f %10.3g %10.3g', ...
+        area_levels{a}, tested.area_level(a), effect(a), se(a), tstat(a), raw_p(a), holm(a)); %#ok<AGROW>
 end
 end
 
@@ -5158,16 +5240,16 @@ end
 
 function draw_nested_area_power(result, folder)
 open_full_figure(['Delta power by area, ', result.condition])
-packed = result.packed;
 areas = result.tested.areas;
 hold on
 for a = 1:numel(areas)
-    in = strcmp(packed.area, areas{a});
-    values = packed.y(in);
+    in = strcmp(result.tested.area, areas{a});
+    values = result.tested.adjusted(in);
     x = a + violin_point_offset(numel(values));
     color = area_bar_color(areas{a});
     plot(x, values, 'o', 'MarkerFaceColor', color, 'MarkerEdgeColor', 'none')
-    plot([a - 0.25, a + 0.25], mean(values) * [1 1], 'Color', [0.1 0.1 0.1], 'LineWidth', 1.6)
+    plot([a - 0.25, a + 0.25], result.tested.area_level(a) * [1 1], ...
+        'Color', [0.1 0.1 0.1], 'LineWidth', 1.6)
 end
 xlim([0.4, numel(areas) + 0.6])
 set(gca, 'XTick', 1:numel(areas), 'XTickLabel', areas)
@@ -5175,12 +5257,14 @@ try
     set(gca, 'TickLabelInterpreter', 'none')
 catch
 end
-ylabel(result.scale_label)
+ylabel(['Session-adjusted ', result.scale_label])
 box off
-sgtitle({sprintf('%s power. Area after session: F(%g, %g) = %.3f, p = %.3g.', ...
-    result.condition, result.tested.df1, result.tested.df2, result.tested.F, result.tested.p), ...
-    'Each point is one session. It is the mean of that session''s channel means in the area.', ...
-    'The line is the mean of those session values.'}, ...
+sgtitle({sprintf('%s. Area after session intercepts: F(%g, %g) = %.3f, p = %.3g.', ...
+    result.condition_label, result.tested.df1, result.tested.df2, ...
+    result.tested.F, result.tested.p), ...
+    'Each point is one session, after that session intercept is subtracted.', ...
+    'It starts as the mean of the channel means in that area.', ...
+    'The line is the area level from the model.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
