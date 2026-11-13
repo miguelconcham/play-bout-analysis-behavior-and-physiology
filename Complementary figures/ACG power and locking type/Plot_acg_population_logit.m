@@ -15,16 +15,21 @@
 % lock-type model cache are written to
 % Data\Analysis results\acg population logit. A cache or matrix saved by
 % an earlier run is read from output_folder or from spike train parsing.
-% n_example_neurons, n_neurons_per_figure, example_smooth_ms, and
-% plot_example_neurons_only are set at the start of section 4.
-% n_example_neurons chooses how many of the strongest oscillatory neurons
-% are drawn. The examples also keep the strongest oscillatory neuron from
-% each analysed area except VLPAG, so that count can be larger than
-% n_example_neurons. n_neurons_per_figure is how many neurons go on each
-% figure. Each neuron is one column: both autocorrelograms on the top row,
-% both shuffle percentiles on the bottom row. example_smooth_ms is the
-% Gaussian smoothing width in milliseconds. plot_example_neurons_only
-% draws those neurons and leaves the other section 4 figures unrun.
+% n_example_neurons, n_neurons_per_figure, example_smooth_half_s,
+% example_skip_abs_lag_s, and plot_example_neurons_only are set at the
+% start of section 4. n_example_neurons chooses how many of the strongest
+% oscillatory neurons are drawn. The examples also keep the strongest
+% oscillatory neuron from each analysed area except VLPAG, so that count
+% can be larger than n_example_neurons. n_neurons_per_figure is how many
+% neurons go on each figure. Each neuron is one column: both
+% autocorrelograms on the top row, both shuffle percentiles on the bottom
+% row. The example autocorrelogram uses the same Gaussian as the
+% percentile estimate: example_smooth_half_s is 0.06 s and the standard
+% deviation is one quarter of that, 15 ms. Lags within
+% example_skip_abs_lag_s of zero, 20 ms, stay unsmoothed. The percentile
+% row is the stored percentile and is not smoothed again.
+% plot_example_neurons_only draws those neurons and leaves the other
+% section 4 figures unrun.
 % classifier_method is set just before the lock-type classifier.
 % The default is naive Bayes, LDA, and a medium Gaussian SVM.
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
@@ -670,7 +675,8 @@ end
 [output_folder, estimate_folder] = logit_folders(output_folder);
 n_example_neurons = 10;
 n_neurons_per_figure = 3;
-example_smooth_ms = 0.05;
+example_smooth_half_s = 0.06;
+example_skip_abs_lag_s = 0.02;
 plot_example_neurons_only = false;
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
@@ -1439,12 +1445,12 @@ if n_example > 0
             lock_label = display_lock_label(neuron_type{pop_row});
             [acg_lag, acg_high, acg_low, found_high, found_low] = example_stratum_curves( ...
                 example_bank, neuron_session{pop_row}, neuron_cluster_id(pop_row));
-            acg_high = smooth_example_trace(acg_lag, acg_high, example_smooth_ms);
-            acg_low = smooth_example_trace(acg_lag, acg_low, example_smooth_ms);
-            pct_high = smooth_example_trace(lag, ...
-                shown_percentile.sum.power_high(rank, :), example_smooth_ms);
-            pct_low = smooth_example_trace(lag, ...
-                shown_percentile.sum.power_low(rank, :), example_smooth_ms);
+            acg_high = smooth_example_acg(acg_lag, acg_high, ...
+                example_smooth_half_s, example_skip_abs_lag_s);
+            acg_low = smooth_example_acg(acg_lag, acg_low, ...
+                example_smooth_half_s, example_skip_abs_lag_s);
+            pct_high = shown_percentile.sum.power_high(rank, :);
+            pct_low = shown_percentile.sum.power_low(rank, :);
             shared_ylim = example_acg_ylim(acg_lag, [acg_high(:), acg_low(:)], lag_limits);
             subplot(n_example_rows, n_example_cols, k)
             hold on
@@ -1492,7 +1498,8 @@ if n_example > 0
         sgtitle({sprintf('Neurons %d-%d of %d. VLPAG is left out.', i0, i1, n_example), ...
             'Each column is one neuron. Top: high-power and low-power autocorrelograms.', ...
             'Bottom: high-power and low-power shuffle percentiles.', ...
-            sprintf('Gaussian smooth, T = %g ms.', example_smooth_ms)}, ...
+            sprintf('Autocorrelogram Gaussian sigma = %g ms. Lags within %g ms of zero stay raw.', ...
+                1000 * example_smooth_half_s / 4, 1000 * example_skip_abs_lag_s)}, ...
             'Interpreter', 'none')
         save_script_figure(output_folder)
     end
@@ -1502,7 +1509,10 @@ if n_example > 0
         sprintf('Figures: %d. Each neuron is one column with two rows.', n_example_figures), ...
         'Top row: high-power and low-power autocorrelograms on one axes.', ...
         'Bottom row: high-power and low-power sum-to-1 shuffle percentiles on one axes.', ...
-        sprintf('Gaussian smoothing width T = %g ms.', example_smooth_ms), ...
+        sprintf(['Example autocorrelograms use the percentile Gaussian: ' ...
+            'smooth_half = %g s, sigma = %g ms. Lags within %g s of zero stay raw.'], ...
+            example_smooth_half_s, 1000 * example_smooth_half_s / 4, example_skip_abs_lag_s),
+        'The percentile row is the stored shuffle percentile.', ...
         'VLPAG is left out. Each other area that has an oscillatory neuron contributes its strongest one.', ...
         'Further neurons are the next highest modulation scores outside VLPAG, until n_example_neurons is reached.', ...
         'If those areas already exceed n_example_neurons, every area representative is still drawn.', ...
@@ -6276,39 +6286,36 @@ end
 end
 
 
-function y = smooth_example_trace(x, y, width_ms)
-%SMOOTH_EXAMPLE_TRACE  Gaussian smooth. width_ms is the standard deviation.
+function y = smooth_example_acg(x, y, smooth_half_s, skip_abs_lag_s)
+%SMOOTH_EXAMPLE_ACG  Same Gaussian as the shuffle-percentile autocorrelogram.
+%
+% smooth_half_s is the full width used by Analyze_locking_period_acg.
+% The standard deviation is one quarter of that width. Lags at and within
+% skip_abs_lag_s of zero are left raw, matching smooth_positive_acg.
 
 y = double(y(:)).';
 x = double(x(:));
 n = min(numel(x), numel(y));
 x = x(1:n);
 y = y(1:n);
-if n < 3 || ~isfinite(width_ms) || width_ms <= 0
+if n < 3 || ~isfinite(smooth_half_s) || smooth_half_s <= 0
     return
 end
 bin_s = median(diff(x));
 if ~isfinite(bin_s) || bin_s <= 0
     return
 end
-sigma_bins = (width_ms / 1000) / bin_s;
-if sigma_bins < 0.05
+smooth_n = max(1, round(smooth_half_s / bin_s));
+if smooth_n <= 1
     return
 end
-half_width = max(1, ceil(4 * sigma_bins));
-t = -half_width:half_width;
-kernel = exp(-0.5 * (t / sigma_bins) .^ 2);
-kernel = kernel / sum(kernel);
-finite = isfinite(y);
-filled = y;
-filled(~finite) = 0;
-numer = conv(filled, kernel, 'same');
-denom = conv(double(finite), kernel, 'same');
-out = y;
-use = denom > 0;
-out(use) = numer(use) ./ denom(use);
-out(~finite) = nan;
-y = out;
+if ~isfinite(skip_abs_lag_s) || skip_abs_lag_s < 0
+    skip_abs_lag_s = 0;
+end
+keep = x > skip_abs_lag_s;
+if any(keep)
+    y(keep) = gaussian_smooth_acg(y(keep), smooth_n / 4);
+end
 end
 
 
