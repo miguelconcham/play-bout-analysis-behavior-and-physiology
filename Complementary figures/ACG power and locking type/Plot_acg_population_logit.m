@@ -61,8 +61,11 @@
 % The intercept is the gap expected when those predictors do not change.
 % The scale is the less skewed of the raw gap and the log gap. The same
 % fit is repeated on the non-oscillatory neurons alone. Pearson
-% correlations of the predictors are saved with each fit. Each feature
-% change is also compared with the firing-rate change. Section 6 tests
+% correlations of the predictors are saved with each fit. Each predictor
+% with p below 0.05 is drawn against the power gap with the other
+% predictors fixed at their means. Each feature change is also compared
+% with the firing-rate change, and each significant feature is scattered
+% against that firing-rate change. Section 6 tests
 % delta power across areas for the high-power tail, the low-power tail,
 % and all runs. Neurons on one channel are averaged, then channels in one
 % area and session are averaged. A session intercept is removed before
@@ -1574,6 +1577,8 @@ draw_power_gap_scale(gap_raw, gap_log, power_gap.scale, output_folder, ...
     'Delta power gap scale')
 draw_power_model_coefficients(power_gap.fit, power_gap.outcome_label, output_folder, ...
     'Within-neuron delta power gap')
+power_gap_partial = draw_ceteris_paribus(power_gap, output_folder, ...
+    'Ceteris paribus, delta power gap')
 draw_regressor_correlation(power_gap.correlation, power_gap.names, output_folder, ...
     'Delta power gap predictor correlations')
 write_summary_section(output_folder, '5. Within-neuron delta-power gap', join_summary_lines( ...
@@ -1590,6 +1595,8 @@ write_summary_section(output_folder, '5. Within-neuron delta-power gap', join_su
     'Each tail rate is the spike count in that tail divided by the summed duration of its runs.', ...
     'The intercept is the power gap expected when every predictor change, including the firing-rate change, is zero.', ...
     'A slope is the change in the power gap associated with a one-unit within-neuron change in that predictor.', ...
+    'A predictor with p below 0.05 is plotted against the power gap while every other predictor is fixed at its mean.', ...
+    power_gap_partial, ...
     'Each neuron has one row, so the standard errors are ordinary least squares.', ...
     'The model F tests the slopes together. The intercept is the reference gap and is left out of that test.', ...
     'The correlation table is the Pearson correlation of the predictors in this fit. The intercept is not included.', ...
@@ -1612,6 +1619,8 @@ draw_power_gap_scale(gap_raw(non_osc), gap_log(non_osc), non_gap.scale, output_f
     'Delta power gap scale, non-oscillatory')
 draw_power_model_coefficients(non_gap.fit, non_gap.outcome_label, output_folder, ...
     'Within-neuron delta power gap, non-oscillatory')
+non_gap_partial = draw_ceteris_paribus(non_gap, output_folder, ...
+    'Ceteris paribus, delta power gap, non-oscillatory')
 draw_regressor_correlation(non_gap.correlation, non_gap.names, output_folder, ...
     'Delta power gap predictor correlations, non-oscillatory')
 write_summary_section(output_folder, ...
@@ -1622,6 +1631,8 @@ write_summary_section(output_folder, ...
     'One row per non-oscillatory neuron that has both power tails and a positive firing rate in each tail.', ...
     'The outcome, the six feature changes, and FiringRate are defined as in section 5.', ...
     'The scale is chosen again from the skewness of this subset.', ...
+    'A predictor with p below 0.05 is plotted against the power gap while every other predictor is fixed at its mean.', ...
+    non_gap_partial, ...
     'The correlation table is the Pearson correlation of the predictors in this subset.', ...
     sprintf('Non-oscillatory neurons in this fit: %d. Oscillatory neurons left out: %d.', ...
         non_gap.n, n_power_osc), ...
@@ -1634,6 +1645,7 @@ for i = 1:numel(rate_link.lines)
     fprintf('%s\n', rate_link.lines{i})
 end
 draw_feature_rate_link(rate_link, output_folder)
+rate_scatter_note = draw_feature_rate_scatter(rate_link, output_folder)
 write_summary_section(output_folder, '5d. Feature changes and the firing-rate change', ...
     join_summary_lines( ...
     ['Output folder: ', output_folder], ...
@@ -1643,6 +1655,8 @@ write_summary_section(output_folder, '5d. Feature changes and the firing-rate ch
     'Pearson and Spearman correlations test whether those two changes move together.', ...
     'The slope is from the within-neuron regression of the feature change on the firing-rate change, with an intercept.', ...
     'Holm-Sidak adjusted p-values are for the Pearson tests across the features in this table.', ...
+    'A feature whose Pearson p is below 0.05 is scattered against the firing-rate change.', ...
+    rate_scatter_note, ...
     sprintf('Neurons: %d.', rate_link.n), ...
     rate_link.lines))
 
@@ -4380,6 +4394,7 @@ else
     result.outcome_label = 'high minus low delta power';
 end
 result.fit = fit_power_feature_model(result.outcome, gap_x, names);
+result.predictors = gap_x;
 result.names = names;
 result.n = size(gap_x, 1);
 result.correlation = corr(gap_x);
@@ -4635,6 +4650,8 @@ end
 holm = holm_sidak_adjust(pearson_p);
 report.n = sum(isfinite(rate));
 report.names = feature_names;
+report.rate = rate;
+report.features = features;
 report.pearson = pearson;
 report.pearson_p = pearson_p;
 report.holm = holm;
@@ -4735,6 +4752,123 @@ sgtitle({'Each correlation uses one neuron with both power tails.', ...
     'Red marks a Pearson p below 0.05. The number above each dot is that p.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
+end
+
+
+function note = draw_ceteris_paribus(result, folder, figure_name)
+%DRAW_CETERIS_PARIBUS  One panel per significant slope, other predictors at their means.
+
+note = 'No slope has p below 0.05, so the ceteris paribus figure was not drawn.';
+if ~isfield(result, 'fit') || ~isfield(result, 'predictors')
+    return
+end
+fit = result.fit;
+X = result.predictors;
+y = result.outcome(:);
+if size(X, 2) ~= numel(fit.names) - 1 || size(X, 1) ~= numel(y)
+    return
+end
+significant = find(fit.p_value(2:end) < 0.05);
+if isempty(significant)
+    return
+end
+n_panels = numel(significant);
+n_cols = min(3, n_panels);
+n_rows = ceil(n_panels / n_cols);
+open_full_figure(figure_name)
+tiledlayout(n_rows, n_cols, 'TileSpacing', 'compact')
+predictor_means = mean(X, 1);
+for s = 1:n_panels
+    nexttile
+    column = significant(s);
+    [x_line, y_line, x_pts, y_pts] = ceteris_paribus_curve(y, X, fit.beta, column, predictor_means);
+    hold on
+    plot(x_pts, y_pts, 'o', 'MarkerFaceColor', [0.25 0.25 0.25], ...
+        'MarkerEdgeColor', 'none', 'MarkerSize', 5)
+    plot(x_line, y_line, 'Color', [0.75 0.15 0.15], 'LineWidth', 1.6)
+    xlabel(fit.names{column + 1}, 'Interpreter', 'none')
+    ylabel(result.outcome_label, 'Interpreter', 'none')
+    title(sprintf('p = %.3g', fit.p_value(column + 1)), 'Interpreter', 'none')
+    box off
+end
+shown_names = fit.names(significant + 1);
+sgtitle({figure_name, ...
+    'Each panel varies one predictor. The others stay at their mean.', ...
+    'Points are the power gap after that adjustment. The line is the model.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+note = sprintf(['Ceteris paribus panels, other predictors fixed at their mean: %s. ', ...
+    'A panel is drawn when that slope has p below 0.05.'], strjoin(shown_names, ', '));
+end
+
+
+function [x_line, y_line, x_pts, y_pts] = ceteris_paribus_curve(y, X, beta, column, predictor_means)
+%CETERIS_PARIBUS_CURVE  Outcome against one predictor, others fixed at their means.
+
+y = y(:);
+beta = beta(:);
+n_predictors = size(X, 2);
+others = true(1, n_predictors);
+others(column) = false;
+x_pts = X(:, column);
+adjustment = zeros(numel(y), 1);
+if any(others)
+    other_beta = beta(find(others) + 1);
+    adjustment = (X(:, others) - predictor_means(others)) * other_beta;
+end
+y_pts = y - adjustment;
+x_line = linspace(min(x_pts), max(x_pts), 40).';
+held = 0;
+if any(others)
+    held = predictor_means(others) * beta(find(others) + 1);
+end
+y_line = beta(1) + beta(column + 1) * x_line + held;
+end
+
+
+function note = draw_feature_rate_scatter(report, folder)
+%DRAW_FEATURE_RATE_SCATTER  Significant feature changes against the firing-rate change.
+
+note = 'No feature has a Pearson p below 0.05, so the scatter was not drawn.';
+if ~isfield(report, 'pearson_p') || ~isfield(report, 'features') || isempty(report.features)
+    return
+end
+significant = find(report.pearson_p(:).' < 0.05);
+if isempty(significant)
+    return
+end
+n_panels = numel(significant);
+n_cols = min(3, n_panels);
+n_rows = ceil(n_panels / n_cols);
+open_full_figure('Significant feature changes versus firing-rate change')
+tiledlayout(n_rows, n_cols, 'TileSpacing', 'compact')
+for s = 1:n_panels
+    nexttile
+    j = significant(s);
+    x = report.rate;
+    y = report.features(:, j);
+    ok = isfinite(x) & isfinite(y);
+    hold on
+    plot(x(ok), y(ok), 'o', 'MarkerFaceColor', [0.25 0.25 0.25], ...
+        'MarkerEdgeColor', 'none', 'MarkerSize', 5)
+    if isfinite(report.slope(j))
+        x_line = linspace(min(x(ok)), max(x(ok)), 40);
+        intercept = mean(y(ok)) - report.slope(j) * mean(x(ok));
+        plot(x_line, intercept + report.slope(j) * x_line, ...
+            'Color', [0.85 0.15 0.15], 'LineWidth', 1.6)
+    end
+    xlabel('Firing-rate change (spikes/s)')
+    ylabel(report.names{j}, 'Interpreter', 'none')
+    title(sprintf('Pearson p = %.3g', report.pearson_p(j)), 'Interpreter', 'none')
+    box off
+end
+sgtitle({'Significant feature changes against the firing-rate change.', ...
+    'Each point is one neuron. The line is that feature change regressed on the firing-rate change.', ...
+    'A panel is included when the Pearson p is below 0.05.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+note = sprintf('Scatter panels for Pearson p below 0.05: %s.', ...
+    strjoin(report.names(significant), ', '));
 end
 
 
