@@ -21,9 +21,12 @@
 % Each neuron uses two panels, so the figures continue until every
 % requested neuron is drawn.
 % classifier_method is set just before the lock-type classifier.
-% 'all' reports every option. The other values are 'lda', 'naivebayes',
-% 'svm', 'tree', and 'logit'. 'svm' is a Gaussian-kernel SVM at medium scale.
-% Only oscillatory neurons are classified.
+% The default is 'naivebayes'. 'all' reports every option. The other values
+% are 'lda', 'naivebayes', 'svm', 'tree', and 'logit'. 'svm' is a
+% Gaussian-kernel SVM at medium scale.
+% The selected classifier is run twice: every trough, peak, and unlocked
+% neuron, and the oscillatory neurons only. n_accuracy_permutations label
+% shuffles test that accuracy. The default is 1000.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -866,6 +869,53 @@ sgtitle(['Black points are every neuron. Blue points are oscillatory neurons at 
     'Filled bands are that panel''s group.'])
 save_script_figure(output_folder)
 
+lock_embedding_labels = lock_labels_for_rows(neuron_type, complete_rows);
+draw_lock_type_embedding(pca_score(:, 1:2), lock_embedding_labels, output_folder, ...
+    'Lock type in the high-power PCA', ...
+    sprintf('PC1 (%.1f%%)', pca_explained(1)), ...
+    sprintf('PC2 (%.1f%%)', pca_explained(2)), ...
+    ['Black points are every neuron in the high-power PCA, including non-classified cells. ', ...
+    'Filled bands are that panel''s lock type.'])
+lock_tsne = [];
+lock_perplexity = nan;
+if exist('Y_tsne', 'var') && exist('perplexity_values', 'var') && ~isempty(Y_tsne)
+    if numel(perplexity_values) >= 2
+        lock_tsne_index = 2;
+    else
+        lock_tsne_index = 1;
+    end
+    if lock_tsne_index <= numel(Y_tsne) ...
+            && size(Y_tsne{lock_tsne_index}, 1) == numel(lock_embedding_labels)
+        lock_tsne = Y_tsne{lock_tsne_index};
+        lock_perplexity = perplexity_values(lock_tsne_index);
+    end
+end
+if isempty(lock_tsne)
+    lock_perplexity_values = [5 15 30 50];
+    lock_perplexity_values = lock_perplexity_values( ...
+        lock_perplexity_values < (size(Xz, 1) - 1) / 3);
+    if isempty(lock_perplexity_values)
+        lock_perplexity_values = max(2, floor((size(Xz, 1) - 1) / 3));
+    end
+    if numel(lock_perplexity_values) >= 2
+        lock_tsne_index = 2;
+    else
+        lock_tsne_index = 1;
+    end
+    lock_perplexity = lock_perplexity_values(lock_tsne_index);
+    rng(42);
+    lock_tsne = tsne(Xz, ...
+        'NumDimensions', 2, ...
+        'Perplexity', lock_perplexity, ...
+        'Standardize', false, ...
+        'Distance', 'euclidean');
+end
+draw_lock_type_embedding(lock_tsne, lock_embedding_labels, output_folder, ...
+    'Lock type in the high-power t-SNE', 't-SNE 1', 't-SNE 2', ...
+    {sprintf('Black points are every neuron in the section 2 t-SNE. Perplexity = %g.', ...
+        lock_perplexity), ...
+    'Filled bands are that panel''s lock type. Non-classified cells stay in the black points.'})
+
 % Same columns as the cluster violins. High values come from the
 % high-power feature table. Low values are the same neurons at low power.
 comparison_names = { ...
@@ -1357,28 +1407,45 @@ write_summary_section(output_folder, '4. Two-factor ANOVA without interaction', 
     'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
     'Holm-Sidak adjusts every term in this figure together.', ...
     'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
-classifier_method = 'all';
+classifier_method = 'naivebayes';
+n_accuracy_permutations = 1000;
 classifier_names = area_feature_names(two_way_panels);
 classifier_titles = area_feature_titles(two_way_panels);
-[classifier_X, classifier_y] = lock_classifier_data(feature_table, neuron_type, ...
-    classifier_names, osc_rows);
 lock_class_names = {'Trough', 'Peak', 'Unlocked'};
 classifier_methods = classifier_method_list(classifier_method);
-classifier_results = cell(numel(classifier_methods), 1);
-for m = 1:numel(classifier_methods)
-    classifier_results{m} = classifier_crossval(classifier_X, classifier_y, ...
-        lock_class_names, classifier_methods{m});
-    if classifier_results{m}.ok
-        fprintf('%s accuracy: %.1f%%. Majority-class chance: %.1f%%.\n', ...
-            classifier_results{m}.method_label, 100 * classifier_results{m}.accuracy, ...
-            100 * classifier_results{m}.chance)
-    else
-        fprintf('%s: %s\n', classifier_results{m}.method_label, classifier_results{m}.note)
+classifier_populations = { ...
+    struct('name', 'All classified neurons', 'rows', (1:size(feature_table, 1)).'), ...
+    struct('name', 'Oscillatory neurons', 'rows', osc_rows(:))};
+rng(42);
+for p = 1:numel(classifier_populations)
+    [classifier_X, classifier_y] = lock_classifier_data(feature_table, neuron_type, ...
+        classifier_names, classifier_populations{p}.rows);
+    classifier_results = cell(numel(classifier_methods), 1);
+    for m = 1:numel(classifier_methods)
+        classifier_results{m} = classifier_crossval(classifier_X, classifier_y, ...
+            lock_class_names, classifier_methods{m});
+        classifier_results{m} = attach_accuracy_permutation(classifier_results{m}, ...
+            classifier_X, classifier_y, lock_class_names, n_accuracy_permutations);
+        if classifier_results{m}.ok
+            fprintf(['%s, %s accuracy: %.1f%%. Majority-class chance: %.1f%%. ', ...
+                'Permutation p = %.3g.\n'], ...
+                classifier_populations{p}.name, classifier_results{m}.method_label, ...
+                100 * classifier_results{m}.accuracy, 100 * classifier_results{m}.chance, ...
+                classifier_results{m}.perm_p)
+        else
+            fprintf('%s, %s: %s\n', classifier_populations{p}.name, ...
+                classifier_results{m}.method_label, classifier_results{m}.note)
+        end
     end
+    classifier_populations{p}.results = classifier_results;
+    draw_lock_classifier(classifier_results, output_folder, classifier_method, ...
+        ['Lock type classifier, ', classifier_populations{p}.name], ...
+        classifier_populations{p}.name)
 end
-draw_lock_classifier(classifier_results, output_folder, classifier_method)
+draw_accuracy_null(classifier_populations, output_folder, classifier_method)
 write_summary_section(output_folder, '4. Lock-type classifier', ...
-    lock_classifier_report(classifier_titles, classifier_method, classifier_results))
+    lock_classifier_report(classifier_titles, classifier_method, ...
+    n_accuracy_permutations, classifier_populations))
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
@@ -2110,7 +2177,7 @@ if ~classifier_method_available(method)
     return
 end
 if isempty(y) || size(X, 2) < 1
-    result.note = 'No oscillatory neuron had a lock type and finite values on all six features.';
+    result.note = 'No neuron had a lock type and finite values on all six features.';
     return
 end
 for c = 1:numel(class_names)
@@ -2118,12 +2185,12 @@ for c = 1:numel(class_names)
 end
 present = find(result.class_n > 0);
 if numel(present) < 2
-    result.note = 'Fewer than two lock types had oscillatory neurons with all six features.';
+    result.note = 'Fewer than two lock types had neurons with all six features.';
     return
 end
 result.n_folds = min(10, min(result.class_n(present)));
 if result.n_folds < 2
-    result.note = 'A lock type has fewer than two oscillatory neurons, so cross-validation was not run.';
+    result.note = 'A lock type has fewer than two neurons, so cross-validation was not run.';
     return
 end
 folds = stratified_folds(y, result.n_folds);
@@ -2384,8 +2451,8 @@ prediction = prediction(:);
 end
 
 
-function draw_lock_classifier(results, folder, method)
-open_full_figure('Lock type classifier')
+function draw_lock_classifier(results, folder, method, figure_name, population_name)
+open_full_figure(figure_name)
 n_methods = numel(results);
 for m = 1:n_methods
     if n_methods > 1
@@ -2432,60 +2499,198 @@ if isfinite(chance)
 else
     chance_line = 'Rows are the true lock type.';
 end
-sgtitle({sprintf('Oscillatory neurons. classifier_method = %s.', method), chance_line}, ...
+sgtitle({sprintf('%s. classifier_method = %s.', population_name, method), chance_line}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
 
 
-function text = lock_classifier_report(feature_titles, method, results)
+function text = lock_classifier_report(feature_titles, method, n_perm, populations)
 lines = { ...
     'Classifier of lock type from six high-power features.', ...
     'The features are subplot numbers 1, 2, 6, 12, 13, and 15:', ...
     strjoin(feature_titles, ', '), ...
-    'Only oscillatory neurons are classified. They are cluster 1 from section 3.', ...
-    'Classes are trough, peak, and unlocked. Non-classified cells are excluded.', ...
+    'The same classifier is run on every trough, peak, and unlocked neuron, and again on the oscillatory neurons only.', ...
+    'Oscillatory neurons are cluster 1 from section 3.', ...
+    'Non-classified cells are excluded.', ...
     'A neuron is used only when all six features are finite.', ...
     'Accuracy is stratified cross-validation. Each class is split across the folds in stored order.', ...
     'Within each training fold the features are standardized.', ...
-    sprintf('classifier_method = %s.', method), ...
+    sprintf('classifier_method = %s. The default is naivebayes.', method), ...
     'lda is a linear discriminant. naivebayes is Gaussian naive Bayes.', ...
     'svm is a Gaussian-kernel SVM with medium scale sqrt(number of features) and box constraint 1.', ...
     'Three SVM classes are compared one against one.', ...
-    'tree is the default classification tree. logit is multinomial logistic regression.'};
-shared = [];
-for m = 1:numel(results)
-    if results{m}.ok
-        shared = results{m};
-        break
+    'tree is the default classification tree. logit is multinomial logistic regression.', ...
+    sprintf('The permutation test shuffles the lock-type labels %d times and repeats the same cross-validation.', n_perm), ...
+    'The features stay fixed. The random stream is reset to 42 before the first shuffle.', ...
+    'p = (1 + number of shuffled accuracies at or above the real accuracy) / (1 + number of shuffles).'};
+for p = 1:numel(populations)
+    lines{end + 1} = populations{p}.name; %#ok<AGROW>
+    results = populations{p}.results;
+    shared = [];
+    for m = 1:numel(results)
+        if results{m}.ok
+            shared = results{m};
+            break
+        end
     end
-end
-if ~isempty(shared)
-    lines{end + 1} = sprintf('Neurons: %d. Folds: %d.', shared.n, shared.n_folds); %#ok<AGROW>
-    count_bits = cell(1, numel(shared.class_names));
-    for c = 1:numel(shared.class_names)
-        count_bits{c} = sprintf('%s %d', shared.class_names{c}, shared.class_n(c));
+    if ~isempty(shared)
+        lines{end + 1} = sprintf('  Neurons: %d. Folds: %d.', shared.n, shared.n_folds); %#ok<AGROW>
+        count_bits = cell(1, numel(shared.class_names));
+        for c = 1:numel(shared.class_names)
+            count_bits{c} = sprintf('%s %d', shared.class_names{c}, shared.class_n(c));
+        end
+        lines{end + 1} = ['  Class counts: ', strjoin(count_bits, ', ')]; %#ok<AGROW>
+        lines{end + 1} = sprintf('  Majority-class chance: %.1f%%.', 100 * shared.chance); %#ok<AGROW>
     end
-    lines{end + 1} = ['Class counts: ', strjoin(count_bits, ', ')]; %#ok<AGROW>
-    lines{end + 1} = sprintf('Majority-class chance: %.1f%%.', 100 * shared.chance); %#ok<AGROW>
-end
-for m = 1:numel(results)
-    result = results{m};
-    lines{end + 1} = result.method_label; %#ok<AGROW>
-    if ~result.ok
-        lines{end + 1} = ['  ', result.note]; %#ok<AGROW>
-        continue
+    for m = 1:numel(results)
+        result = results{m};
+        lines{end + 1} = ['  ', result.method_label]; %#ok<AGROW>
+        if ~result.ok
+            lines{end + 1} = ['    ', result.note]; %#ok<AGROW>
+            continue
+        end
+        lines{end + 1} = sprintf('    Cross-validated accuracy: %.1f%%.', 100 * result.accuracy); %#ok<AGROW>
+        for c = 1:numel(result.class_names)
+            lines{end + 1} = sprintf('    %-16s recall %s', result.class_names{c}, ...
+                stat_num(100 * result.recall(c), '%.1f%%')); %#ok<AGROW>
+        end
+        lines{end + 1} = '    Confusion counts, rows true and columns predicted:'; %#ok<AGROW>
+        lines{end + 1} = labeled_number_matrix('True', result.class_names, ...
+            result.class_names, result.counts, '%.0f'); %#ok<AGROW>
+        if result.n_perm < 1 || ~isfinite(result.perm_p)
+            lines{end + 1} = ['    ', result.perm_note]; %#ok<AGROW>
+            continue
+        end
+        lines{end + 1} = sprintf('    Permutation shuffles: %d.', result.n_perm); %#ok<AGROW>
+        lines{end + 1} = sprintf('    Null mean accuracy: %.1f%%.', 100 * result.null_mean); %#ok<AGROW>
+        lines{end + 1} = sprintf('    Null 95th percentile: %.1f%%.', 100 * result.null_p95); %#ok<AGROW>
+        lines{end + 1} = sprintf('    Permutation p: %.4g.', result.perm_p); %#ok<AGROW>
     end
-    lines{end + 1} = sprintf('  Cross-validated accuracy: %.1f%%.', 100 * result.accuracy); %#ok<AGROW>
-    for c = 1:numel(result.class_names)
-        lines{end + 1} = sprintf('  %-16s recall %s', result.class_names{c}, ...
-            stat_num(100 * result.recall(c), '%.1f%%')); %#ok<AGROW>
-    end
-    lines{end + 1} = '  Confusion counts, rows true and columns predicted:'; %#ok<AGROW>
-    lines{end + 1} = labeled_number_matrix('True', result.class_names, ...
-        result.class_names, result.counts, '%.0f'); %#ok<AGROW>
 end
 text = strjoin(lines, newline);
+end
+
+
+function result = attach_accuracy_permutation(result, X, y, class_names, n_perm)
+%ATTACH_ACCURACY_PERMUTATION  Label-shuffle null for one cross-validated accuracy.
+
+result.n_perm = 0;
+result.null_mean = nan;
+result.null_p95 = nan;
+result.perm_p = nan;
+result.null_accuracy = zeros(0, 1);
+result.perm_note = '';
+if ~result.ok
+    result.perm_note = 'The permutation test was skipped because the classifier did not run.';
+    return
+end
+if n_perm < 1
+    result.perm_note = 'n_accuracy_permutations is below 1, so no shuffle was run.';
+    return
+end
+null_accuracy = nan(n_perm, 1);
+for shuffle = 1:n_perm
+    shuffled = classifier_crossval(X, y(randperm(numel(y))), class_names, result.method);
+    if shuffled.ok
+        null_accuracy(shuffle) = shuffled.accuracy;
+    end
+end
+null_accuracy = null_accuracy(isfinite(null_accuracy));
+result.n_perm = numel(null_accuracy);
+result.null_accuracy = null_accuracy;
+if isempty(null_accuracy)
+    result.perm_note = 'Every label shuffle failed, so the permutation p was not computed.';
+    return
+end
+result.null_mean = mean(null_accuracy);
+result.null_p95 = upper_percentile(null_accuracy, 0.95);
+result.perm_p = (1 + sum(null_accuracy >= result.accuracy - 1e-12)) / (1 + result.n_perm);
+end
+
+
+function value = upper_percentile(x, fraction)
+x = sort(x(:));
+if isempty(x)
+    value = nan;
+    return
+end
+index = max(1, ceil(fraction * numel(x)));
+value = x(min(index, numel(x)));
+end
+
+
+function draw_accuracy_null(populations, folder, method)
+open_full_figure('Lock-type accuracy permutation')
+n_pop = numel(populations);
+n_methods = numel(populations{1}.results);
+for m = 1:n_methods
+    for p = 1:n_pop
+        subplot(n_methods, n_pop, (m - 1) * n_pop + p)
+        result = populations{p}.results{m};
+        if ~result.ok || isempty(result.null_accuracy)
+            axis off
+            title({populations{p}.name, result.method_label}, 'Interpreter', 'none')
+            if ~isempty(result.perm_note)
+                text(0.5, 0.5, result.perm_note, 'HorizontalAlignment', 'center', ...
+                    'Interpreter', 'none')
+            end
+            continue
+        end
+        histogram(result.null_accuracy, 'FaceColor', [0.75 0.75 0.75], 'EdgeColor', 'none')
+        hold on
+        y_limit = ylim;
+        plot([result.accuracy result.accuracy], y_limit, ...
+            'Color', [0.8 0.15 0.15], 'LineWidth', 1.6)
+        xlabel('Cross-validated accuracy')
+        ylabel('Shuffles')
+        title({populations{p}.name, result.method_label, ...
+            sprintf('p = %.3g', result.perm_p)}, 'Interpreter', 'none')
+        box off
+    end
+end
+sgtitle({sprintf('Gray bars are label shuffles. The red line is the real accuracy. classifier_method = %s.', method)}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function labels = lock_labels_for_rows(neuron_type, row_index)
+labels = cell(numel(row_index), 1);
+for i = 1:numel(row_index)
+    row = row_index(i);
+    if row >= 1 && row <= numel(neuron_type)
+        labels{i} = display_lock_label(neuron_type{row});
+    else
+        labels{i} = 'Non-classified';
+    end
+end
+end
+
+
+function draw_lock_type_embedding(xy, lock_labels, folder, figure_name, x_label, y_label, caption)
+names = {'Trough', 'Peak', 'Unlocked'};
+open_full_figure(figure_name)
+embedding_axes = gobjects(1, numel(names));
+for g = 1:numel(names)
+    embedding_axes(g) = subplot(1, numel(names), g);
+    group_xy = xy(strcmp(lock_labels, names{g}), :);
+    draw_iso_probability(xy, group_xy, lock_bar_color(names{g}), zeros(0, 2), [0 0 0])
+    title(names{g}, 'Interpreter', 'none')
+    xlabel(x_label, 'Interpreter', 'none')
+    ylabel(y_label, 'Interpreter', 'none')
+    grid on
+    box off
+end
+limits = embedding_axis_limits(xy);
+if ~isempty(limits)
+    for g = 1:numel(names)
+        set(embedding_axes(g), 'XLim', limits(1:2), 'YLim', limits(3:4))
+    end
+    linkaxes(embedding_axes, 'xy')
+end
+sgtitle(caption, 'Interpreter', 'none')
+save_script_figure(folder)
 end
 
 
