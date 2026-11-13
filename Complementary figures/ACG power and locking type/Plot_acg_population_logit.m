@@ -25,13 +25,15 @@
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
 % The features are those whose lock-type ANOVA has Holm-Sidak p below 0.05
 % in all classified neurons or in the oscillatory neurons only.
-% Each classifier is run on every trough, peak, and unlocked neuron, and
-% again on the oscillatory neurons only. Inside each training fold, a
-% neuron is weighted by the inverse of its lock-type count, scaled so the
-% weights average to 1. The accuracy of the whole model is the unweighted
-% mean of the three lock-type accuracies. n_accuracy_permutations label
-% shuffles test that mean and each lock type. The default is 1000. A bar
-% is filled when that permutation p is below 0.05.
+% Each classifier is naive Bayes, LDA, or a medium Gaussian SVM. Each one is
+% trained twice, with inverse-frequency weights and with equal weights, on
+% every trough, peak, and unlocked neuron and again on the oscillatory
+% neurons only. A joint model mixes the two class probabilities. The mix
+% uses each model's training-fold accuracy and the ACG features only.
+% n_accuracy_permutations label shuffles are drawn once per population and
+% reused for all nine models. The default is 1000. The model accuracy is
+% the mean of the three lock-type accuracies. A bar is filled when that
+% permutation p is below 0.05.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -1283,13 +1285,13 @@ write_summary_section(output_folder, '4. Two-factor ANOVA without interaction', 
     'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
     'Holm-Sidak adjusts every term in this figure together.', ...
     'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
-classifier_method = {'naivebayes', 'lda', 'svm'};
+classifier_method = {'svm', 'naivebayes', 'lda'};
 classifier_method_name = classifier_method_text(classifier_method);
 n_accuracy_permutations = 1000;
 [classifier_names, classifier_titles, classifier_sources] = significant_lock_features( ...
     lock_anova, osc_lock_anova, area_feature_names, area_feature_titles);
 lock_class_names = {'Trough', 'Peak', 'Unlocked'};
-classifier_methods = classifier_method_list(classifier_method);
+classifier_methods = {'svm', 'naivebayes', 'lda'};
 fprintf('Classifier features (%d): %s\n', numel(classifier_titles), ...
     strjoin(classifier_titles, ', '))
 if isempty(classifier_names)
@@ -1307,32 +1309,50 @@ rng(42);
 for p = 1:numel(classifier_populations)
     [classifier_X, classifier_y] = lock_classifier_data(feature_table, neuron_type, ...
         classifier_names, classifier_populations{p}.rows);
-    classifier_results = cell(numel(classifier_methods), 1);
+    shuffled_labels = shared_label_shuffles(classifier_y, n_accuracy_permutations);
+    model_grid = cell(3, numel(classifier_methods));
     for m = 1:numel(classifier_methods)
-        classifier_results{m} = classifier_crossval(classifier_X, classifier_y, ...
+        observed = classifier_weight_trio(classifier_X, classifier_y, ...
             lock_class_names, classifier_methods{m});
-        classifier_results{m} = attach_accuracy_permutation(classifier_results{m}, ...
-            classifier_X, classifier_y, lock_class_names, n_accuracy_permutations);
-        if classifier_results{m}.ok
-            fprintf(['%s, %s mean lock-type accuracy: %.1f%%. ', ...
-                'Equal-type reference: %.1f%%. Neuron-weighted accuracy: %.1f%%. ', ...
-                'Permutation p = %.3g.\n'], ...
-                classifier_populations{p}.name, classifier_results{m}.method_label, ...
-                100 * classifier_results{m}.accuracy, 100 * classifier_results{m}.chance, ...
-                100 * classifier_results{m}.neuron_accuracy, ...
-                classifier_results{m}.perm_p)
-            for c = 1:numel(lock_class_names)
-                fprintf('  %s accuracy: %.1f%%. Permutation p = %.3g.\n', ...
-                    lock_class_names{c}, 100 * classifier_results{m}.recall(c), ...
-                    classifier_results{m}.class_perm_p(c))
+        null_accuracy = nan(n_accuracy_permutations, 3);
+        null_recall = nan(n_accuracy_permutations, 3, numel(lock_class_names));
+        if observed{1}.ok || observed{2}.ok
+            for shuffle = 1:n_accuracy_permutations
+                shuffled = classifier_weight_trio(classifier_X, ...
+                    shuffled_labels(shuffle, :).', lock_class_names, classifier_methods{m});
+                for row = 1:3
+                    if shuffled{row}.ok
+                        null_accuracy(shuffle, row) = shuffled{row}.accuracy;
+                        null_recall(shuffle, row, :) = shuffled{row}.recall;
+                    end
+                end
             end
-        else
-            fprintf('%s, %s: %s\n', classifier_populations{p}.name, ...
-                classifier_results{m}.method_label, classifier_results{m}.note)
+        end
+        for row = 1:3
+            recall_null = reshape(null_recall(:, row, :), n_accuracy_permutations, []);
+            model_grid{row, m} = apply_shared_null(observed{row}, ...
+                null_accuracy(:, row), recall_null);
+            if model_grid{row, m}.ok
+                fprintf(['%s, %s mean lock-type accuracy: %.1f%%. ', ...
+                    'Equal-type reference: %.1f%%. Neuron-weighted accuracy: %.1f%%. ', ...
+                    'Permutation p = %.3g.\n'], ...
+                    classifier_populations{p}.name, model_grid{row, m}.method_label, ...
+                    100 * model_grid{row, m}.accuracy, 100 * model_grid{row, m}.chance, ...
+                    100 * model_grid{row, m}.neuron_accuracy, model_grid{row, m}.perm_p)
+                for c = 1:numel(lock_class_names)
+                    fprintf('  %s accuracy: %.1f%%. Permutation p = %.3g.\n', ...
+                        lock_class_names{c}, 100 * model_grid{row, m}.recall(c), ...
+                        model_grid{row, m}.class_perm_p(c))
+                end
+            else
+                fprintf('%s, %s: %s\n', classifier_populations{p}.name, ...
+                    model_grid{row, m}.method_label, model_grid{row, m}.note)
+            end
         end
     end
-    classifier_populations{p}.results = classifier_results;
-    draw_lock_classifier(classifier_results, output_folder, classifier_method_name, ...
+    classifier_populations{p}.grid = model_grid;
+    classifier_populations{p}.results = model_grid(:);
+    draw_lock_classifier(model_grid, output_folder, classifier_method_name, ...
         ['Lock type classifier, ', classifier_populations{p}.name], ...
         classifier_populations{p}.name)
 end
@@ -2285,28 +2305,14 @@ end
 end
 
 
-function prediction = classifier_predict(method, X_train, y_train, X_test)
+function prediction = classifier_predict(method, X_train, y_train, X_test, weighting)
 %CLASSIFIER_PREDICT  One fold. Features are standardized on the training fold.
 
-[X_train, X_test] = standardize_fold(X_train, X_test);
-weights = inverse_frequency_weights(y_train);
-switch lower(method)
-    case 'lda'
-        prediction = lda_predict(X_train, y_train, X_test, weights);
-    case 'naivebayes'
-        prediction = naive_bayes_predict(X_train, y_train, X_test, weights);
-    case 'svm'
-        prediction = gaussian_svm_predict(X_train, y_train, X_test, weights);
-    case 'tree'
-        model = fitctree(X_train, y_train, 'Weights', weights);
-        prediction = predict(model, X_test);
-    case 'logit'
-        prediction = logit_predict(X_train, y_train, X_test, weights);
-    otherwise
-        error('Plot_acg_population_logit:classifier', ...
-            'Unknown classifier method.');
+if nargin < 5 || isempty(weighting)
+    weighting = 'weighted';
 end
-prediction = prediction(:);
+n_class = max([y_train(:); 1]);
+[prediction, ~, ~] = fold_predictions(method, X_train, y_train, X_test, weighting, n_class);
 end
 
 
@@ -2328,6 +2334,249 @@ end
 end
 
 
+function shuffled = shared_label_shuffles(y, n_perm)
+%SHARED_LABEL_SHUFFLES  One label permutation list for every model.
+
+y = y(:);
+shuffled = zeros(n_perm, numel(y));
+for shuffle = 1:n_perm
+    shuffled(shuffle, :) = y(randperm(numel(y))).';
+end
+end
+
+
+function results = classifier_weight_trio(X, y, class_names, method)
+%CLASSIFIER_WEIGHT_TRIO  Weighted, unweighted, and joint decisions for one method.
+%
+% The joint decision mixes the two class probabilities. Each probability
+% is scaled by that model's mean lock-type accuracy on the training fold.
+% The test neuron's lock type is not an input.
+
+row_names = {'Weighted', 'Unweighted', 'Joint decision'};
+results = cell(3, 1);
+for row = 1:3
+    results{row} = empty_classifier_result(class_names, method, row_names{row});
+end
+if ~classifier_method_available(method)
+    for row = 1:3
+        results{row}.note = 'This option needs the Statistics and Machine Learning Toolbox.';
+    end
+    return
+end
+y = y(:);
+n = numel(y);
+n_class = numel(class_names);
+if isempty(y) || size(X, 2) < 1
+    for row = 1:3
+        results{row}.note = 'No neuron had a lock type and finite values on every selected feature.';
+    end
+    return
+end
+for row = 1:3
+    results{row}.n = n;
+    for c = 1:n_class
+        results{row}.class_n(c) = sum(y == c);
+    end
+end
+present = find(results{1}.class_n > 0);
+if numel(present) < 2
+    for row = 1:3
+        results{row}.note = 'Fewer than two lock types had neurons with every selected feature.';
+    end
+    return
+end
+n_folds = min(10, min(results{1}.class_n(present)));
+if n_folds < 2
+    for row = 1:3
+        results{row}.note = 'A lock type has fewer than two neurons, so cross-validation was not run.';
+    end
+    return
+end
+folds = stratified_folds(y, n_folds);
+prediction = nan(n, 3);
+for fold = 1:n_folds
+    test = folds == fold;
+    train = ~test;
+    try
+        [pred_w, post_w, train_w] = fold_predictions(method, X(train, :), y(train), ...
+            X(test, :), 'weighted', n_class);
+        [pred_u, post_u, train_u] = fold_predictions(method, X(train, :), y(train), ...
+            X(test, :), 'unweighted', n_class);
+        acc_w = mean_lock_accuracy(y(train), train_w, n_class);
+        acc_u = mean_lock_accuracy(y(train), train_u, n_class);
+        prediction(test, 1) = pred_w;
+        prediction(test, 2) = pred_u;
+        prediction(test, 3) = mix_class_posteriors(post_w, post_u, acc_w, acc_u);
+    catch err
+        for row = 1:3
+            results{row}.note = err.message;
+        end
+        return
+    end
+end
+for row = 1:3
+    results{row} = scored_prediction_result(results{row}, prediction(:, row), y, n_folds);
+end
+end
+
+
+function prediction = mix_class_posteriors(post_w, post_u, acc_w, acc_u)
+%MIX_CLASS_POSTERIORS  Scale each model's probabilities by its training accuracy.
+
+if ~isfinite(acc_w) || acc_w < 0
+    acc_w = 0;
+end
+if ~isfinite(acc_u) || acc_u < 0
+    acc_u = 0;
+end
+if acc_w + acc_u <= 0
+    acc_w = 1;
+    acc_u = 1;
+end
+mixed = acc_w * post_w + acc_u * post_u;
+[~, prediction] = max(mixed, [], 2);
+prediction = prediction(:);
+end
+
+
+function accuracy = mean_lock_accuracy(y, prediction, n_class)
+recalls = zeros(1, 0);
+for c = 1:n_class
+    members = y(:) == c;
+    if any(members)
+        recalls(end + 1) = mean(prediction(members) == c); %#ok<AGROW>
+    end
+end
+if isempty(recalls)
+    accuracy = nan;
+    return
+end
+accuracy = mean(recalls);
+end
+
+
+function result = empty_classifier_result(class_names, method, row_name)
+result.ok = false;
+result.note = '';
+result.method = method;
+result.method_label = [row_name, ' ', classifier_method_label(method)];
+result.accuracy = nan;
+result.neuron_accuracy = nan;
+result.chance = nan;
+result.n_folds = 0;
+result.n = 0;
+result.class_names = class_names;
+result.counts = zeros(numel(class_names));
+result.recall = nan(1, numel(class_names));
+result.class_n = zeros(1, numel(class_names));
+result.n_perm = 0;
+result.null_mean = nan;
+result.null_p95 = nan;
+result.perm_p = nan;
+result.null_accuracy = zeros(0, 1);
+result.null_recall = zeros(0, numel(class_names));
+result.class_null_mean = nan(1, numel(class_names));
+result.class_null_p95 = nan(1, numel(class_names));
+result.class_perm_p = nan(1, numel(class_names));
+result.perm_note = '';
+end
+
+
+function result = scored_prediction_result(result, prediction, y, n_folds)
+prediction = prediction(:);
+y = y(:);
+if numel(prediction) ~= numel(y) || any(~isfinite(prediction))
+    result.note = 'The classifier did not return a class for every neuron.';
+    return
+end
+n_class = numel(result.class_names);
+result.ok = true;
+result.n_folds = n_folds;
+result.neuron_accuracy = mean(prediction == y);
+for c = 1:n_class
+    for p = 1:n_class
+        result.counts(c, p) = sum(y == c & prediction == p);
+    end
+    if result.class_n(c) > 0
+        result.recall(c) = result.counts(c, c) / result.class_n(c);
+    end
+end
+present_recall = result.recall(result.class_n > 0);
+result.accuracy = mean(present_recall);
+result.chance = 1 / numel(present_recall);
+end
+
+
+function result = apply_shared_null(result, null_accuracy, null_recall)
+%APPLY_SHARED_NULL  Permutation p from one shared list of shuffled labels.
+
+result.n_perm = 0;
+result.null_mean = nan;
+result.null_p95 = nan;
+result.perm_p = nan;
+result.null_accuracy = zeros(0, 1);
+n_class = numel(result.class_names);
+result.null_recall = zeros(0, n_class);
+result.class_null_mean = nan(1, n_class);
+result.class_null_p95 = nan(1, n_class);
+result.class_perm_p = nan(1, n_class);
+result.perm_note = '';
+if ~result.ok
+    result.perm_note = 'The permutation test was skipped because the classifier did not run.';
+    return
+end
+kept = isfinite(null_accuracy);
+null_accuracy = null_accuracy(kept);
+null_recall = null_recall(kept, :);
+result.n_perm = numel(null_accuracy);
+result.null_accuracy = null_accuracy;
+result.null_recall = null_recall;
+if isempty(null_accuracy)
+    result.perm_note = 'Every label shuffle failed, so the permutation p was not computed.';
+    return
+end
+result.null_mean = mean(null_accuracy);
+result.null_p95 = upper_percentile(null_accuracy, 0.95);
+result.perm_p = permutation_p(null_accuracy, result.accuracy);
+for c = 1:n_class
+    samples = null_recall(isfinite(null_recall(:, c)), c);
+    if isempty(samples) || ~isfinite(result.recall(c))
+        continue
+    end
+    result.class_null_mean(c) = mean(samples);
+    result.class_null_p95(c) = upper_percentile(samples, 0.95);
+    result.class_perm_p(c) = permutation_p(samples, result.recall(c));
+end
+end
+
+
+function [test_pred, test_post, train_pred] = fold_predictions(method, X_train, y_train, X_test, weighting, n_class)
+%FOLD_PREDICTIONS  Fit one model and score the test rows and the training rows.
+
+[X_train, X_test] = standardize_fold(X_train, X_test);
+y_train = y_train(:);
+if strcmpi(weighting, 'unweighted')
+    weights = ones(numel(y_train), 1);
+else
+    weights = inverse_frequency_weights(y_train);
+end
+switch lower(method)
+    case 'lda'
+        [test_pred, test_post, train_pred] = lda_two_sets( ...
+            X_train, y_train, X_test, weights, n_class);
+    case 'naivebayes'
+        [test_pred, test_post, train_pred] = naive_bayes_two_sets( ...
+            X_train, y_train, X_test, weights, n_class);
+    case 'svm'
+        [test_pred, test_post, train_pred] = svm_two_sets( ...
+            X_train, y_train, X_test, weights, n_class);
+    otherwise
+        error('Plot_acg_population_logit:classifier', ...
+            'The joint comparison runs svm, naivebayes, and lda.');
+end
+end
+
+
 function [X_train, X_test] = standardize_fold(X_train, X_test)
 center = mean(X_train, 1);
 scale = std(X_train, 0, 1);
@@ -2337,31 +2586,40 @@ X_test = (X_test - center) ./ scale;
 end
 
 
-function prediction = lda_predict(X_train, y_train, X_test, weights)
-%LDA_PREDICT  Linear discriminant using the pooled within-class covariance.
-% Inverse-frequency weights give each lock type the same total weight.
+function [test_pred, test_post, train_pred] = lda_two_sets(X_train, y_train, X_test, weights, n_class)
+%LDA_TWO_SETS  One linear discriminant, scored on the test and training rows.
 
 if exist('fitcdiscr', 'file') == 2
+    weighted = max(weights) - min(weights) > 1e-10;
     try
-        model = fitcdiscr(X_train, y_train, 'DiscrimType', 'linear', 'Weights', weights);
+        if weighted
+            model = fitcdiscr(X_train, y_train, 'DiscrimType', 'linear', 'Weights', weights);
+        else
+            model = fitcdiscr(X_train, y_train, 'DiscrimType', 'linear');
+        end
     catch
-        try
-            model = fitcdiscr(X_train, y_train, 'DiscrimType', 'linear', 'Prior', 'uniform');
-        catch
+        if weighted
             model = fitcdiscr(X_train, y_train, 'DiscrimType', 'pseudoLinear', 'Prior', 'uniform');
+        else
+            model = fitcdiscr(X_train, y_train, 'DiscrimType', 'pseudoLinear');
         end
     end
-    prediction = predict(model, X_test);
-    prediction = prediction(:);
+    [test_pred, test_post] = posterior_from_model(model, X_test, n_class);
+    [train_pred, ~] = posterior_from_model(model, X_train, n_class);
     return
 end
+[test_pred, test_post, train_pred] = lda_hand_rolled(X_train, y_train, X_test, weights, n_class);
+end
+
+
+function [test_pred, test_post, train_pred] = lda_hand_rolled(X_train, y_train, X_test, weights, n_class)
 classes = unique(y_train(:))';
-n_class = numel(classes);
+n_present = numel(classes);
 n_feature = size(X_train, 2);
-means = zeros(n_class, n_feature);
-priors = zeros(n_class, 1);
+means = zeros(n_present, n_feature);
+priors = zeros(n_present, 1);
 covariance = zeros(n_feature, n_feature);
-for c = 1:n_class
+for c = 1:n_present
     rows = y_train == classes(c);
     priors(c) = sum(weights(rows)) / sum(weights);
     means(c, :) = mean(X_train(rows, :), 1);
@@ -2369,7 +2627,7 @@ for c = 1:n_class
     class_df = max(sum(rows) - 1, 1);
     covariance = covariance + (centered' * centered) / class_df;
 end
-covariance = covariance / n_class;
+covariance = covariance / n_present;
 ridge = 1e-6 * trace(covariance) / n_feature;
 if ~isfinite(ridge) || ridge <= 0
     ridge = 1e-6;
@@ -2377,56 +2635,122 @@ end
 covariance = covariance + ridge * eye(n_feature);
 weighted_means = covariance \ means';
 quadratic = 0.5 * sum(means' .* weighted_means, 1);
-scores = X_test * weighted_means - quadratic + log(max(priors, realmin)).';
-[~, pick] = max(scores, [], 2);
-prediction = classes(pick);
-prediction = prediction(:);
+[test_pred, test_post] = prediction_from_scores( ...
+    X_test * weighted_means - quadratic + log(max(priors, realmin)).', classes, n_class);
+[train_pred, ~] = prediction_from_scores( ...
+    X_train * weighted_means - quadratic + log(max(priors, realmin)).', classes, n_class);
 end
 
 
-function prediction = naive_bayes_predict(X_train, y_train, X_test, weights)
-%NAIVE_BAYES_PREDICT  Gaussian naive Bayes, one normal per feature and class.
-% Weights are constant within a lock type, so the fitted normals stay the
-% class means and variances. The prior follows the total weight of the type.
+function [test_pred, test_post, train_pred] = naive_bayes_two_sets(X_train, y_train, X_test, weights, n_class)
+%NAIVE_BAYES_TWO_SETS  One Gaussian naive Bayes, scored on both row sets.
 
 if exist('fitcnb', 'file') == 2
+    weighted = max(weights) - min(weights) > 1e-10;
     try
-        model = fitcnb(X_train, y_train, 'DistributionNames', 'normal', 'Weights', weights);
+        if weighted
+            model = fitcnb(X_train, y_train, 'DistributionNames', 'normal', 'Weights', weights);
+        else
+            model = fitcnb(X_train, y_train, 'DistributionNames', 'normal');
+        end
     catch
-        model = fitcnb(X_train, y_train, 'DistributionNames', 'normal', 'Prior', 'uniform');
+        if weighted
+            model = fitcnb(X_train, y_train, 'DistributionNames', 'normal', 'Prior', 'uniform');
+        else
+            model = fitcnb(X_train, y_train, 'DistributionNames', 'normal');
+        end
     end
-    prediction = predict(model, X_test);
-    prediction = prediction(:);
+    [test_pred, test_post] = posterior_from_model(model, X_test, n_class);
+    [train_pred, ~] = posterior_from_model(model, X_train, n_class);
     return
 end
 classes = unique(y_train(:))';
-n_class = numel(classes);
-log_score = zeros(size(X_test, 1), n_class);
-for c = 1:n_class
+n_present = numel(classes);
+log_test = zeros(size(X_test, 1), n_present);
+log_train = zeros(size(X_train, 1), n_present);
+for c = 1:n_present
     rows = y_train == classes(c);
     mu = mean(X_train(rows, :), 1);
     sigma = var(X_train(rows, :), 0, 1);
     sigma(~isfinite(sigma) | sigma < 1e-6) = 1e-6;
     prior = sum(weights(rows)) / sum(weights);
-    z = (X_test - mu) ./ sqrt(sigma);
-    log_score(:, c) = log(max(prior, realmin)) - 0.5 * sum(z .^ 2, 2) ...
+    log_test(:, c) = log(max(prior, realmin)) ...
+        - 0.5 * sum(((X_test - mu) ./ sqrt(sigma)) .^ 2, 2) ...
+        - 0.5 * sum(log(2 * pi * sigma));
+    log_train(:, c) = log(max(prior, realmin)) ...
+        - 0.5 * sum(((X_train - mu) ./ sqrt(sigma)) .^ 2, 2) ...
         - 0.5 * sum(log(2 * pi * sigma));
 end
-[~, pick] = max(log_score, [], 2);
-prediction = classes(pick);
-prediction = prediction(:);
+[test_pred, test_post] = prediction_from_scores(log_test, classes, n_class);
+[train_pred, ~] = prediction_from_scores(log_train, classes, n_class);
 end
 
 
-function prediction = gaussian_svm_predict(X_train, y_train, X_test, weights)
-%GAUSSIAN_SVM_PREDICT  Medium Gaussian SVM. Kernel scale is sqrt(n features).
+function [prediction, posterior] = naive_bayes_predict(X_train, y_train, X_test, weights, n_class)
+%NAIVE_BAYES_PREDICT  Gaussian naive Bayes for one score matrix.
+
+if nargin < 5 || isempty(n_class)
+    n_class = max(y_train(:));
+end
+[prediction, posterior, ~] = naive_bayes_two_sets(X_train, y_train, X_test, weights, n_class);
+end
+
+
+function [test_pred, test_post, train_pred] = svm_two_sets(X_train, y_train, X_test, weights, n_class)
+%SVM_TWO_SETS  One medium Gaussian SVM, scored on the test and training rows.
 
 kernel_scale = sqrt(size(X_train, 2));
 template = templateSVM('KernelFunction', 'gaussian', ...
     'KernelScale', kernel_scale, 'BoxConstraint', 1, 'Standardize', false);
 model = fitcecoc(X_train, y_train, 'Learners', template, 'Weights', weights);
-prediction = predict(model, X_test);
+[test_pred, test_post] = svm_posterior(model, X_test, n_class);
+[train_pred, ~] = svm_posterior(model, X_train, n_class);
+end
+
+
+function [prediction, posterior] = svm_posterior(model, X, n_class)
+[prediction, neg_loss] = predict(model, X);
 prediction = prediction(:);
+posterior = align_posterior(softmax_rows(neg_loss), model.ClassNames(:), n_class);
+end
+
+
+function [prediction, posterior] = posterior_from_model(model, X, n_class)
+[prediction, posterior] = predict(model, X);
+prediction = prediction(:);
+posterior = align_posterior(posterior, model.ClassNames(:), n_class);
+end
+
+
+function [prediction, posterior] = prediction_from_scores(scores, classes, n_class)
+posterior = align_posterior(softmax_rows(scores), classes(:), n_class);
+[~, prediction] = max(posterior, [], 2);
+prediction = prediction(:);
+end
+
+
+function probability = softmax_rows(scores)
+scores(~isfinite(scores)) = -inf;
+scores = scores - max(scores, [], 2);
+probability = exp(scores);
+row_sum = sum(probability, 2);
+row_sum(row_sum <= 0) = 1;
+probability = probability ./ row_sum;
+end
+
+
+function aligned = align_posterior(posterior, classes, n_class)
+aligned = zeros(size(posterior, 1), n_class);
+classes = classes(:);
+for c = 1:numel(classes)
+    class_id = classes(c);
+    if class_id >= 1 && class_id <= n_class
+        aligned(:, class_id) = posterior(:, c);
+    end
+end
+row_sum = sum(aligned, 2);
+keep = row_sum > 0;
+aligned(keep, :) = aligned(keep, :) ./ row_sum(keep);
 end
 
 
@@ -2503,46 +2827,45 @@ prediction = prediction(:);
 end
 
 
-function draw_lock_classifier(results, folder, method, figure_name, population_name)
+function draw_lock_classifier(grid, folder, method, figure_name, population_name)
 open_full_figure(figure_name)
-n_methods = numel(results);
-for m = 1:n_methods
-    if n_methods > 1
-        subplot(2, 3, m)
-    end
-    result = results{m};
-    if ~result.ok
-        axis off
-        title(result.method_label, 'Interpreter', 'none')
-        text(0.5, 0.5, result.note, 'HorizontalAlignment', 'center', ...
-            'Interpreter', 'none')
-        continue
-    end
-    imagesc(result.counts)
-    set(gca, 'XTick', 1:numel(result.class_names), 'XTickLabel', result.class_names, ...
-        'YTick', 1:numel(result.class_names), 'YTickLabel', result.class_names)
-    try
-        set(gca, 'TickLabelInterpreter', 'none')
-    catch
-    end
-    colormap(gca, [linspace(0.97, 0.20, 64)', linspace(0.97, 0.45, 64)', linspace(0.97, 0.75, 64)'])
-    for r = 1:size(result.counts, 1)
-        for c = 1:size(result.counts, 2)
-            text(c, r, sprintf('%d', result.counts(r, c)), ...
-                'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle')
-        end
-    end
-    xlabel('Predicted lock type')
-    ylabel('True lock type')
-    title({result.method_label, sprintf('Mean type accuracy %.1f%%', 100 * result.accuracy)}, ...
-        'Interpreter', 'none')
-    box off
-end
+[n_rows, n_cols] = size(grid);
 chance = nan;
-for m = 1:n_methods
-    if results{m}.ok
-        chance = results{m}.chance;
-        break
+for row = 1:n_rows
+    for col = 1:n_cols
+        subplot(n_rows, n_cols, (row - 1) * n_cols + col)
+        result = grid{row, col};
+        if ~result.ok
+            axis off
+            title(result.method_label, 'Interpreter', 'none')
+            if ~isempty(result.note)
+                text(0.5, 0.5, result.note, 'HorizontalAlignment', 'center', ...
+                    'Interpreter', 'none')
+            end
+            continue
+        end
+        imagesc(result.counts)
+        set(gca, 'XTick', 1:numel(result.class_names), 'XTickLabel', result.class_names, ...
+            'YTick', 1:numel(result.class_names), 'YTickLabel', result.class_names)
+        try
+            set(gca, 'TickLabelInterpreter', 'none')
+        catch
+        end
+        colormap(gca, [linspace(0.97, 0.20, 64)', linspace(0.97, 0.45, 64)', linspace(0.97, 0.75, 64)'])
+        for r = 1:size(result.counts, 1)
+            for c = 1:size(result.counts, 2)
+                text(c, r, sprintf('%d', result.counts(r, c)), ...
+                    'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle')
+            end
+        end
+        xlabel('Predicted lock type')
+        ylabel('True lock type')
+        title({result.method_label, sprintf('Mean type accuracy %.1f%%', 100 * result.accuracy)}, ...
+            'Interpreter', 'none')
+        box off
+        if ~isfinite(chance)
+            chance = result.chance;
+        end
     end
 end
 if isfinite(chance)
@@ -2551,7 +2874,8 @@ if isfinite(chance)
 else
     chance_line = 'Rows are the true lock type.';
 end
-sgtitle({sprintf('%s. classifier_method = %s.', population_name, method), chance_line}, ...
+sgtitle({sprintf('%s. Columns: %s.', population_name, method), ...
+    'Rows are weighted, unweighted, and the joint decision.', chance_line}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
@@ -2568,27 +2892,29 @@ lines = [{ ...
     'Holm-Sidak is computed separately inside each of those two comparisons.', ...
     'The selected features:'}, ...
     feature_lines, { ...
-    'Naive Bayes, LDA, and the medium Gaussian SVM are the default. Each one is run on every trough, peak, and unlocked neuron, and again on the oscillatory neurons only.', ...
+    'Naive Bayes, LDA, and the medium Gaussian SVM each have a weighted fit, an unweighted fit, and a joint decision.', ...
+    'The weighted fit gives each neuron a weight equal to the inverse of its lock-type count, scaled so the mean weight is 1.', ...
+    'The unweighted fit gives every neuron the same weight.', ...
+    'The joint decision mixes the two class probabilities. Each probability is scaled by that model''s mean lock-type accuracy on the training fold.', ...
+    'The mix uses the ACG features only. The lock type of the neuron being classified is not an input.', ...
+    'Each classifier is run on every trough, peak, and unlocked neuron, and again on the oscillatory neurons only.', ...
     'Oscillatory neurons are cluster 1 from section 3.', ...
     'Non-classified cells are excluded.', ...
     'A neuron is used only when every selected feature is finite.', ...
     'Accuracy is stratified cross-validation. Each class is split across the folds in stored order.', ...
     'Within each training fold the features are standardized.', ...
-    'Within each training fold, each neuron is weighted by the inverse of its lock-type count.', ...
-    'The weights are scaled so their mean is 1. Each lock type then has the same total weight.', ...
-    'The weight uses only the training fold, so the test labels do not enter it.', ...
     'The accuracy of the whole model is the unweighted mean of the lock-type accuracies.', ...
     'Neuron-weighted accuracy counts every neuron once and is listed beside that mean.', ...
     'The equal-type reference is one divided by the number of lock types. A constant guess at one type scores that value on the mean accuracy.', ...
-    sprintf('classifier_method = %s.', method), ...
-    'The default list is naive Bayes, LDA, and a medium Gaussian SVM.', ...
-    'lda is a linear discriminant. naivebayes is Gaussian naive Bayes.', ...
+    sprintf('Figure columns, left to right: %s.', method), ...
+    'Figure rows, top to bottom: weighted, unweighted, joint decision.', ...
     'svm is a Gaussian-kernel SVM with medium scale sqrt(number of features) and box constraint 1.', ...
-    'Three SVM classes are compared one against one.', ...
-    'tree is the default classification tree. logit is multinomial logistic regression.', ...
-    sprintf('The permutation test shuffles the lock-type labels %d times and repeats the same cross-validation.', n_perm), ...
-    'The features stay fixed. The random stream is reset to 42 before the first shuffle.', ...
-    'The same shuffles give the p-value of the whole model and of each lock type.', ...
+    'Three SVM classes are compared one against one. Its class probabilities are a softmax of the SVM scores.', ...
+    'naivebayes is Gaussian naive Bayes. lda is a linear discriminant.', ...
+    sprintf('The permutation test draws %d shuffled label lists once per population.', n_perm), ...
+    'Every model in that population is tested on those same lists.', ...
+    'The features stay fixed. The random stream is reset to 42 before the first population.', ...
+    'The same shuffles give the p-value of each model and of each lock type.', ...
     'A lock-type accuracy is the fraction of neurons of that type that were classified as that type.', ...
     'p = (1 + number of shuffled accuracies at or above the real accuracy) / (1 + number of shuffles).', ...
     'A bar is filled when that permutation p is below 0.05. Otherwise only the border is drawn.'}];
@@ -2720,32 +3046,17 @@ end
 function draw_accuracy_null(populations, folder, method)
 for p = 1:numel(populations)
     open_full_figure(['Lock-type accuracy permutation, ', populations{p}.name])
-    results = populations{p}.results;
-    n_methods = numel(results);
-    n_class = 0;
-    for m = 1:n_methods
-        n_class = max(n_class, numel(results{m}.class_names));
-    end
-    n_columns = 1 + n_class;
-    for m = 1:n_methods
-        result = results{m};
-        for column = 1:n_columns
-            subplot(n_methods, n_columns, (m - 1) * n_columns + column)
-            if column == 1
-                samples = result.null_accuracy;
-                observed = result.accuracy;
-                p_value = result.perm_p;
-                panel_name = 'All';
-            else
-                samples = result.null_recall(:, column - 1);
-                samples = samples(isfinite(samples));
-                observed = result.recall(column - 1);
-                p_value = result.class_perm_p(column - 1);
-                panel_name = result.class_names{column - 1};
-            end
+    grid = populations{p}.grid;
+    [n_rows, n_cols] = size(grid);
+    for row = 1:n_rows
+        for col = 1:n_cols
+            subplot(n_rows, n_cols, (row - 1) * n_cols + col)
+            result = grid{row, col};
+            samples = result.null_accuracy;
+            observed = result.accuracy;
             if ~result.ok || isempty(samples) || ~isfinite(observed)
                 axis off
-                title({result.method_label, panel_name}, 'Interpreter', 'none')
+                title(result.method_label, 'Interpreter', 'none')
                 if ~isempty(result.perm_note)
                     text(0.5, 0.5, result.perm_note, 'HorizontalAlignment', 'center', ...
                         'Interpreter', 'none')
@@ -2756,21 +3067,17 @@ for p = 1:numel(populations)
             hold on
             y_limit = ylim;
             plot(100 * [observed observed], y_limit, 'Color', [0.8 0.15 0.15], 'LineWidth', 1.6)
-            if column == 1
-                xlabel('Mean of lock-type accuracies (%)')
-            else
-                xlabel('Lock-type accuracy (%)')
-            end
+            xlabel('Mean of lock-type accuracies (%)')
             ylabel('Shuffles')
-            title({sprintf('p = %.3g', p_value), result.method_label, panel_name}, ...
+            title({sprintf('p = %.3g', result.perm_p), result.method_label}, ...
                 'Interpreter', 'none')
             box off
         end
     end
     sgtitle({populations{p}.name, ...
-        'The All column is the mean of the lock-type accuracies.', ...
-        'Each training fold weights a neuron by the inverse of its lock-type count.', ...
-        sprintf('Gray bars are label shuffles. The red line is the real accuracy. classifier_method = %s.', method)}, ...
+        'Columns are SVM, naive Bayes, and LDA. Rows are weighted, unweighted, and the joint decision.', ...
+        'All nine models use the same shuffled labels.', ...
+        sprintf('Gray bars are label shuffles. The red line is the real mean accuracy. %s.', method)}, ...
         'Interpreter', 'none')
     save_script_figure(folder)
 end
@@ -2780,56 +3087,59 @@ end
 function draw_class_accuracy_bars(populations, folder)
 for p = 1:numel(populations)
     open_full_figure(['Lock-type accuracy by cell type, ', populations{p}.name])
-    results = populations{p}.results;
-    n_methods = numel(results);
-    for m = 1:n_methods
-        subplot(1, n_methods, m)
-        result = results{m};
-        if ~result.ok
-            axis off
-            title(result.method_label, 'Interpreter', 'none')
-            if ~isempty(result.note)
-                text(0.5, 0.5, result.note, 'HorizontalAlignment', 'center', ...
-                    'Interpreter', 'none')
-            end
-            continue
-        end
-        hold on
-        y_top = 0;
-        for c = 1:numel(result.class_names)
-            if ~isfinite(result.recall(c))
+    grid = populations{p}.grid;
+    [n_rows, n_cols] = size(grid);
+    for row = 1:n_rows
+        for col = 1:n_cols
+            subplot(n_rows, n_cols, (row - 1) * n_cols + col)
+            result = grid{row, col};
+            if ~result.ok
+                axis off
+                title(result.method_label, 'Interpreter', 'none')
+                if ~isempty(result.note)
+                    text(0.5, 0.5, result.note, 'HorizontalAlignment', 'center', ...
+                        'Interpreter', 'none')
+                end
                 continue
             end
-            height = 100 * result.recall(c);
-            color = lock_bar_color(result.class_names{c});
-            significant = isfinite(result.class_perm_p(c)) && result.class_perm_p(c) < 0.05;
-            if significant
-                bar(c, height, 0.72, 'FaceColor', color, 'EdgeColor', color, ...
-                    'FaceAlpha', 0.9, 'LineWidth', 1.2)
-            else
-                bar(c, height, 0.72, 'FaceColor', 'none', 'EdgeColor', color, ...
-                    'LineWidth', 1.6)
+            hold on
+            y_top = 0;
+            for c = 1:numel(result.class_names)
+                if ~isfinite(result.recall(c))
+                    continue
+                end
+                height = 100 * result.recall(c);
+                color = lock_bar_color(result.class_names{c});
+                significant = isfinite(result.class_perm_p(c)) && result.class_perm_p(c) < 0.05;
+                if significant
+                    bar(c, height, 0.72, 'FaceColor', color, 'EdgeColor', color, ...
+                        'FaceAlpha', 0.9, 'LineWidth', 1.2)
+                else
+                    bar(c, height, 0.72, 'FaceColor', 'none', 'EdgeColor', color, ...
+                        'LineWidth', 1.6)
+                end
+                if isfinite(result.class_perm_p(c))
+                    text(c, height, sprintf('p = %.3g', result.class_perm_p(c)), ...
+                        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
+                        'Interpreter', 'none')
+                end
+                y_top = max(y_top, height);
             end
-            if isfinite(result.class_perm_p(c))
-                text(c, height, sprintf('p = %.3g', result.class_perm_p(c)), ...
-                    'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
-                    'Interpreter', 'none')
+            set(gca, 'XTick', 1:numel(result.class_names), 'XTickLabel', result.class_names)
+            try
+                set(gca, 'TickLabelInterpreter', 'none')
+            catch
             end
-            y_top = max(y_top, height);
+            ylim([0, max(110, y_top + 15)])
+            xlim([0.4, numel(result.class_names) + 0.6])
+            ylabel('Accuracy (%)')
+            title({result.method_label, sprintf('Mean p = %.3g', result.perm_p)}, ...
+                'Interpreter', 'none')
+            box off
         end
-        set(gca, 'XTick', 1:numel(result.class_names), 'XTickLabel', result.class_names)
-        try
-            set(gca, 'TickLabelInterpreter', 'none')
-        catch
-        end
-        ylim([0, max(110, y_top + 15)])
-        xlim([0.4, numel(result.class_names) + 0.6])
-        ylabel('Accuracy (%)')
-        title({result.method_label, sprintf('Mean p = %.3g', result.perm_p)}, ...
-            'Interpreter', 'none')
-        box off
     end
     sgtitle({populations{p}.name, ...
+        'Columns are SVM, naive Bayes, and LDA. Rows are weighted, unweighted, and the joint decision.', ...
         'Filled bars have permutation p < 0.05. Open bars do not.'}, ...
         'Interpreter', 'none')
     save_script_figure(folder)
