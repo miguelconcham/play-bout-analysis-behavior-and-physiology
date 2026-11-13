@@ -30,15 +30,19 @@
 % Analyze_locking_period_acg.m in this same folder: alpha, the
 % non-entrained threshold, the 25/75 tails, acg_lag, the delta window,
 % smooth_half, skip_abs_lag, the refractory blank, areas_to_keep,
-% tail_percent, and acg_method. low_percent and high_percent follow
+% tail_percent, acg_method, and acg_count. low_percent and high_percent follow
 % tail_percent when they are not written as numbers. The lag axis is
 % built from that acg_lag and the parsing bin
 % width, the same way Analyze_locking_period_acg builds it. No summary
 % file is read. 'eligible' counts partners of spikes that can see each
-% bin. 'overlap' keeps pair counts / (T-|lag|). The checkpoint name
-% follows that choice, so an eligible null does not replace the overlap
-% checkpoint. A checkpoint saved before the selector has no method and
-% is treated as overlap.
+% bin. 'overlap' keeps an overlap-corrected count. acg_count is 'pairs',
+% 'fft', or 'crosscorr' for that overlap count. Pair counts are
+% autocorrelogram pairs / (T-|lag|). The FFT uses the same correction.
+% Crosscorr insets the reference spikes by acg_lag. The checkpoint name
+% follows the method and the count, so one null does not replace another.
+% A checkpoint saved before the count selector has no acg_count and is
+% treated as pairs. A checkpoint saved before the method selector has no
+% method and is treated as overlap.
 %
 % Those same shuffles are averaged across neurons in two scales. The sum-to-1
 % mean gives every neuron the same weight. The rate-ratio mean divides
@@ -91,6 +95,12 @@ skip_abs_lag = analysis.skip_abs_lag;
 acg_refractory_s = analysis.acg_refractory_s;
 areas_to_keep = analysis.areas_to_keep;
 acg_method = analysis.acg_method;
+acg_count = analysis.acg_count;
+if strcmp(acg_method, 'eligible') && ~strcmp(acg_count, 'pairs')
+    error('Analyze_locking_period_acg_shuffle:count', ...
+        ['acg_count is %s and acg_method is eligible. Eligible-spike ' ...
+        'autocorrelograms keep their own count.'], acg_count);
+end
 rate_exponent = acg_rate_exponent(acg_method);
 [edges, centers, bin_w] = axis_from_parsing(parsing_folder, acg_lag);
 n_bins = numel(centers);
@@ -104,7 +114,7 @@ disp_script_parameters(analysis, edges, bin_w, n_bins, smooth_n)
 
 group_order = {'trough', 'peak', 'nonentrained'};
 grand_order = {'trough', 'peak', 'delta', 'nonentrained'};
-checkpoint = fullfile(parsing_folder, locking_shuffle_filename(n_shuffles, acg_method));
+checkpoint = fullfile(parsing_folder, locking_shuffle_filename(n_shuffles, acg_method, acg_count));
 
 parameters = struct( ...
     'n_shuffles', n_shuffles, ...
@@ -128,6 +138,7 @@ parameters = struct( ...
     'percentile_curves', true, ...
     'all_runs', true, ...
     'acg_method', acg_method, ...
+    'acg_count', acg_count, ...
     'null', 'uniform spike times inside each firing run');
 
 grand_bytes = (2 * numel(grand_order) * 2 * 2 + 2 * numel(grand_order)) ...
@@ -291,14 +302,14 @@ for f = 1:numel(parsing_files)
                     || ~ismember('RunEndTime', rt.Properties.VariableNames)
                 continue
             end
-            if strcmp(acg_method, 'overlap') && saved_covers
+            if strcmp(acg_method, 'overlap') && strcmp(acg_count, 'pairs') && saved_covers
                 acg = rt.autoccorrelograms;
                 n_eligible = [];
                 this_corrected = already_corrected;
             else
                 [acg, n_eligible, this_corrected] = firing_run_acgs( ...
                     session_times(session_clusters == this_id), ...
-                    rt.RunStartTime, rt.RunEndTime, edges, acg_method);
+                    rt.RunStartTime, rt.RunEndTime, edges, acg_method, [], [], acg_count);
             end
             if size(acg, 2) ~= n_bins || size(acg, 1) ~= height(rt)
                 warning('Analyze_locking_period_acg_shuffle:width', ...
@@ -310,9 +321,9 @@ for f = 1:numel(parsing_files)
             ppc = rt.phase_entrainment(:, ppc_col);
             power = run_delta_power(rt);
             pooled = pool_period_acgs(acg, n_eligible, edges, run_length, ppc, ...
-                this_corrected, low_percent, high_percent, acg_method);
+                this_corrected, low_percent, high_percent, acg_method, acg_count);
             pooled_power = pool_period_acgs(acg, n_eligible, edges, run_length, power, ...
-                this_corrected, low_percent, high_percent, acg_method);
+                this_corrected, low_percent, high_percent, acg_method, acg_count);
             lock_ok = split_is_usable(pooled);
             power_ok = split_is_usable(pooled_power);
             if ~lock_ok && ~power_ok
@@ -354,14 +365,14 @@ for f = 1:numel(parsing_files)
                 acg_s = nan(height(rt), n_bins);
                 n_s = nan(height(rt), n_bins);
                 [acg_use, n_use, sh_corrected] = firing_run_acgs(shuffled, ...
-                    rt.RunStartTime(use), rt.RunEndTime(use), edges, acg_method);
+                    rt.RunStartTime(use), rt.RunEndTime(use), edges, acg_method, [], [], acg_count);
                 acg_s(use, :) = acg_use;
                 if ~isempty(n_use)
                     n_s(use, :) = n_use;
                 end
                 if lock_ok
                     sh_lock = pool_period_acgs(acg_s, n_s, edges, run_length, ppc, ...
-                        sh_corrected, low_percent, high_percent, acg_method);
+                        sh_corrected, low_percent, high_percent, acg_method, acg_count);
                     [peaks, row, ratio] = score_tail_curves(sh_lock.low, centers, smooth_n, ...
                         acg_refractory_s, rate_lock.low, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'locking', 'low', s, peaks);
@@ -375,7 +386,7 @@ for f = 1:numel(parsing_files)
                 end
                 if power_ok
                     sh_power = pool_period_acgs(acg_s, n_s, edges, run_length, power, ...
-                        sh_corrected, low_percent, high_percent, acg_method);
+                        sh_corrected, low_percent, high_percent, acg_method, acg_count);
                     [peaks, row, ratio] = score_tail_curves(sh_power.low, centers, smooth_n, ...
                         acg_refractory_s, rate_power.low, bin_w, rate_exponent);
                     nulls = store_null_tail(nulls, 'power', 'low', s, peaks);
@@ -656,6 +667,14 @@ if isfield(stored.parameters, 'acg_method') && ~isempty(stored.parameters.acg_me
 end
 if ~strcmp(stored_method, canonical_acg_method(parameters.acg_method))
     match = false;
+    return
+end
+stored_count = 'pairs';
+if isfield(stored.parameters, 'acg_count') && ~isempty(stored.parameters.acg_count)
+    stored_count = canonical_count_method(stored.parameters.acg_count);
+end
+if ~strcmp(stored_count, canonical_count_method(parameters.acg_count))
+    match = false;
 end
 end
 
@@ -874,6 +893,7 @@ if isempty(analysis.high_percent)
 end
 analysis.areas_to_keep = read_script_areas(script_path);
 analysis.acg_method = canonical_acg_method(read_script_string(script_path, 'acg_method'));
+analysis.acg_count = canonical_count_method(read_script_string(script_path, 'acg_count'));
 analysis.script_path = script_path;
 end
 
@@ -928,7 +948,7 @@ end
 
 function disp_script_parameters(analysis, edges, bin_w, n_bins, smooth_n)
 disp(['Parameters from ', analysis.script_path])
-disp(['  acg_method = ', analysis.acg_method])
+disp(['  acg_method = ', analysis.acg_method, ', acg_count = ', analysis.acg_count])
 disp(sprintf('  alpha = %g, non-entrained p = %g', analysis.alpha, analysis.non_entrained_p))
 disp(sprintf('  tails = %g / %g, acg_lag = %g s, delta window = %s s', ...
     analysis.low_percent, analysis.high_percent, analysis.acg_lag, mat2str(double(analysis.delta_lag))))

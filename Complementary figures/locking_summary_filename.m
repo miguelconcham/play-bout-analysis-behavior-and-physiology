@@ -1,18 +1,17 @@
-function file_name = locking_summary_filename(maximize_strata_number, method)
+function file_name = locking_summary_filename(maximize_strata_number, method, count_method)
 %LOCKING_SUMMARY_FILENAME  Summary file for the strata rule and ACG method.
 %
-% Overlap keeps the original names. Eligible inserts _eligible so a new
-% estimate does not replace a summary written by the overlap method.
+% Overlap pair counts keep the original names. Eligible inserts
+% _eligible. FFT and crosscorr insert _fft or _crosscorr, so a new count
+% does not replace a summary written by another count.
 
-method = canonical_acg_method(method);
-if strcmp(method, 'eligible')
-    method_token = '_eligible';
-else
-    method_token = '';
+if nargin < 3
+    count_method = [];
 end
+token = acg_count_token(method, count_method);
 if maximize_strata_number
-    file_name = ['locking_period_acg_summary', method_token, '_max_strata.mat'];
+    file_name = ['locking_period_acg_summary', token, '_max_strata.mat'];
 else
-    file_name = ['locking_period_acg_summary', method_token, '.mat'];
+    file_name = ['locking_period_acg_summary', token, '.mat'];
 end
 end

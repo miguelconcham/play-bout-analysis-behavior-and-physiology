@@ -40,6 +40,13 @@ return
 % 'eligible' to use that estimator. It writes its own summary, so it does
 % not replace the overlap file.
 %
+% acg_count selects how an overlap autocorrelogram is counted. 'pairs'
+% is the count above. 'fft' uses the same T-|lag| correction on counts
+% from the FFT of the binned run. 'crosscorr' calls crosscorrelogram:
+% reference spikes are inset by acg_lag, and the count is divided by
+% that inner duration. Eligible estimates keep their own count. Pair
+% counts keep the overlap file names. FFT and crosscorr write their own.
+%
 % The lag-0 bins are blanked, and each neuron is scaled to sum to 1 so a cell
 % with more spikes does not dominate the mean. One figure per lock group
 % for the locking split, and one figure per lock group for the power split.
@@ -314,6 +321,10 @@ redraw_figures_only = false;
 % that can see the whole bin. Eligible summaries use their own file name.
 acg_method = 'overlap';
 acg_method = canonical_acg_method(acg_method);
+% 'pairs', 'fft', or 'crosscorr'. Used when acg_method is overlap.
+% 'pairs' keeps the overlap file names. Eligible estimates ignore this.
+acg_count = 'pairs';
+acg_count = canonical_count_method(acg_count);
 
 source_order = {'trough', 'peak', 'nonentrained'};
 source_title = {'Trough-locked', 'Peak-locked', 'Non-entrained'};
@@ -347,6 +358,7 @@ end
 setappdata(0, 'locking_acg_tail_percent', tail_percent);
 setappdata(0, 'locking_acg_mean_peak_height', mean_acg_peak_height);
 setappdata(0, 'locking_acg_method', acg_method);
+setappdata(0, 'locking_acg_count', acg_count);
 start_statistics_diary(figure_folder)
 
 if reprint_stats_only
@@ -479,6 +491,7 @@ parameters = struct( ...
     'min_strata_in_model', min_strata_in_model, ...
     'neuron_slope_alpha', neuron_slope_alpha, ...
     'acg_method', acg_method, ...
+    'acg_count', acg_count, ...
     'delta_power', 'square of median delta-band envelope (lfp_param column 2)');
 base_path = base_summary_path(parsing_folder, maximize_strata_number, acg_method);
 tail_path = tail_summary_path(parsing_folder, tail_percent, acg_method);
@@ -581,7 +594,9 @@ for f = 1:numel(parsing_files)
 
         session_times = [];
         session_clusters = [];
-        if ~saved_covers || strcmp(acg_method, 'eligible')
+        needs_spikes = ~saved_covers || ~strcmp(acg_method, 'overlap') ...
+            || ~strcmp(acg_count, 'pairs');
+        if needs_spikes
             [session_times, session_clusters] = load_pag_spikes(npx_root, animal_code);
             if isempty(session_times)
                 if strcmp(acg_method, 'eligible')
@@ -601,7 +616,8 @@ for f = 1:numel(parsing_files)
             if strcmp(acg_method, 'eligible')
                 disp(['  eligible-spike autocorrelograms to +/- ', num2str(acg_lag), ' s'])
             else
-                disp(['  recomputing autocorrelograms to +/- ', num2str(acg_lag), ' s'])
+                disp(['  recomputing autocorrelograms to +/- ', num2str(acg_lag), ...
+                    ' s (', acg_count, ')'])
             end
         end
 
@@ -639,7 +655,7 @@ for f = 1:numel(parsing_files)
                 n_unsplit_power(g) = n_unsplit_power(g) + 1;
                 continue
             end
-            if strcmp(acg_method, 'overlap') && saved_covers
+            if strcmp(acg_method, 'overlap') && strcmp(acg_count, 'pairs') && saved_covers
                 acg = rt.autoccorrelograms;
                 n_eligible = [];
                 this_corrected = already_corrected;
@@ -651,7 +667,7 @@ for f = 1:numel(parsing_files)
             else
                 [acg, n_eligible, this_corrected] = firing_run_acgs( ...
                     session_times(session_clusters == this_id), ...
-                    rt.RunStartTime, rt.RunEndTime, edges, acg_method);
+                    rt.RunStartTime, rt.RunEndTime, edges, acg_method, [], [], acg_count);
             end
             if size(acg, 2) ~= n_bins || size(acg, 1) ~= height(rt)
                 warning('Analyze_locking_period_acg:width', ...
@@ -669,7 +685,7 @@ for f = 1:numel(parsing_files)
                     run_length, this_power, rt, this_corrected, ...
                     max(1, round(smooth_half / bin_w)), delta_lag, acg_refractory_s, ...
                     stratum_min_spikes, stratum_min_lag_s, animal_code, this_id, this_group, ...
-                    this_ppc, maximize_strata_number, acg_method, n_eligible);
+                    this_ppc, maximize_strata_number, acg_method, n_eligible, acg_count);
                 run_rows = append_run_rate_rows(run_rows, run_length, this_power, rt, ...
                     animal_code, this_id, this_group);
             end
@@ -678,7 +694,7 @@ for f = 1:numel(parsing_files)
             end
             run_means = all_run_means(rt, acg, run_length, this_ppc, this_power);
             pooled = pool_period_acgs(acg, n_eligible, edges, run_length, ...
-                this_ppc, this_corrected, low_percent, high_percent, acg_method);
+                this_ppc, this_corrected, low_percent, high_percent, acg_method, acg_count);
             if split_is_usable(pooled)
                 acg_raw.(source_order{g}) = append_pooled( ...
                     acg_raw.(source_order{g}), pooled, animal_code, this_id, this_area, ...
@@ -689,7 +705,7 @@ for f = 1:numel(parsing_files)
             end
 
             pooled_power = pool_period_acgs(acg, n_eligible, edges, run_length, ...
-                this_power, this_corrected, low_percent, high_percent, acg_method);
+                this_power, this_corrected, low_percent, high_percent, acg_method, acg_count);
             if split_is_usable(pooled_power)
                 acg_power.(source_order{g}) = append_pooled( ...
                     acg_power.(source_order{g}), pooled_power, animal_code, this_id, this_area, ...
@@ -820,23 +836,29 @@ save_open_figures(figure_folder)
 stop_statistics_diary()
 
 
-function summary_path = base_summary_path(parsing_folder, maximize_strata_number, method)
+function summary_path = base_summary_path(parsing_folder, maximize_strata_number, method, count_method)
 if nargin < 3 || isempty(method)
     method = acg_method_now();
 end
+if nargin < 4 || isempty(count_method)
+    count_method = acg_count_now();
+end
 summary_path = fullfile(parsing_folder, ...
-    locking_summary_filename(maximize_strata_number, method));
+    locking_summary_filename(maximize_strata_number, method, count_method));
 end
 
 
-function summary_path = tail_summary_path(parsing_folder, tail_percent, method)
+function summary_path = tail_summary_path(parsing_folder, tail_percent, method, count_method)
 if nargin < 2 || isempty(tail_percent)
     tail_percent = tail_percent_now();
 end
 if nargin < 3 || isempty(method)
     method = acg_method_now();
 end
-summary_path = fullfile(parsing_folder, locking_tail_filename(tail_percent, method));
+if nargin < 4 || isempty(count_method)
+    count_method = acg_count_now();
+end
+summary_path = fullfile(parsing_folder, locking_tail_filename(tail_percent, method, count_method));
 end
 
 
@@ -846,6 +868,17 @@ if isappdata(0, 'locking_acg_method')
     stored = getappdata(0, 'locking_acg_method');
     if ~isempty(stored)
         method = canonical_acg_method(stored);
+    end
+end
+end
+
+
+function count_method = acg_count_now()
+count_method = 'pairs';
+if isappdata(0, 'locking_acg_count')
+    stored = getappdata(0, 'locking_acg_count');
+    if ~isempty(stored)
+        count_method = canonical_count_method(stored);
     end
 end
 end
@@ -957,7 +990,15 @@ current_method = 'overlap';
 if isfield(current, 'acg_method') && ~isempty(current.acg_method)
     current_method = canonical_acg_method(current.acg_method);
 end
-ok = strcmp(saved_method, current_method);
+ok = strcmp(saved_method, current_method) && strcmp(saved_count(saved), saved_count(current));
+end
+
+
+function count_method = saved_count(parameters)
+count_method = 'pairs';
+if isstruct(parameters) && isfield(parameters, 'acg_count') && ~isempty(parameters.acg_count)
+    count_method = canonical_count_method(parameters.acg_count);
+end
 end
 
 
@@ -5957,7 +5998,7 @@ keep = counts(idx) >= min_count;
 end
 
 
-function store = append_neuron_power_strata(store, acg, edges, centers, run_length, power, rt, already_corrected, smooth_n, delta_lag, refractory_s, min_spikes, min_lag_s, animal_code, cluster_id, lock_group, ppc, maximize, acg_method, n_eligible)
+function store = append_neuron_power_strata(store, acg, edges, centers, run_length, power, rt, already_corrected, smooth_n, delta_lag, refractory_s, min_spikes, min_lag_s, animal_code, cluster_id, lock_group, ppc, maximize, acg_method, n_eligible, count_method)
 if ~ismember('RunNumSpikes', rt.Properties.VariableNames) ...
         || size(acg, 1) ~= numel(run_length) || numel(power) ~= numel(run_length)
     store.n_at_k(1) = store.n_at_k(1) + 1;
@@ -5972,6 +6013,11 @@ if nargin < 19 || isempty(acg_method)
 end
 if nargin < 20
     n_eligible = [];
+end
+if nargin < 21 || isempty(count_method)
+    count_method = 'pairs';
+else
+    count_method = canonical_count_method(count_method);
 end
 acg_method = canonical_acg_method(acg_method);
 if strcmp(acg_method, 'eligible') && (isempty(n_eligible) ...
@@ -5999,7 +6045,7 @@ for b = 1:plan.k
         sub_eligible = [];
     end
     pooled = pool_period_acgs(sub_acg, sub_eligible, edges, sub_len, ...
-        ones(sum(in), 1), already_corrected, [], [], acg_method);
+        ones(sum(in), 1), already_corrected, [], [], acg_method, count_method);
     curve = blank_acg_zero_lag(pooled.all, centers, refractory_s);
     curve = normalize_acg_rows(curve);
     peaks = acg_delta_peaks(curve, centers, smooth_n);

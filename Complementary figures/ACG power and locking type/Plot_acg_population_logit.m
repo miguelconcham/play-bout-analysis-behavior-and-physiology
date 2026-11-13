@@ -58,6 +58,7 @@ if exist('align_population_percentiles', 'file') ~= 2
 end
 
 acg_method = 'overlap';
+acg_count = 'pairs';
 n_shuffles_default = 500;
 % Mean percentile inside this lag window sets the stored row order.
 % 0.2 s is 200 ms. Section 2 sorts the figure again.
@@ -66,7 +67,7 @@ sort_window_s = [0.200 0.400];
 data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
     'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
 parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
-checkpoint = fullfile(parsing_folder, shuffle_checkpoint_filename(n_shuffles_default, acg_method));
+checkpoint = fullfile(parsing_folder, shuffle_checkpoint_filename(n_shuffles_default, acg_method, acg_count));
 if exist(checkpoint, 'file') ~= 2
     error('Plot_acg_population_logit:checkpoint', ...
         'No shuffle checkpoint at %s.', checkpoint);
@@ -1340,9 +1341,12 @@ end
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
+if ~exist('acg_count', 'var') || isempty(acg_count)
+    acg_count = 'pairs';
+end
 if exist('checkpoint', 'var')
     example_summary_path = fullfile(fileparts(checkpoint), ...
-        locking_summary_filename(false, acg_method));
+        locking_summary_filename(false, acg_method, acg_count));
 else
     example_summary_path = '';
 end

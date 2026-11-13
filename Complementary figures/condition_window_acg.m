@@ -1,11 +1,13 @@
-function block = condition_window_acg(spike_times, epochs, bin_edges, power, method)
+function block = condition_window_acg(spike_times, epochs, bin_edges, power, method, count_method)
 %CONDITION_WINDOW_ACG  Autocorrelogram of one play-power condition.
 %
-% 'overlap' is the default: pair counts / (T-|lag|), pooled across
-% half-open epochs. 'eligible' replaces that curve with the mean partner
-% count of spikes that can see each whole bin. The firing rate is still
-% spikes divided by epoch duration, including silent epochs. The eligible
-% curve is not divided by T-|lag|.
+% 'overlap' is the default. count_method chooses that overlap count:
+% 'pairs' divides pair counts by T-|lag|, 'fft' uses the same correction
+% on a binned FFT, and 'crosscorr' insets the reference spikes by the lag
+% limit. 'eligible' replaces the curve with the mean partner count of
+% spikes that can see each whole bin. The firing rate is still spikes
+% divided by epoch duration, including silent epochs. The eligible curve
+% is not divided by T-|lag|.
 
 if nargin < 4
     power = [];
@@ -13,8 +15,18 @@ end
 if nargin < 5 || isempty(method)
     method = 'overlap';
 end
+if nargin < 6 || isempty(count_method)
+    count_method = 'pairs';
+else
+    count_method = canonical_count_method(count_method);
+end
 method = canonical_acg_method(method);
-block = window_condition_acg(spike_times, epochs, bin_edges, power);
+if strcmp(method, 'eligible') && ~strcmp(count_method, 'pairs')
+    error('condition_window_acg:count', ...
+        ['Eligible-spike autocorrelograms keep their own count. ' ...
+        'acg_count applies to overlap estimates.']);
+end
+block = window_condition_acg(spike_times, epochs, bin_edges, power, count_method);
 if strcmp(method, 'overlap') || block.n_epochs < 1
     return
 end

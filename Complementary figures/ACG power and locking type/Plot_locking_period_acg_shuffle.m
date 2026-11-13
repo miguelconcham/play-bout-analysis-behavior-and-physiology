@@ -34,12 +34,13 @@ if exist('acg_delta_peaks', 'file') ~= 2
 end
 
 acg_method = 'overlap';
+acg_count = 'pairs';
 n_shuffles = 500;
 if isempty(checkpoint)
     data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
         'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
     parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
-    checkpoint = fullfile(parsing_folder, shuffle_checkpoint_filename(n_shuffles, acg_method));
+    checkpoint = fullfile(parsing_folder, shuffle_checkpoint_filename(n_shuffles, acg_method, acg_count));
 end
 if exist(checkpoint, 'file') ~= 2
     error('Plot_locking_period_acg_shuffle:checkpoint', ...

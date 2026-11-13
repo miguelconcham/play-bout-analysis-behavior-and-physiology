@@ -1,4 +1,4 @@
-function pooled = pool_locking_period_acgs(acg, bin_edges, run_length, score, already_corrected, low_percent, high_percent)
+function pooled = pool_locking_period_acgs(acg, bin_edges, run_length, score, already_corrected, low_percent, high_percent, count_method)
 %POOL_LOCKING_PERIOD_ACGS  Overlap-weighted ACGs for low, high, and all runs.
 %
 % Each run has one autocorrelogram row and one score (PPC, or delta-band
@@ -14,6 +14,8 @@ function pooled = pool_locking_period_acgs(acg, bin_edges, run_length, score, al
 % run count as much as a long one. Bins whose overlap is shorter than one
 % bin are ignored. When already_corrected is true, rows are rates
 % (counts / overlap) and the counts are recovered before summing.
+% count_method 'crosscorr' pools counts / inner duration by that duration
+% instead. 'pairs' and 'fft' keep the overlap pool. A missing count is pairs.
 
 if nargin < 6 || isempty(low_percent)
     low_percent = 25;
@@ -23,6 +25,11 @@ if nargin < 7 || isempty(high_percent)
 end
 if nargin < 5 || isempty(already_corrected)
     already_corrected = false;
+end
+if nargin < 8 || isempty(count_method)
+    count_method = 'pairs';
+else
+    count_method = canonical_count_method(count_method);
 end
 
 bin_edges = bin_edges(:)';
@@ -60,23 +67,27 @@ if isfinite(pooled.threshold_low) && isfinite(pooled.threshold_high) ...
 end
 all_idx = usable & any(isfinite(acg), 2);
 
-[pooled.low, pooled.n_low] = pool_selected(acg, bin_edges, run_length, low_idx, already_corrected);
-[pooled.high, pooled.n_high] = pool_selected(acg, bin_edges, run_length, high_idx, already_corrected);
-[pooled.all, pooled.n_all] = pool_selected(acg, bin_edges, run_length, all_idx, already_corrected);
+[pooled.low, pooled.n_low] = pool_selected(acg, bin_edges, run_length, low_idx, already_corrected, count_method);
+[pooled.high, pooled.n_high] = pool_selected(acg, bin_edges, run_length, high_idx, already_corrected, count_method);
+[pooled.all, pooled.n_all] = pool_selected(acg, bin_edges, run_length, all_idx, already_corrected, count_method);
 pooled.all_index = all_idx;
-pooled.score_low = mean(score(low_idx), 'omitnan');
-pooled.score_high = mean(score(high_idx), 'omitnan');
-pooled.score_all = mean(score(score_ok), 'omitnan');
+pooled.score_low = mean_known(score(low_idx));
+pooled.score_high = mean_known(score(high_idx));
+pooled.score_all = mean_known(score(score_ok));
 pooled.low_index = low_idx;
 pooled.high_index = high_idx;
 end
 
 
-function [mu, n_used] = pool_selected(acg, bin_edges, run_length, idx, already_corrected)
+function [mu, n_used] = pool_selected(acg, bin_edges, run_length, idx, already_corrected, count_method)
 n_bins = size(acg, 2);
 mu = nan(1, n_bins);
 n_used = sum(idx);
 if n_used < 1
+    return
+end
+if strcmp(count_method, 'crosscorr')
+    mu = pool_crosscorr_rows(acg(idx, :), run_length(idx), bin_edges);
     return
 end
 bin_w = mean(diff(bin_edges));
@@ -88,11 +99,27 @@ if already_corrected
     counts = counts .* overlap;
 end
 counts(~isfinite(overlap)) = NaN;
-den = sum(overlap, 1, 'omitnan');
-num = sum(counts, 1, 'omitnan');
+den = sum_known(overlap, 1);
+num = sum_known(counts, 1);
 n_finite = sum(isfinite(counts) & isfinite(overlap), 1);
 ok = den > 0 & n_finite > 0;
 mu(ok) = num(ok) ./ den(ok);
+end
+
+
+function value = mean_known(x)
+x = x(isfinite(x));
+if isempty(x)
+    value = NaN;
+else
+    value = mean(x);
+end
+end
+
+
+function total = sum_known(x, dim)
+x(~isfinite(x)) = 0;
+total = sum(x, dim);
 end
 
 

@@ -147,7 +147,7 @@ for cc = 1:numel(channels_with_spikes)
                 these_power = play_power(idx);
             end
             block = condition_window_acg(unit_spikes, these_epochs, bin_edges, these_power, ...
-                options.acg_method);
+                options.acg_method, options.acg_count);
             block.median_pair_gap_db = gap_of.(name);
             blocks.(name) = block;
         end
@@ -172,6 +172,7 @@ session.low_percent = options.low_percent;
 session.high_percent = options.high_percent;
 session.caliper_sd = options.caliper_sd;
 session.acg_method = options.acg_method;
+session.acg_count = options.acg_count;
 session.areas_to_keep = options.areas_to_keep;
 session.session_type = options.session_type;
 session.play_epochs = epochs.play;
@@ -216,6 +217,15 @@ if ~isfield(options, 'acg_method') || isempty(options.acg_method)
     options.acg_method = 'overlap';
 end
 options.acg_method = canonical_acg_method(options.acg_method);
+if ~isfield(options, 'acg_count') || isempty(options.acg_count)
+    options.acg_count = 'pairs';
+end
+options.acg_count = canonical_count_method(options.acg_count);
+if strcmp(options.acg_method, 'eligible') && ~strcmp(options.acg_count, 'pairs')
+    error('GENERATE_PLAY_POWER_ACG:count', ...
+        ['acg_count is %s and acg_method is eligible. Eligible-spike ' ...
+        'autocorrelograms keep their own count.'], options.acg_count);
+end
 end
 
 
