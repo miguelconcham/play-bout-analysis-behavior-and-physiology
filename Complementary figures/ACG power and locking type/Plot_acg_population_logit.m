@@ -58,7 +58,10 @@
 % skewness of those stratum means with the skewness of their logarithm,
 % then predicts the less skewed scale from the six oscillatory features
 % of the same stratum, from the oscillatory or non-oscillatory group,
-% and from a term that marks the high-power row.
+% and from a term that marks the high-power row. It also reads the saved
+% power summary and compares, within each neuron, the firing rate of the
+% low-power runs, the high-power runs, and the runs in the all-runs
+% autocorrelogram.
 
 %% 1. Load the checkpoint and build the imagesc matrices
 output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
@@ -1636,6 +1639,41 @@ write_summary_section(output_folder, '5. Delta power model, both strata', join_s
         power_fit.rsq, power_fit.adj_rsq, power_fit.df1, power_fit.df, power_fit.F, power_fit.F_p), ...
     sprintf('%-18s %12s %12s %10s %10s', 'Term', 'Coefficient', 'SE', 't', 'p'), ...
     power_lines))
+
+% Firing rates are already stored on the power-split summary. This block
+% only reads them. It does not rebuild the autocorrelograms.
+if ~exist('acg_method', 'var') || isempty(acg_method)
+    acg_method = 'overlap';
+end
+if ~exist('acg_count', 'var') || isempty(acg_count)
+    acg_count = 'pairs';
+end
+if exist('checkpoint', 'var') && ~isempty(checkpoint)
+    rate_summary_path = fullfile(fileparts(checkpoint), ...
+        locking_summary_filename(false, acg_method, acg_count));
+else
+    rate_data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
+        'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
+    rate_summary_path = fullfile(rate_data_root, 'Analysis results', ...
+        'spike train parsing', locking_summary_filename(false, acg_method, acg_count));
+end
+if ~exist('neuron_session', 'var') || ~exist('neuron_cluster_id', 'var') ...
+        || numel(neuron_session) ~= numel(neuron_cluster_id)
+    rate_session = {};
+    rate_cluster_id = [];
+else
+    rate_session = neuron_session;
+    rate_cluster_id = neuron_cluster_id;
+end
+rate_report = load_stratum_firing_rates(rate_summary_path, rate_session, rate_cluster_id);
+for i = 1:numel(rate_report.lines)
+    fprintf('%s\n', rate_report.lines{i})
+end
+if numel(rate_report.low) >= 2
+    draw_stratum_rate_figure(rate_report.low, rate_report.high, output_folder)
+end
+write_summary_section(output_folder, '5b. Firing rates of the power strata', ...
+    join_summary_lines(rate_report.lines))
 
 
 function draw_power_embedding(xy, group_id, shown, colors, labels, folder, figure_name, x_label, y_label, caption)
@@ -4306,6 +4344,185 @@ sgtitle({sprintf('%s. R^2 = %.3f. Wald p = %.3g.', outcome_label, fit.rsq, fit.F
     'Orange is the oscillatory group. Its reference level is non-oscillatory.', ...
     'Teal is the high-power stratum. Its reference level is low power.', ...
     'Whiskers are the coefficient plus or minus 1.96 cluster-robust standard errors.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function report = load_stratum_firing_rates(summary_path, session, cluster_id)
+%LOAD_STRATUM_FIRING_RATES  Paired rates from the saved power summary.
+%
+% rate_low and rate_high are the duration-weighted firing rates of the
+% runs in each power tail. model_fr is that rate for the runs that enter
+% the all-runs autocorrelogram.
+
+report.low = zeros(0, 1);
+report.high = zeros(0, 1);
+report.all_rate = zeros(0, 1);
+report.lines = {['Summary: ', summary_path]};
+if isempty(summary_path) || exist(summary_path, 'file') ~= 2
+    report.lines{end + 1} = 'The locking summary was not found, so the stratum firing rates were not read.';
+    return
+end
+try
+    stored = load(summary_path, 'power_acg');
+catch
+    report.lines{end + 1} = 'The locking summary could not be read.';
+    return
+end
+if ~isfield(stored, 'power_acg') || ~isfield(stored.power_acg, 'all_neurons')
+    report.lines{end + 1} = 'The summary has no power_acg.all_neurons.';
+    return
+end
+block = stored.power_acg.all_neurons;
+if ~isfield(block, 'rate_low') || ~isfield(block, 'rate_high')
+    report.lines{end + 1} = 'The power summary has no rate_low and rate_high.';
+    return
+end
+low = double(block.rate_low(:));
+high = double(block.rate_high(:));
+if isfield(block, 'model_fr') && numel(block.model_fr) == numel(low)
+    all_rate = double(block.model_fr(:));
+    all_name = 'all-runs autocorrelogram';
+    all_detail = ['model_fr is the spike count of the runs that enter the all-runs autocorrelogram, ', ...
+        'divided by the summed duration of those runs.'];
+elseif isfield(block, 'rate_all')
+    all_rate = double(block.rate_all(:));
+    all_name = 'all firing runs';
+    all_detail = ['rate_all is the spike count of every firing run, divided by the summed duration. ', ...
+        'The summary has no model_fr for the all-runs autocorrelogram alone.'];
+else
+    report.lines{end + 1} = 'The power summary has no model_fr or rate_all.';
+    return
+end
+n = min([numel(low), numel(high), numel(all_rate)]);
+low = low(1:n);
+high = high(1:n);
+all_rate = all_rate(1:n);
+if isempty(session)
+    keep = true(n, 1);
+    match_line = sprintf(['Neurons in the power summary: %d. Population identifiers were not ', ...
+        'in the workspace, so every summary neuron is included.'], n);
+elseif ~isfield(block, 'session') || ~isfield(block, 'cluster_id')
+    keep = true(n, 1);
+    match_line = sprintf(['Neurons in the power summary: %d. The summary has no session and ', ...
+        'cluster id, so every summary neuron is included.'], n);
+else
+    summary_keys = neuron_keys(block.session, block.cluster_id);
+    if numel(summary_keys) < n
+        keep = false(n, 1);
+    else
+        keep = ismember(summary_keys(1:n), neuron_keys(session, cluster_id));
+    end
+    match_line = sprintf('Neurons in the power summary: %d. Matched to this population: %d.', ...
+        n, sum(keep));
+end
+ok = keep & isfinite(low) & isfinite(high) & isfinite(all_rate) ...
+    & low > 0 & high > 0 & all_rate > 0;
+report.low = low(ok);
+report.high = high(ok);
+report.all_rate = all_rate(ok);
+report.lines = [report.lines, { ...
+    'These rates are already stored on the power-split summary. They are not estimated again.', ...
+    'Low-power rate: spikes in runs at or below the neuron''s 25th percentile of delta power, divided by the summed duration of those runs.', ...
+    'High-power rate: the same quantity for runs at or above the 75th percentile.', ...
+    all_detail, ...
+    match_line, ...
+    sprintf('Neurons with a positive rate in the low-power tail, the high-power tail, and the %s: %d.', ...
+        all_name, numel(report.low))}];
+if numel(report.low) < 2
+    report.lines{end + 1} = 'Fewer than two neurons have all three rates, so the comparison stops here.';
+    return
+end
+report.lines = [report.lines, { ...
+    sprintf('Median low-power rate: %.4g sp/s. Median high-power rate: %.4g sp/s. Median %s rate: %.4g sp/s.', ...
+        median(report.low), median(report.high), all_name, median(report.all_rate)), ...
+    sprintf('Mean low-power rate: %.4g sp/s. Mean high-power rate: %.4g sp/s. Mean %s rate: %.4g sp/s.', ...
+        mean(report.low), mean(report.high), all_name, mean(report.all_rate))}, ...
+    ratio_lines('High power', 'low power', report.high, report.low), ...
+    ratio_lines(all_name, 'low power', report.all_rate, report.low), ...
+    ratio_lines(all_name, 'high power', report.all_rate, report.high)];
+end
+
+
+function lines = ratio_lines(name_a, name_b, a, b)
+ratio = a(:) ./ b(:);
+stats = compare_two_samples(log(a(:)), log(b(:)), 'paired');
+within_two = mean(ratio >= 0.5 & ratio <= 2);
+within_one_half = mean(ratio >= (2 / 3) & ratio <= 1.5);
+lines = { ...
+    sprintf(['%s / %s: median %.3g. Geometric mean %.3g. ', ...
+        'Within a factor of 2: %.1f%%. Within a factor of 1.5: %.1f%%.'], ...
+        name_a, name_b, median(ratio), exp(mean(log(ratio))), ...
+        100 * within_two, 100 * within_one_half), ...
+    sprintf('Paired t, log(%s) minus log(%s): mean %.4g, t %.3f, df %.0f, p %.3g.', ...
+        name_a, name_b, stats.difference, stats.t, stats.df, stats.raw_p)};
+end
+
+
+function keys = neuron_keys(session, cluster_id)
+if ischar(session)
+    session = cellstr(session);
+elseif isstring(session)
+    session = cellstr(session);
+end
+session = session(:);
+cluster_id = double(cluster_id(:));
+n = min(numel(session), numel(cluster_id));
+keys = cell(n, 1);
+for i = 1:n
+    label = session{i};
+    if isstring(label)
+        label = char(label);
+    end
+    if ~ischar(label)
+        label = '';
+    end
+    keys{i} = [strtrim(label), '|', rate_id_text(cluster_id(i))];
+end
+end
+
+
+function text = rate_id_text(value)
+if isfinite(value) && value == round(value)
+    text = sprintf('%.0f', value);
+else
+    text = sprintf('%.12g', value);
+end
+end
+
+
+function draw_stratum_rate_figure(low, high, folder)
+open_full_figure('Power stratum firing rates')
+low = low(:);
+high = high(:);
+ratio = high ./ low;
+subplot(1, 2, 1)
+hold on
+span = [min([low; high]), max([low; high])];
+if ~(span(2) > span(1))
+    span = span(1) * [0.5 2];
+end
+plot(span, span, '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1)
+plot(low, high, 'o', 'MarkerSize', 5, 'MarkerFaceColor', [0.25 0.35 0.55], ...
+    'MarkerEdgeColor', 'none')
+set(gca, 'XScale', 'log', 'YScale', 'log')
+xlim(span)
+ylim(span)
+xlabel('Low-power firing rate (spikes/s)')
+ylabel('High-power firing rate (spikes/s)')
+title(sprintf('Median high/low = %.3g', median(ratio)), 'Interpreter', 'none')
+box off
+subplot(1, 2, 2)
+histogram(log2(ratio), 'FaceColor', [0.25 0.35 0.55], 'EdgeColor', 'none')
+hold on
+yl = ylim;
+plot([0 0], yl, '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1)
+xlabel('log2(high-power rate / low-power rate)')
+ylabel('Neurons')
+box off
+sgtitle({'Each point is one neuron.', ...
+    'The dashed line is equal firing rate in the two power tails.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
