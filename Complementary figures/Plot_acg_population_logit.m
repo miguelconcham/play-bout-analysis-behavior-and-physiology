@@ -1302,6 +1302,57 @@ write_summary_section(output_folder, '4. Oscillatory features by lock type', ...
     'Holm-Sidak adjusts the ANOVA p-values across features.', ...
     'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
     'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
+% Subplot numbers on the feature panels, in reading order:
+% 1 Modulation1, 2 Modulation2, 6 Baseline, 12 Peak2, 13 Trough1,
+% 15 Peak1 - Peak2.
+two_way_panels = [1 2 6 12 13 15];
+n_two_way = numel(two_way_panels);
+two_way_samples = cell(n_two_way, 1);
+two_way_with = cell(n_two_way, 1);
+two_way_without = cell(n_two_way, 1);
+for j = 1:n_two_way
+    feature_index = two_way_panels(j);
+    two_way_samples{j} = two_way_sample(feature_table, neuron_area, neuron_type, ...
+        area_feature_names{feature_index});
+    two_way_samples{j}.feature = area_feature_titles{feature_index};
+    [area_idx, type_idx] = two_way_indices(two_way_samples{j});
+    n_area = numel(two_way_samples{j}.area_names);
+    n_type = numel(two_way_samples{j}.type_names);
+    two_way_with{j} = two_way_anova(two_way_samples{j}.y, area_idx, type_idx, ...
+        n_area, n_type, true);
+    two_way_without{j} = two_way_anova(two_way_samples{j}.y, area_idx, type_idx, ...
+        n_area, n_type, false);
+end
+two_way_with = assign_two_way_holm(two_way_with);
+two_way_without = assign_two_way_holm(two_way_without);
+draw_two_way_panels(two_way_samples, two_way_with, output_folder, ...
+    'Two-factor ANOVA with interaction', ...
+    {'Area and cell type, with an interaction.', ...
+    'Blue is trough, red is peak, gray is unlocked.', ...
+    'Each title line is the Holm-Sidak p of that term.'})
+draw_two_way_panels(two_way_samples, two_way_without, output_folder, ...
+    'Two-factor ANOVA without interaction', ...
+    {'Area and cell type, without an interaction.', ...
+    'Blue is trough, red is peak, gray is unlocked.', ...
+    'Each title line is the Holm-Sidak p of that term.'})
+write_summary_section(output_folder, '4. Two-factor ANOVA with interaction', ...
+    two_way_report(two_way_samples, two_way_with, { ...
+    'Features are subplot numbers 1, 2, 6, 12, 13, and 15.', ...
+    'They are Modulation1, Modulation2, Baseline, Peak2, Trough1, and Peak1 - Peak2.', ...
+    'The model is area + cell type + area x cell type.', ...
+    'Each term is tested after the other terms, with effect coding.', ...
+    'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
+    'Holm-Sidak adjusts every term in this figure together.', ...
+    'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
+write_summary_section(output_folder, '4. Two-factor ANOVA without interaction', ...
+    two_way_report(two_way_samples, two_way_without, { ...
+    'Features are subplot numbers 1, 2, 6, 12, 13, and 15.', ...
+    'They are Modulation1, Modulation2, Baseline, Peak2, Trough1, and Peak1 - Peak2.', ...
+    'The model is area + cell type, with no interaction.', ...
+    'Each main effect is tested after the other main effect.', ...
+    'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
+    'Holm-Sidak adjusts every term in this figure together.', ...
+    'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
@@ -1649,6 +1700,324 @@ if F < 0
     return
 end
 p = betainc(df2 / (df2 + df1 * F), df2 / 2, df1 / 2);
+end
+
+
+function sample = two_way_sample(feature_table, neuron_area, neuron_type, feature_name)
+%TWO_WAY_SAMPLE  Neurons kept for an area-by-cell-type ANOVA.
+
+values = feature_column(feature_table, feature_name);
+n = numel(values);
+areas = cell(n, 1);
+types = cell(n, 1);
+keep = isfinite(values);
+kept_types = {'Trough', 'Peak', 'Unlocked'};
+for i = 1:n
+    if i <= numel(neuron_area)
+        areas{i} = area_display_name(neuron_area{i});
+    else
+        areas{i} = 'area unknown';
+    end
+    if i <= numel(neuron_type)
+        types{i} = display_lock_label(neuron_type{i});
+    else
+        types{i} = 'Non-classified';
+    end
+    if ~keep(i)
+        continue
+    end
+    if strcmpi(areas{i}, 'VLPAG') || strcmp(areas{i}, 'area unknown')
+        keep(i) = false;
+    elseif ~any(strcmp(types{i}, kept_types))
+        keep(i) = false;
+    end
+end
+sample.y = values(keep);
+sample.area = areas(keep);
+sample.type = types(keep);
+sample.feature = feature_name;
+preferred = {'SC', 'LPAG', 'DLPAG', 'DR'};
+sample.area_names = {};
+for k = 1:numel(preferred)
+    if any(strcmp(sample.area, preferred{k}))
+        sample.area_names{end + 1} = preferred{k}; %#ok<AGROW>
+    end
+end
+for i = 1:numel(sample.area)
+    if ~any(strcmp(sample.area_names, sample.area{i}))
+        sample.area_names{end + 1} = sample.area{i}; %#ok<AGROW>
+    end
+end
+sample.type_names = {};
+for k = 1:numel(kept_types)
+    if any(strcmp(sample.type, kept_types{k}))
+        sample.type_names{end + 1} = kept_types{k}; %#ok<AGROW>
+    end
+end
+end
+
+
+function [area_idx, type_idx] = two_way_indices(sample)
+area_idx = zeros(numel(sample.y), 1);
+type_idx = zeros(numel(sample.y), 1);
+for i = 1:numel(sample.y)
+    area_idx(i) = find(strcmp(sample.area_names, sample.area{i}), 1);
+    type_idx(i) = find(strcmp(sample.type_names, sample.type{i}), 1);
+end
+end
+
+
+function model = two_way_anova(y, area_idx, type_idx, n_area, n_type, with_interaction)
+%TWO_WAY_ANOVA  Area and cell type, with or without their interaction.
+%
+% Effect coding. With an interaction, each term is tested after the
+% others. Without it, each main effect is tested after the other one.
+
+model.ok = false;
+model.note = '';
+model.n = numel(y);
+model.terms = empty_anova_term();
+model.terms(1) = [];
+if n_area < 2 || n_type < 2 || numel(y) < 4
+    model.note = 'Fewer than two areas or two cell types had enough neurons.';
+    return
+end
+y = y(:);
+area_idx = area_idx(:);
+type_idx = type_idx(:);
+X = twoway_design(area_idx, type_idx, n_area, n_type, with_interaction);
+n_a = n_area - 1;
+n_t = n_type - 1;
+area_cols = 2:(1 + n_a);
+type_cols = (2 + n_a):(1 + n_a + n_t);
+term_names = {'Area', 'Cell type'};
+term_cols = {area_cols, type_cols};
+if with_interaction
+    term_names{end + 1} = 'Interaction'; %#ok<AGROW>
+    term_cols{end + 1} = (2 + n_a + n_t):size(X, 2); %#ok<AGROW>
+end
+[rss_full, rank_full] = ols_rss(X, y);
+df_error = numel(y) - rank_full;
+if rank_full < size(X, 2)
+    model.note = 'Some area and cell-type combinations are missing, so the model rank is reduced.';
+end
+if df_error < 1
+    model.note = 'Too few neurons for the residual degrees of freedom.';
+    return
+end
+model.ok = true;
+model.terms = repmat(empty_anova_term(), numel(term_names), 1);
+for k = 1:numel(term_names)
+    keep = true(1, size(X, 2));
+    keep(term_cols{k}) = false;
+    [rss_reduced, rank_reduced] = ols_rss(X(:, keep), y);
+    df1 = rank_full - rank_reduced;
+    ss = rss_reduced - rss_full;
+    scale = max([1, abs(rss_reduced), abs(rss_full)]);
+    if ss < 0 && ss > -1e-8 * scale
+        ss = 0;
+    end
+    model.terms(k).name = term_names{k};
+    model.terms(k).df1 = df1;
+    model.terms(k).df2 = df_error;
+    if df1 < 1 || ss < 0
+        continue
+    end
+    if rss_full <= 1e-10 * scale
+        if ss > 1e-10 * scale
+            model.terms(k).F = inf;
+            model.terms(k).p = 0;
+            model.terms(k).eta = 1;
+        else
+            model.terms(k).F = 0;
+            model.terms(k).p = 1;
+            model.terms(k).eta = 0;
+        end
+        continue
+    end
+    model.terms(k).F = (ss / df1) / (rss_full / df_error);
+    model.terms(k).p = f_survival(model.terms(k).F, df1, df_error);
+    model.terms(k).eta = ss / (ss + rss_full);
+end
+end
+
+
+function s = empty_anova_term()
+s = struct('name', '', 'F', nan, 'df1', nan, 'df2', nan, ...
+    'p', nan, 'holm_p', nan, 'eta', nan);
+end
+
+
+function X = twoway_design(area_idx, type_idx, n_area, n_type, with_interaction)
+n = numel(area_idx);
+n_a = n_area - 1;
+n_t = n_type - 1;
+n_col = 1 + n_a + n_t;
+if with_interaction
+    n_col = n_col + n_a * n_t;
+end
+X = zeros(n, n_col);
+X(:, 1) = 1;
+for a = 1:n_a
+    code = zeros(n, 1);
+    code(area_idx == a) = 1;
+    code(area_idx == n_area) = -1;
+    X(:, 1 + a) = code;
+end
+for t = 1:n_t
+    code = zeros(n, 1);
+    code(type_idx == t) = 1;
+    code(type_idx == n_type) = -1;
+    X(:, 1 + n_a + t) = code;
+end
+if with_interaction
+    col = 2 + n_a + n_t;
+    for a = 1:n_a
+        for t = 1:n_t
+            X(:, col) = X(:, 1 + a) .* X(:, 1 + n_a + t);
+            col = col + 1;
+        end
+    end
+end
+end
+
+
+function [rss, xrank] = ols_rss(X, y)
+y = y(:);
+if isempty(X) || size(X, 2) < 1
+    rss = sum((y - mean(y)) .^ 2);
+    xrank = 0;
+    return
+end
+beta = X \ y;
+rss = sum((y - X * beta) .^ 2);
+singular = svd(X);
+if isempty(singular)
+    xrank = 0;
+    return
+end
+tol = max(size(X)) * eps(max(singular));
+xrank = sum(singular > tol);
+end
+
+
+function models = assign_two_way_holm(models)
+raw = [];
+which_model = [];
+which_term = [];
+for j = 1:numel(models)
+    for k = 1:numel(models{j}.terms)
+        raw(end + 1) = models{j}.terms(k).p; %#ok<AGROW>
+        which_model(end + 1) = j; %#ok<AGROW>
+        which_term(end + 1) = k; %#ok<AGROW>
+    end
+end
+adjusted = holm_sidak_adjust(raw);
+for i = 1:numel(raw)
+    models{which_model(i)}.terms(which_term(i)).holm_p = adjusted(i);
+end
+end
+
+
+function draw_two_way_panels(samples, models, folder, figure_name, caption)
+open_full_figure(figure_name)
+type_gap = 0.24;
+for j = 1:numel(samples)
+    subplot(2, 3, j)
+    hold on
+    sample = samples{j};
+    model = models{j};
+    n_area = numel(sample.area_names);
+    n_type = numel(sample.type_names);
+    offsets = ((1:n_type) - (n_type + 1) / 2) * type_gap;
+    for a = 1:n_area
+        for t = 1:n_type
+            mask = strcmp(sample.area, sample.area_names{a}) ...
+                & strcmp(sample.type, sample.type_names{t});
+            y = sample.y(mask);
+            if isempty(y)
+                continue
+            end
+            if numel(y) == 1
+                x = a + offsets(t);
+            else
+                x = a + offsets(t) + linspace(-0.05, 0.05, numel(y));
+            end
+            scatter(x, y, 12, [0 0 0], 'filled', ...
+                'MarkerFaceAlpha', 0.45, 'MarkerEdgeColor', 'none')
+            bar(a + offsets(t), mean(y), 0.2, 'FaceColor', lock_bar_color(sample.type_names{t}), ...
+                'FaceAlpha', 0.45, 'EdgeColor', 'none')
+            hold on
+        end
+    end
+    if n_area > 0
+        set(gca, 'XTick', 1:n_area, 'XTickLabel', sample.area_names)
+        xlim([0.45, n_area + 0.55])
+    end
+    try
+        set(gca, 'TickLabelInterpreter', 'none')
+    catch
+    end
+    title(two_way_title(sample.feature, model), 'Interpreter', 'none')
+    grid on
+    box off
+end
+sgtitle(caption, 'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function lines = two_way_title(feature_name, model)
+if ~model.ok || isempty(model.terms)
+    lines = {feature_name, 'Too few neurons'};
+    return
+end
+lines = cell(1, numel(model.terms) + 1);
+lines{1} = feature_name;
+for k = 1:numel(model.terms)
+    if ~isfinite(model.terms(k).holm_p)
+        p_text = 'not tested';
+    else
+        p_text = sprintf('%.3g', model.terms(k).holm_p);
+    end
+    lines{k + 1} = sprintf('%s Holm-Sidak p = %s', model.terms(k).name, p_text);
+end
+end
+
+
+function text = two_way_report(samples, models, intro)
+lines = intro;
+for j = 1:numel(samples)
+    model = models{j};
+    if ~model.ok
+        lines{end + 1} = sprintf('%s: %s', samples{j}.feature, model.note); %#ok<AGROW>
+        continue
+    end
+    significant = false(1, numel(model.terms));
+    for k = 1:numel(model.terms)
+        significant(k) = isfinite(model.terms(k).holm_p) && model.terms(k).holm_p < 0.05;
+    end
+    if ~any(significant)
+        lines{end + 1} = sprintf('%s   n = %d   no Holm-Sidak significant term', ...
+            samples{j}.feature, model.n); %#ok<AGROW>
+        continue
+    end
+    lines{end + 1} = sprintf('%s   n = %d', samples{j}.feature, model.n); %#ok<AGROW>
+    if ~isempty(model.note)
+        lines{end + 1} = ['  ', model.note]; %#ok<AGROW>
+    end
+    for k = 1:numel(model.terms)
+        if ~significant(k)
+            continue
+        end
+        term = model.terms(k);
+        lines{end + 1} = sprintf('  %-14s F(%s, %s) = %s   partial eta2 = %s   raw p = %s   Holm-Sidak p = %s', ...
+            term.name, stat_num(term.df1, '%.0f'), stat_num(term.df2, '%.0f'), ...
+            stat_num(term.F, '%.4g'), stat_num(term.eta, '%.4g'), ...
+            stat_num(term.p, '%.4g'), stat_num(term.holm_p, '%.4g')); %#ok<AGROW>
+    end
+end
+text = strjoin(lines, newline);
 end
 
 
