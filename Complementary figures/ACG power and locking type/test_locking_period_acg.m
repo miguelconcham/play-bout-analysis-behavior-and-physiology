@@ -9,8 +9,11 @@ function test_locking_period_acg()
 
 this_dir = fileparts(mfilename('fullpath'));
 if ~isempty(this_dir)
+    figures_dir = fileparts(this_dir);
+    repo_root = fileparts(figures_dir);
     addpath(this_dir);
-    addpath(fullfile(fileparts(this_dir), 'Figure 2', 'Supporting codes', 'Delta episodes'));
+    addpath(figures_dir);
+    addpath(fullfile(repo_root, 'Figure 2', 'Supporting codes', 'Delta episodes'));
 end
 
 assert(strcmp(delta_lock_group(0.001, pi, 0.01, 0.1), 'trough'), ...

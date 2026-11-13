@@ -21,12 +21,11 @@
 % Each neuron uses two panels, so the figures continue until every
 % requested neuron is drawn.
 % classifier_method is set just before the lock-type classifier.
-% The default is 'naivebayes'. 'all' reports every option. The other values
-% are 'lda', 'naivebayes', 'svm', 'tree', and 'logit'. 'svm' is a
-% Gaussian-kernel SVM at medium scale.
-% The selected classifier is run twice: every trough, peak, and unlocked
-% neuron, and the oscillatory neurons only. n_accuracy_permutations label
-% shuffles test that accuracy. The default is 1000.
+% The default is naive Bayes, LDA, and a medium Gaussian SVM.
+% 'all' adds the tree and multinomial logit. One name keeps that classifier.
+% Each classifier is run on every trough, peak, and unlocked neuron, and
+% again on the oscillatory neurons only. n_accuracy_permutations label
+% shuffles test each accuracy. The default is 1000.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -46,8 +45,10 @@
 %% 1. Load the checkpoint and build the imagesc matrices
 output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 this_dir = fileparts(mfilename('fullpath'));
-repo_root = fileparts(this_dir);
+figures_dir = fileparts(this_dir);
+repo_root = fileparts(figures_dir);
 addpath(this_dir);
+addpath(figures_dir);
 addpath(repo_root);
 if exist('align_population_percentiles', 'file') ~= 2
     run(fullfile(repo_root, 'add_repo_paths.m'));
@@ -167,6 +168,7 @@ if ~exist('output_folder', 'var') || isempty(output_folder)
 end
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
+addpath(fileparts(this_dir));
 if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
         || ~exist('imagesc_sum_power_high', 'var')
     data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
@@ -534,6 +536,7 @@ if ~exist('output_folder', 'var') || isempty(output_folder)
 end
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
+addpath(fileparts(this_dir));
 if ~exist('idx_cluster', 'var') || ~exist('complete_rows', 'var') ...
         || ~exist('modulation_score', 'var') || ~exist('neuron_type', 'var')
     error('Plot_acg_population_logit:cluster', ...
@@ -594,6 +597,7 @@ n_example_neurons = 10;
 n_example_subplots = 6;
 this_dir = fileparts(mfilename('fullpath'));
 addpath(this_dir);
+addpath(fileparts(this_dir));
 if ~exist('shown_logit', 'var')
     error('Plot_acg_population_logit:shown', ...
         'shown_logit is not in the workspace. Run section 3 first.');
@@ -870,12 +874,24 @@ sgtitle(['Black points are every neuron. Blue points are oscillatory neurons at 
 save_script_figure(output_folder)
 
 lock_embedding_labels = lock_labels_for_rows(neuron_type, complete_rows);
-draw_lock_type_embedding(pca_score(:, 1:2), lock_embedding_labels, output_folder, ...
-    'Lock type in the high-power PCA', ...
-    sprintf('PC1 (%.1f%%)', pca_explained(1)), ...
-    sprintf('PC2 (%.1f%%)', pca_explained(2)), ...
-    ['Black points are every neuron in the high-power PCA, including non-classified cells. ', ...
-    'Filled bands are that panel''s lock type.'])
+lock_embedding_keep = { ...
+    true(numel(lock_embedding_labels), 1), ...
+    ismember(complete_rows(:), osc_rows(:))};
+lock_embedding_names = {'all neurons', 'oscillatory neurons'};
+for set_n = 1:2
+    if ~any(lock_embedding_keep{set_n})
+        fprintf('No %s were available for the lock-type PCA.\n', lock_embedding_names{set_n})
+        continue
+    end
+    draw_lock_type_embedding( ...
+        pca_score(lock_embedding_keep{set_n}, 1:2), ...
+        lock_embedding_labels(lock_embedding_keep{set_n}), output_folder, ...
+        ['Lock type in the high-power PCA, ', lock_embedding_names{set_n}], ...
+        sprintf('PC1 (%.1f%%)', pca_explained(1)), ...
+        sprintf('PC2 (%.1f%%)', pca_explained(2)), ...
+        ['Black points are the ', lock_embedding_names{set_n}, ...
+        ' in the high-power PCA. Filled bands are that panel''s lock type.'])
+end
 lock_tsne = [];
 lock_perplexity = nan;
 if exist('Y_tsne', 'var') && exist('perplexity_values', 'var') && ~isempty(Y_tsne)
@@ -910,11 +926,20 @@ if isempty(lock_tsne)
         'Standardize', false, ...
         'Distance', 'euclidean');
 end
-draw_lock_type_embedding(lock_tsne, lock_embedding_labels, output_folder, ...
-    'Lock type in the high-power t-SNE', 't-SNE 1', 't-SNE 2', ...
-    {sprintf('Black points are every neuron in the section 2 t-SNE. Perplexity = %g.', ...
-        lock_perplexity), ...
-    'Filled bands are that panel''s lock type. Non-classified cells stay in the black points.'})
+for set_n = 1:2
+    if ~any(lock_embedding_keep{set_n})
+        fprintf('No %s were available for the lock-type t-SNE.\n', lock_embedding_names{set_n})
+        continue
+    end
+    draw_lock_type_embedding( ...
+        lock_tsne(lock_embedding_keep{set_n}, :), ...
+        lock_embedding_labels(lock_embedding_keep{set_n}), output_folder, ...
+        ['Lock type in the high-power t-SNE, ', lock_embedding_names{set_n}], ...
+        't-SNE 1', 't-SNE 2', ...
+        {sprintf('Black points are the %s in the section 2 t-SNE. Perplexity = %g.', ...
+            lock_embedding_names{set_n}, lock_perplexity), ...
+        'Filled bands are that panel''s lock type.'})
+end
 
 % Same columns as the cluster violins. High values come from the
 % high-power feature table. Low values are the same neurons at low power.
@@ -1407,7 +1432,8 @@ write_summary_section(output_folder, '4. Two-factor ANOVA without interaction', 
     'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
     'Holm-Sidak adjusts every term in this figure together.', ...
     'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
-classifier_method = 'naivebayes';
+classifier_method = {'naivebayes', 'lda', 'svm'};
+classifier_method_name = classifier_method_text(classifier_method);
 n_accuracy_permutations = 1000;
 classifier_names = area_feature_names(two_way_panels);
 classifier_titles = area_feature_titles(two_way_panels);
@@ -1438,13 +1464,13 @@ for p = 1:numel(classifier_populations)
         end
     end
     classifier_populations{p}.results = classifier_results;
-    draw_lock_classifier(classifier_results, output_folder, classifier_method, ...
+    draw_lock_classifier(classifier_results, output_folder, classifier_method_name, ...
         ['Lock type classifier, ', classifier_populations{p}.name], ...
         classifier_populations{p}.name)
 end
-draw_accuracy_null(classifier_populations, output_folder, classifier_method)
+draw_accuracy_null(classifier_populations, output_folder, classifier_method_name)
 write_summary_section(output_folder, '4. Lock-type classifier', ...
-    lock_classifier_report(classifier_titles, classifier_method, ...
+    lock_classifier_report(classifier_titles, classifier_method_name, ...
     n_accuracy_permutations, classifier_populations))
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
@@ -2144,16 +2170,34 @@ end
 
 function methods = classifier_method_list(method)
 allowed = {'lda', 'naivebayes', 'svm', 'tree', 'logit'};
-if strcmpi(method, 'all')
+if isstring(method)
+    method = cellstr(method);
+elseif ischar(method)
+    method = {method};
+end
+method = method(:)';
+if numel(method) == 1 && strcmpi(method{1}, 'all')
     methods = allowed;
     return
 end
-hit = strcmpi(allowed, method);
-if ~any(hit)
-    error('Plot_acg_population_logit:classifier', ...
-        'classifier_method must be all, lda, naivebayes, svm, tree, or logit.');
+methods = cell(1, numel(method));
+for i = 1:numel(method)
+    hit = strcmpi(allowed, method{i});
+    if ~any(hit)
+        error('Plot_acg_population_logit:classifier', ...
+            'classifier_method must be all, lda, naivebayes, svm, tree, logit, or a list of those names.');
+    end
+    methods{i} = allowed{hit};
 end
-methods = allowed(hit);
+end
+
+
+function text = classifier_method_text(method)
+if iscell(method)
+    text = strjoin(method, ', ');
+    return
+end
+text = char(method);
 end
 
 
@@ -2510,13 +2554,14 @@ lines = { ...
     'Classifier of lock type from six high-power features.', ...
     'The features are subplot numbers 1, 2, 6, 12, 13, and 15:', ...
     strjoin(feature_titles, ', '), ...
-    'The same classifier is run on every trough, peak, and unlocked neuron, and again on the oscillatory neurons only.', ...
+    'Naive Bayes, LDA, and the medium Gaussian SVM are the default. Each one is run on every trough, peak, and unlocked neuron, and again on the oscillatory neurons only.', ...
     'Oscillatory neurons are cluster 1 from section 3.', ...
     'Non-classified cells are excluded.', ...
     'A neuron is used only when all six features are finite.', ...
     'Accuracy is stratified cross-validation. Each class is split across the folds in stored order.', ...
     'Within each training fold the features are standardized.', ...
-    sprintf('classifier_method = %s. The default is naivebayes.', method), ...
+    sprintf('classifier_method = %s.', method), ...
+    'The default list is naive Bayes, LDA, and a medium Gaussian SVM.', ...
     'lda is a linear discriminant. naivebayes is Gaussian naive Bayes.', ...
     'svm is a Gaussian-kernel SVM with medium scale sqrt(number of features) and box constraint 1.', ...
     'Three SVM classes are compared one against one.', ...
@@ -2644,8 +2689,8 @@ for m = 1:n_methods
             'Color', [0.8 0.15 0.15], 'LineWidth', 1.6)
         xlabel('Cross-validated accuracy')
         ylabel('Shuffles')
-        title({populations{p}.name, result.method_label, ...
-            sprintf('p = %.3g', result.perm_p)}, 'Interpreter', 'none')
+        title({sprintf('p = %.3g', result.perm_p), ...
+            result.method_label, populations{p}.name}, 'Interpreter', 'none')
         box off
     end
 end
