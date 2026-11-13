@@ -21,7 +21,9 @@
 % burst (0-50 ms), first-peak prominence, second-cycle prominence, folded
 % autocorrelogram delta power after 100 ms, and the two peak latencies.
 % Sum-to-1 and rate-ratio curves are both tested. acg_method chooses which
-% saved sessions are loaded. 'eligible' reads
+% saved sessions are loaded. acg_count chooses the overlap count inside
+% those sessions: pairs, fft, or crosscorr. Pair counts are the default.
+% 'eligible' reads
 % {animal}_play_power_acg_eligible.mat. Its rate-ratio curve divides the
 % mean partner count by firing rate times bin width. 'overlap' reads the
 % original files and divides pair counts / overlap by rate squared times
@@ -56,8 +58,10 @@ show_paired_tests = [true true];
 areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 figure_folder = '';
 % 'eligible' or 'overlap'. Overlap is the default. Plotting loads the
-% sessions saved for this method.
+% sessions saved for this method and acg_count. 'pairs' is the overlap
+% pair count. 'fft' and 'crosscorr' load their own files.
 acg_method = 'overlap';
+acg_count = 'pairs';
 
 group_order = {'trough', 'peak', 'delta', 'nonentrained', 'all'};
 group_title = {'Trough-locked', 'Peak-locked', 'Delta-locked', 'Non-entrained', 'All neurons'};
@@ -94,12 +98,14 @@ end
 
 %% Stack session autocorrelograms
 acg_method = canonical_acg_method(acg_method);
+acg_count = canonical_count_method(acg_count);
 compare_options.acg_method = acg_method;
-session_files = dir(fullfile(result_folder, play_power_acg_filename('*', acg_method)));
+session_files = dir(fullfile(result_folder, play_power_acg_filename('*', acg_method, acg_count)));
 if isempty(session_files)
     error('Analyze_play_power_acg:empty', ...
-        ['No %s play-power ACG files in %s. Run Estimate_play_power_acg ' ...
-        'with acg_method = ''%s''.'], acg_method, result_folder, acg_method);
+        ['No %s %s play-power ACG files in %s. Run Estimate_play_power_acg ' ...
+        'with acg_method = ''%s'' and acg_count = ''%s''.'], acg_method, acg_count, ...
+        result_folder, acg_method, acg_count);
 end
 stack = [];
 n_missing = 0;
@@ -116,10 +122,14 @@ for f = 1:numel(session_files)
     if isfield(session, 'acg_method') && ~isempty(session.acg_method)
         stored_method = canonical_acg_method(session.acg_method);
     end
-    if ~strcmp(stored_method, acg_method)
+    stored_count = 'pairs';
+    if isfield(session, 'acg_count') && ~isempty(session.acg_count)
+        stored_count = canonical_count_method(session.acg_count);
+    end
+    if ~strcmp(stored_method, acg_method) || ~strcmp(stored_count, acg_count)
         warning('Analyze_play_power_acg:method', ...
-            '%s was saved with acg_method ''%s'' and was skipped.', ...
-            session_files(f).name, stored_method);
+            '%s was saved with acg_method ''%s'' and acg_count ''%s'' and was skipped.', ...
+            session_files(f).name, stored_method, stored_count);
         continue
     end
     if isempty(stack)

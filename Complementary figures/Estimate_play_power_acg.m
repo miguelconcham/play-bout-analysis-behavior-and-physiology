@@ -4,11 +4,15 @@
 % add_repo_paths.m before this script. Analyze_play_power_acg.m reads the
 % per-session files written here.
 %
-% acg_method 'overlap' is the default: pair counts / (T-|lag|) and the
-% original file name. 'eligible' keeps one observation per spike that can
-% see the whole lag bin and writes {animal}_play_power_acg_eligible.mat,
-% so an eligible estimate does not replace an overlap file. Set the same
-% value in Analyze_play_power_acg.m before plotting.
+% acg_method 'overlap' is the default. acg_count then chooses how that
+% overlap autocorrelogram is counted. 'pairs' divides pair counts by
+% (T-|lag|) and keeps the original file name. 'fft' uses the same
+% correction on a binned FFT. 'crosscorr' insets the reference spikes by
+% the lag limit and divides by that inner duration. 'eligible' keeps one
+% observation per spike that can see the whole lag bin and writes
+% {animal}_play_power_acg_eligible.mat. FFT and crosscorr write their own
+% files, so one count does not replace another. Set the same acg_method
+% and acg_count in Analyze_play_power_acg.m before plotting.
 
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 npx_raw_data = fullfile(data_root, 'NPX data', 'NPX raw data');
@@ -39,9 +43,12 @@ generator_options.caliper_sd = 0.25;
 generator_options.areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 generator_options.session_type = 'Partners session';
 % 'eligible' or 'overlap'. Overlap is the default. Eligible files are not
-% written over overlap files.
+% written over overlap files. acg_count is 'pairs', 'fft', or 'crosscorr'
+% for an overlap estimate. Pair counts keep the overlap file name.
 acg_method = 'overlap';
+acg_count = 'pairs';
 generator_options.acg_method = acg_method;
+generator_options.acg_count = acg_count;
 RECOMPUTE_EXISTING = false;
 
 animal_list = dir(npx_raw_data);
@@ -58,7 +65,7 @@ n_added = 0;
 
 for fn = 1:numel(animal_list)
     animal_name = animal_list(fn).name;
-    session_file = fullfile(saving_folder, play_power_acg_filename(animal_name, acg_method));
+    session_file = fullfile(saving_folder, play_power_acg_filename(animal_name, acg_method, acg_count));
     fprintf('\nSession %d/%d: %s\n', fn, numel(animal_list), animal_name);
     if ~RECOMPUTE_EXISTING && exist(session_file, 'file') == 2
         fprintf('Keeping existing file: %s\n', session_file);
@@ -78,7 +85,7 @@ for fn = 1:numel(animal_list)
     end
 end
 
-retry_file = fullfile(saving_folder, play_power_retry_filename(acg_method));
+retry_file = fullfile(saving_folder, play_power_retry_filename(acg_method, acg_count));
 save(retry_file, 'failed_sessions', 'skipped_sessions', ...
     'generator_options', 'delta_band', 'n_added');
 fprintf('Kept %d existing sessions; added %d; %d failed.\nLog: %s\n', ...
