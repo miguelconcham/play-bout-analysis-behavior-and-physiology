@@ -1418,7 +1418,7 @@ if n_example > 0
             lock_label = display_lock_label(neuron_type{pop_row});
             [acg_lag, acg_high, acg_low, found_high, found_low] = example_stratum_curves( ...
                 example_bank, neuron_session{pop_row}, neuron_cluster_id(pop_row));
-            shared_ylim = example_acg_ylim(acg_lag, [acg_high, acg_low], lag_limits);
+            shared_ylim = example_acg_ylim(acg_lag, [acg_high(:), acg_low(:)], lag_limits);
             subplot(n_example_rows, n_example_cols, k)
             if found_high
                 plot(acg_lag, acg_high, 'Color', high_color, 'LineWidth', 1.4)
@@ -6226,15 +6226,19 @@ end
 
 
 function y_lim = example_acg_ylim(acg_lag, acg_y, lag_limits)
-%EXAMPLE_ACG_YLIM  Scale one autocorrelogram without the near-zero peak.
+%EXAMPLE_ACG_YLIM  Scale one or more autocorrelograms without the near-zero peak.
+%
+% acg_y has one curve per column. Every column uses acg_lag.
 
-acg_lag = double(acg_lag(:).');
-acg_y = double(acg_y(:).');
-shown = acg_lag >= lag_limits(1) & acg_lag <= lag_limits(2) & isfinite(acg_y);
-tail = shown & acg_lag >= 0.05;
-values = acg_y(tail);
+acg_lag = double(acg_lag(:));
+acg_y = example_acg_columns(acg_lag, acg_y);
+in_window = acg_lag >= lag_limits(1) & acg_lag <= lag_limits(2);
+tail = in_window & acg_lag >= 0.05;
+values = acg_y(tail, :);
+values = values(isfinite(values(:)));
 if numel(values) < 5
-    values = acg_y(shown);
+    shown = acg_y(in_window, :);
+    values = shown(isfinite(shown(:)));
 end
 if isempty(values)
     y_lim = [0 1];
@@ -6248,6 +6252,40 @@ if span <= 1e-6 * max(abs(hi), 1)
 end
 pad = 0.08 * span;
 y_lim = [lo - pad, hi + pad];
+end
+
+
+function curves = example_acg_columns(acg_lag, acg_y)
+%EXAMPLE_ACG_COLUMNS  Curves as columns aligned to acg_lag.
+
+n = numel(acg_lag);
+acg_y = double(acg_y);
+if isvector(acg_y)
+    flat = acg_y(:);
+    if numel(flat) == n
+        curves = flat;
+        return
+    end
+    if n > 0 && mod(numel(flat), n) == 0
+        curves = reshape(flat, n, []);
+        return
+    end
+    curves = nan(n, 1);
+    n_copy = min(n, numel(flat));
+    curves(1:n_copy) = flat(1:n_copy);
+    return
+end
+if size(acg_y, 1) == n
+    curves = acg_y;
+    return
+end
+if size(acg_y, 2) == n
+    curves = acg_y.';
+    return
+end
+curves = nan(n, size(acg_y, 2));
+n_copy = min(n, size(acg_y, 1));
+curves(1:n_copy, :) = acg_y(1:n_copy, :);
 end
 
 
