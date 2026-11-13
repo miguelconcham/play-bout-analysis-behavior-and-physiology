@@ -24,8 +24,10 @@ if nargin < 1
     checkpoint = '';
 end
 this_dir = fileparts(mfilename('fullpath'));
-repo_root = fileparts(this_dir);
+figures_dir = fileparts(this_dir);
+repo_root = fileparts(figures_dir);
 addpath(this_dir);
+addpath(figures_dir);
 addpath(repo_root);
 if exist('acg_delta_peaks', 'file') ~= 2
     run(fullfile(repo_root, 'add_repo_paths.m'));

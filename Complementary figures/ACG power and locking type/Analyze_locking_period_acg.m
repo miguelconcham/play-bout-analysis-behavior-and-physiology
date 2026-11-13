@@ -1,4 +1,12 @@
 %% Analyze_locking_period_acg
+% OLD UNUSED SCRIPT. The model figures and the neuron examples in this file
+% are not used. The parameter assignments remain in the text so
+% Analyze_locking_period_acg_shuffle can read them. This file returns
+% before any of that work runs.
+return
+
+%{
+%% Analyze_locking_period_acg
 % Mean autocorrelogram of spikes in low and high periods, and in every
 % firing run. Reads the delta-lock table and the firing-run tables written
 % by Estimate_spike_train_parsing. Does not recompute phase locking.
@@ -7556,3 +7564,5 @@ else
     mark = '*';
 end
 end
+
+%}
