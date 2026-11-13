@@ -9,12 +9,12 @@
 % Section 4 only draws. After section 3 has run, edit section 4 and run
 % that section alone.
 %
-% output_folder is set at the start of section 1. Change that path to choose
-% where each figure and analysis_summary.txt are written. Later sections
-% keep that folder when it is already in the workspace. The neuron table,
-% the population matrices, and the lock-type model cache are written to
+% Set output_folder in the workspace before running a section. That path is
+% where each figure and analysis_summary.txt are written. This script does
+% not choose it. The neuron table, the population matrices, and the
+% lock-type model cache are written to
 % Data\Analysis results\acg population logit. A cache or matrix saved by
-% an earlier run is read from the figure folder or from spike train parsing.
+% an earlier run is read from output_folder or from spike train parsing.
 % n_example_neurons and n_example_subplots are set at the start of section 4.
 % n_example_neurons chooses how many of the strongest oscillatory neurons
 % are drawn. The examples also keep the strongest oscillatory neuron from
@@ -82,9 +82,13 @@
 % Kolmogorov-Smirnov test.
 
 %% 1. Load the checkpoint and build the imagesc matrices
-output_folder = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
-    'NPX-OPTO PLAY NMM\PlayBout Analysis\Figures organized by version\' ...
-    'Reviewer Figures\Delta oscillation validation\autocorrelogram as a function of power'];
+% output_folder is an input. Set it in the workspace before running this
+% section. Figures and analysis_summary.txt are written there.
+if ~exist('output_folder', 'var') || isempty(output_folder)
+    error('Plot_acg_population_logit:outputFolder', ...
+        ['Set output_folder to the folder where figures should be saved, ' ...
+        'then run this section.']);
+end
 [output_folder, estimate_folder] = logit_folders(output_folder);
 this_dir = fileparts(mfilename('fullpath'));
 figures_dir = fileparts(this_dir);
@@ -4965,14 +4969,6 @@ root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
 end
 
 
-function folder = default_figure_folder()
-%DEFAULT_FIGURE_FOLDER  Figures and analysis_summary.txt.
-folder = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
-    'NPX-OPTO PLAY NMM\PlayBout Analysis\Figures organized by version\' ...
-    'Reviewer Figures\Delta oscillation validation\autocorrelogram as a function of power'];
-end
-
-
 function folder = logit_result_folder()
 %LOGIT_RESULT_FOLDER  Neuron table, population matrices, and the lock-type cache.
 folder = fullfile(experiment_data_root(), 'Analysis results', 'acg population logit');
@@ -4980,13 +4976,14 @@ end
 
 
 function [figure_folder, estimate_folder] = logit_folders(figure_folder)
-%LOGIT_FOLDERS  Keep the chosen figure folder and prepare the estimate folder.
+%LOGIT_FOLDERS  Use the output_folder given by the caller for figures.
 estimate_folder = logit_result_folder();
-legacy = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
-if isempty(figure_folder) || strcmpi(char(figure_folder), legacy) ...
-        || strcmpi(char(figure_folder), estimate_folder)
-    figure_folder = default_figure_folder();
+if isempty(figure_folder)
+    error('Plot_acg_population_logit:outputFolder', ...
+        ['Set output_folder to the folder where figures should be saved, ' ...
+        'then run this section.']);
 end
+figure_folder = char(figure_folder);
 if exist(figure_folder, 'dir') ~= 7
     mkdir(figure_folder);
 end
