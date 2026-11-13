@@ -61,7 +61,9 @@
 % and the log gap. It also reads the saved
 % power summary and compares, within each neuron, the firing rate of the
 % low-power runs, the high-power runs, and the runs in the all-runs
-% autocorrelogram.
+% autocorrelogram. Each pair is tested with a paired t-test, a
+% signed-rank test, a sign test, and a paired permutation
+% Kolmogorov-Smirnov test.
 
 %% 1. Load the checkpoint and build the imagesc matrices
 output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
@@ -4409,7 +4411,12 @@ report.lines = [report.lines, { ...
     sprintf('Median low-power rate: %.4g sp/s. Median high-power rate: %.4g sp/s. Median %s rate: %.4g sp/s.', ...
         median(report.low), median(report.high), all_name, median(report.all_rate)), ...
     sprintf('Mean low-power rate: %.4g sp/s. Mean high-power rate: %.4g sp/s. Mean %s rate: %.4g sp/s.', ...
-        mean(report.low), mean(report.high), all_name, mean(report.all_rate))}, ...
+        mean(report.low), mean(report.high), all_name, mean(report.all_rate)), ...
+    'Four paired tests are reported for each comparison. All four use the same neurons.', ...
+    'The paired t-test asks whether the mean of the log ratio is zero. That is equal geometric means.', ...
+    'The Wilcoxon signed-rank test asks whether those paired log differences are symmetric around zero.', ...
+    'The sign test asks whether each rate is the higher one equally often. Ties are left out. Its p-value is the exact two-sided binomial probability.', ...
+    'The Kolmogorov-Smirnov test asks whether the two firing-rate distributions match. Its p-value comes from swapping the two rates inside each neuron, 4999 times, with random seed 1. The reported p is one plus the number of swaps at least as large, divided by one plus the number of swaps.'}, ...
     ratio_lines('High power', 'low power', report.high, report.low), ...
     ratio_lines(all_name, 'low power', report.all_rate, report.low), ...
     ratio_lines(all_name, 'high power', report.all_rate, report.high)];
@@ -4418,7 +4425,7 @@ end
 
 function lines = ratio_lines(name_a, name_b, a, b)
 ratio = a(:) ./ b(:);
-stats = compare_two_samples(log(a(:)), log(b(:)), 'paired');
+tests = paired_rate_tests(a, b);
 within_two = mean(ratio >= 0.5 & ratio <= 2);
 within_one_half = mean(ratio >= (2 / 3) & ratio <= 1.5);
 lines = { ...
@@ -4427,7 +4434,12 @@ lines = { ...
         name_a, name_b, median(ratio), exp(mean(log(ratio))), ...
         100 * within_two, 100 * within_one_half), ...
     sprintf('Paired t, log(%s) minus log(%s): mean %.4g, t %.3f, df %.0f, p %.3g.', ...
-        name_a, name_b, stats.difference, stats.t, stats.df, stats.raw_p)};
+        name_a, name_b, tests.t.difference, tests.t.t, tests.t.df, tests.t.raw_p), ...
+    sprintf('Wilcoxon signed-rank on that log difference: p %.3g.', tests.signrank_p), ...
+    sprintf('Sign test: %s higher in %d neurons, %s higher in %d, ties %d, p %.3g.', ...
+        name_a, tests.n_pos, name_b, tests.n_neg, tests.n_tie, tests.sign_p), ...
+    sprintf('Paired permutation Kolmogorov-Smirnov: D %.3g, p %.3g.', ...
+        tests.ks_d, tests.ks_p)};
 end
 
 
@@ -4463,11 +4475,173 @@ end
 end
 
 
+function tests = paired_rate_tests(a, b)
+%PAIRED_RATE_TESTS  Location and distribution tests for one paired rate comparison.
+%
+% The t-test and the signed-rank test use log(a) minus log(b). The sign
+% test uses the sign of a minus b. The Kolmogorov-Smirnov p-value swaps
+% the two rates inside each neuron.
+
+a = a(:);
+b = b(:);
+tests.t = compare_two_samples(log(a), log(b), 'paired');
+tests.signrank_p = paired_log_signrank_p(a, b);
+[tests.sign_p, tests.n_pos, tests.n_neg, tests.n_tie] = paired_sign_p(a, b);
+[tests.ks_d, tests.ks_p] = paired_exchange_ks(a, b);
+end
+
+
+function p = paired_log_signrank_p(a, b)
+log_a = log(a(:));
+log_b = log(b(:));
+if exist('paired_signrank_p', 'file') == 2
+    try
+        p = paired_signrank_p(log_a, log_b, 'both');
+        if isfinite(p)
+            return
+        end
+    catch
+    end
+end
+p = signed_rank_normal_p(log_a - log_b);
+end
+
+
+function p = signed_rank_normal_p(d)
+d = d(isfinite(d) & d ~= 0);
+n = numel(d);
+if n < 2
+    p = nan;
+    return
+end
+magnitude = abs(d);
+[~, order] = sort(magnitude);
+ranks = zeros(n, 1);
+tie_cubic = 0;
+k = 1;
+while k <= n
+    j = k;
+    while j < n && magnitude(order(j + 1)) == magnitude(order(k))
+        j = j + 1;
+    end
+    ranks(order(k:j)) = (k + j) / 2;
+    t = j - k + 1;
+    if t > 1
+        tie_cubic = tie_cubic + t ^ 3 - t;
+    end
+    k = j + 1;
+end
+w_pos = sum(ranks(d > 0));
+mu = n * (n + 1) / 4;
+sigma2 = n * (n + 1) * (2 * n + 1) / 24 - tie_cubic / 48;
+sigma = sqrt(max(sigma2, 0));
+if sigma <= 0
+    p = nan;
+    return
+end
+delta = w_pos - mu;
+z = (delta - 0.5 * sign(delta)) / sigma;
+if delta == 0
+    z = 0;
+end
+p = min(1, erfc(abs(z) / sqrt(2)));
+end
+
+
+function [p, n_pos, n_neg, n_tie] = paired_sign_p(a, b)
+d = a(:) - b(:);
+d = d(isfinite(d));
+n_pos = sum(d > 0);
+n_neg = sum(d < 0);
+n_tie = sum(d == 0);
+n = n_pos + n_neg;
+if n < 1
+    p = nan;
+    return
+end
+p = min(1, 2 * binomial_cdf(min(n_pos, n_neg), n, 0.5));
+end
+
+
+function cdf = binomial_cdf(k, n, probability)
+if k < 0
+    cdf = 0;
+    return
+end
+if k >= n
+    cdf = 1;
+    return
+end
+cdf = 1 - betainc(probability, k + 1, n - k);
+end
+
+
+function [D, p] = paired_exchange_ks(a, b)
+a = a(:);
+b = b(:);
+ok = isfinite(a) & isfinite(b);
+a = a(ok);
+b = b(ok);
+n = numel(a);
+D = two_sample_ks(a, b);
+n_perm = 4999;
+if n < 2 || D == 0
+    p = 1;
+    return
+end
+previous = rng;
+rng(1, 'twister');
+extreme = 0;
+for i = 1:n_perm
+    swap = rand(n, 1) < 0.5;
+    perm_a = a;
+    perm_b = b;
+    perm_a(swap) = b(swap);
+    perm_b(swap) = a(swap);
+    if two_sample_ks(perm_a, perm_b) + eps(D) >= D
+        extreme = extreme + 1;
+    end
+end
+rng(previous);
+p = (extreme + 1) / (n_perm + 1);
+end
+
+
+function D = two_sample_ks(a, b)
+sa = sort(a(:));
+sb = sort(b(:));
+n = numel(sa);
+m = numel(sb);
+if n == 0 || m == 0
+    D = nan;
+    return
+end
+i = 1;
+j = 1;
+D = 0;
+while i <= n || j <= m
+    if j > m || (i <= n && sa(i) <= sb(j))
+        x = sa(i);
+    else
+        x = sb(j);
+    end
+    while i <= n && sa(i) == x
+        i = i + 1;
+    end
+    while j <= m && sb(j) == x
+        j = j + 1;
+    end
+    D = max(D, abs((i - 1) / n - (j - 1) / m));
+end
+end
+
+
 function draw_stratum_rate_figure(low, high, folder)
 open_full_figure('Power stratum firing rates')
 low = low(:);
 high = high(:);
 ratio = high ./ low;
+tests = paired_rate_tests(high, low);
 subplot(1, 2, 1)
 hold on
 span = [min([low; high]), max([low; high])];
@@ -4491,9 +4665,12 @@ yl = ylim;
 plot([0 0], yl, '--', 'Color', [0.35 0.35 0.35], 'LineWidth', 1)
 xlabel('log2(high-power rate / low-power rate)')
 ylabel('Neurons')
+title({sprintf('Paired t p %.3g. Signed-rank p %.3g.', tests.t.raw_p, tests.signrank_p), ...
+    sprintf('Sign test p %.3g. Permutation KS p %.3g.', tests.sign_p, tests.ks_p)}, ...
+    'Interpreter', 'none')
 box off
-sgtitle({'Each point is one neuron.', ...
-    'The dashed line is equal firing rate in the two power tails.'}, ...
+sgtitle({'Each point is one neuron. The dashed line is equal firing rate.', ...
+    'The four p-values test whether the low-power and high-power rates match.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
