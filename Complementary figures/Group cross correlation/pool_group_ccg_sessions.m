@@ -1,12 +1,16 @@
 function summary = pool_group_ccg_sessions(sessions, central_lag)
-%POOL_GROUP_CCG_SESSIONS  Equal-weight mean of the per-session correlograms.
+%POOL_GROUP_CCG_SESSIONS  Normalize each session, then mean and CI.
 %
-% Each saved session is one recording. A session that did not have both
-% groups, or that did not reach the reference-spike minimum, stays out of
-% that pair. The central value of a session is the mean excess, and the
-% mean rate ratio, on lags whose absolute value is at most central_lag.
-% The t-test compares those session means with zero. Holm-Sidak is applied
-% across the directed pairs that have a finite p-value.
+% Each saved session is one recording. Its curve is first divided by that
+% session's own target rate, and one is subtracted, so zero is
+% independence on every recording. A session that did not have both
+% groups, or that did not reach the reference-spike minimum, stays out.
+% The mean and the 95% t interval are then taken across those normalized
+% session values, with each session weighted equally. The central value
+% of a session is the mean normalized excess on lags whose absolute value
+% is at most central_lag. The t-test compares those session means with
+% zero. Holm-Sidak is applied across the directed pairs that have a
+% finite p-value.
 
 if nargin < 2 || isempty(central_lag)
     central_lag = 0.05;
@@ -48,11 +52,17 @@ for s = 1:n_sessions
                 'Session %s pair %d is not %s against %s.', session_names{s}, k, ...
                 names.group_id{names.pair_reference(k)}, names.group_id{names.pair_target(k)});
         end
-        if ~isfield(pair, 'usable') || ~pair.usable || ~isfield(pair, 'excess_rate')
+        if ~isfield(pair, 'usable') || ~pair.usable ...
+                || ~isfield(pair, 'conditional_rate') || ~isfield(pair, 'target_rate')
             continue
         end
-        excess(s, :, k) = double(pair.excess_rate(:))';
-        ratio(s, :, k) = double(pair.rate_ratio(:))';
+        [this_ratio, this_normalized] = normalize_pair_curve( ...
+            pair.conditional_rate, pair.target_rate);
+        if ~any(isfinite(this_normalized))
+            continue
+        end
+        excess(s, :, k) = this_normalized;
+        ratio(s, :, k) = this_ratio;
         n_neurons_reference(s, k) = pair.n_neurons_reference;
         n_neurons_target(s, k) = pair.n_neurons_target;
     end

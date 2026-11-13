@@ -7,10 +7,11 @@
 % and DR.
 %
 % Inside one recording, spikes of a group are pooled and cross-correlated
-% with each of the other groups. Partners-session intervals are the time
-% base, and the correlograms from those intervals are pooled into one
-% curve per pair for that session. Analyze_group_cross_correlation.m then
-% averages those session curves. Run add_repo_paths.m before this script.
+% with each of the other groups at 1 ms. Partners-session intervals are
+% the time base. Counts from those intervals are added, then divided by
+% the reference count and the bin width. Analyze normalizes each session
+% by its own target rate before the mean and the confidence interval.
+% Run add_repo_paths.m before this script.
 
 this_dir = fileparts(mfilename('fullpath'));
 repo_root = fileparts(fileparts(this_dir));
@@ -30,7 +31,7 @@ if exist(saving_folder, 'dir') ~= 7
 end
 
 generator_options.acg_lag = 1;
-generator_options.acg_bin = 0.01;
+generator_options.acg_bin = 0.001;
 generator_options.areas_to_keep = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 generator_options.session_type = 'Partners session';
 generator_options.min_reference_spikes = 50;

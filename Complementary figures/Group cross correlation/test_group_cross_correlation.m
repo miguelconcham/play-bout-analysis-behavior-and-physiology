@@ -33,8 +33,11 @@ assert(isempty(group_id) && group_index == 0, ...
     'An unclassified lock was given a group.');
 
 settings = group_ccg_settings(struct());
-assert(numel(settings.centers) == 200, 'A +/- 1 s axis at 10 ms does not have 200 bins.');
-assert(abs(settings.centers(1) + 0.995) < 1e-12, 'The first bin is not centered at -995 ms.');
+assert(abs(settings.acg_bin - 0.001) < 1e-12, 'The estimate bin is not 1 ms.');
+assert(numel(settings.centers) == 2000, 'A +/- 1 s axis at 1 ms does not have 2000 bins.');
+assert(abs(settings.centers(1) + 0.9995) < 1e-12, 'The first bin is not centered at -999.5 ms.');
+assert(abs(settings.bin_edges(1) + 1) < 1e-12 && abs(settings.bin_edges(end) - 1) < 1e-12, ...
+    'The 1 ms axis does not run from -1 s to 1 s.');
 assert(max(abs(settings.centers + fliplr(settings.centers))) < 1e-12, ...
     'The lag axis is not symmetric.');
 empty_type = group_ccg_settings(struct('session_type', ''));
@@ -172,6 +175,22 @@ assert(abs(summary.holm_p(1) - summary.raw_p(1)) < 1e-12 && isfinite(summary.raw
 assert(all(isnan(summary.holm_p(2:end))), ...
     'A pair without two sessions received a p-value.');
 
+[ratio_one, normalized_one] = normalize_pair_curve([2 4], 2);
+assert(isequal(ratio_one, [1 2]) && isequal(normalized_one, [0 1]), ...
+    'The session curve was not divided by its own target rate.');
+[silent_ratio, silent_norm] = normalize_pair_curve([0 0], 0);
+assert(all(isnan(silent_ratio)) && all(isnan(silent_norm)), ...
+    'A target rate of zero was treated as a finite normalization.');
+high = session_with_rate('A', centers, 20, 10);
+low = session_with_rate('B', centers, 4, 2);
+scaled = pool_group_ccg_sessions([high, low], 0.02);
+assert(abs(scaled.central_mean(1) - 1) < 1e-12, ...
+    'Sessions were averaged in spikes/s instead of after normalization.');
+assert(max(abs(scaled.mean_excess(1, :) - 1)) < 1e-12, ...
+    'The normalized mean kept the firing-rate scale of one session.');
+assert(max(abs(scaled.ci_low(1, :) - 1)) < 1e-9 && max(abs(scaled.ci_high(1, :) - 1)) < 1e-9, ...
+    'The confidence interval was not the spread of the normalized session values.');
+
 adjusted = holm_sidak_adjust([0.01 0.04]);
 assert(abs(adjusted(1) - (1 - 0.99 ^ 2)) < 1e-12, ...
     'The smaller p-value was not adjusted for both tests.');
@@ -225,10 +244,26 @@ for k = 1:n_pairs
     session.pairs(k).target = names.group_id{names.pair_target(k)};
     session.pairs(k).usable = k == 1 && usable;
     if session.pairs(k).usable
+        session.pairs(k).target_rate = 1;
+        session.pairs(k).conditional_rate = excess + 1;
         session.pairs(k).excess_rate = excess;
         session.pairs(k).rate_ratio = excess + 1;
         session.pairs(k).n_neurons_reference = 2;
         session.pairs(k).n_neurons_target = 4;
     end
+end
+end
+
+
+function session = session_with_rate(animal, centers, conditional_rate, target_rate)
+session = session_with_excess(animal, centers, [0 0], true);
+n_bins = numel(centers);
+for k = 1:numel(session.pairs)
+    if ~session.pairs(k).usable
+        continue
+    end
+    session.pairs(k).target_rate = target_rate;
+    session.pairs(k).conditional_rate = conditional_rate * ones(1, n_bins);
+    session.pairs(k).excess_rate = session.pairs(k).conditional_rate - target_rate;
 end
 end

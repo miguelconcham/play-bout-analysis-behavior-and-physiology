@@ -1,15 +1,15 @@
 %% Analyze pooled cross-correlations between the six cell groups
 % Reads the per-session files from Estimate_group_cross_correlation.
-% Each session contributes one excess-rate curve per directed pair. The
-% session is the unit: sessions are averaged with equal weight.
+% Each session curve is normalized before the sessions are combined:
+% conditional rate divided by that session's target rate, minus 1. Zero
+% is independence. A negative value is the fraction by which the target
+% group fell below its own rate. The mean and the 95% t interval are the
+% spread of those normalized session values, with equal session weight.
 %
-% Excess rate is the target group's conditional rate around a reference
-% spike, minus the target's own Partners-session rate. A negative value
-% means the target fired less than its own rate while the reference group
-% was active. The printed test uses the mean excess inside +/- central_lag
+% The printed test uses the mean normalized excess inside +/- central_lag
 % on the unsmoothed curve. The drawn curves are Gaussian-smoothed first,
-% and the ribbon is the 95% t interval of those smoothed session curves.
-% Holm-Sidak is applied across the 30 directed pairs.
+% and the ribbon is the 95% t interval of those smoothed normalized
+% curves. Holm-Sidak is applied across the 30 directed pairs.
 %
 % figure_folder empty keeps the figures on screen and still writes
 % group_ccg_summary.txt in the result folder. A non-empty figure_folder
@@ -52,9 +52,10 @@ for i = 1:numel(files)
         continue
     end
     session = stored.group_ccg;
-    if ~isfield(session, 'version') || session.version ~= 1
+    if ~isfield(session, 'version') || session.version ~= 2
         error('group_ccg:analyze', ...
-            '%s was saved by a different estimate. Re-run Estimate_group_cross_correlation.', ...
+            ['%s was saved at a bin width other than 1 ms. ' ...
+            'Re-run Estimate_group_cross_correlation.'], ...
             files(i).name);
     end
     if isempty(sessions)
@@ -73,12 +74,13 @@ function write_group_ccg_summary(path, summary, alpha)
 names = group_ccg_names();
 lines = cell(numel(summary.pair_reference) + 8, 1);
 lines{1} = 'Pooled cross-correlation between lock type and oscillation class.';
-lines{2} = ['Excess rate is target spikes/s around a reference spike, minus the target rate. ', ...
-    'Negative means the target was below its own rate.'];
+lines{2} = ['Each session is normalized by its own target rate before averaging. ', ...
+    'Normalized excess is rate/expected - 1. Zero is independence. ', ...
+    'Negative means the target was below its own rate. The confidence interval is across sessions.'];
 lines{3} = sprintf('Central window: +/- %.0f ms, unsmoothed. A star in the matrix is Holm-Sidak p < %.2f.', ...
     1000 * summary.central_lag, alpha);
 lines{4} = sprintf('%-28s %-28s %6s %10s %10s %10s %10s %10s', ...
-    'Reference', 'Target', 'N', 'Excess', 'CI low', 'CI high', 'Ratio', 'Holm p');
+    'Reference', 'Target', 'N', 'Norm', 'CI low', 'CI high', 'Ratio', 'Holm p');
 n_lines = 4;
 for k = 1:numel(summary.pair_reference)
     ratio_values = summary.central_ratio(:, k);
@@ -136,7 +138,7 @@ set(gca, 'XTick', 1:n_groups, 'YTick', 1:n_groups, ...
 xtickangle(35);
 xlabel('Target group');
 ylabel('Reference group');
-title(sprintf('Mean excess rate inside +/- %.0f ms', 1000 * summary.central_lag));
+title(sprintf('Mean normalized excess inside +/- %.0f ms', 1000 * summary.central_lag));
 for i = 1:n_groups
     for j = 1:n_groups
         if ~isfinite(matrix(i, j))
@@ -195,14 +197,15 @@ for reference = 1:numel(names.group_id)
         'HandleVisibility', 'off');
     xlim([summary.centers(1), summary.centers(end)]);
     xlabel('Lag (s)');
-    ylabel('Excess rate (spikes/s)');
+    ylabel('Normalized excess (rate / expected - 1)');
     title(base_title{reference}, 'Color', names.color(reference, :));
     if any(plotted)
         legend(legend_text(plotted), 'Location', 'best', 'Box', 'off');
     end
 end
 if exist('sgtitle', 'file') == 2 || exist('sgtitle', 'builtin') == 5
-    sgtitle(sprintf('Smoothed excess, %.0f ms Gaussian. Negative: target below its own rate.', ...
+    sgtitle(sprintf(['Smoothed normalized excess, %.0f ms Gaussian. ', ...
+        'Ribbon: 95%% CI across sessions. Negative: target below its own rate.'], ...
         1000 * smooth_half));
 end
 save_group_figure(fig, figure_folder, 'group_ccg_excess_curves');
