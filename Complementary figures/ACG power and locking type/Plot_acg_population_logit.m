@@ -56,9 +56,11 @@
 % each neuron's low-power autocorrelogram and each neuron's high-power
 % autocorrelogram. For neurons with both tails, it regresses the
 % high-minus-low power gap on the high-minus-low change in the six
-% oscillatory features. The intercept is the gap expected when those
-% features do not change. The scale is the less skewed of the raw gap
-% and the log gap. It also reads the saved
+% oscillatory features and on the high-minus-low change in firing rate.
+% The intercept is the gap expected when those predictors do not change.
+% The scale is the less skewed of the raw gap and the log gap. The same
+% fit is repeated on the non-oscillatory neurons alone. Pearson
+% correlations of the predictors are saved with each fit. It also reads the saved
 % power summary and compares, within each neuron, the firing rate of the
 % low-power runs, the high-power runs, and the runs in the all-runs
 % autocorrelogram. Each pair is tested with a paired t-test, a
@@ -1493,9 +1495,11 @@ write_section_4_summary(output_folder, column_title, cycle_n, cycle_r, cycle_p, 
 
 %% 5. Within-neuron delta-power gap and the feature changes
 % Re-run this section after section 3. One row per neuron that has both
-% tails. The outcome is the high-power mean minus the low-power mean.
-% Each predictor is that same high-minus-low change in an autocorrelogram
-% feature. The intercept is the gap expected when the features do not change.
+% tails and a positive firing rate in each tail. The outcome is the
+% high-power mean minus the low-power mean. Each predictor is that same
+% high-minus-low change in an autocorrelogram feature, or in firing rate.
+% The intercept is the gap expected when those predictors do not change.
+% The same equation is fit again on the non-oscillatory neurons.
 if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
@@ -1547,105 +1551,103 @@ y_low = low_power_delta(power_rows);
 osc = double(ismember(power_rows, osc_rows(:)));
 high_ok = all(isfinite(x_high), 2) & isfinite(y_high) & y_high > 0;
 low_ok = all(isfinite(x_low), 2) & isfinite(y_low) & y_low > 0;
-both = high_ok & low_ok;
+if ~exist('acg_method', 'var') || isempty(acg_method)
+    acg_method = 'overlap';
+end
+if ~exist('acg_count', 'var') || isempty(acg_count)
+    acg_count = 'pairs';
+end
+if ~exist('checkpoint', 'var')
+    checkpoint = '';
+end
+if ~exist('neuron_session', 'var') || ~exist('neuron_cluster_id', 'var') ...
+        || numel(neuron_session) ~= numel(neuron_type) ...
+        || numel(neuron_cluster_id) ~= numel(neuron_type)
+    error('Plot_acg_population_logit:powerModel', ...
+        'Session and cluster id are not in the workspace. Run section 1 first.');
+end
+rate_summary_path = stratum_summary_path(checkpoint, acg_method, acg_count);
+[rate_low_pop, rate_high_pop] = population_stratum_rates( ...
+    rate_summary_path, neuron_session, neuron_cluster_id);
+rate_low_rows = rate_low_pop(power_rows);
+rate_high_rows = rate_high_pop(power_rows);
+rate_ok = isfinite(rate_low_rows) & isfinite(rate_high_rows);
+both = high_ok & low_ok & rate_ok;
 if sum(both) < 3
     error('Plot_acg_population_logit:powerModel', ...
-        'Too few neurons with both a low-power and a high-power tail.');
+        'Too few neurons with both power tails and a positive firing rate in each tail.');
 end
-gap_x = x_high(both, :) - x_low(both, :);
+gap_x = [x_high(both, :) - x_low(both, :), rate_high_rows(both) - rate_low_rows(both)];
+gap_names = [power_feature_names, {'FiringRate'}];
 gap_raw = y_high(both) - y_low(both);
 gap_log = log(y_high(both)) - log(y_low(both));
 gap_osc = osc(both);
-gap_span = max(abs(gap_x(:)));
-if isempty(gap_span) || ~isfinite(gap_span)
-    gap_span = 1;
-end
-gap_sd = std(gap_x, 0, 1);
-gap_keep = isfinite(gap_sd) & gap_sd > eps(gap_span);
-if ~any(gap_keep)
-    error('Plot_acg_population_logit:powerModel', ...
-        'No oscillatory feature changes between the low-power and high-power tails.');
-end
-dropped_gap_names = power_feature_names(~gap_keep);
-power_feature_names = power_feature_names(gap_keep);
-gap_x = gap_x(:, gap_keep);
-if isempty(dropped_gap_names)
-    dropped_gap_line = 'Every listed feature has some high-minus-low change.';
-else
-    dropped_gap_line = ['Left out because the high-minus-low change has no variance: ', ...
-        strjoin(dropped_gap_names, ', '), '.'];
-end
-if size(gap_x, 1) < numel(power_feature_names) + 2
-    error('Plot_acg_population_logit:powerModel', ...
-        'Too few neurons with both a low-power and a high-power tail.');
-end
-power_scale = choose_gap_scale(gap_raw, gap_log);
-if strcmp(power_scale.name, 'log')
-    power_outcome = gap_log;
-    power_outcome_label = 'log high minus log low delta power';
-else
-    power_outcome = gap_raw;
-    power_outcome_label = 'high minus low delta power';
-end
-power_fit = fit_power_feature_model(power_outcome, gap_x, power_feature_names);
-n_power_both = size(gap_x, 1);
+n_rate_missing = sum(high_ok & low_ok & ~rate_ok);
+power_gap = fit_within_neuron_gap(gap_raw, gap_log, gap_x, gap_names, ...
+    'All neurons with both tails');
 n_power_osc = sum(gap_osc == 1);
-fprintf('Within-neuron delta-power gap, n = %d neurons with both tails.\n', n_power_both)
-fprintf('Oscillatory neurons: %d. Non-oscillatory neurons: %d.\n', ...
-    n_power_osc, n_power_both - n_power_osc)
 fprintf('Neurons with only a high-power tail: %d. Only a low-power tail: %d.\n', ...
     sum(high_ok & ~low_ok), sum(low_ok & ~high_ok))
-fprintf('%s\n', dropped_gap_line)
-fprintf('Skewness of the raw gap: %.3f. Skewness of the log gap: %.3f.\n', ...
-    power_scale.skew_raw, power_scale.skew_log)
-fprintf('%s\n', power_scale.reason)
-fprintf('Model outcome: %s. R^2 = %.3f. Adjusted R^2 = %.3f. F(%g,%g) = %.3f, p = %.3g.\n', ...
-    power_outcome_label, power_fit.rsq, power_fit.adj_rsq, ...
-    power_fit.df1, power_fit.df, power_fit.F, power_fit.F_p)
-for i = 1:numel(power_fit.names)
-    fprintf('  %-18s  coefficient %.4g  SE %.4g  t %.3f  p %.3g\n', ...
-        power_fit.names{i}, power_fit.beta(i), power_fit.se(i), ...
-        power_fit.t(i), power_fit.p_value(i))
-end
-draw_power_gap_scale(gap_raw, gap_log, power_scale, output_folder)
-draw_power_model_coefficients(power_fit, power_outcome_label, output_folder)
-power_lines = cell(numel(power_fit.names), 1);
-for i = 1:numel(power_fit.names)
-    power_lines{i} = sprintf('%-18s %12.4g %12.4g %10.3f %10.3g', ...
-        power_fit.names{i}, power_fit.beta(i), power_fit.se(i), ...
-        power_fit.t(i), power_fit.p_value(i));
-end
+fprintf('Both power tails but no positive firing rate in both tails: %d.\n', n_rate_missing)
+fprintf('Oscillatory neurons: %d. Non-oscillatory neurons: %d.\n', ...
+    n_power_osc, power_gap.n - n_power_osc)
+print_gap_model(power_gap)
+draw_power_gap_scale(gap_raw, gap_log, power_gap.scale, output_folder, ...
+    'Delta power gap scale')
+draw_power_model_coefficients(power_gap.fit, power_gap.outcome_label, output_folder, ...
+    'Within-neuron delta power gap')
+draw_regressor_correlation(power_gap.correlation, power_gap.names, output_folder, ...
+    'Delta power gap predictor correlations')
 write_summary_section(output_folder, '5. Within-neuron delta-power gap', join_summary_lines( ...
     ['Output folder: ', output_folder], ...
-    'One row per neuron that has both a low-power tail and a high-power tail.', ...
+    'One row per neuron that has both power tails and a positive firing rate in each tail.', ...
     'A run is high power when its delta power is at or above the neuron''s own 75th percentile.', ...
     'A run is low power when its delta power is at or below the neuron''s own 25th percentile.', ...
     'Delta power of a run is the square of the median delta-band envelope on the neuron channel.', ...
     'The outcome is the high-power mean minus the low-power mean.', ...
     'On the log scale that outcome is log(high) minus log(low).', ...
-    'Each feature predictor is the high-power value minus the low-power value of that feature.', ...
+    'Each autocorrelogram predictor is the high-power value minus the low-power value of that feature.', ...
     'Features are Modulation1, Modulation2, PeakInterval, TroughInterval, OscillationScore, and Baseline.', ...
-    'The intercept is the power gap expected when every feature gap is zero.', ...
-    'A feature slope is the change in the power gap associated with a one-unit within-neuron change in that feature.', ...
+    'FiringRate is the high-power firing rate minus the low-power firing rate, in spikes per second.', ...
+    'Each tail rate is the spike count in that tail divided by the summed duration of its runs.', ...
+    'The intercept is the power gap expected when every predictor change, including the firing-rate change, is zero.', ...
+    'A slope is the change in the power gap associated with a one-unit within-neuron change in that predictor.', ...
     'Each neuron has one row, so the standard errors are ordinary least squares.', ...
-    'The model F tests the feature slopes together. The intercept is the reference gap and is left out of that test.', ...
-    dropped_gap_line, ...
+    'The model F tests the slopes together. The intercept is the reference gap and is left out of that test.', ...
+    'The correlation table is the Pearson correlation of the predictors in this fit. The intercept is not included.', ...
     sprintf('Neurons in the model: %d. Oscillatory: %d. Non-oscillatory: %d.', ...
-        n_power_both, n_power_osc, n_power_both - n_power_osc), ...
+        power_gap.n, n_power_osc, power_gap.n - n_power_osc), ...
     sprintf('Neurons with only a high-power tail: %d. Only a low-power tail: %d.', ...
         sum(high_ok & ~low_ok), sum(low_ok & ~high_ok)), ...
+    sprintf('Both power tails but no positive firing rate in both tails: %d.', n_rate_missing), ...
     sprintf('Mean raw gap, oscillatory: %.4g. Non-oscillatory: %.4g.', ...
         finite_mean(gap_raw(gap_osc == 1)), finite_mean(gap_raw(gap_osc == 0))), ...
     sprintf('Mean log gap, oscillatory: %.4g. Non-oscillatory: %.4g.', ...
         finite_mean(gap_log(gap_osc == 1)), finite_mean(gap_log(gap_osc == 0))), ...
-    sprintf('Skewness of the raw gap: %.3f.', power_scale.skew_raw), ...
-    sprintf('Skewness of the log gap: %.3f.', power_scale.skew_log), ...
-    power_scale.reason, ...
-    sprintf('Fitted outcome: %s.', power_outcome_label), ...
-    sprintf('R^2 = %.3f. Adjusted R^2 = %.3f. F(%g, %g) = %.3f. p = %.3g.', ...
-        power_fit.rsq, power_fit.adj_rsq, power_fit.df1, power_fit.df, power_fit.F, power_fit.F_p), ...
-    sprintf('%-18s %12s %12s %10s %10s', 'Term', 'Coefficient', 'SE', 't', 'p'), ...
-    power_lines))
+    gap_fit_lines(power_gap)))
+non_osc = gap_osc == 0;
+non_gap = fit_within_neuron_gap(gap_raw(non_osc), gap_log(non_osc), ...
+    gap_x(non_osc, :), gap_names, 'Non-oscillatory neurons with both tails');
+fprintf('Non-oscillatory gap model. Oscillatory neurons left out: %d.\n', n_power_osc)
+print_gap_model(non_gap)
+draw_power_gap_scale(gap_raw(non_osc), gap_log(non_osc), non_gap.scale, output_folder, ...
+    'Delta power gap scale, non-oscillatory')
+draw_power_model_coefficients(non_gap.fit, non_gap.outcome_label, output_folder, ...
+    'Within-neuron delta power gap, non-oscillatory')
+draw_regressor_correlation(non_gap.correlation, non_gap.names, output_folder, ...
+    'Delta power gap predictor correlations, non-oscillatory')
+write_summary_section(output_folder, ...
+    '5c. Within-neuron delta-power gap, non-oscillatory neurons', join_summary_lines( ...
+    ['Output folder: ', output_folder], ...
+    'This is the same within-neuron equation as section 5, fit only on neurons outside the oscillatory group.', ...
+    'The oscillatory group is cluster 1 from section 3.', ...
+    'One row per non-oscillatory neuron that has both power tails and a positive firing rate in each tail.', ...
+    'The outcome, the six feature changes, and FiringRate are defined as in section 5.', ...
+    'The scale is chosen again from the skewness of this subset.', ...
+    'The correlation table is the Pearson correlation of the predictors in this subset.', ...
+    sprintf('Non-oscillatory neurons in this fit: %d. Oscillatory neurons left out: %d.', ...
+        non_gap.n, n_power_osc), ...
+    gap_fit_lines(non_gap)))
 
 % Firing rates are already stored on the power-split summary. This block
 % only reads them. It does not rebuild the autocorrelograms.
@@ -1655,14 +1657,11 @@ end
 if ~exist('acg_count', 'var') || isempty(acg_count)
     acg_count = 'pairs';
 end
-if exist('checkpoint', 'var') && ~isempty(checkpoint)
-    rate_summary_path = fullfile(fileparts(checkpoint), ...
-        locking_summary_filename(false, acg_method, acg_count));
-else
-    rate_data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
-        'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
-    rate_summary_path = fullfile(rate_data_root, 'Analysis results', ...
-        'spike train parsing', locking_summary_filename(false, acg_method, acg_count));
+if ~exist('checkpoint', 'var')
+    checkpoint = '';
+end
+if ~exist('rate_summary_path', 'var') || isempty(rate_summary_path)
+    rate_summary_path = stratum_summary_path(checkpoint, acg_method, acg_count);
 end
 if ~exist('neuron_session', 'var') || ~exist('neuron_cluster_id', 'var') ...
         || numel(neuron_session) ~= numel(neuron_cluster_id)
@@ -4274,8 +4273,144 @@ end
 end
 
 
-function draw_power_gap_scale(raw_gap, log_gap, scale, folder)
-open_full_figure('Delta power gap scale')
+function result = fit_within_neuron_gap(gap_raw, gap_log, gap_x, names, sample_name)
+%FIT_WITHIN_NEURON_GAP  Power gap on predictor gaps, plus their correlation.
+
+gap_raw = gap_raw(:);
+gap_log = gap_log(:);
+names = names(:)';
+if size(gap_x, 1) ~= numel(gap_raw) || numel(gap_log) ~= numel(gap_raw)
+    error('Plot_acg_population_logit:powerModel', ...
+        'The power-gap rows and the predictor rows do not match.');
+end
+if size(gap_x, 1) < 3
+    error('Plot_acg_population_logit:powerModel', ...
+        'Too few neurons for the gap model (%s).', sample_name);
+end
+span = max(abs(gap_x(:)));
+if isempty(span) || ~isfinite(span)
+    span = 1;
+end
+gap_sd = std(gap_x, 0, 1);
+keep = isfinite(gap_sd) & gap_sd > eps(span);
+if ~any(keep)
+    error('Plot_acg_population_logit:powerModel', ...
+        'No predictor changes between the tails for %s.', sample_name);
+end
+dropped = names(~keep);
+names = names(keep);
+gap_x = gap_x(:, keep);
+if isempty(dropped)
+    result.dropped_line = 'Every listed predictor has some high-minus-low change.';
+else
+    result.dropped_line = ['Left out because the high-minus-low change has no variance: ', ...
+        strjoin(dropped, ', '), '.'];
+end
+if size(gap_x, 1) < numel(names) + 2
+    error('Plot_acg_population_logit:powerModel', ...
+        'Too few neurons for the predictors that remain (%s).', sample_name);
+end
+result.scale = choose_gap_scale(gap_raw, gap_log);
+if strcmp(result.scale.name, 'log')
+    result.outcome = gap_log;
+    result.outcome_label = 'log high minus log low delta power';
+else
+    result.outcome = gap_raw;
+    result.outcome_label = 'high minus low delta power';
+end
+result.fit = fit_power_feature_model(result.outcome, gap_x, names);
+result.names = names;
+result.n = size(gap_x, 1);
+result.correlation = corr(gap_x);
+result.correlation_lines = correlation_table_lines(result.correlation, names);
+result.sample_name = sample_name;
+end
+
+
+function print_gap_model(result)
+fprintf('%s. n = %d.\n', result.sample_name, result.n)
+fprintf('%s\n', result.dropped_line)
+fprintf('Skewness of the raw gap: %.3f. Skewness of the log gap: %.3f.\n', ...
+    result.scale.skew_raw, result.scale.skew_log)
+fprintf('%s\n', result.scale.reason)
+fprintf('Model outcome: %s. R^2 = %.3f. Adjusted R^2 = %.3f. F(%g,%g) = %.3f, p = %.3g.\n', ...
+    result.outcome_label, result.fit.rsq, result.fit.adj_rsq, ...
+    result.fit.df1, result.fit.df, result.fit.F, result.fit.F_p)
+for i = 1:numel(result.fit.names)
+    fprintf('  %-18s  coefficient %.4g  SE %.4g  t %.3f  p %.3g\n', ...
+        result.fit.names{i}, result.fit.beta(i), result.fit.se(i), ...
+        result.fit.t(i), result.fit.p_value(i))
+end
+fprintf('Predictor correlations:\n')
+for i = 1:numel(result.correlation_lines)
+    fprintf('%s\n', result.correlation_lines{i})
+end
+end
+
+
+function lines = gap_fit_lines(result)
+coeff = cell(numel(result.fit.names), 1);
+for i = 1:numel(result.fit.names)
+    coeff{i} = sprintf('%-18s %12.4g %12.4g %10.3f %10.3g', ...
+        result.fit.names{i}, result.fit.beta(i), result.fit.se(i), ...
+        result.fit.t(i), result.fit.p_value(i));
+end
+lines = [{ ...
+    result.dropped_line, ...
+    sprintf('Skewness of the raw gap: %.3f.', result.scale.skew_raw), ...
+    sprintf('Skewness of the log gap: %.3f.', result.scale.skew_log), ...
+    result.scale.reason, ...
+    sprintf('Fitted outcome: %s.', result.outcome_label), ...
+    sprintf('R^2 = %.3f. Adjusted R^2 = %.3f. F(%g, %g) = %.3f. p = %.3g.', ...
+        result.fit.rsq, result.fit.adj_rsq, result.fit.df1, result.fit.df, ...
+        result.fit.F, result.fit.F_p), ...
+    sprintf('%-18s %12s %12s %10s %10s', 'Term', 'Coefficient', 'SE', 't', 'p')}, ...
+    coeff(:)', { ...
+    'Pearson correlation of the predictors:', ...
+    }, result.correlation_lines(:)'];
+if result.fit.collinear
+    lines{end + 1} = 'The predictor columns are collinear, so the slope standard errors are not reported.';
+end
+end
+
+
+function lines = correlation_table_lines(correlation, names)
+names = names(:)';
+n = numel(names);
+width = max(cellfun(@numel, names));
+width = max(width, 6);
+header = blanks(width);
+for j = 1:n
+    header = [header, ' ', sprintf('%*s', width, names{j})]; %#ok<AGROW>
+end
+lines = cell(n + 2, 1);
+lines{1} = header;
+for i = 1:n
+    row = sprintf('%*s', width, names{i});
+    for j = 1:n
+        row = [row, ' ', sprintf('%*.3f', width, correlation(i, j))]; %#ok<AGROW>
+    end
+    lines{i + 1} = row;
+end
+off = abs(correlation);
+off(1:n + 1:end) = -inf;
+[peak, idx] = max(off(:));
+if isempty(idx) || ~isfinite(peak)
+    lines{n + 2} = 'No off-diagonal correlation could be computed.';
+    return
+end
+[row_i, col_i] = ind2sub([n, n], idx);
+lines{n + 2} = sprintf( ...
+    'Largest absolute correlation off the diagonal: %s and %s, r = %.3f.', ...
+    names{row_i}, names{col_i}, correlation(row_i, col_i));
+end
+
+
+function draw_power_gap_scale(raw_gap, log_gap, scale, folder, figure_name)
+if nargin < 5 || isempty(figure_name)
+    figure_name = 'Delta power gap scale';
+end
+open_full_figure(figure_name)
 subplot(1, 2, 1)
 histogram(raw_gap, 'FaceColor', [0.25 0.35 0.55], 'EdgeColor', 'none')
 xlabel('High minus low delta power')
@@ -4294,13 +4429,28 @@ save_script_figure(folder)
 end
 
 
-function draw_power_model_coefficients(fit, outcome_label, folder)
-open_full_figure('Within-neuron delta power gap')
+function draw_regressor_correlation(correlation, names, folder, figure_name)
+open_full_figure(figure_name)
+heatmap(names, names, correlation, 'ColorLimits', [-1 1])
+title('Pearson correlation of the high-minus-low predictors')
+save_script_figure(folder)
+end
+
+
+function draw_power_model_coefficients(fit, outcome_label, folder, figure_name)
+if nargin < 4 || isempty(figure_name)
+    figure_name = 'Within-neuron delta power gap';
+end
+open_full_figure(figure_name)
 shown = 2:numel(fit.names);
 hold on
-color = [0.25 0.35 0.55];
 for i = 1:numel(shown)
     k = shown(i);
+    if strcmp(fit.names{k}, 'FiringRate')
+        color = [0.75 0.42 0.18];
+    else
+        color = [0.25 0.35 0.55];
+    end
     plot([i i], fit.beta(k) + fit.se(k) * [-1.96 1.96], 'Color', color, 'LineWidth', 1.4)
     plot(i, fit.beta(k), 'o', 'MarkerFaceColor', color, 'MarkerEdgeColor', color)
 end
@@ -4314,11 +4464,70 @@ end
 ylabel(['Coefficient on ', outcome_label])
 box off
 sgtitle({sprintf('%s. R^2 = %.3f. F p = %.3g.', outcome_label, fit.rsq, fit.F_p), ...
-    'Each coefficient is the high-minus-low feature change.', ...
-    'The intercept is the power gap when every feature change is zero. It is not drawn.', ...
+    'Navy is a high-minus-low autocorrelogram feature.', ...
+    'Orange is FiringRate, the high-minus-low firing rate in spikes/s.', ...
+    'The intercept is the power gap when every predictor change is zero. It is not drawn.', ...
     'Whiskers are the coefficient plus or minus 1.96 standard errors.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
+end
+
+
+function path = stratum_summary_path(checkpoint, method, count)
+if ~isempty(checkpoint)
+    path = fullfile(fileparts(checkpoint), ...
+        locking_summary_filename(false, method, count));
+    return
+end
+data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
+    'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
+path = fullfile(data_root, 'Analysis results', 'spike train parsing', ...
+    locking_summary_filename(false, method, count));
+end
+
+
+function [low, high] = population_stratum_rates(summary_path, session, cluster_id)
+%POPULATION_STRATUM_RATES  Tail rates aligned to the population rows.
+%
+% Unmatched neurons, and neurons without a positive rate in both tails,
+% are NaN.
+
+n_pop = numel(cluster_id);
+low = nan(n_pop, 1);
+high = nan(n_pop, 1);
+if isempty(summary_path) || exist(summary_path, 'file') ~= 2
+    error('Plot_acg_population_logit:powerModel', ...
+        'The locking summary was not found at %s.', summary_path);
+end
+try
+    stored = load(summary_path, 'power_acg');
+catch
+    error('Plot_acg_population_logit:powerModel', ...
+        'The locking summary could not be read.');
+end
+if ~isfield(stored, 'power_acg') || ~isfield(stored.power_acg, 'all_neurons')
+    error('Plot_acg_population_logit:powerModel', ...
+        'The summary has no power_acg.all_neurons.');
+end
+block = stored.power_acg.all_neurons;
+if ~isfield(block, 'rate_low') || ~isfield(block, 'rate_high') ...
+        || ~isfield(block, 'session') || ~isfield(block, 'cluster_id')
+    error('Plot_acg_population_logit:powerModel', ...
+        'The power summary has no session, cluster id, rate_low, and rate_high.');
+end
+rate_low = double(block.rate_low(:));
+rate_high = double(block.rate_high(:));
+n = min(numel(rate_low), numel(rate_high));
+summary_keys = neuron_keys(block.session, block.cluster_id);
+n = min(n, numel(summary_keys));
+pop_keys = neuron_keys(session, cluster_id);
+[found, loc] = ismember(pop_keys, summary_keys(1:n));
+use = found(:) & loc(:) >= 1 & loc(:) <= n;
+low(use) = rate_low(loc(use));
+high(use) = rate_high(loc(use));
+bad = ~(isfinite(low) & isfinite(high) & low > 0 & high > 0);
+low(bad) = nan;
+high(bad) = nan;
 end
 
 
