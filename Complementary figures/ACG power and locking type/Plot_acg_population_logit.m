@@ -66,6 +66,8 @@
 % and all runs. Neurons on one channel are averaged, then channels in one
 % area and session are averaged. A session intercept is removed before
 % area is tested, and the figure shows those session-adjusted values.
+% When that area test is below 0.05, pairwise comparisons are Holm-Sidak
+% adjusted and significant pairs are drawn with a line and stars.
 % It also reads the saved
 % power summary and compares, within each neuron, the firing rate of the
 % low-power runs, the high-power runs, and the runs in the all-runs
@@ -4669,6 +4671,8 @@ holm = holm_sidak_adjust(pearson_p);
 report.n = sum(isfinite(rate));
 report.names = feature_names;
 report.pearson = pearson;
+report.pearson_p = pearson_p;
+report.holm = holm;
 report.slope = slope;
 report.slope_se = slope_se;
 report.lines = cell(n_features + 1, 1);
@@ -4736,9 +4740,20 @@ if ~isfield(report, 'pearson') || isempty(report.pearson)
 end
 open_full_figure('Feature change versus firing-rate change')
 hold on
-color = [0.25 0.35 0.55];
 for i = 1:numel(report.pearson)
-    plot(i, report.pearson(i), 'o', 'MarkerFaceColor', color, 'MarkerEdgeColor', color)
+    significant = isfinite(report.pearson_p(i)) && report.pearson_p(i) < 0.05;
+    if significant
+        color = [0.85 0.15 0.15];
+    else
+        color = [0 0 0];
+    end
+    plot(i, report.pearson(i), 'o', 'MarkerFaceColor', color, ...
+        'MarkerEdgeColor', color, 'MarkerSize', 8)
+    if isfinite(report.pearson_p(i))
+        text(i, report.pearson(i), sprintf('p = %.3g', report.pearson_p(i)), ...
+            'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
+            'Interpreter', 'none', 'Color', color)
+    end
 end
 plot([0.5, numel(report.pearson) + 0.5], [0 0], 'Color', [0.5 0.5 0.5])
 set(gca, 'XTick', 1:numel(report.names), 'XTickLabel', report.names)
@@ -4748,10 +4763,11 @@ try
 catch
 end
 ylabel('Pearson r, feature change vs firing-rate change')
-ylim([-1 1])
+ylim([-1.25 1.35])
 box off
 sgtitle({'Each correlation uses one neuron with both power tails.', ...
-    'The feature change and the firing-rate change are high minus low.'}, ...
+    'The feature change and the firing-rate change are high minus low.', ...
+    'Red marks a Pearson p below 0.05. The number above each dot is that p.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
@@ -4986,6 +5002,8 @@ result.lines = [result.lines, { ...
     'The model has a separate intercept for each session, because sessions differ in overall power.', ...
     'Area is tested after those session intercepts. The error is the remaining variation of the area differences across sessions.', ...
     'The figure subtracts the fitted session intercept from each point.', ...
+    'When the area test is below 0.05, every area pair is compared in the same model.', ...
+    'Holm-Sidak adjusts those pairs. A line and stars are drawn for each pair that stays below 0.05.', ...
     sprintf('Neurons with a finite %s value and a known channel: %d.', condition_label, packed.n_neurons), ...
     sprintf('Channels: %d. Session-area rows: %d.', packed.n_channels, numel(packed.y)), ...
     sprintf('Neurons with no channel match: %d.', packed.n_unmatched), ...
@@ -5214,6 +5232,76 @@ for a = 1:n_area
     tested.lines{end + 1} = sprintf('%-12s %12.4g %12.4g %12.4g %10.3f %10.3g %10.3g', ...
         area_levels{a}, tested.area_level(a), effect(a), se(a), tstat(a), raw_p(a), holm(a)); %#ok<AGROW>
 end
+n_pairs = n_area * (n_area - 1) / 2;
+pair_index = zeros(n_pairs, 2);
+pair_diff = nan(n_pairs, 1);
+pair_se = nan(n_pairs, 1);
+pair_raw = nan(n_pairs, 1);
+k = 0;
+for a = 1:n_area
+    for b = a + 1:n_area
+        k = k + 1;
+        pair_index(k, :) = [a, b];
+        contrast = area_pair_contrast(a, b, n_a);
+        difference = contrast' * area_beta;
+        pair_se_k = sqrt(max(real(contrast' * area_cov * contrast), 0));
+        pair_diff(k) = difference;
+        pair_se(k) = pair_se_k;
+        if pair_se_k > 0
+            pair_raw(k) = two_sided_t_p(difference / pair_se_k, df2);
+        elseif difference ~= 0
+            pair_raw(k) = 0;
+        else
+            pair_raw(k) = 1;
+        end
+    end
+end
+run_pairs = isfinite(p) && p < 0.05;
+tested.pair_index = zeros(0, 2);
+tested.pair_holm = zeros(0, 1);
+if ~run_pairs
+    tested.lines{end + 1} = 'Pairwise area comparisons were not run, because the area test was not below 0.05.';
+    return
+end
+pair_holm = holm_sidak_adjust(pair_raw);
+tested.pair_index = pair_index;
+tested.pair_holm = pair_holm(:);
+tested.lines{end + 1} = ['Pairwise differences are area levels from the same model. ', ...
+    'Holm-Sidak adjusts those pairs. The figure draws a line and stars when the adjusted p is below 0.05.'];
+tested.lines{end + 1} = sprintf('%-28s %12s %12s %10s %10s %10s', ...
+    'Pair', 'Difference', 'SE', 't', 'p', 'Holm');
+for k = 1:n_pairs
+    if pair_se(k) > 0
+        t_pair = pair_diff(k) / pair_se(k);
+    elseif pair_diff(k) ~= 0
+        t_pair = inf;
+    else
+        t_pair = 0;
+    end
+    tested.lines{end + 1} = sprintf('%-28s %12.4g %12.4g %10.3f %10.3g %10.3g', ...
+        sprintf('%s vs %s', area_levels{pair_index(k, 1)}, area_levels{pair_index(k, 2)}), ...
+        pair_diff(k), pair_se(k), t_pair, pair_raw(k), pair_holm(k)); %#ok<AGROW>
+end
+end
+
+
+function contrast = area_pair_contrast(first_area, second_area, n_coded)
+%AREA_PAIR_CONTRAST  Coefficients for the first area level minus the second.
+%
+% The last area is the omitted effect-coded level, equal to minus the sum
+% of the coded area coefficients.
+
+contrast = zeros(n_coded, 1);
+if first_area <= n_coded
+    contrast(first_area) = contrast(first_area) + 1;
+else
+    contrast = contrast - 1;
+end
+if second_area <= n_coded
+    contrast(second_area) = contrast(second_area) - 1;
+else
+    contrast = contrast + 1;
+end
 end
 
 
@@ -5251,6 +5339,12 @@ for a = 1:numel(areas)
     plot([a - 0.25, a + 0.25], result.tested.area_level(a) * [1 1], ...
         'Color', [0.1 0.1 0.1], 'LineWidth', 1.6)
 end
+y_top = nan;
+if isfield(result.tested, 'pair_holm') && any(result.tested.pair_holm < 0.05)
+    show = result.tested.pair_holm < 0.05;
+    y_top = draw_sig_brackets(result.tested.pair_index(show, :), ...
+        result.tested.pair_holm(show), result.tested.adjusted);
+end
 xlim([0.4, numel(areas) + 0.6])
 set(gca, 'XTick', 1:numel(areas), 'XTickLabel', areas)
 try
@@ -5259,12 +5353,17 @@ catch
 end
 ylabel(['Session-adjusted ', result.scale_label])
 box off
+if isfinite(y_top)
+    yl = ylim;
+    ylim([yl(1), max(yl(2), y_top)])
+end
 sgtitle({sprintf('%s. Area after session intercepts: F(%g, %g) = %.3f, p = %.3g.', ...
     result.condition_label, result.tested.df1, result.tested.df2, ...
     result.tested.F, result.tested.p), ...
     'Each point is one session, after that session intercept is subtracted.', ...
     'It starts as the mean of the channel means in that area.', ...
-    'The line is the area level from the model.'}, ...
+    'The line is the area level from the model.', ...
+    'A connecting line and stars mark a pair whose Holm-Sidak p is below 0.05.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
