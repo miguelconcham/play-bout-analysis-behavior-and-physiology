@@ -1,23 +1,28 @@
-function draw_ccg_columns(figure_folder, file_name, reference_title, columns, centers)
+function draw_ccg_columns(figure_folder, file_name, reference_title, columns, centers, x_lim)
 %DRAW_CCG_COLUMNS  One reference group: a column per other group, three rows.
 %
 % columns(c).title is the target group. columns(c).top and
 % columns(c).middle are images, rows by lag. columns(c).mean, lo, and hi
 % are the bottom trace and its 95% interval. The two images share one
-% color scale. Zero on the bottom row is independence after normalization.
+% color scale. x_lim is the lag window in seconds, [-0.5 0.5] when omitted.
+% The bottom y-axis is set from the mean curve and its interval inside
+% that window. Zero on the bottom row is independence after normalization.
 
+if nargin < 6 || isempty(x_lim)
+    x_lim = [-0.5 0.5];
+end
 n_columns = numel(columns);
 if n_columns < 1
     return
 end
 fig = figure('Name', reference_title, 'Color', 'w', ...
     'Units', 'normalized', 'Position', [0.02 0.06 0.96 0.86]);
-limit = color_limit(columns);
+limit = color_limit(columns, centers, x_lim);
 for c = 1:n_columns
-    draw_image(centers, columns(c).top, 3, n_columns, c, limit);
+    draw_image(centers, columns(c).top, 3, n_columns, c, limit, x_lim);
     ylabel(columns(c).top_label);
     title(columns(c).title);
-    draw_image(centers, columns(c).middle, 3, n_columns, n_columns + c, limit);
+    draw_image(centers, columns(c).middle, 3, n_columns, n_columns + c, limit, x_lim);
     ylabel(columns(c).middle_label);
     subplot(3, n_columns, 2 * n_columns + c);
     hold on
@@ -25,8 +30,9 @@ for c = 1:n_columns
     if any(isfinite(columns(c).mean))
         plot(centers, columns(c).mean, 'k', 'LineWidth', 1.4);
     end
-    plot(centers([1 end]), [0 0], 'Color', [0.75 0.75 0.75], 'HandleVisibility', 'off');
-    xlim([centers(1), centers(end)]);
+    plot(x_lim, [0 0], 'Color', [0.75 0.75 0.75], 'HandleVisibility', 'off');
+    xlim(x_lim);
+    ylim(ccg_mean_ylim(columns(c).mean, columns(c).lo, columns(c).hi, centers, x_lim));
     xlabel('Lag (s)');
     if c == 1
         ylabel('Normalized excess');
@@ -49,7 +55,7 @@ print(fig, fullfile(figure_folder, [file_name, '.jpg']), '-djpeg', '-r200');
 end
 
 
-function draw_image(centers, image, n_rows, n_columns, slot, limit)
+function draw_image(centers, image, n_rows, n_columns, slot, limit, x_lim)
 subplot(n_rows, n_columns, slot);
 if isempty(image) || ~any(isfinite(image(:)))
     axis off
@@ -59,7 +65,7 @@ imagesc(centers, 1:size(image, 1), image);
 set(gca, 'Color', [0.93 0.93 0.93]);
 caxis([-limit, limit]);
 colormap(gca, blue_red_map());
-xlim([centers(1), centers(end)]);
+xlim(x_lim);
 end
 
 
@@ -74,11 +80,12 @@ fill([centers(covered), fliplr(centers(covered))], ...
 end
 
 
-function limit = color_limit(columns)
+function limit = color_limit(columns, centers, x_lim)
+shown = centers >= x_lim(1) & centers <= x_lim(2);
 values = zeros(0, 1);
 for c = 1:numel(columns)
-    top = columns(c).top(isfinite(columns(c).top));
-    middle = columns(c).middle(isfinite(columns(c).middle));
+    top = visible_values(columns(c).top, shown);
+    middle = visible_values(columns(c).middle, shown);
     values = [values; top(:); middle(:)]; %#ok<AGROW>
 end
 if isempty(values)
@@ -92,6 +99,19 @@ end
 if ~isfinite(limit) || limit <= 0
     limit = 1;
 end
+end
+
+
+function values = visible_values(image, shown)
+if isempty(image) || ~any(shown)
+    values = [];
+    return
+end
+if size(image, 2) ~= numel(shown)
+    shown = true(1, size(image, 2));
+end
+block = image(:, shown);
+values = block(isfinite(block));
 end
 
 

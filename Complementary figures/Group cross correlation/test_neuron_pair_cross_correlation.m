@@ -58,6 +58,21 @@ assert(max(abs(summary.ci_low(1, :) - summary.mean_excess(1, :))) < 1e-8, ...
 assert(size(summary.pair_excess{1}, 1) == 2, ...
     'The neuron-pair image does not have one row per pair.');
 
+centers = (-10:10) * 0.001;
+impulse = zeros(2, numel(centers));
+impulse(:, 11) = 1;
+untouched = smooth_ccg_matrix(impulse, centers, 1);
+assert(isequal(untouched, impulse), ...
+    'A Gaussian no wider than the 1 ms bin changed the correlogram.');
+smoothed = smooth_ccg_matrix(impulse, centers, 4);
+assert(all(smoothed(:, 11) < 1) && all(smoothed(:, 10) > 0) && all(smoothed(:, 12) > 0), ...
+    'The Gaussian did not spread each correlogram into the neighboring bins.');
+assert(max(abs(smoothed(1, :) - smoothed(2, :))) < 1e-12, ...
+    'The two correlogram rows were not smoothed separately to the same shape.');
+y_lim = ccg_mean_ylim(ones(1, 5), 0.8 * ones(1, 5), 1.2 * ones(1, 5), 1:5, [1 5]);
+assert(y_lim(1) > 0.7 && y_lim(1) < 0.8 && y_lim(2) > 1.2 && y_lim(2) < 1.3, ...
+    'The y-axis was not set just outside the mean and its interval.');
+
 disp('Neuron-pair cross-correlation checks passed.')
 end
 

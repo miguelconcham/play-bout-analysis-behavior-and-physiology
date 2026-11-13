@@ -6,8 +6,11 @@
 %
 % One figure per reference group. Each column is one of the other groups.
 % The top row is every neuron pair. The middle row is one row per
-% session. The bottom row is the session mean and its confidence interval.
-% Overlaid target groups are not drawn in the same axes.
+% session. The bottom row is the mean of the smoothed session
+% correlograms and its confidence interval. smooth_ms is the Gaussian
+% standard deviation in milliseconds. A value no larger than the bin
+% width leaves every correlogram unsmoothed. x_lim is the lag window in
+% seconds. Overlaid target groups are not drawn in the same axes.
 
 %% Paths and parameters
 this_dir = fileparts(mfilename('fullpath'));
@@ -17,6 +20,8 @@ run(fullfile(repo_root, 'add_repo_paths.m'));
 data_root = group_ccg_data_root();
 result_folder = fullfile(data_root, 'Analysis results', 'neuron pair cross correlation');
 central_lag = 0.05;
+smooth_ms = 30;
+x_lim = [-0.5 0.5];
 alpha = 0.05;
 figure_folder = result_folder;
 
@@ -25,7 +30,7 @@ summary = pool_neuron_pair_sessions(sessions, central_lag);
 summary_path = fullfile(result_folder, 'neuron_pair_ccg_summary.txt');
 write_neuron_pair_summary(summary_path, summary, alpha);
 fprintf('Summary: %s\n', summary_path);
-draw_neuron_pair_figures(summary, alpha, figure_folder);
+draw_neuron_pair_figures(summary, alpha, smooth_ms, x_lim, figure_folder);
 
 
 function sessions = load_neuron_pair_sessions(result_folder)
@@ -87,7 +92,7 @@ clear cleanup
 end
 
 
-function draw_neuron_pair_figures(summary, alpha, figure_folder)
+function draw_neuron_pair_figures(summary, alpha, smooth_ms, x_lim, figure_folder)
 names = group_ccg_names();
 for reference = 1:numel(names.group_id)
     columns = empty_columns(numel(names.group_id) - 1);
@@ -97,12 +102,15 @@ for reference = 1:numel(names.group_id)
             continue
         end
         slot = slot + 1;
-        pairs = finite_image_rows(summary.pair_excess{k});
+        pairs = smooth_ccg_matrix(finite_image_rows(summary.pair_excess{k}), ...
+            summary.centers, smooth_ms);
         sessions = squeeze(summary.session_excess(:, :, k));
         if size(summary.session_excess, 1) == 1
             sessions = sessions(:)';
         end
-        sessions = finite_image_rows(sessions);
+        sessions = smooth_ccg_matrix(finite_image_rows(sessions), ...
+            summary.centers, smooth_ms);
+        [mu, lo, hi] = smoothed_session_ci(sessions, numel(summary.centers));
         columns(slot).title = names.title{summary.pair_target(k)};
         if isfinite(summary.holm_p(k)) && summary.holm_p(k) < alpha
             columns(slot).title = [columns(slot).title, ' *'];
@@ -111,15 +119,15 @@ for reference = 1:numel(names.group_id)
         columns(slot).middle = sort_image_rows(sessions, summary.centers, summary.central_lag);
         columns(slot).top_label = 'Neuron pairs';
         columns(slot).middle_label = 'Sessions';
-        columns(slot).mean = summary.mean_excess(k, :);
-        columns(slot).lo = summary.ci_low(k, :);
-        columns(slot).hi = summary.ci_high(k, :);
+        columns(slot).mean = mu;
+        columns(slot).lo = lo;
+        columns(slot).hi = hi;
         columns(slot).note = sprintf('sessions %d, pairs %d', ...
             summary.n_sessions(k), summary.n_pairs(k));
     end
     draw_ccg_columns(figure_folder, ...
         ['neuron_pair_ccg_', names.group_id{reference}], ...
-        names.title{reference}, columns, summary.centers);
+        names.title{reference}, columns, summary.centers, x_lim);
 end
 end
 
@@ -138,6 +146,30 @@ if isempty(image)
     return
 end
 image = image(any(isfinite(image), 2), :);
+end
+
+
+function [mu, lo, hi] = smoothed_session_ci(sample, n_bins)
+mu = nan(1, n_bins);
+lo = mu;
+hi = mu;
+if isempty(sample)
+    return
+end
+for b = 1:size(sample, 2)
+    values = sample(:, b);
+    values = values(isfinite(values));
+    if isempty(values)
+        continue
+    end
+    mu(b) = mean(values);
+    if numel(values) < 2
+        continue
+    end
+    half = tinv(0.975, numel(values) - 1) * std(values) / sqrt(numel(values));
+    lo(b) = mu(b) - half;
+    hi(b) = mu(b) + half;
+end
 end
 
 
