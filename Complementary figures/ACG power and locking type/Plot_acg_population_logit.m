@@ -578,7 +578,9 @@ disp(['Run section 3 to keep ', cluster_method_label, ' cluster 1.'])
 %% 3. Choose the oscillatory neurons
 % Cluster 1 is the higher-modulation group of cluster_method. Its rows are
 % the complete feature rows, not yet the image rows. The strongest
-% modulation is placed first.
+% modulation is placed first. This section also writes
+% oscillatory_neuron_labels.csv, with the session and neuron id of every
+% population neuron and whether that neuron was classified as oscillatory.
 if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
@@ -597,6 +599,18 @@ osc_member = false(numel(neuron_type), 1);
 osc_member(complete_rows(idx_cluster == 1)) = true;
 osc_rows = oscillatory_member_rows(osc_member, osc_score);
 osc_neuron_type = neuron_type(osc_rows);
+if ~exist('neuron_session', 'var') || ~exist('neuron_cluster_id', 'var') ...
+        || numel(neuron_session) ~= numel(neuron_type) ...
+        || numel(neuron_cluster_id) ~= numel(neuron_type)
+    if ~exist('records', 'var') || ~exist('neuron_record_index', 'var')
+        error('Plot_acg_population_logit:cluster', ...
+            'Session and neuron id are not in the workspace. Run section 1 first.');
+    end
+    [neuron_session, ~, neuron_cluster_id] = ...
+        neuron_identity_from_records(records, neuron_record_index);
+end
+oscillatory_label_file = save_oscillatory_label_table(output_folder, ...
+    neuron_session, neuron_cluster_id, osc_member, complete_rows);
 [type_percent, type_observed, type_total, lock_type_label] = ...
     lock_type_osc_rate(neuron_type, osc_rows);
 n_osc = numel(osc_rows);
@@ -631,6 +645,9 @@ write_summary_section(output_folder, '3. Oscillatory neurons kept for the figure
     ['Output folder: ', output_folder], ...
     sprintf('Oscillatory neurons: %d of %d', n_osc, n_before_osc), ...
     'Cluster 1 of the chosen split, strongest modulation first.', ...
+    ['Neuron table: ', oscillatory_label_file], ...
+    'Each row is one population neuron. session and neuron_id match the original spike train.', ...
+    'oscillatory is true only for cluster 1. classification is oscillatory, non-oscillatory, or not classified when the neuron did not enter the split.', ...
     'Share of each lock type that is in that group:', ...
     type_lines))
 
@@ -4126,6 +4143,34 @@ if n_points <= 1
     return
 end
 offset = linspace(-0.12, 0.12, n_points).';
+end
+
+
+function path = save_oscillatory_label_table(folder, session, cluster_id, osc_member, complete_rows)
+%SAVE_OSCILLATORY_LABEL_TABLE  Session and neuron id with the oscillatory label.
+
+n = numel(osc_member);
+if numel(session) ~= n || numel(cluster_id) ~= n
+    error('Plot_acg_population_logit:cluster', ...
+        'The session and neuron id must have one entry per population neuron.');
+end
+if exist(folder, 'dir') ~= 7
+    mkdir(folder);
+end
+session_text = cell(n, 1);
+for i = 1:n
+    session_text{i} = value_text(session{i});
+end
+classification = repmat({'not classified'}, n, 1);
+classified = false(n, 1);
+classified(complete_rows) = true;
+classification(classified & ~osc_member(:)) = {'non-oscillatory'};
+classification(osc_member(:)) = {'oscillatory'};
+labels = table((1:n)', session_text, double(cluster_id(:)), osc_member(:), classification, ...
+    'VariableNames', {'population_row', 'session', 'neuron_id', 'oscillatory', 'classification'});
+path = fullfile(folder, 'oscillatory_neuron_labels.csv');
+writetable(labels, path);
+fprintf('Saved %s\n', path)
 end
 
 
