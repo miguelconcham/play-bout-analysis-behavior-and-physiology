@@ -18,8 +18,9 @@
 % are drawn. The examples also keep the strongest oscillatory neuron from
 % each analysed area except VLPAG, so that count can be larger than
 % n_example_neurons. n_example_subplots is how many panels go on each figure.
-% Each neuron uses two panels, so the figures continue until every
-% requested neuron is drawn.
+% Each neuron uses three panels: high-power autocorrelogram, low-power
+% autocorrelogram, then both shuffle percentiles. The figures continue
+% until every requested neuron is drawn.
 % classifier_method is set just before the lock-type classifier.
 % The default is naive Bayes, LDA, and a medium Gaussian SVM.
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
@@ -654,10 +655,6 @@ peak_windows_s = [0.25 0.35; 0.45 0.55];
 % Symmetric color range for the logit image. 1 is about the 9th and 91st
 % percentiles. 2 is about the 1st and 99th.
 logit_color_limit = 2;
-high_cut = 95;
-low_cut = 5;
-n_rows = 4;
-n_cols = numel(column_id);
 n_colors = 256;
 half = n_colors / 2;
 logit_map = [ ...
@@ -672,96 +669,43 @@ if ~any(first_peak_lag) || ~any(first_trough_lag) ...
     error('Plot_acg_population_logit:window', ...
         'A peak or trough window contains no lag bin.')
 end
-cycle_n = nan(1, n_cols);
-cycle_r = nan(1, n_cols);
-cycle_p = nan(1, n_cols);
-
-for s = 1
-    open_full_figure(['ACG population logit, ', scale_title{s}])
-    for c = 1:n_cols
-        this_logit = shown_logit.(scale_id{s}).(column_id{c});
-        this_pctl = shown_percentile.(scale_id{s}).(column_id{c});
-        n = size(this_logit, 1);
-        if n < 1
-            for row = 1:n_rows
-                subplot(n_rows, n_cols, (row - 1) * n_cols + c)
-                if row == 1
-                    title({column_title{c}, sprintf('osc/n = 0/%d', n_before_osc)})
-                end
-                axis off
-            end
-            continue
-        end
-
-        subplot(n_rows, n_cols, c)
-        if n == 1
-            imagesc(lag, [0.5 1.5], this_logit)
-            ylim([0.5 1.5])
-        else
-            imagesc(lag, 1:n, this_logit)
-            set(gca, 'YTick', [1 n])
-        end
-        axis tight
-        clim([-logit_color_limit logit_color_limit])
-        colormap(gca, logit_map)
-        ylabel('Neuron')
-        title({column_title{c}, sprintf('osc/n = %d/%d', n_osc, n_before_osc)})
-        box off
-        if c == n_cols
-            colorbar
-        end
-
-        first_diff = mean(this_logit(:, first_peak_lag), 2, 'omitnan') ...
-            - mean(this_logit(:, first_trough_lag), 2, 'omitnan');
-        second_diff = mean(this_logit(:, second_peak_lag), 2, 'omitnan') ...
-            - mean(this_logit(:, second_trough_lag), 2, 'omitnan');
-        subplot(n_rows, n_cols, n_cols + c)
-        finite_pair = isfinite(first_diff) & isfinite(second_diff);
-        cycle_n(c) = sum(finite_pair);
-        if sum(finite_pair) < 3
-            plot(first_diff, second_diff, '.k')
-            title('Too few neurons')
-        else
-            cycle_fit = fitlm(first_diff(finite_pair), second_diff(finite_pair));
-            plot(cycle_fit)
-            legend off
-            [r_mat, p_mat] = corrcoef(first_diff(finite_pair), second_diff(finite_pair));
-            cycle_r(c) = r_mat(1, 2);
-            cycle_p(c) = p_mat(1, 2);
-            title(sprintf('r = %.2f, p = %.3g', r_mat(1, 2), p_mat(1, 2)))
-        end
-        xlabel('First cycle, peak - trough')
-        ylabel('Second cycle, peak - trough')
-        box off
-
-        [high_percent, low_percent] = percentile_tail_fractions(this_pctl, high_cut, low_cut);
-        subplot(n_rows, n_cols, 2 * n_cols + c)
-        hold on
-        plot(lag, high_percent, 'Color', [0.7 0.25 0.25], 'LineWidth', 1.8)
-        plot(lag, low_percent, 'Color', [0.25 0.45 0.75], 'LineWidth', 1.8)
-        ylim([0 100])
-        ylabel('Neurons (%)')
-        if c == 1
-            legend({sprintf('Percentile >= %g', high_cut), ...
-                sprintf('Percentile <= %g', low_cut)}, ...
-                'Location', 'northeast', 'Box', 'off')
-        end
-        box off
-
-        subplot(n_rows, n_cols, 3 * n_cols + c)
-        hold on
-        plot(lag([1 end]), [0 0], ':', 'Color', [0.45 0.45 0.45], ...
-            'HandleVisibility', 'off')
-        plot(lag, mean(this_logit, 1, 'omitnan'), 'k', 'LineWidth', 2.4)
-        xlabel('Lag (s)')
-        ylabel('Mean logit')
-        ylim([-logit_color_limit logit_color_limit])
-        box off
-    end
-    sgtitle({['Oscillatory neurons, ', scale_title{s}], ...
-        [cluster_method_label, ' group with the higher modulation, strongest first.']})
-    save_script_figure(output_folder)
+stratum_columns = {'power_high', 'power_low'};
+stratum_titles = {'High 25% power', 'Low 25% power'};
+if ~exist('osc_member', 'var') || numel(osc_member) ~= numel(neuron_type)
+    osc_member = false(numel(neuron_type), 1);
+    osc_member(osc_rows) = true;
 end
+if ~exist('osc_score', 'var') || numel(osc_score) ~= numel(neuron_type)
+    osc_score = nan(numel(neuron_type), 1);
+end
+if ~exist('imagesc_logit', 'var')
+    error('Plot_acg_population_logit:shown', ...
+        'imagesc_logit is not in the workspace. Run section 1 first.');
+end
+non_osc_rows = oscillatory_member_rows(~osc_member, osc_score);
+[cycle_n, cycle_r, cycle_p] = draw_power_logit_pair( ...
+    imagesc_logit, osc_rows, stratum_columns, stratum_titles, ...
+    'oscillatory', n_osc, n_before_osc, lag, logit_color_limit, logit_map, ...
+    first_peak_lag, first_trough_lag, second_peak_lag, second_trough_lag, ...
+    scale_title{1}, ...
+    [cluster_method_label, ' group with the higher modulation, strongest first.'], ...
+    output_folder);
+[non_cycle_n, non_cycle_r, non_cycle_p] = draw_power_logit_pair( ...
+    imagesc_logit, non_osc_rows, stratum_columns, stratum_titles, ...
+    'non-oscillatory', numel(non_osc_rows), n_before_osc, lag, ...
+    logit_color_limit, logit_map, ...
+    first_peak_lag, first_trough_lag, second_peak_lag, second_trough_lag, ...
+    scale_title{1}, ...
+    'Neurons outside that group, strongest remaining modulation first.', ...
+    output_folder);
+non_cycle_lines = cycle_summary_lines(stratum_titles, non_cycle_n, non_cycle_r, non_cycle_p);
+write_summary_section(output_folder, '4. Non-oscillatory logit figure', join_summary_lines( ...
+    ['Output folder: ', output_folder], ...
+    sprintf('Non-oscillatory neurons: %d of %d.', numel(non_osc_rows), n_before_osc), ...
+    'Same two-by-two layout as the oscillatory logit figure: high power and low power, image above mean logit.', ...
+    'Rows are ordered by the remaining modulation score, strongest first.', ...
+    'Pearson correlation of the first cycle with the second cycle is reported here and is not drawn.', ...
+    non_cycle_lines))
 
 open_full_figure('ACG population logit, high minus low power')
 subplot(2, 1, 1)
@@ -1429,8 +1373,11 @@ example_bank = load_example_acg_bank(example_summary_path);
 example_pos = example_positions(osc_rows, neuron_area, n_example_neurons, 'VLPAG');
 n_example = numel(example_pos);
 example_names = [comparison_names, {'Peak1 - Peak2'}];
-neurons_per_figure = max(1, floor(n_example_subplots / 2));
+n_example_rows = 3;
+neurons_per_figure = max(1, floor(n_example_subplots / n_example_rows));
 n_example_cols = neurons_per_figure;
+high_color = [0.75 0.22 0.18];
+low_color = [0.15 0.35 0.70];
 if n_example > 0
     example_lines = cell(n_example, 1);
     lag_limits = example_lag_limits(lag);
@@ -1445,53 +1392,71 @@ if n_example > 0
             pop_row = osc_rows(rank);
             this_area = area_display_name(neuron_area{pop_row});
             lock_label = display_lock_label(neuron_type{pop_row});
-            [acg_lag, acg_y, acg_found] = example_acg_curve(example_bank, ...
-                neuron_session{pop_row}, neuron_cluster_id(pop_row));
-            subplot(2, n_example_cols, k)
-            if acg_found
-                plot(acg_lag, acg_y, 'k', 'LineWidth', 1.4)
+            [acg_lag, acg_high, acg_low, found_high, found_low] = example_stratum_curves( ...
+                example_bank, neuron_session{pop_row}, neuron_cluster_id(pop_row));
+            shared_ylim = example_acg_ylim(acg_lag, [acg_high, acg_low], lag_limits);
+            subplot(n_example_rows, n_example_cols, k)
+            if found_high
+                plot(acg_lag, acg_high, 'Color', high_color, 'LineWidth', 1.4)
                 xlim(lag_limits)
-                ylim(example_acg_ylim(acg_lag, acg_y, lag_limits))
+                ylim(shared_ylim)
             else
-                text(0.5, 0.5, 'ACG not in summary', 'HorizontalAlignment', 'center')
+                text(0.5, 0.5, 'High ACG not in summary', 'HorizontalAlignment', 'center')
                 axis([0 1 0 1])
             end
-            xlabel('Lag (s)')
-            ylabel('Sum-to-1')
+            ylabel('High, sum-to-1')
             title({sprintf('%s, %s', this_area, lock_label), ...
                 sprintf('%s id %g', neuron_session{pop_row}, neuron_cluster_id(pop_row))}, ...
                 'Interpreter', 'none')
             box off
-            subplot(2, n_example_cols, n_example_cols + k)
-            plot(lag, shown_percentile.sum.power_high(rank, :), 'Color', [0.15 0.35 0.7], ...
+            subplot(n_example_rows, n_example_cols, n_example_cols + k)
+            if found_low
+                plot(acg_lag, acg_low, 'Color', low_color, 'LineWidth', 1.4)
+                xlim(lag_limits)
+                ylim(shared_ylim)
+            else
+                text(0.5, 0.5, 'Low ACG not in summary', 'HorizontalAlignment', 'center')
+                axis([0 1 0 1])
+            end
+            ylabel('Low, sum-to-1')
+            box off
+            subplot(n_example_rows, n_example_cols, 2 * n_example_cols + k)
+            hold on
+            plot(lag, shown_percentile.sum.power_high(rank, :), 'Color', high_color, ...
+                'LineWidth', 1.4)
+            plot(lag, shown_percentile.sum.power_low(rank, :), 'Color', low_color, ...
                 'LineWidth', 1.4)
             xlim(lag_limits)
             ylim([0 100])
             xlabel('Lag (s)')
             ylabel('Percentile')
+            if k == 1
+                legend({'High 25% power', 'Low 25% power'}, 'Location', 'northeast', 'Box', 'off')
+            end
             box off
             example_lines{i} = example_neuron_summary(i, neuron_session{pop_row}, ...
                 neuron_cluster_id(pop_row), this_area, lock_label, osc_score(pop_row), ...
-                acg_found, feature_table, feature_table_low, pop_row, example_names);
+                found_high, found_low, feature_table, feature_table_low, pop_row, example_names);
         end
         sgtitle({sprintf('Neurons %d-%d of %d. VLPAG is left out.', i0, i1, n_example), ...
-            'Top: autocorrelogram on its own scale. Bottom: high-power shuffle percentile.'}, ...
+            'Top two rows: high-power and low-power autocorrelograms, one shared scale per neuron.', ...
+            'Bottom row: high-power and low-power shuffle percentiles.'}, ...
             'Interpreter', 'none')
         save_script_figure(output_folder)
     end
     write_summary_section(output_folder, '4. Example oscillatory neurons', join_summary_lines( ...
         sprintf('n_example_neurons = %d. Drawn: %d. Subplots per figure: %d.', ...
-            n_example_neurons, n_example, 2 * neurons_per_figure), ...
-        sprintf('Figures: %d. Each figure holds up to %d neurons, autocorrelogram above percentile.', ...
+            n_example_neurons, n_example, n_example_rows * neurons_per_figure), ...
+        sprintf('Figures: %d. Each figure holds up to %d neurons.', ...
             n_example_figures, neurons_per_figure), ...
+        'Each neuron has three rows: high-power autocorrelogram, low-power autocorrelogram, then both percentiles.', ...
         'VLPAG is left out. Each other area that has an oscillatory neuron contributes its strongest one.', ...
         'Further neurons are the next highest modulation scores outside VLPAG, until n_example_neurons is reached.', ...
         'If those areas already exceed n_example_neurons, every area representative is still drawn.', ...
         'The drawn order is strongest modulation first.', ...
         example_bank.note, ...
-        'Each autocorrelogram uses the same lag window as the percentile.', ...
-        'Its y-axis is set from that neuron alone, using lags at and after 0.05 s, so the bin beside zero does not flatten the trace.', ...
-        'The percentile is the high-power sum-to-1 shuffle percentile.', ...
+        'The two autocorrelogram rows share a y-axis taken from that neuron, using lags at and after 0.05 s, so the bin beside zero does not flatten the trace.', ...
+        'The bottom row plots the high-power and low-power sum-to-1 shuffle percentiles on the same axes.', ...
         'Features are the high-power and low-power values for that neuron.', ...
         example_lines))
 else
@@ -1499,7 +1464,7 @@ else
         sprintf('n_example_neurons = %d. Drawn: 0.', n_example_neurons), ...
         'No oscillatory neuron outside VLPAG was available.'))
 end
-write_section_4_summary(output_folder, column_title, cycle_n, cycle_r, cycle_p, ...
+write_section_4_summary(output_folder, stratum_titles, cycle_n, cycle_r, cycle_p, ...
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
     sum(osc_in_complete), sum(~osc_in_complete), sum(low_member), ...
     sum(low_member), sum(osc_in_complete) - sum(low_member), embed_perplexity, ...
@@ -5779,9 +5744,9 @@ end
 
 
 function bank = load_example_acg_bank(summary_path)
-%LOAD_EXAMPLE_ACG_BANK  Mirrored sum-to-1 autocorrelograms keyed by neuron.
+%LOAD_EXAMPLE_ACG_BANK  Mirrored high-power and low-power autocorrelograms.
 
-bank = empty_acg_bank('The locking summary file was not found, so the original autocorrelogram is not drawn.');
+bank = empty_acg_bank('The locking summary file was not found, so the original autocorrelograms are not drawn.');
 if isempty(summary_path) || exist(summary_path, 'file') ~= 2
     return
 end
@@ -5792,8 +5757,16 @@ catch
     return
 end
 if isfield(stored, 'power_acg') && has_neuron_curve(stored.power_acg, 'high')
-    bank = bank_from_curves(stored.power_acg.all_neurons, stored.power_acg.centers, 'high', ...
-        'Top row: high-power sum-to-1 autocorrelogram, positive lags, both sides averaged.');
+    low_name = '';
+    if has_neuron_curve(stored.power_acg, 'low')
+        low_name = 'low';
+    end
+    note = ['High-power and low-power sum-to-1 autocorrelograms, positive lags, both sides averaged.'];
+    if isempty(low_name)
+        note = [note, ' The summary has no low-power curve.'];
+    end
+    bank = bank_from_curves(stored.power_acg.all_neurons, stored.power_acg.centers, ...
+        'high', low_name, note);
     return
 end
 try
@@ -5803,8 +5776,10 @@ catch
     return
 end
 if isfield(stored, 'locking_acg') && has_neuron_curve(stored.locking_acg, 'all')
-    bank = bank_from_curves(stored.locking_acg.all_neurons, stored.locking_acg.centers, 'all', ...
-        'Top row: all-runs autocorrelogram, positive lags, both sides averaged. The high-power curve was not in the summary.');
+    bank = bank_from_curves(stored.locking_acg.all_neurons, stored.locking_acg.centers, ...
+        'all', '', ...
+        ['The power-stratum curves were not in the summary. ', ...
+        'The high-power row uses the all-runs autocorrelogram, positive lags, both sides averaged.']);
     return
 end
 bank.note = 'The summary file has no per-neuron autocorrelogram.';
@@ -5819,24 +5794,30 @@ end
 
 function bank = empty_acg_bank(note)
 bank.lag = zeros(1, 0);
-bank.y = zeros(0, 0);
+bank.high = zeros(0, 0);
+bank.low = zeros(0, 0);
 bank.session = {};
 bank.cluster_id = zeros(0, 1);
 bank.note = note;
 end
 
 
-function bank = bank_from_curves(block, centers, curve_name, note)
+function bank = bank_from_curves(block, centers, high_name, low_name, note)
 bank = empty_acg_bank(note);
 centers = double(centers(:).');
-curves = double(block.(curve_name));
-if size(curves, 2) ~= numel(centers)
+high_curves = double(block.(high_name));
+if size(high_curves, 2) ~= numel(centers)
     bank.note = 'The autocorrelogram width does not match its lag axis.';
     return
 end
-[folded, pos_lag] = mirror_acg_matrix(curves, centers);
-bank.lag = pos_lag;
-bank.y = folded;
+[bank.high, bank.lag] = mirror_acg_matrix(high_curves, centers);
+bank.low = nan(size(bank.high));
+if ~isempty(low_name) && isfield(block, low_name)
+    low_curves = double(block.(low_name));
+    if size(low_curves, 2) == numel(centers) && size(low_curves, 1) == size(high_curves, 1)
+        [bank.low, ~] = mirror_acg_matrix(low_curves, centers);
+    end
+end
 if iscell(block.session)
     bank.session = block.session(:);
 else
@@ -5866,16 +5847,22 @@ pos_lag = centers(pos);
 end
 
 
-function [acg_lag, acg_y, found] = example_acg_curve(bank, session, cluster_id)
+function [acg_lag, acg_high, acg_low, found_high, found_low] = example_stratum_curves(bank, session, cluster_id)
 acg_lag = bank.lag;
-acg_y = nan(1, numel(bank.lag));
-found = false;
+acg_high = nan(1, numel(bank.lag));
+acg_low = acg_high;
+found_high = false;
+found_low = false;
 row = find_example_neuron(bank, session, cluster_id);
-if isempty(row)
+if isempty(row) || row > size(bank.high, 1)
     return
 end
-acg_y = bank.y(row, :);
-found = any(isfinite(acg_y));
+acg_high = bank.high(row, :);
+found_high = any(isfinite(acg_high));
+if row <= size(bank.low, 1)
+    acg_low = bank.low(row, :);
+    found_low = any(isfinite(acg_low));
+end
 end
 
 
@@ -6026,12 +6013,15 @@ end
 
 
 function text = example_neuron_summary(index, session, cluster_id, area_label, ...
-    lock_label, modulation, acg_found, feature_table, feature_table_low, row, names)
+    lock_label, modulation, found_high, found_low, feature_table, feature_table_low, row, names)
 header = sprintf('Neuron %d   session %s   id %g   area %s   lock %s   modulation %.4g', ...
     index, session, cluster_id, area_label, lock_label, modulation);
 lines = {header};
-if ~acg_found
-    lines{end + 1} = 'Original autocorrelogram was not matched in the summary file.'; %#ok<AGROW>
+if ~found_high
+    lines{end + 1} = 'High-power autocorrelogram was not matched in the summary file.'; %#ok<AGROW>
+end
+if ~found_low
+    lines{end + 1} = 'Low-power autocorrelogram was not matched in the summary file.'; %#ok<AGROW>
 end
 lines{end + 1} = sprintf('%-42s %14s %14s', 'Feature', 'high power', 'low power'); %#ok<AGROW>
 for j = 1:numel(names)
@@ -6300,21 +6290,98 @@ write_summary_section(folder, ...
 end
 
 
+function [cycle_n, cycle_r, cycle_p] = draw_power_logit_pair(logit, rows, columns, titles, ...
+    group_name, n_group, n_population, lag, color_limit, color_map, ...
+    first_peak_lag, first_trough_lag, second_peak_lag, second_trough_lag, ...
+    scale_name, order_note, folder)
+%DRAW_POWER_LOGIT_PAIR  High-power and low-power logit image above the mean.
+
+n_cols = numel(columns);
+n_rows = 2;
+cycle_n = nan(1, n_cols);
+cycle_r = nan(1, n_cols);
+cycle_p = nan(1, n_cols);
+open_full_figure(['ACG population logit, ', group_name, ', ', scale_name])
+for c = 1:n_cols
+    this_logit = logit.sum.(columns{c})(rows, :);
+    n = size(this_logit, 1);
+    subplot(n_rows, n_cols, c)
+    if n < 1
+        title({titles{c}, sprintf('%s/n = 0/%d', group_name, n_population)})
+        axis off
+    elseif n == 1
+        imagesc(lag, [0.5 1.5], this_logit)
+        ylim([0.5 1.5])
+        axis tight
+        clim([-color_limit color_limit])
+        colormap(gca, color_map)
+        ylabel('Neuron')
+        title({titles{c}, sprintf('%s/n = %d/%d', group_name, n_group, n_population)})
+        box off
+    else
+        imagesc(lag, 1:n, this_logit)
+        set(gca, 'YTick', [1 n])
+        axis tight
+        clim([-color_limit color_limit])
+        colormap(gca, color_map)
+        ylabel('Neuron')
+        title({titles{c}, sprintf('%s/n = %d/%d', group_name, n_group, n_population)})
+        box off
+    end
+    if c == n_cols && n >= 1
+        colorbar
+    end
+    if n >= 1
+        first_diff = mean(this_logit(:, first_peak_lag), 2, 'omitnan') ...
+            - mean(this_logit(:, first_trough_lag), 2, 'omitnan');
+        second_diff = mean(this_logit(:, second_peak_lag), 2, 'omitnan') ...
+            - mean(this_logit(:, second_trough_lag), 2, 'omitnan');
+        finite_pair = isfinite(first_diff) & isfinite(second_diff);
+        cycle_n(c) = sum(finite_pair);
+        if sum(finite_pair) >= 3
+            [r_mat, p_mat] = corrcoef(first_diff(finite_pair), second_diff(finite_pair));
+            cycle_r(c) = r_mat(1, 2);
+            cycle_p(c) = p_mat(1, 2);
+        end
+    end
+    subplot(n_rows, n_cols, n_cols + c)
+    hold on
+    plot(lag([1 end]), [0 0], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+    if n >= 1
+        plot(lag, mean(this_logit, 1, 'omitnan'), 'k', 'LineWidth', 2.4)
+    end
+    xlabel('Lag (s)')
+    ylabel('Mean logit')
+    ylim([-color_limit color_limit])
+    box off
+end
+figure_group = group_name;
+figure_group(1) = upper(figure_group(1));
+sgtitle({[figure_group, ' neurons, ', scale_name], order_note}, 'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function lines = cycle_summary_lines(titles, cycle_n, cycle_r, cycle_p)
+lines = cell(1, numel(titles));
+for c = 1:numel(titles)
+    if ~isfinite(cycle_r(c))
+        lines{c} = sprintf('%-32s n = %.0f    too few neurons for r', ...
+            titles{c}, cycle_n(c));
+    else
+        lines{c} = sprintf('%-32s n = %.0f    r = %.4g    uncorrected p = %.4g', ...
+            titles{c}, cycle_n(c), cycle_r(c), cycle_p(c));
+    end
+end
+end
+
+
 function write_section_4_summary(folder, column_title, cycle_n, cycle_r, cycle_p, ...
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
     n_osc_high, n_other_high, n_osc_low_pca, n_osc_low_tsne, n_omitted, ...
     embed_perplexity, paired_stats, lock_type_label, type_observed, type_total, type_percent)
 
-cycle_lines = cell(1, numel(column_title));
-for c = 1:numel(column_title)
-    if ~isfinite(cycle_r(c))
-        cycle_lines{c} = sprintf('%-32s n = %.0f    too few neurons for r', ...
-            column_title{c}, cycle_n(c));
-    else
-        cycle_lines{c} = sprintf('%-32s n = %.0f    r = %.4g    uncorrected p = %.4g', ...
-            column_title{c}, cycle_n(c), cycle_r(c), cycle_p(c));
-    end
-end
+cycle_lines = cycle_summary_lines(column_title, cycle_n, cycle_r, cycle_p);
 n_sig = sum(high_vs_low_h(:) == 1);
 finite_p = isfinite(high_vs_low_p);
 if any(finite_p)
@@ -6334,8 +6401,9 @@ end
 write_summary_section(folder, '4. Oscillatory logit figure', join_summary_lines( ...
     ['Output folder: ', folder], ...
     'Figures from this section are saved there as jpg and svg.', ...
-    'Pearson correlation of the first cycle (peak minus trough) with the second cycle.', ...
-    'The p on the figure is uncorrected. These three correlations are not in the Holm-Sidak family.', ...
+    'The logit figure is two columns, high power and low power, and two rows, the neuron image and the mean logit.', ...
+    'Pearson correlation of the first cycle (peak minus trough) with the second cycle is reported here and is not drawn.', ...
+    'The p-values are uncorrected and are not in the Holm-Sidak family.', ...
     cycle_lines))
 write_summary_section(folder, '4. High power minus low power across lag', join_summary_lines( ...
     'Each lag is a paired t-test of the same oscillatory neurons, high power minus low power.', ...
