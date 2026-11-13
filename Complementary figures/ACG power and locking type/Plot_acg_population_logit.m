@@ -9,10 +9,12 @@
 % Section 4 only draws. After section 3 has run, edit section 4 and run
 % that section alone.
 %
-% output_folder is the first line of section 1. Change that path to choose
-% where this script writes each figure as jpg and svg, and where it writes
-% analysis_summary.txt. Later sections keep that folder when it is already
-% in the workspace.
+% output_folder is set at the start of section 1. Figures, analysis_summary.txt,
+% the neuron table, the population matrices, and the lock-type model cache
+% are written to Data\Analysis results\acg population logit. Later sections
+% keep that folder when it is already in the workspace. A file saved by an
+% earlier run next to this script, or a population matrix saved in spike
+% train parsing, is copied or read from there.
 % n_example_neurons and n_example_subplots are set at the start of section 4.
 % n_example_neurons chooses how many of the strongest oscillatory neurons
 % are drawn. The examples also keep the strongest oscillatory neuron from
@@ -80,7 +82,10 @@
 % Kolmogorov-Smirnov test.
 
 %% 1. Load the checkpoint and build the imagesc matrices
-output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+output_folder = logit_result_folder();
+if exist(output_folder, 'dir') ~= 7
+    mkdir(output_folder);
+end
 this_dir = fileparts(mfilename('fullpath'));
 figures_dir = fileparts(this_dir);
 repo_root = fileparts(figures_dir);
@@ -98,8 +103,7 @@ n_shuffles_default = 500;
 % 0.2 s is 200 ms. Section 2 sorts the figure again.
 sort_window_s = [0.200 0.400];
 
-data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
-    'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
+data_root = experiment_data_root();
 parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
 checkpoint = fullfile(parsing_folder, shuffle_checkpoint_filename(n_shuffles_default, acg_method, acg_count));
 if exist(checkpoint, 'file') ~= 2
@@ -163,7 +167,7 @@ imagesc_sum_all = imagesc_logit.sum.all;
 imagesc_sum_power_high = imagesc_logit.sum.power_high;
 imagesc_sum_power_low = imagesc_logit.sum.power_low;
 
-prep_file = fullfile(parsing_folder, 'acg_population_logit_prep.mat');
+prep_file = fullfile(output_folder, 'acg_population_logit_prep.mat');
 % acg2features scores the lags it is given. The checkpoint axis is
 % two-sided, and the rhythmicity function uses the positive side.
 positive_lag = lag > 0;
@@ -210,18 +214,16 @@ write_summary_section(output_folder, '1. Checkpoint and population matrices', st
 % frequency, amplitude, and the peak-to-peak drop. Those extra columns
 % do not enter the split.
 cluster_method = 'ward';
-if ~exist('output_folder', 'var') || isempty(output_folder)
-    output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+if ~exist('output_folder', 'var')
+    output_folder = '';
 end
+output_folder = resolve_logit_output_folder(output_folder);
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
 if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
         || ~exist('imagesc_sum_power_high', 'var')
-    data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
-        'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
-    parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
-    prep_file = fullfile(parsing_folder, 'acg_population_logit_prep.mat');
+    prep_file = logit_prep_file(output_folder);
     load(prep_file)
 end
 if ~exist('feature_table', 'var')
@@ -581,9 +583,10 @@ disp(['Run section 3 to keep ', cluster_method_label, ' cluster 1.'])
 % modulation is placed first. This section also writes
 % oscillatory_neuron_labels.csv, with the session and neuron id of every
 % population neuron and whether that neuron was classified as oscillatory.
-if ~exist('output_folder', 'var') || isempty(output_folder)
-    output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+if ~exist('output_folder', 'var')
+    output_folder = '';
 end
+output_folder = resolve_logit_output_folder(output_folder);
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
@@ -655,9 +658,10 @@ write_summary_section(output_folder, '3. Oscillatory neurons kept for the figure
 % Re-run this section after editing the figure. Section 3 does not need
 % to run again while shown_logit is still in the workspace. The low-power
 % PCA figure and the paired feature figure also need the section 2 PCA.
-if ~exist('output_folder', 'var') || isempty(output_folder)
-    output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+if ~exist('output_folder', 'var')
+    output_folder = '';
 end
+output_folder = resolve_logit_output_folder(output_folder);
 n_example_neurons = 10;
 n_example_subplots = 6;
 this_dir = fileparts(mfilename('fullpath'));
@@ -1303,7 +1307,7 @@ if isempty(classifier_names)
 else
 % Bump this when the fit itself changes. A file from another version is not loaded.
 lock_model_cache_version = 1;
-lock_model_cache_file = fullfile(output_folder, 'lock_type_model_cache.mat');
+lock_model_cache_file = lock_cache_file(output_folder);
 classifier_populations = { ...
     struct('name', 'All classified neurons', 'rows', (1:size(feature_table, 1)).'), ...
     struct('name', 'Oscillatory neurons', 'rows', osc_rows(:))};
@@ -1497,9 +1501,10 @@ write_section_4_summary(output_folder, stratum_titles, cycle_n, cycle_r, cycle_p
 % high-minus-low change in an autocorrelogram feature, or in firing rate.
 % The intercept is the gap expected when those predictors do not change.
 % The same equation is fit again on the non-oscillatory neurons.
-if ~exist('output_folder', 'var') || isempty(output_folder)
-    output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+if ~exist('output_folder', 'var')
+    output_folder = '';
 end
+output_folder = resolve_logit_output_folder(output_folder);
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
@@ -1715,9 +1720,10 @@ write_summary_section(output_folder, '5b. Firing rates of the power strata', ...
 % set of runs. 'high' is the high-power mean, 'low' is the low-power mean,
 % and 'all' is the mean over every run with a finite score.
 area_power_conditions = {'high', 'low', 'all'};
-if ~exist('output_folder', 'var') || isempty(output_folder)
-    output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+if ~exist('output_folder', 'var')
+    output_folder = '';
 end
+output_folder = resolve_logit_output_folder(output_folder);
 if ~exist('neuron_area', 'var') || ~exist('neuron_session', 'var') ...
         || ~exist('neuron_cluster_id', 'var') || ~exist('high_power_delta', 'var') ...
         || ~exist('low_power_delta', 'var')
@@ -4600,9 +4606,7 @@ if ~isempty(checkpoint)
         locking_summary_filename(false, method, count));
     return
 end
-data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
-    'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
-path = fullfile(data_root, 'Analysis results', 'spike train parsing', ...
+path = fullfile(default_parsing_folder(), ...
     locking_summary_filename(false, method, count));
 end
 
@@ -4955,10 +4959,66 @@ end
 end
 
 
-function folder = default_parsing_folder()
-data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
+function root = experiment_data_root()
+root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
     'NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data'];
-folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
+end
+
+
+function folder = logit_result_folder()
+%LOGIT_RESULT_FOLDER  Saved figures and estimates for this script.
+folder = fullfile(experiment_data_root(), 'Analysis results', 'acg population logit');
+end
+
+
+function folder = resolve_logit_output_folder(folder)
+%RESOLVE_LOGIT_OUTPUT_FOLDER  Use the analysis-results folder unless another folder was chosen.
+legacy = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+if isempty(folder) || strcmpi(char(folder), legacy)
+    folder = logit_result_folder();
+end
+if exist(folder, 'dir') ~= 7
+    mkdir(folder);
+end
+end
+
+
+function path = logit_prep_file(output_folder)
+%LOGIT_PREP_FILE  Population matrices, including one saved with the parsing files.
+path = fullfile(output_folder, 'acg_population_logit_prep.mat');
+if exist(path, 'file') == 2
+    return
+end
+legacy = fullfile(default_parsing_folder(), 'acg_population_logit_prep.mat');
+if exist(legacy, 'file') == 2
+    path = legacy;
+end
+end
+
+
+function path = lock_cache_file(output_folder)
+%LOCK_CACHE_FILE  Lock-type fit, copied forward from the old figure folder.
+path = fullfile(output_folder, 'lock_type_model_cache.mat');
+legacy = fullfile(fileparts(mfilename('fullpath')), ...
+    'acg_population_logit_figures', 'lock_type_model_cache.mat');
+if exist(path, 'file') == 2 || exist(legacy, 'file') ~= 2 || strcmpi(path, legacy)
+    return
+end
+if exist(output_folder, 'dir') ~= 7
+    mkdir(output_folder);
+end
+try
+    copyfile(legacy, path);
+    fprintf('Copied the saved lock-type models to %s\n', path)
+catch
+    path = legacy;
+    fprintf('Using the saved lock-type models at %s\n', path)
+end
+end
+
+
+function folder = default_parsing_folder()
+folder = fullfile(experiment_data_root(), 'Analysis results', 'spike train parsing');
 end
 
 
