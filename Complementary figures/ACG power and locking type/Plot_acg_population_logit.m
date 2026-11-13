@@ -53,10 +53,12 @@
 % imagesc_osc_sum_all is the same sum-to-1 image under a plain name.
 % osc_neuron_type is its lock group. feature_table has one row per neuron.
 % Section 5 stores the mean channel delta power of the runs that form
-% each neuron's high-power autocorrelogram. It compares the skewness of
-% that power with the skewness of its logarithm, then predicts the less
-% skewed scale from the six oscillatory features and from the oscillatory
-% or non-oscillatory group.
+% each neuron's low-power autocorrelogram and each neuron's high-power
+% autocorrelogram. A neuron can contribute both rows. It compares the
+% skewness of those stratum means with the skewness of their logarithm,
+% then predicts the less skewed scale from the six oscillatory features
+% of the same stratum, from the oscillatory or non-oscillatory group,
+% and from a term that marks the high-power row.
 
 %% 1. Load the checkpoint and build the imagesc matrices
 output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
@@ -115,7 +117,7 @@ neuron_type = neuron_type(row_order);
 neuron_record_index = neuron_record_index(row_order);
 [neuron_session, neuron_area, neuron_cluster_id] = ...
     neuron_identity_from_records(records, neuron_record_index);
-high_power_delta = high_power_mean_delta(records, neuron_record_index);
+[high_power_delta, low_power_delta] = stratum_mean_delta(records, neuron_record_index);
 
 imagesc_logit = struct();
 sort_score = struct();
@@ -150,7 +152,7 @@ feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positi
 save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
     'neuron_type', 'neuron_record_index', 'neuron_session', 'neuron_area', ...
-    'neuron_cluster_id', 'feature_table', 'high_power_delta', ...
+    'neuron_cluster_id', 'feature_table', 'high_power_delta', 'low_power_delta', ...
     'column_id', 'column_title', 'scale_id', 'scale_title', ...
     'n_shuffles', 'sort_window_s', 'checkpoint', 'prep_file');
 disp(['Section 1 saved the matrices to ', prep_file])
@@ -165,7 +167,9 @@ write_summary_section(output_folder, '1. Checkpoint and population matrices', st
     sprintf('Shuffles: %d', n_shuffles), ...
     sprintf('Neurons with all, high-power, and low-power curves: %d', numel(neuron_type)), ...
     sprintf('Neurons with a finite high-power mean delta power: %d', sum(isfinite(high_power_delta))), ...
+    sprintf('Neurons with a finite low-power mean delta power: %d', sum(isfinite(low_power_delta))), ...
     'high_power_delta is the mean, across that neuron''s high-power runs, of the squared median delta-band envelope on the neuron channel.', ...
+    'low_power_delta is that mean for the runs at or below the neuron''s 25th percentile.', ...
     sprintf('Lag axis: %.3f to %.3f s, %d bins', lag(1), lag(end), numel(lag)), ...
     sprintf('Sort window for the stored row order: %.3f to %.3f s', ...
         sort_window_s(1), sort_window_s(2)), ...
@@ -1482,10 +1486,12 @@ write_section_4_summary(output_folder, column_title, cycle_n, cycle_r, cycle_p, 
     sum(low_member), sum(osc_in_complete) - sum(low_member), embed_perplexity, ...
     paired_stats, lock_type_label, type_observed, type_total, type_percent)
 
-%% 5. Mean high-power delta and the feature model
-% Re-run this section after section 3. high_power_delta comes from section
-% 1. The six predictors are the features that define the oscillatory split.
-% The seventh predictor is that split: oscillatory or non-oscillatory.
+%% 5. Low-power and high-power delta and the feature model
+% Re-run this section after section 3. Each neuron can contribute a
+% low-power row and a high-power row. The outcome is that stratum's mean
+% channel delta power. The six feature predictors come from the
+% autocorrelogram of the same stratum. Oscillatory is the section 3 group
+% and is shared by both rows. High power is 1 on the high-power row.
 if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
@@ -1497,52 +1503,87 @@ if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
     error('Plot_acg_population_logit:powerModel', ...
         'The oscillatory split is not in the workspace. Run sections 2 and 3 first.');
 end
-if ~exist('high_power_delta', 'var') || numel(high_power_delta) ~= numel(neuron_type)
+if ~exist('high_power_delta', 'var') || ~exist('low_power_delta', 'var') ...
+        || numel(high_power_delta) ~= numel(neuron_type) ...
+        || numel(low_power_delta) ~= numel(neuron_type)
     if ~exist('records', 'var') || ~exist('neuron_record_index', 'var')
         error('Plot_acg_population_logit:powerModel', ...
-            'high_power_delta is not in the workspace. Run section 1 first.');
+            'The low-power and high-power means are not in the workspace. Run section 1 first.');
     end
-    high_power_delta = high_power_mean_delta(records, neuron_record_index);
+    [high_power_delta, low_power_delta] = stratum_mean_delta(records, neuron_record_index);
+end
+if ~exist('feature_table_low', 'var') || size(feature_table_low, 1) ~= numel(neuron_type)
+    if ~exist('imagesc_sum_power_low', 'var') || ~exist('lag', 'var')
+        error('Plot_acg_population_logit:powerModel', ...
+            'The low-power autocorrelogram is not in the workspace. Run section 1 first.');
+    end
+    if exist('acg2features', 'file') ~= 2
+        run(fullfile(fileparts(fileparts(this_dir)), 'add_repo_paths.m'));
+    end
+    positive_lag = lag > 0;
+    feature_table_low = acg2features( ...
+        imagesc_sum_power_low(:, positive_lag), lag(positive_lag));
 end
 power_feature_names = { ...
     'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
     'OscillationScore', 'Baseline'};
 power_feature_names = power_feature_names( ...
-    ismember(power_feature_names, feature_table.Properties.VariableNames));
+    ismember(power_feature_names, feature_table.Properties.VariableNames) ...
+    & ismember(power_feature_names, feature_table_low.Properties.VariableNames));
 if isempty(power_feature_names)
     error('Plot_acg_population_logit:powerModel', ...
-        'None of the oscillatory features are in feature_table.');
+        'None of the oscillatory features are in both feature tables.');
 end
 power_rows = complete_rows(:);
 power_rows = power_rows(power_rows >= 1 & power_rows <= numel(neuron_type));
-power_x = feature_table{power_rows, power_feature_names};
-power_y = high_power_delta(power_rows);
-power_group = double(ismember(power_rows, osc_rows(:)));
-power_keep = all(isfinite(power_x), 2) & isfinite(power_y) & power_y > 0;
-power_x = power_x(power_keep, :);
-power_y = power_y(power_keep);
-power_group = power_group(power_keep);
-if size(power_x, 1) < numel(power_feature_names) + 4
+x_high = feature_table{power_rows, power_feature_names};
+x_low = feature_table_low{power_rows, power_feature_names};
+y_high = high_power_delta(power_rows);
+y_low = low_power_delta(power_rows);
+osc = double(ismember(power_rows, osc_rows(:)));
+high_ok = all(isfinite(x_high), 2) & isfinite(y_high) & y_high > 0;
+low_ok = all(isfinite(x_low), 2) & isfinite(y_low) & y_low > 0;
+power_x = [x_high(high_ok, :); x_low(low_ok, :)];
+power_y = [y_high(high_ok); y_low(low_ok)];
+power_group = [osc(high_ok); osc(low_ok)];
+power_stratum = [ones(sum(high_ok), 1); zeros(sum(low_ok), 1)];
+power_neuron = [power_rows(high_ok); power_rows(low_ok)];
+n_power_coeff = numel(power_feature_names) + 3;
+if isempty(power_neuron) || numel(unique(power_neuron)) < n_power_coeff + 1
     error('Plot_acg_population_logit:powerModel', ...
-        'Too few neurons with a positive high-power delta and finite features.');
+        'Too few neurons with a positive low-power or high-power delta and finite features.');
 end
 power_scale = choose_positive_scale(power_y);
 if strcmp(power_scale.name, 'log')
     power_outcome = log(power_y);
-    power_outcome_label = 'log high-power delta';
+    power_outcome_label = 'log delta power';
 else
     power_outcome = power_y;
-    power_outcome_label = 'high-power delta';
+    power_outcome_label = 'delta power';
 end
-power_design = [power_x, power_group];
-power_predictor_names = [power_feature_names, {'Oscillatory'}];
-power_fit = fit_power_feature_model(power_outcome, power_design, power_predictor_names);
-fprintf('High-power mean delta, n = %d (%d oscillatory, %d non-oscillatory).\n', ...
-    numel(power_y), sum(power_group == 1), sum(power_group == 0))
+power_design = [power_x, power_group, power_stratum];
+power_predictor_names = [power_feature_names, {'Oscillatory', 'High power'}];
+[~, ~, power_neuron_code] = unique(power_neuron, 'stable');
+power_row_count = accumarray(power_neuron_code, 1);
+power_weight = 1 ./ power_row_count(power_neuron_code);
+power_fit = fit_power_feature_model(power_outcome, power_design, ...
+    power_predictor_names, power_neuron, power_weight);
+n_power_neurons = numel(unique(power_neuron));
+n_power_both = sum(high_ok & low_ok);
+n_power_high_only = sum(high_ok & ~low_ok);
+n_power_low_only = sum(low_ok & ~high_ok);
+n_power_osc_neurons = numel(unique(power_neuron(power_group == 1)));
+fprintf(['Delta power, both strata: %d rows from %d neurons ', ...
+    '(%d high-power rows, %d low-power rows).\n'], ...
+    numel(power_y), n_power_neurons, sum(power_stratum == 1), sum(power_stratum == 0))
+fprintf('Neurons in both strata: %d. High-power row only: %d. Low-power row only: %d.\n', ...
+    n_power_both, n_power_high_only, n_power_low_only)
+fprintf('Oscillatory neurons in the model: %d.\n', n_power_osc_neurons)
 fprintf('Skewness of power: %.3f. Skewness of log power: %.3f.\n', ...
     power_scale.skew_raw, power_scale.skew_log)
 fprintf('%s\n', power_scale.reason)
-fprintf('Model outcome: %s. R^2 = %.3f. Adjusted R^2 = %.3f. F(%g,%g) = %.3f, p = %.3g.\n', ...
+fprintf(['Model outcome: %s. Weighted R^2 = %.3f. Adjusted R^2 = %.3f. ', ...
+    'Wald F(%g,%g) = %.3f, p = %.3g.\n'], ...
     power_outcome_label, power_fit.rsq, power_fit.adj_rsq, ...
     power_fit.df1, power_fit.df, power_fit.F, power_fit.F_p)
 for i = 1:numel(power_fit.names)
@@ -1550,7 +1591,7 @@ for i = 1:numel(power_fit.names)
         power_fit.names{i}, power_fit.beta(i), power_fit.se(i), ...
         power_fit.t(i), power_fit.p_value(i))
 end
-draw_power_scale_check(power_y, power_scale, output_folder)
+draw_power_scale_check(power_y, power_stratum, power_scale, output_folder)
 draw_power_model_coefficients(power_fit, power_outcome_label, output_folder)
 power_lines = cell(numel(power_fit.names), 1);
 for i = 1:numel(power_fit.names)
@@ -1558,23 +1599,40 @@ for i = 1:numel(power_fit.names)
         power_fit.names{i}, power_fit.beta(i), power_fit.se(i), ...
         power_fit.t(i), power_fit.p_value(i));
 end
-write_summary_section(output_folder, '5. High-power delta model', join_summary_lines( ...
+write_summary_section(output_folder, '5. Delta power model, both strata', join_summary_lines( ...
     ['Output folder: ', output_folder], ...
-    'The outcome is the mean delta power of the firing runs that form the high-power autocorrelogram.', ...
-    'A run is in that tail when its delta power is at or above the neuron''s own 75th percentile.', ...
+    'Each row is one neuron in one power stratum.', ...
+    'The high-power outcome is the mean delta power of the firing runs that form the high-power autocorrelogram.', ...
+    'The low-power outcome is the mean delta power of the firing runs that form the low-power autocorrelogram.', ...
+    'A run is high power when its delta power is at or above the neuron''s own 75th percentile.', ...
+    'A run is low power when its delta power is at or below the neuron''s own 25th percentile.', ...
     'Delta power of a run is the square of the median delta-band envelope on the neuron channel.', ...
-    'The mean gives each of those runs the same weight.', ...
-    sprintf('Neurons in the model: %d. Oscillatory: %d. Non-oscillatory: %d.', ...
-        numel(power_y), sum(power_group == 1), sum(power_group == 0)), ...
-    sprintf('Mean power, oscillatory: %.4g. Mean power, non-oscillatory: %.4g.', ...
-        mean(power_y(power_group == 1)), mean(power_y(power_group == 0))), ...
+    'The mean gives each run inside a stratum the same weight.', ...
+    'The feature predictors are Modulation1, Modulation2, PeakInterval, TroughInterval, OscillationScore, and Baseline from that same stratum.', ...
+    'Oscillatory is 1 for cluster 1 and 0 for the other neurons with complete high-power features. Both rows of a neuron share that label.', ...
+    'High power is 1 on the high-power row and 0 on the low-power row. The intercept is the low-power, non-oscillatory level.', ...
+    'Each neuron has total weight 1. A neuron with both strata gives each row weight 1/2.', ...
+    'Standard errors are cluster-robust by neuron, with the G/(G-1) factor. t uses G - p degrees of freedom.', ...
+    'G is the number of neurons and p is the number of coefficients, including the intercept.', ...
+    'The model F is a Wald test that every slope is zero.', ...
+    sprintf('Rows: %d. Neurons: %d. High-power rows: %d. Low-power rows: %d.', ...
+        numel(power_y), n_power_neurons, sum(power_stratum == 1), sum(power_stratum == 0)), ...
+    sprintf('Neurons in both strata: %d. High-power row only: %d. Low-power row only: %d.', ...
+        n_power_both, n_power_high_only, n_power_low_only), ...
+    sprintf('Oscillatory neurons: %d. Non-oscillatory neurons: %d.', ...
+        n_power_osc_neurons, n_power_neurons - n_power_osc_neurons), ...
+    sprintf('Mean high-power delta, oscillatory: %.4g. Non-oscillatory: %.4g.', ...
+        finite_mean(power_y(power_stratum == 1 & power_group == 1)), ...
+        finite_mean(power_y(power_stratum == 1 & power_group == 0))), ...
+    sprintf('Mean low-power delta, oscillatory: %.4g. Non-oscillatory: %.4g.', ...
+        finite_mean(power_y(power_stratum == 0 & power_group == 1)), ...
+        finite_mean(power_y(power_stratum == 0 & power_group == 0))), ...
+    'Skewness is computed on the low-power and high-power rows together.', ...
     sprintf('Skewness of the power: %.3f.', power_scale.skew_raw), ...
     sprintf('Skewness of the logarithm: %.3f.', power_scale.skew_log), ...
     power_scale.reason, ...
     sprintf('Fitted outcome: %s.', power_outcome_label), ...
-    'Predictors are Modulation1, Modulation2, PeakInterval, TroughInterval, OscillationScore, and Baseline, plus the oscillatory group.', ...
-    'Oscillatory is 1 for cluster 1 and 0 for the other neurons with complete features. The intercept is the non-oscillatory level.', ...
-    sprintf('R^2 = %.3f. Adjusted R^2 = %.3f. F(%g, %g) = %.3f. p = %.3g.', ...
+    sprintf('Weighted R^2 = %.3f. Adjusted R^2 = %.3f. Wald F(%g, %g) = %.3f. p = %.3g.', ...
         power_fit.rsq, power_fit.adj_rsq, power_fit.df1, power_fit.df, power_fit.F, power_fit.F_p), ...
     sprintf('%-18s %12s %12s %10s %10s', 'Term', 'Coefficient', 'SE', 't', 'p'), ...
     power_lines))
@@ -3972,25 +4030,46 @@ end
 end
 
 
-function power = high_power_mean_delta(records, record_index)
-%HIGH_POWER_MEAN_DELTA  Mean channel delta power of each high-power tail.
+function [power_high, power_low] = stratum_mean_delta(records, record_index)
+%STRATUM_MEAN_DELTA  Mean channel delta power of the high and low tails.
 %
-% power.score_high is the mean of the squared median delta-band envelopes
-% of the runs at or above that neuron's 75th percentile.
+% score_high is the mean of the squared median delta-band envelopes of
+% the runs at or above that neuron's 75th percentile. score_low is the
+% same mean for the runs at or below the 25th percentile.
 
 n = numel(record_index);
-power = nan(n, 1);
+power_high = nan(n, 1);
+power_low = nan(n, 1);
 for i = 1:n
     record = records{record_index(i)};
-    if ~isstruct(record) || ~isfield(record, 'power') || ~isstruct(record.power) ...
-            || ~isfield(record.power, 'score_high')
+    if ~isstruct(record) || ~isfield(record, 'power') || ~isstruct(record.power)
         continue
     end
-    value = record.power.score_high;
-    if isnumeric(value) && isscalar(value)
-        power(i) = double(value);
-    end
+    power_high(i) = scalar_power_field(record.power, 'score_high');
+    power_low(i) = scalar_power_field(record.power, 'score_low');
 end
+end
+
+
+function value = scalar_power_field(power, field_name)
+value = nan;
+if ~isfield(power, field_name)
+    return
+end
+raw = power.(field_name);
+if isnumeric(raw) && isscalar(raw)
+    value = double(raw);
+end
+end
+
+
+function m = finite_mean(x)
+x = x(isfinite(x));
+if isempty(x)
+    m = NaN;
+    return
+end
+m = mean(x);
 end
 
 
@@ -4002,7 +4081,7 @@ scale.name = 'raw';
 scale.skew_raw = moment_skewness(y);
 scale.skew_log = nan;
 if any(~isfinite(y)) || any(y <= 0) || ~isfinite(scale.skew_raw)
-    scale.reason = ['The power is not positive for every neuron, so the model uses the power itself.'];
+    scale.reason = ['The power is not positive for every row, so the model uses the power itself.'];
     return
 end
 scale.skew_log = moment_skewness(log(y));
@@ -4035,26 +4114,53 @@ g = mean(((x - mean(x)) / sigma) .^ 3);
 end
 
 
-function fit = fit_power_feature_model(y, X, names)
-%FIT_POWER_FEATURE_MODEL  Ordinary least squares with an intercept column.
+function fit = fit_power_feature_model(y, X, names, cluster_id, weights)
+%FIT_POWER_FEATURE_MODEL  Weighted least squares with an intercept column.
+%
+% cluster_id groups rows that belong to one neuron. When it is present,
+% the standard errors are cluster-robust, using the same G/(G-1) factor
+% and G - p degrees of freedom as the locking-period oscillation fits.
+% weights give each neuron total weight 1 when a neuron has two strata.
 
 y = y(:);
 n = size(X, 1);
+if nargin < 5 || isempty(weights)
+    weights = ones(n, 1);
+end
+weights = weights(:);
+if numel(weights) ~= n || any(~isfinite(weights)) || any(weights < 0) || sum(weights) <= 0
+    error('Plot_acg_population_logit:powerModel', ...
+        'The weight vector must have one non-negative entry per row.');
+end
+if nargin < 4
+    cluster_id = [];
+end
 A = [ones(n, 1), X];
 fit.names = [{'Intercept'}, names];
 fit.n = n;
 fit.p = size(A, 2);
-fit.df = n - fit.p;
+fit.df_resid = n - fit.p;
 fit.df1 = fit.p - 1;
-fit.beta = A \ y;
+fit.clustered = ~isempty(cluster_id);
+fit.n_clusters = nan;
+fit.df = fit.df_resid;
+sw = sqrt(weights);
+Aw = A .* sw;
+yw = y .* sw;
+fit.beta = Aw \ yw;
 fit.beta = fit.beta(:);
 resid = y - A * fit.beta;
-ss_res = sum(resid .^ 2);
-ss_tot = sum((y - mean(y)) .^ 2);
-fit.rsq = 1 - ss_res / ss_tot;
-if fit.df > 0 && n > 1 && ss_tot > 0
-    fit.adj_rsq = 1 - (ss_res / fit.df) / (ss_tot / (n - 1));
-    fit.sigma = sqrt(ss_res / fit.df);
+ss_res = sum(weights .* resid .^ 2);
+y_bar = sum(weights .* y) / sum(weights);
+ss_tot = sum(weights .* (y - y_bar) .^ 2);
+if ss_tot > 0
+    fit.rsq = 1 - ss_res / ss_tot;
+else
+    fit.rsq = nan;
+end
+if fit.df_resid > 0 && n > 1 && ss_tot > 0
+    fit.adj_rsq = 1 - (ss_res / fit.df_resid) / (ss_tot / (n - 1));
+    fit.sigma = sqrt(ss_res / fit.df_resid);
 else
     fit.adj_rsq = nan;
     fit.sigma = nan;
@@ -4062,56 +4168,124 @@ end
 fit.se = nan(fit.p, 1);
 fit.t = nan(fit.p, 1);
 fit.p_value = nan(fit.p, 1);
-xtx = A' * A;
+fit.F = nan;
+fit.F_p = nan;
+xtx = Aw' * Aw;
 fit.collinear = ~isfinite(rcond(xtx)) || rcond(xtx) < 1e-8;
-if ~fit.collinear && fit.df > 0 && fit.sigma > 0
-    covariance = (fit.sigma ^ 2) * inv(xtx);
-    fit.se = sqrt(max(diag(covariance), 0));
-    fit.t = fit.beta ./ fit.se;
+fit.ss_model = ss_tot - ss_res;
+fit.resid_skew = moment_skewness(resid);
+if fit.collinear
+    return
+end
+if ~fit.clustered
+    if fit.df > 0 && fit.sigma > 0
+        covariance = (fit.sigma ^ 2) * inv(xtx);
+        fit.se = sqrt(max(diag(covariance), 0));
+        fit.t = fit.beta ./ fit.se;
+        for i = 1:fit.p
+            fit.p_value(i) = two_sided_t_p(fit.t(i), fit.df);
+        end
+    end
+    if fit.df > 0 && fit.df1 > 0 && ss_res > 0
+        fit.F = (fit.ss_model / fit.df1) / (ss_res / fit.df);
+        fit.F_p = f_survival(fit.F, fit.df1, fit.df);
+    end
+    return
+end
+cluster_id = cluster_id(:);
+if numel(cluster_id) ~= n
+    error('Plot_acg_population_logit:powerModel', ...
+        'The cluster id must have one entry per row.');
+end
+ids = unique(cluster_id);
+G = numel(ids);
+fit.n_clusters = G;
+fit.df = G - fit.p;
+bread = inv(xtx);
+meat = zeros(fit.p, fit.p);
+for i = 1:G
+    in = cluster_id == ids(i);
+    score = A(in, :)' * (weights(in) .* resid(in));
+    meat = meat + score * score';
+end
+if G > 1
+    meat = meat * (G / (G - 1));
+end
+V = bread * meat * bread;
+V = (V + V') / 2;
+fit.se = sqrt(max(real(diag(V)), 0));
+fit.t = fit.beta ./ fit.se;
+fit.t(~isfinite(fit.se) | fit.se <= 0) = nan;
+if fit.df >= 1
     for i = 1:fit.p
         fit.p_value(i) = two_sided_t_p(fit.t(i), fit.df);
     end
 end
-fit.ss_model = ss_tot - ss_res;
-if fit.df > 0 && fit.df1 > 0 && ss_res > 0
-    fit.F = (fit.ss_model / fit.df1) / (ss_res / fit.df);
-    fit.F_p = f_survival(fit.F, fit.df1, fit.df);
-else
-    fit.F = nan;
-    fit.F_p = nan;
+if fit.df >= 1 && fit.df1 > 0
+    contrast_rows = fit.df1;
+    R = [zeros(contrast_rows, 1), eye(contrast_rows)];
+    contrast = R * fit.beta;
+    middle = R * V * R';
+    if all(isfinite(contrast))
+        wald = real(contrast' * pinv(middle) * contrast);
+        fit.F = wald / fit.df1;
+        fit.F_p = f_survival(fit.F, fit.df1, fit.df);
+    end
 end
-fit.resid_skew = moment_skewness(resid);
 end
 
 
-function draw_power_scale_check(power, scale, folder)
-open_full_figure('High-power delta scale')
+function draw_power_scale_check(power, stratum, scale, folder)
+open_full_figure('Delta power scale, both strata')
+power = power(:);
+stratum = stratum(:);
+low_color = [0.20 0.45 0.72];
+high_color = [0.75 0.42 0.18];
 subplot(1, 2, 1)
-histogram(power, 'FaceColor', [0.35 0.45 0.65], 'EdgeColor', 'none')
-xlabel('Mean high-power delta')
-ylabel('Neurons')
+hold on
+draw_stratum_histogram(power, stratum, low_color, high_color)
+xlabel('Mean delta power of the stratum')
+ylabel('Rows')
 title(sprintf('Power, skewness %.3f', scale.skew_raw), 'Interpreter', 'none')
 box off
 subplot(1, 2, 2)
-histogram(log(power), 'FaceColor', [0.75 0.45 0.25], 'EdgeColor', 'none')
-xlabel('log mean high-power delta')
-ylabel('Neurons')
+hold on
+draw_stratum_histogram(log(power), stratum, low_color, high_color)
+xlabel('log mean delta power of the stratum')
+ylabel('Rows')
 title(sprintf('Logarithm, skewness %.3f', scale.skew_log), 'Interpreter', 'none')
 box off
-sgtitle({scale.reason, sprintf('The model uses the %s scale.', scale.name)}, ...
+sgtitle({scale.reason, ...
+    'Blue is the low-power stratum. Orange is the high-power stratum.', ...
+    sprintf('The model uses the %s scale.', scale.name)}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
 
 
+function draw_stratum_histogram(values, stratum, low_color, high_color)
+finite_values = values(isfinite(values));
+if numel(finite_values) < 2
+    return
+end
+edges = linspace(min(finite_values), max(finite_values), 24);
+histogram(values(stratum == 0), edges, 'FaceColor', low_color, ...
+    'EdgeColor', 'none', 'FaceAlpha', 0.55)
+histogram(values(stratum == 1), edges, 'FaceColor', high_color, ...
+    'EdgeColor', 'none', 'FaceAlpha', 0.55)
+end
+
+
 function draw_power_model_coefficients(fit, outcome_label, folder)
-open_full_figure('High-power delta model')
+open_full_figure('Delta power model, both strata')
 shown = 2:numel(fit.names);
 hold on
 for i = 1:numel(shown)
     k = shown(i);
     if strcmp(fit.names{k}, 'Oscillatory')
         color = [0.84 0.37 0.00];
+    elseif strcmp(fit.names{k}, 'High power')
+        color = [0.00 0.45 0.55];
     else
         color = [0.25 0.35 0.55];
     end
@@ -4127,9 +4301,11 @@ catch
 end
 ylabel(['Coefficient on ', outcome_label])
 box off
-sgtitle({sprintf('%s. R^2 = %.3f. F p = %.3g.', outcome_label, fit.rsq, fit.F_p), ...
+sgtitle({sprintf('%s. R^2 = %.3f. Wald p = %.3g.', outcome_label, fit.rsq, fit.F_p), ...
+    'Navy is an autocorrelogram feature of the same stratum.', ...
     'Orange is the oscillatory group. Its reference level is non-oscillatory.', ...
-    'Whiskers are coefficient plus or minus 1.96 standard errors.'}, ...
+    'Teal is the high-power stratum. Its reference level is low power.', ...
+    'Whiskers are the coefficient plus or minus 1.96 cluster-robust standard errors.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
