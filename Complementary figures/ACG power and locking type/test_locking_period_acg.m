@@ -121,6 +121,12 @@ assert(found.second_present && found.second_lag > 0.54 && found.second_lag < 0.6
     'The second cycle was not near twice the first lag.');
 assert(found.n_cycles == 2, 'Two delta cycles were not counted.');
 
+short_centers = -0.24:0.01:0.24;
+short_curve = synthetic_acg(short_centers, 0.16, 0.4);
+short_peaks = acg_delta_peaks(short_curve, short_centers, 1);
+assert(short_peaks.first_measurable, ...
+    'A short autocorrelogram was not scored.');
+
 decay = synthetic_acg(centers, 0.02, 1);
 quiet = acg_delta_peaks(decay, centers, 1);
 assert(quiet.first_measurable && ~quiet.first_present && quiet.first_prominence == 0, ...
