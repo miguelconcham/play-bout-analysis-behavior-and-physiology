@@ -7,9 +7,11 @@
 % spread of those normalized session values, with equal session weight.
 %
 % The printed test uses the mean normalized excess inside +/- central_lag
-% on the unsmoothed curve. The drawn curves are Gaussian-smoothed first,
-% and the ribbon is the 95% t interval of those smoothed normalized
-% curves. Holm-Sidak is applied across the 30 directed pairs.
+% on the unsmoothed curve. Each reference group has its own figure.
+% Columns are the other groups. The top image is the sessions sorted by
+% the central value, the middle image keeps recording order, and the
+% bottom row is the smoothed mean and its 95% interval. Holm-Sidak is
+% applied across the 30 directed pairs.
 %
 % figure_folder empty keeps the figures on screen and still writes
 % group_ccg_summary.txt in the result folder. A non-empty figure_folder
@@ -158,21 +160,19 @@ end
 
 function draw_excess_curves(summary, smooth_half, figure_folder)
 names = group_ccg_names();
-base_title = names.title;
 bin_w = median(diff(summary.centers));
 sigma_bins = smooth_half / bin_w;
-fig = figure('Name', 'Group CCG excess curves', 'Color', 'w', ...
-    'Units', 'normalized', 'Position', [0.05 0.05 0.9 0.85]);
 for reference = 1:numel(names.group_id)
-    subplot(2, 3, reference);
-    hold on
-    plotted = false(numel(names.group_id), 1);
-    legend_text = base_title;
+    columns = repmat(struct( ...
+        'title', '', 'top', [], 'middle', [], ...
+        'top_label', 'Sessions, sorted', 'middle_label', 'Sessions', ...
+        'mean', [], 'lo', [], 'hi', [], 'note', ''), numel(names.group_id) - 1, 1);
+    slot = 0;
     for k = 1:numel(summary.pair_reference)
         if summary.pair_reference(k) ~= reference
             continue
         end
-        target = summary.pair_target(k);
+        slot = slot + 1;
         sample = squeeze(summary.excess(:, :, k));
         if size(summary.excess, 1) == 1
             sample = sample(:)';
@@ -184,31 +184,30 @@ for reference = 1:numel(names.group_id)
             end
         end
         [mu, lo, hi, n] = row_mean_ci(smoothed);
-        if ~any(isfinite(mu))
-            continue
-        end
-        color = names.color(target, :);
-        draw_ci(summary.centers, lo, hi, color);
-        plot(summary.centers, mu, 'Color', color, 'LineWidth', 1.5);
-        plotted(target) = true;
-        legend_text{target} = sprintf('%s (n=%d)', base_title{target}, max(n));
+        shown = sample(any(isfinite(sample), 2), :);
+        columns(slot).title = names.title{summary.pair_target(k)};
+        columns(slot).top = sort_session_rows(shown, summary.centers, summary.central_lag);
+        columns(slot).middle = shown;
+        columns(slot).mean = mu;
+        columns(slot).lo = lo;
+        columns(slot).hi = hi;
+        columns(slot).note = sprintf('n = %d', max([n, 0]));
     end
-    plot(summary.centers([1 end]), [0 0], 'Color', [0.75 0.75 0.75], ...
-        'HandleVisibility', 'off');
-    xlim([summary.centers(1), summary.centers(end)]);
-    xlabel('Lag (s)');
-    ylabel('Normalized excess (rate / expected - 1)');
-    title(base_title{reference}, 'Color', names.color(reference, :));
-    if any(plotted)
-        legend(legend_text(plotted), 'Location', 'best', 'Box', 'off');
-    end
+    draw_ccg_columns(figure_folder, ...
+        ['group_ccg_', names.group_id{reference}], ...
+        names.title{reference}, columns, summary.centers);
 end
-if exist('sgtitle', 'file') == 2 || exist('sgtitle', 'builtin') == 5
-    sgtitle(sprintf(['Smoothed normalized excess, %.0f ms Gaussian. ', ...
-        'Ribbon: 95%% CI across sessions. Negative: target below its own rate.'], ...
-        1000 * smooth_half));
 end
-save_group_figure(fig, figure_folder, 'group_ccg_excess_curves');
+
+
+function image = sort_session_rows(image, centers, central_lag)
+if isempty(image)
+    return
+end
+in_center = abs(centers) <= central_lag + 1e-12;
+score = mean(image(:, in_center), 2, 'omitnan');
+[~, order] = sort(score, 'descend');
+image = image(order, :);
 end
 
 
@@ -233,17 +232,6 @@ for b = 1:n_bins
     lo(b) = mu(b) - half;
     hi(b) = mu(b) + half;
 end
-end
-
-
-function draw_ci(centers, lo, hi, color)
-covered = isfinite(lo) & isfinite(hi);
-if sum(covered) < 2
-    return
-end
-fill([centers(covered), fliplr(centers(covered))], ...
-    [lo(covered), fliplr(hi(covered))], color, ...
-    'FaceAlpha', 0.18, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 end
 
 
