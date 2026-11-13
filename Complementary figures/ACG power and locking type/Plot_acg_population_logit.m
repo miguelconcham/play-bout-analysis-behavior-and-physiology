@@ -23,9 +23,12 @@
 % classifier_method is set just before the lock-type classifier.
 % The default is naive Bayes, LDA, and a medium Gaussian SVM.
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
+% The features are those whose lock-type ANOVA has Holm-Sidak p below 0.05
+% in all classified neurons or in the oscillatory neurons only.
 % Each classifier is run on every trough, peak, and unlocked neuron, and
 % again on the oscillatory neurons only. n_accuracy_permutations label
-% shuffles test each accuracy. The default is 1000.
+% shuffles test the accuracy of the whole model and of each lock type.
+% The default is 1000. A bar is filled when that permutation p is below 0.05.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -233,8 +236,9 @@ feature_mean = mean(X, 1);
 feature_sigma = std(X, 0, 1);
 Xz = (X - feature_mean) ./ feature_sigma;
 
-% pca_mu is the centering of this PCA. Section 4 uses it to place the
-% low-power features in the same plane. t-SNE has no equivalent transform.
+% This PCA and the t-SNE below use high-power neurons only. Section 4 fits
+% a separate PCA and t-SNE that also include the oscillatory neurons at
+% low power, and the section 4 figures share that plane.
 [pca_coeff, pca_score, pca_latent, ~, pca_explained, pca_mu] = pca(Xz);
 open_full_figure('PCA variance explained')
 subplot(1, 2, 1)
@@ -764,67 +768,28 @@ title('Red marks a paired difference at p < 0.05')
 box off
 save_script_figure(output_folder)
 
-% The PCA below keeps its original axes and only receives the low-power
-% points. t-SNE cannot do that, so the t-SNE figure is a new embedding of
-% the high-power neurons plus the oscillatory neurons at low power.
-if ~exist('pca_coeff', 'var') || ~exist('pca_mu', 'var') ...
-        || ~exist('pca_score', 'var') || ~exist('pca_explained', 'var') ...
-        || ~exist('feature_mean', 'var') || ~exist('feature_sigma', 'var') ...
+% One PCA and one t-SNE include the high-power neurons and the oscillatory
+% neurons at low power. Every embedding figure below uses that plane.
+% Figures that omit the low-power points keep the same coordinates.
+if ~exist('feature_mean', 'var') || ~exist('feature_sigma', 'var') ...
         || ~exist('feature_names', 'var') || ~exist('complete_rows', 'var') ...
         || ~exist('feature_table', 'var') || ~exist('imagesc_sum_power_low', 'var') ...
         || ~exist('osc_rows', 'var') || ~exist('Xz', 'var')
     error('Plot_acg_population_logit:pca', ...
-        'The high-power PCA is not in the workspace. Run sections 2 and 3 first.');
+        'The high-power features are not in the workspace. Run sections 2 and 3 first.');
 end
 positive_lag = lag > 0;
 feature_table_low = acg2features( ...
     imagesc_sum_power_low(:, positive_lag), lag(positive_lag));
 X_low = feature_table_low{complete_rows, feature_names};
 Xz_low = (X_low - feature_mean) ./ feature_sigma;
-score_low = (Xz_low - pca_mu) * pca_coeff;
-[in_complete, osc_pos] = ismember(osc_rows, complete_rows);
-osc_pos = osc_pos(in_complete);
-high_xy = pca_score(osc_pos, 1:2);
-low_xy = score_low(osc_pos, 1:2);
-finite_projection = all(isfinite(high_xy), 2) & all(isfinite(low_xy), 2);
 osc_in_complete = ismember(complete_rows(:), osc_rows(:));
-group_color = [0.84 0.37 0.00; 0.00 0.62 0.45; 0.00 0.45 0.70];
-group_label = { ...
-    'Oscillatory, high power', ...
-    'Non-oscillatory, high power', ...
-    'Oscillatory, low power'};
-
-pca_all = [pca_score(:, 1:2); low_xy(finite_projection, :)];
-pca_groups = { ...
-    pca_score(osc_in_complete, 1:2), ...
-    pca_score(~osc_in_complete, 1:2), ...
-    low_xy(finite_projection, :)};
-open_full_figure('Low-power ACGs in the high-power PCA')
-pca_axes = gobjects(1, 3);
-for g = 1:3
-    pca_axes(g) = subplot(1, 3, g);
-    draw_iso_probability(pca_all, pca_groups{g}, group_color(g, :), ...
-        low_xy(finite_projection, :), group_color(3, :))
-    title(group_label{g}, 'Interpreter', 'none')
-    xlabel(sprintf('PC1 (%.1f%%)', pca_explained(1)))
-    ylabel(sprintf('PC2 (%.1f%%)', pca_explained(2)))
-    grid on
-    box off
-end
-pca_limits = embedding_axis_limits(pca_all);
-for g = 1:3
-    set(pca_axes(g), 'XLim', pca_limits(1:2), 'YLim', pca_limits(3:4))
-end
-linkaxes(pca_axes, 'xy')
-sgtitle(['Black points are every neuron. Blue points are oscillatory neurons at low power. ', ...
-    'Filled bands are that panel''s group.'])
-save_script_figure(output_folder)
-
 low_member = osc_in_complete & all(isfinite(Xz_low), 2);
 X_embed = [Xz; Xz_low(low_member, :)];
 group_id = ones(size(Xz, 1), 1);
 group_id(~osc_in_complete) = 2;
 group_id = [group_id; 3 * ones(sum(low_member), 1)];
+[~, power_score, ~, ~, power_explained] = pca(X_embed);
 n_embed = size(X_embed, 1);
 candidate_perplexity = [5 15 30 50];
 candidate_perplexity = candidate_perplexity( ...
@@ -843,102 +808,69 @@ Y_power = tsne(X_embed, ...
     'Perplexity', embed_perplexity, ...
     'Standardize', false, ...
     'Distance', 'euclidean');
-fprintf(['Low-power oscillatory neurons in the new t-SNE: %d. ', ...
+fprintf(['Shared embedding. Low-power oscillatory neurons: %d. ', ...
     'Omitted for missing low-power features: %d.\n'], ...
     sum(low_member), sum(osc_in_complete) - sum(low_member))
+power_color = [0.84 0.37 0.00; 0.45 0.28 0.62; 0.00 0.45 0.70];
+power_label = { ...
+    'Oscillatory, high power', ...
+    'Non-oscillatory, high power', ...
+    'Oscillatory, low power'};
+power_caption = { ...
+    'Orange circles are oscillatory neurons at high power. Purple circles are the other high-power neurons.', ...
+    'Bands use the same colors. Axis limits come from the shared plane, including the low-power points.'};
+draw_power_embedding(power_score(:, 1:2), group_id, [1 2], power_color, power_label, ...
+    output_folder, 'PCA oscillatory and non-oscillatory', ...
+    sprintf('PC1 (%.1f%%)', power_explained(1)), ...
+    sprintf('PC2 (%.1f%%)', power_explained(2)), ...
+    [power_caption, {'Low-power oscillatory neurons are in this PCA and are not drawn.'}])
+draw_power_embedding(power_score(:, 1:2), group_id, [1 2 3], power_color, power_label, ...
+    output_folder, 'PCA oscillatory and non-oscillatory with low power', ...
+    sprintf('PC1 (%.1f%%)', power_explained(1)), ...
+    sprintf('PC2 (%.1f%%)', power_explained(2)), ...
+    [power_caption, {'Blue triangles are the same oscillatory neurons at low power.'}])
+draw_power_embedding(Y_power, group_id, [1 2], power_color, power_label, ...
+    output_folder, 't-SNE oscillatory and non-oscillatory', ...
+    't-SNE 1', 't-SNE 2', ...
+    [power_caption, {sprintf('Perplexity = %g. Low-power oscillatory neurons are in this t-SNE and are not drawn.', ...
+        embed_perplexity)}])
+draw_power_embedding(Y_power, group_id, [1 2 3], power_color, power_label, ...
+    output_folder, 't-SNE oscillatory and non-oscillatory with low power', ...
+    't-SNE 1', 't-SNE 2', ...
+    [power_caption, {sprintf('Perplexity = %g. Blue triangles are the same oscillatory neurons at low power.', ...
+        embed_perplexity)}])
 
-tsne_groups = { ...
-    Y_power(group_id == 1, :), ...
-    Y_power(group_id == 2, :), ...
-    Y_power(group_id == 3, :)};
-open_full_figure('t-SNE with low-power oscillatory neurons')
-tsne_axes = gobjects(1, 3);
-for g = 1:3
-    tsne_axes(g) = subplot(1, 3, g);
-    draw_iso_probability(Y_power, tsne_groups{g}, group_color(g, :), ...
-        tsne_groups{3}, group_color(3, :))
-    title({group_label{g}, sprintf('Perplexity = %g', embed_perplexity)}, ...
-        'Interpreter', 'none')
-    xlabel('t-SNE 1')
-    ylabel('t-SNE 2')
-    grid on
-    box off
-end
-tsne_limits = embedding_axis_limits(Y_power);
-for g = 1:3
-    set(tsne_axes(g), 'XLim', tsne_limits(1:2), 'YLim', tsne_limits(3:4))
-end
-linkaxes(tsne_axes, 'xy')
-sgtitle(['Black points are every neuron. Blue points are oscillatory neurons at low power. ', ...
-    'Filled bands are that panel''s group.'])
-save_script_figure(output_folder)
-
+n_high = size(Xz, 1);
 lock_embedding_labels = lock_labels_for_rows(neuron_type, complete_rows);
 lock_embedding_keep = { ...
-    true(numel(lock_embedding_labels), 1), ...
+    true(n_high, 1), ...
     ismember(complete_rows(:), osc_rows(:))};
 lock_embedding_names = {'all neurons', 'oscillatory neurons'};
-for set_n = 1:2
-    if ~any(lock_embedding_keep{set_n})
-        fprintf('No %s were available for the lock-type PCA.\n', lock_embedding_names{set_n})
-        continue
+lock_xy = {power_score(1:n_high, 1:2), Y_power(1:n_high, :)};
+lock_x_label = { ...
+    sprintf('PC1 (%.1f%%)', power_explained(1)), ...
+    't-SNE 1'};
+lock_y_label = { ...
+    sprintf('PC2 (%.1f%%)', power_explained(2)), ...
+    't-SNE 2'};
+lock_plane = {'PCA', 't-SNE'};
+for plane = 1:2
+    for set_n = 1:2
+        if ~any(lock_embedding_keep{set_n})
+            fprintf('No %s were available for the lock-type %s.\n', ...
+                lock_embedding_names{set_n}, lock_plane{plane})
+            continue
+        end
+        draw_lock_type_embedding( ...
+            lock_xy{plane}(lock_embedding_keep{set_n}, :), ...
+            lock_embedding_labels(lock_embedding_keep{set_n}), output_folder, ...
+            ['Lock type in the shared ', lock_plane{plane}, ', ', lock_embedding_names{set_n}], ...
+            lock_x_label{plane}, lock_y_label{plane}, ...
+            {['Black points are the ', lock_embedding_names{set_n}, ...
+                ' in the shared ', lock_plane{plane}, '.'], ...
+            'That plane also contains the oscillatory neurons at low power. Those points are not drawn here.', ...
+            'Blue is trough, red is peak, and green is unlocked.'})
     end
-    draw_lock_type_embedding( ...
-        pca_score(lock_embedding_keep{set_n}, 1:2), ...
-        lock_embedding_labels(lock_embedding_keep{set_n}), output_folder, ...
-        ['Lock type in the high-power PCA, ', lock_embedding_names{set_n}], ...
-        sprintf('PC1 (%.1f%%)', pca_explained(1)), ...
-        sprintf('PC2 (%.1f%%)', pca_explained(2)), ...
-        ['Black points are the ', lock_embedding_names{set_n}, ...
-        ' in the high-power PCA. Filled bands are that panel''s lock type.'])
-end
-lock_tsne = [];
-lock_perplexity = nan;
-if exist('Y_tsne', 'var') && exist('perplexity_values', 'var') && ~isempty(Y_tsne)
-    if numel(perplexity_values) >= 2
-        lock_tsne_index = 2;
-    else
-        lock_tsne_index = 1;
-    end
-    if lock_tsne_index <= numel(Y_tsne) ...
-            && size(Y_tsne{lock_tsne_index}, 1) == numel(lock_embedding_labels)
-        lock_tsne = Y_tsne{lock_tsne_index};
-        lock_perplexity = perplexity_values(lock_tsne_index);
-    end
-end
-if isempty(lock_tsne)
-    lock_perplexity_values = [5 15 30 50];
-    lock_perplexity_values = lock_perplexity_values( ...
-        lock_perplexity_values < (size(Xz, 1) - 1) / 3);
-    if isempty(lock_perplexity_values)
-        lock_perplexity_values = max(2, floor((size(Xz, 1) - 1) / 3));
-    end
-    if numel(lock_perplexity_values) >= 2
-        lock_tsne_index = 2;
-    else
-        lock_tsne_index = 1;
-    end
-    lock_perplexity = lock_perplexity_values(lock_tsne_index);
-    rng(42);
-    lock_tsne = tsne(Xz, ...
-        'NumDimensions', 2, ...
-        'Perplexity', lock_perplexity, ...
-        'Standardize', false, ...
-        'Distance', 'euclidean');
-end
-for set_n = 1:2
-    if ~any(lock_embedding_keep{set_n})
-        fprintf('No %s were available for the lock-type t-SNE.\n', lock_embedding_names{set_n})
-        continue
-    end
-    draw_lock_type_embedding( ...
-        lock_tsne(lock_embedding_keep{set_n}, :), ...
-        lock_embedding_labels(lock_embedding_keep{set_n}), output_folder, ...
-        ['Lock type in the high-power t-SNE, ', lock_embedding_names{set_n}], ...
-        't-SNE 1', 't-SNE 2', ...
-        {sprintf('Black points are the %s in the section 2 t-SNE. Perplexity = %g.', ...
-            lock_embedding_names{set_n}, lock_perplexity), ...
-        'Filled bands are that panel''s lock type.'})
 end
 
 % Same columns as the cluster violins. High values come from the
@@ -1041,14 +973,13 @@ else
     paired_stats(1) = [];
 end
 
-type_color = [0.20 0.45 0.80; 0.85 0.25 0.20; 0.45 0.45 0.45; 0.75 0.75 0.75];
 open_full_figure('Oscillatory cells within each lock type')
 shown_percent = type_percent;
 shown_percent(~isfinite(shown_percent)) = 0;
 hold on
 type_legend = cell(1, 4);
 for k = 1:4
-    bar(k, shown_percent(k), 'FaceColor', type_color(k, :), 'BarWidth', 0.8)
+    bar(k, shown_percent(k), 'FaceColor', lock_bar_color(lock_type_label{k}), 'BarWidth', 0.8)
     type_legend{k} = sprintf('%s %d/%d', lock_type_label{k}, type_observed(k), type_total(k));
     text(k, min(shown_percent(k) + 4, 108), sprintf('%d/%d', type_observed(k), type_total(k)), ...
         'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
@@ -1266,116 +1197,33 @@ sgtitle({'High-power oscillatory features by brain area. VLPAG is left out.', ..
 save_script_figure(output_folder)
 write_summary_section(output_folder, '4. Oscillatory features by brain area', ...
     area_feature_report(area_anova))
-lock_anova = repmat(empty_area_anova(), n_area_features, 1);
-for j = 1:n_area_features
-    [groups, names] = values_by_lock(feature_table, neuron_type, ...
-        area_feature_names{j}, 2);
-    lock_anova(j).feature = area_feature_titles{j};
-    lock_anova(j).areas = names;
-    lock_anova(j).groups = groups;
-    stats = one_way_anova(groups);
-    lock_anova(j).n = stats.n;
-    lock_anova(j).mean = stats.mean;
-    lock_anova(j).F = stats.F;
-    lock_anova(j).df1 = stats.df1;
-    lock_anova(j).df2 = stats.df2;
-    lock_anova(j).raw_p = stats.p;
-    lock_anova(j).eta = stats.eta;
-end
-lock_anova_holm = holm_sidak_adjust([lock_anova.raw_p]);
-for j = 1:n_area_features
-    lock_anova(j).holm_p = lock_anova_holm(j);
-    names = lock_anova(j).areas;
-    groups = lock_anova(j).groups;
-    if ~isfinite(lock_anova(j).holm_p) || lock_anova(j).holm_p >= 0.05 || numel(names) < 2
-        continue
-    end
-    pair_list = empty_feature_stats();
-    pair_list(1) = [];
-    pair_index = zeros(0, 2);
-    for a = 1:numel(names)
-        for b = a + 1:numel(names)
-            pair = compare_two_samples(groups{a}, groups{b}, 'unpaired');
-            pair.feature = sprintf('%s vs %s', names{a}, names{b});
-            pair.role = lock_anova(j).feature;
-            pair_list(end + 1) = pair; %#ok<AGROW>
-            pair_index(end + 1, :) = [a, b]; %#ok<AGROW>
-        end
-    end
-    if isempty(pair_list)
-        continue
-    end
-    pair_holm = holm_sidak_adjust([pair_list.raw_p]);
-    for p = 1:numel(pair_list)
-        pair_list(p).holm_p = pair_holm(p);
-    end
-    lock_anova(j).pairs = pair_list;
-    lock_anova(j).pair_index = pair_index;
-end
-open_full_figure('Oscillatory features by lock type')
-tiledlayout(ceil(n_area_features / n_descriptor_cols), n_descriptor_cols, ...
-    'TileSpacing', 'compact')
-for j = 1:n_area_features
-    nexttile
-    hold on
-    names = lock_anova(j).areas;
-    groups = lock_anova(j).groups;
-    for a = 1:numel(names)
-        y = groups{a}(:);
-        y = y(isfinite(y));
-        if isempty(y)
-            continue
-        end
-        scatter(a + violin_point_offset(numel(y)), y, 12, [0 0 0], 'filled', ...
-            'MarkerFaceAlpha', 0.45, 'MarkerEdgeColor', 'none')
-    end
-    for a = 1:numel(names)
-        if ~isfinite(lock_anova(j).mean(a))
-            continue
-        end
-        bar(a, lock_anova(j).mean(a), 0.55, 'FaceColor', lock_bar_color(names{a}), ...
-            'FaceAlpha', 0.45, 'EdgeColor', 'none')
-        hold on
-    end
-    y_top = nan;
-    if ~isempty(lock_anova(j).pairs)
-        show = find([lock_anova(j).pairs.holm_p] < 0.05);
-        if ~isempty(show)
-            pooled = [];
-            for a = 1:numel(groups)
-                pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
-            end
-            y_top = draw_sig_brackets(lock_anova(j).pair_index(show, :), ...
-                [lock_anova(j).pairs(show).holm_p], pooled);
-        end
-    end
-    if ~isempty(names)
-        set(gca, 'XTick', 1:numel(names), 'XTickLabel', names)
-        xlim([0.4, numel(names) + 0.6])
-    end
-    try
-        set(gca, 'TickLabelInterpreter', 'none')
-    catch
-    end
-    if isfinite(y_top)
-        yl = ylim;
-        ylim([yl(1), max(yl(2), y_top)])
-    end
-    if ~isfinite(lock_anova(j).holm_p)
-        p_text = 'Too few neurons';
-    else
-        p_text = sprintf('Holm-Sidak p = %.3g', lock_anova(j).holm_p);
-    end
-    title({lock_anova(j).feature, p_text}, 'Interpreter', 'none')
-    grid on
-    box off
-end
-sgtitle({'High-power oscillatory features by lock type. Non-classified cells are left out.', ...
+lock_anova = lock_type_feature_anova(feature_table, neuron_type, ...
+    area_feature_names, area_feature_titles);
+draw_lock_feature_figure(lock_anova, output_folder, n_descriptor_cols, ...
+    'Oscillatory features by lock type', ...
+    {'High-power features by lock type, all classified neurons.', ...
+    'Non-classified cells are left out.', ...
     'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
-save_script_figure(output_folder)
 write_summary_section(output_folder, '4. Oscillatory features by lock type', ...
     area_feature_report(lock_anova, { ...
-    'One-way ANOVA of each high-power oscillatory feature, with lock type as the factor.', ...
+    'One-way ANOVA of each high-power feature, with lock type as the factor.', ...
+    'Every classified high-power neuron is included.', ...
+    'The groups are trough, peak, and unlocked. Non-classified cells are excluded.', ...
+    'A lock type is included in a feature only when it has at least two finite values.', ...
+    'Holm-Sidak adjusts the ANOVA p-values across features.', ...
+    'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
+    'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
+osc_lock_anova = lock_type_feature_anova(feature_table, neuron_type, ...
+    area_feature_names, area_feature_titles, osc_rows);
+draw_lock_feature_figure(osc_lock_anova, output_folder, n_descriptor_cols, ...
+    'Oscillatory features by lock type, oscillatory neurons', ...
+    {'High-power features by lock type, oscillatory neurons only.', ...
+    'Oscillatory neurons are cluster 1 from section 3. Non-classified cells are left out.', ...
+    'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
+write_summary_section(output_folder, '4. Oscillatory features by lock type, oscillatory neurons', ...
+    area_feature_report(osc_lock_anova, { ...
+    'One-way ANOVA of each high-power feature, with lock type as the factor.', ...
+    'Only oscillatory neurons are included. They are cluster 1 from section 3.', ...
     'The groups are trough, peak, and unlocked. Non-classified cells are excluded.', ...
     'A lock type is included in a feature only when it has at least two finite values.', ...
     'Holm-Sidak adjusts the ANOVA p-values across features.', ...
@@ -1407,12 +1255,12 @@ two_way_without = assign_two_way_holm(two_way_without);
 draw_two_way_panels(two_way_samples, two_way_with, output_folder, ...
     'Two-factor ANOVA with interaction', ...
     {'Area and cell type, with an interaction.', ...
-    'Blue is trough, red is peak, gray is unlocked.', ...
+    'Blue is trough, red is peak, green is unlocked.', ...
     'Each title line is the Holm-Sidak p of that term.'})
 draw_two_way_panels(two_way_samples, two_way_without, output_folder, ...
     'Two-factor ANOVA without interaction', ...
     {'Area and cell type, without an interaction.', ...
-    'Blue is trough, red is peak, gray is unlocked.', ...
+    'Blue is trough, red is peak, green is unlocked.', ...
     'Each title line is the Holm-Sidak p of that term.'})
 write_summary_section(output_folder, '4. Two-factor ANOVA with interaction', ...
     two_way_report(two_way_samples, two_way_with, { ...
@@ -1435,10 +1283,20 @@ write_summary_section(output_folder, '4. Two-factor ANOVA without interaction', 
 classifier_method = {'naivebayes', 'lda', 'svm'};
 classifier_method_name = classifier_method_text(classifier_method);
 n_accuracy_permutations = 1000;
-classifier_names = area_feature_names(two_way_panels);
-classifier_titles = area_feature_titles(two_way_panels);
+[classifier_names, classifier_titles, classifier_sources] = significant_lock_features( ...
+    lock_anova, osc_lock_anova, area_feature_names, area_feature_titles);
 lock_class_names = {'Trough', 'Peak', 'Unlocked'};
 classifier_methods = classifier_method_list(classifier_method);
+fprintf('Classifier features (%d): %s\n', numel(classifier_titles), ...
+    strjoin(classifier_titles, ', '))
+if isempty(classifier_names)
+    fprintf(['No lock-type feature had Holm-Sidak p below 0.05, ', ...
+        'so the classifiers were not run.\n'])
+    write_summary_section(output_folder, '4. Lock-type classifier', join_summary_lines( ...
+        'No classifier was run.', ...
+        'A feature is used when its lock-type ANOVA Holm-Sidak p is below 0.05 for all classified neurons or for oscillatory neurons only.', ...
+        'Neither comparison marked a feature.'))
+else
 classifier_populations = { ...
     struct('name', 'All classified neurons', 'rows', (1:size(feature_table, 1)).'), ...
     struct('name', 'Oscillatory neurons', 'rows', osc_rows(:))};
@@ -1458,6 +1316,11 @@ for p = 1:numel(classifier_populations)
                 classifier_populations{p}.name, classifier_results{m}.method_label, ...
                 100 * classifier_results{m}.accuracy, 100 * classifier_results{m}.chance, ...
                 classifier_results{m}.perm_p)
+            for c = 1:numel(lock_class_names)
+                fprintf('  %s accuracy: %.1f%%. Permutation p = %.3g.\n', ...
+                    lock_class_names{c}, 100 * classifier_results{m}.recall(c), ...
+                    classifier_results{m}.class_perm_p(c))
+            end
         else
             fprintf('%s, %s: %s\n', classifier_populations{p}.name, ...
                 classifier_results{m}.method_label, classifier_results{m}.note)
@@ -1469,9 +1332,11 @@ for p = 1:numel(classifier_populations)
         classifier_populations{p}.name)
 end
 draw_accuracy_null(classifier_populations, output_folder, classifier_method_name)
+draw_class_accuracy_bars(classifier_populations, output_folder)
 write_summary_section(output_folder, '4. Lock-type classifier', ...
-    lock_classifier_report(classifier_titles, classifier_method_name, ...
+    lock_classifier_report(classifier_titles, classifier_sources, classifier_method_name, ...
     n_accuracy_permutations, classifier_populations))
+end
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
@@ -1557,9 +1422,114 @@ else
 end
 write_section_4_summary(output_folder, column_title, cycle_n, cycle_r, cycle_p, ...
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
-    sum(osc_in_complete), sum(~osc_in_complete), sum(finite_projection), ...
+    sum(osc_in_complete), sum(~osc_in_complete), sum(low_member), ...
     sum(low_member), sum(osc_in_complete) - sum(low_member), embed_perplexity, ...
     paired_stats, lock_type_label, type_observed, type_total, type_percent)
+
+
+function draw_power_embedding(xy, group_id, shown, colors, labels, folder, figure_name, x_label, y_label, caption)
+%DRAW_POWER_EMBEDDING  Colored oscillatory groups on one shared plane.
+%
+% shown selects group ids. 1 is oscillatory high power, 2 is the other
+% high-power neurons, and 3 is oscillatory low power. Axis limits always
+% use every row of xy, including groups that are not drawn.
+
+open_full_figure(figure_name)
+hold on
+draw_order = [2 1 3];
+draw_order = draw_order(ismember(draw_order, shown));
+for g = draw_order
+    draw_group_density(xy, xy(group_id == g, :), colors(g, :))
+end
+handles = gobjects(1, 0);
+legend_labels = {};
+for g = draw_order
+    pts = xy(group_id == g, :);
+    pts = pts(all(isfinite(pts), 2), :);
+    if isempty(pts)
+        continue
+    end
+    if g == 3
+        marker = '^';
+        marker_size = 28;
+    else
+        marker = 'o';
+        marker_size = 18;
+    end
+    handles(end + 1) = scatter(pts(:, 1), pts(:, 2), marker_size, colors(g, :), ...
+        'filled', 'Marker', marker, 'MarkerFaceAlpha', 0.85, ...
+        'MarkerEdgeColor', 'none', 'DisplayName', labels{g}); %#ok<AGROW>
+    legend_labels{end + 1} = labels{g}; %#ok<AGROW>
+end
+limits = embedding_axis_limits(xy);
+if ~isempty(limits)
+    xlim(limits(1:2))
+    ylim(limits(3:4))
+end
+xlabel(x_label, 'Interpreter', 'none')
+ylabel(y_label, 'Interpreter', 'none')
+if ~isempty(handles)
+    legend(handles, legend_labels, 'Location', 'best', 'Box', 'off', 'Interpreter', 'none')
+end
+grid on
+box off
+sgtitle(caption, 'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function draw_group_density(all_xy, group_xy, face_color)
+%DRAW_GROUP_DENSITY  Filled density bands for one group on the current axes.
+
+all_xy = all_xy(all(isfinite(all_xy), 2), :);
+group_xy = group_xy(all(isfinite(group_xy), 2), :);
+if size(group_xy, 1) < 3 || isempty(all_xy)
+    return
+end
+span = max(all_xy, [], 1) - min(all_xy, [], 1);
+span(span <= 0) = 1;
+pad = 0.05 * span;
+x1 = linspace(min(all_xy(:, 1)) - pad(1), max(all_xy(:, 1)) + pad(1), 100);
+x2 = linspace(min(all_xy(:, 2)) - pad(2), max(all_xy(:, 2)) + pad(2), 100);
+[xg, yg] = meshgrid(x1, x2);
+density = [];
+try
+    density = ksdensity(group_xy, [xg(:), yg(:)]);
+catch
+    density = [];
+end
+if isempty(density)
+    return
+end
+density_grid = reshape(density, size(xg));
+if ~any(density_grid(:) > 0)
+    return
+end
+density_sorted = sort(density_grid(:), 'descend');
+cumulative = cumsum(density_sorted) / sum(density_sorted);
+probability_levels = 0.1:0.1:0.9;
+thresholds = nan(size(probability_levels));
+for level_n = 1:numel(probability_levels)
+    level_index = find(cumulative >= probability_levels(level_n), 1, 'first');
+    if ~isempty(level_index)
+        thresholds(level_n) = density_sorted(level_index);
+    end
+end
+thresholds = unique(thresholds(isfinite(thresholds)));
+if numel(thresholds) < 2
+    return
+end
+sorted_thresholds = sort(thresholds(:));
+n_thresholds = numel(sorted_thresholds);
+for band_n = (n_thresholds - 1):-1:1
+    contourf(x1, x2, density_grid, ...
+        sorted_thresholds([band_n band_n + 1]), ...
+        'LineWidth', 0.5, 'FaceColor', face_color, ...
+        'EdgeColor', 'none', ...
+        'FaceAlpha', 0.28 + 0.42 * band_n / n_thresholds, ...
+        'HandleVisibility', 'off');
+end
+end
 
 
 function draw_iso_probability(all_xy, group_xy, face_color, highlight_xy, highlight_color)
@@ -2141,7 +2111,7 @@ end
 
 
 function [X, y] = lock_classifier_data(feature_table, neuron_type, feature_names, osc_rows)
-%LOCK_CLASSIFIER_DATA  Six features for oscillatory trough, peak, or unlocked neurons.
+%LOCK_CLASSIFIER_DATA  Selected features for trough, peak, or unlocked neurons.
 
 n = size(feature_table, 1);
 X = nan(n, numel(feature_names));
@@ -2221,7 +2191,7 @@ if ~classifier_method_available(method)
     return
 end
 if isempty(y) || size(X, 2) < 1
-    result.note = 'No neuron had a lock type and finite values on all six features.';
+    result.note = 'No neuron had a lock type and finite values on every selected feature.';
     return
 end
 for c = 1:numel(class_names)
@@ -2229,7 +2199,7 @@ for c = 1:numel(class_names)
 end
 present = find(result.class_n > 0);
 if numel(present) < 2
-    result.note = 'Fewer than two lock types had neurons with all six features.';
+    result.note = 'Fewer than two lock types had neurons with every selected feature.';
     return
 end
 result.n_folds = min(10, min(result.class_n(present)));
@@ -2549,15 +2519,21 @@ save_script_figure(folder)
 end
 
 
-function text = lock_classifier_report(feature_titles, method, n_perm, populations)
-lines = { ...
-    'Classifier of lock type from six high-power features.', ...
-    'The features are subplot numbers 1, 2, 6, 12, 13, and 15:', ...
-    strjoin(feature_titles, ', '), ...
+function text = lock_classifier_report(feature_titles, feature_sources, method, n_perm, populations)
+feature_lines = cell(1, numel(feature_titles));
+for j = 1:numel(feature_titles)
+    feature_lines{j} = sprintf('  %s, significant for %s.', feature_titles{j}, feature_sources{j});
+end
+lines = [{ ...
+    'Classifier of lock type from the high-power features that differ by lock type.', ...
+    'A feature is included when its one-way ANOVA Holm-Sidak p is below 0.05 for all classified neurons or for oscillatory neurons only.', ...
+    'Holm-Sidak is computed separately inside each of those two comparisons.', ...
+    'The selected features:'}, ...
+    feature_lines, { ...
     'Naive Bayes, LDA, and the medium Gaussian SVM are the default. Each one is run on every trough, peak, and unlocked neuron, and again on the oscillatory neurons only.', ...
     'Oscillatory neurons are cluster 1 from section 3.', ...
     'Non-classified cells are excluded.', ...
-    'A neuron is used only when all six features are finite.', ...
+    'A neuron is used only when every selected feature is finite.', ...
     'Accuracy is stratified cross-validation. Each class is split across the folds in stored order.', ...
     'Within each training fold the features are standardized.', ...
     sprintf('classifier_method = %s.', method), ...
@@ -2568,7 +2544,10 @@ lines = { ...
     'tree is the default classification tree. logit is multinomial logistic regression.', ...
     sprintf('The permutation test shuffles the lock-type labels %d times and repeats the same cross-validation.', n_perm), ...
     'The features stay fixed. The random stream is reset to 42 before the first shuffle.', ...
-    'p = (1 + number of shuffled accuracies at or above the real accuracy) / (1 + number of shuffles).'};
+    'The same shuffles give the p-value of the whole model and of each lock type.', ...
+    'A lock-type accuracy is the fraction of neurons of that type that were classified as that type.', ...
+    'p = (1 + number of shuffled accuracies at or above the real accuracy) / (1 + number of shuffles).', ...
+    'A bar is filled when that permutation p is below 0.05. Otherwise only the border is drawn.'}];
 for p = 1:numel(populations)
     lines{end + 1} = populations{p}.name; %#ok<AGROW>
     results = populations{p}.results;
@@ -2596,21 +2575,25 @@ for p = 1:numel(populations)
             continue
         end
         lines{end + 1} = sprintf('    Cross-validated accuracy: %.1f%%.', 100 * result.accuracy); %#ok<AGROW>
+        if result.n_perm < 1 || ~isfinite(result.perm_p)
+            lines{end + 1} = ['    ', result.perm_note]; %#ok<AGROW>
+        else
+            lines{end + 1} = sprintf('    Permutation shuffles: %d.', result.n_perm); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model null mean: %.1f%%.', 100 * result.null_mean); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model null 95th percentile: %.1f%%.', 100 * result.null_p95); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model permutation p: %.4g.', result.perm_p); %#ok<AGROW>
+        end
         for c = 1:numel(result.class_names)
-            lines{end + 1} = sprintf('    %-16s recall %s', result.class_names{c}, ...
-                stat_num(100 * result.recall(c), '%.1f%%')); %#ok<AGROW>
+            lines{end + 1} = sprintf('    %-16s accuracy %s   null mean %s   null 95th %s   permutation p %s', ...
+                result.class_names{c}, ...
+                stat_num(100 * result.recall(c), '%.1f%%'), ...
+                stat_num(100 * result.class_null_mean(c), '%.1f%%'), ...
+                stat_num(100 * result.class_null_p95(c), '%.1f%%'), ...
+                stat_num(result.class_perm_p(c), '%.4g')); %#ok<AGROW>
         end
         lines{end + 1} = '    Confusion counts, rows true and columns predicted:'; %#ok<AGROW>
         lines{end + 1} = labeled_number_matrix('True', result.class_names, ...
             result.class_names, result.counts, '%.0f'); %#ok<AGROW>
-        if result.n_perm < 1 || ~isfinite(result.perm_p)
-            lines{end + 1} = ['    ', result.perm_note]; %#ok<AGROW>
-            continue
-        end
-        lines{end + 1} = sprintf('    Permutation shuffles: %d.', result.n_perm); %#ok<AGROW>
-        lines{end + 1} = sprintf('    Null mean accuracy: %.1f%%.', 100 * result.null_mean); %#ok<AGROW>
-        lines{end + 1} = sprintf('    Null 95th percentile: %.1f%%.', 100 * result.null_p95); %#ok<AGROW>
-        lines{end + 1} = sprintf('    Permutation p: %.4g.', result.perm_p); %#ok<AGROW>
     end
 end
 text = strjoin(lines, newline);
@@ -2618,13 +2601,18 @@ end
 
 
 function result = attach_accuracy_permutation(result, X, y, class_names, n_perm)
-%ATTACH_ACCURACY_PERMUTATION  Label-shuffle null for one cross-validated accuracy.
+%ATTACH_ACCURACY_PERMUTATION  Label-shuffle null for the model and each lock type.
 
+n_class = numel(result.class_names);
 result.n_perm = 0;
 result.null_mean = nan;
 result.null_p95 = nan;
 result.perm_p = nan;
 result.null_accuracy = zeros(0, 1);
+result.null_recall = zeros(0, n_class);
+result.class_null_mean = nan(1, n_class);
+result.class_null_p95 = nan(1, n_class);
+result.class_perm_p = nan(1, n_class);
 result.perm_note = '';
 if ~result.ok
     result.perm_note = 'The permutation test was skipped because the classifier did not run.';
@@ -2635,22 +2623,41 @@ if n_perm < 1
     return
 end
 null_accuracy = nan(n_perm, 1);
+null_recall = nan(n_perm, n_class);
 for shuffle = 1:n_perm
     shuffled = classifier_crossval(X, y(randperm(numel(y))), class_names, result.method);
     if shuffled.ok
         null_accuracy(shuffle) = shuffled.accuracy;
+        null_recall(shuffle, :) = shuffled.recall(:).';
     end
 end
-null_accuracy = null_accuracy(isfinite(null_accuracy));
+kept = isfinite(null_accuracy);
+null_accuracy = null_accuracy(kept);
+null_recall = null_recall(kept, :);
 result.n_perm = numel(null_accuracy);
 result.null_accuracy = null_accuracy;
+result.null_recall = null_recall;
 if isempty(null_accuracy)
     result.perm_note = 'Every label shuffle failed, so the permutation p was not computed.';
     return
 end
 result.null_mean = mean(null_accuracy);
 result.null_p95 = upper_percentile(null_accuracy, 0.95);
-result.perm_p = (1 + sum(null_accuracy >= result.accuracy - 1e-12)) / (1 + result.n_perm);
+result.perm_p = permutation_p(null_accuracy, result.accuracy);
+for c = 1:n_class
+    samples = null_recall(isfinite(null_recall(:, c)), c);
+    if isempty(samples) || ~isfinite(result.recall(c))
+        continue
+    end
+    result.class_null_mean(c) = mean(samples);
+    result.class_null_p95(c) = upper_percentile(samples, 0.95);
+    result.class_perm_p(c) = permutation_p(samples, result.recall(c));
+end
+end
+
+
+function p = permutation_p(null_values, observed)
+p = (1 + sum(null_values >= observed - 1e-12)) / (1 + numel(null_values));
 end
 
 
@@ -2666,37 +2673,116 @@ end
 
 
 function draw_accuracy_null(populations, folder, method)
-open_full_figure('Lock-type accuracy permutation')
-n_pop = numel(populations);
-n_methods = numel(populations{1}.results);
-for m = 1:n_methods
-    for p = 1:n_pop
-        subplot(n_methods, n_pop, (m - 1) * n_pop + p)
-        result = populations{p}.results{m};
-        if ~result.ok || isempty(result.null_accuracy)
+for p = 1:numel(populations)
+    open_full_figure(['Lock-type accuracy permutation, ', populations{p}.name])
+    results = populations{p}.results;
+    n_methods = numel(results);
+    n_class = 0;
+    for m = 1:n_methods
+        n_class = max(n_class, numel(results{m}.class_names));
+    end
+    n_columns = 1 + n_class;
+    for m = 1:n_methods
+        result = results{m};
+        for column = 1:n_columns
+            subplot(n_methods, n_columns, (m - 1) * n_columns + column)
+            if column == 1
+                samples = result.null_accuracy;
+                observed = result.accuracy;
+                p_value = result.perm_p;
+                panel_name = 'All';
+            else
+                samples = result.null_recall(:, column - 1);
+                samples = samples(isfinite(samples));
+                observed = result.recall(column - 1);
+                p_value = result.class_perm_p(column - 1);
+                panel_name = result.class_names{column - 1};
+            end
+            if ~result.ok || isempty(samples) || ~isfinite(observed)
+                axis off
+                title({result.method_label, panel_name}, 'Interpreter', 'none')
+                if ~isempty(result.perm_note)
+                    text(0.5, 0.5, result.perm_note, 'HorizontalAlignment', 'center', ...
+                        'Interpreter', 'none')
+                end
+                continue
+            end
+            histogram(100 * samples, 'FaceColor', [0.75 0.75 0.75], 'EdgeColor', 'none')
+            hold on
+            y_limit = ylim;
+            plot(100 * [observed observed], y_limit, 'Color', [0.8 0.15 0.15], 'LineWidth', 1.6)
+            xlabel('Cross-validated accuracy (%)')
+            ylabel('Shuffles')
+            title({sprintf('p = %.3g', p_value), result.method_label, panel_name}, ...
+                'Interpreter', 'none')
+            box off
+        end
+    end
+    sgtitle({populations{p}.name, ...
+        sprintf('Gray bars are label shuffles. The red line is the real accuracy. classifier_method = %s.', method)}, ...
+        'Interpreter', 'none')
+    save_script_figure(folder)
+end
+end
+
+
+function draw_class_accuracy_bars(populations, folder)
+for p = 1:numel(populations)
+    open_full_figure(['Lock-type accuracy by cell type, ', populations{p}.name])
+    results = populations{p}.results;
+    n_methods = numel(results);
+    for m = 1:n_methods
+        subplot(1, n_methods, m)
+        result = results{m};
+        if ~result.ok
             axis off
-            title({populations{p}.name, result.method_label}, 'Interpreter', 'none')
-            if ~isempty(result.perm_note)
-                text(0.5, 0.5, result.perm_note, 'HorizontalAlignment', 'center', ...
+            title(result.method_label, 'Interpreter', 'none')
+            if ~isempty(result.note)
+                text(0.5, 0.5, result.note, 'HorizontalAlignment', 'center', ...
                     'Interpreter', 'none')
             end
             continue
         end
-        histogram(result.null_accuracy, 'FaceColor', [0.75 0.75 0.75], 'EdgeColor', 'none')
         hold on
-        y_limit = ylim;
-        plot([result.accuracy result.accuracy], y_limit, ...
-            'Color', [0.8 0.15 0.15], 'LineWidth', 1.6)
-        xlabel('Cross-validated accuracy')
-        ylabel('Shuffles')
-        title({sprintf('p = %.3g', result.perm_p), ...
-            result.method_label, populations{p}.name}, 'Interpreter', 'none')
+        y_top = 0;
+        for c = 1:numel(result.class_names)
+            if ~isfinite(result.recall(c))
+                continue
+            end
+            height = 100 * result.recall(c);
+            color = lock_bar_color(result.class_names{c});
+            significant = isfinite(result.class_perm_p(c)) && result.class_perm_p(c) < 0.05;
+            if significant
+                bar(c, height, 0.72, 'FaceColor', color, 'EdgeColor', color, ...
+                    'FaceAlpha', 0.9, 'LineWidth', 1.2)
+            else
+                bar(c, height, 0.72, 'FaceColor', 'none', 'EdgeColor', color, ...
+                    'LineWidth', 1.6)
+            end
+            if isfinite(result.class_perm_p(c))
+                text(c, height, sprintf('p = %.3g', result.class_perm_p(c)), ...
+                    'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
+                    'Interpreter', 'none')
+            end
+            y_top = max(y_top, height);
+        end
+        set(gca, 'XTick', 1:numel(result.class_names), 'XTickLabel', result.class_names)
+        try
+            set(gca, 'TickLabelInterpreter', 'none')
+        catch
+        end
+        ylim([0, max(110, y_top + 15)])
+        xlim([0.4, numel(result.class_names) + 0.6])
+        ylabel('Accuracy (%)')
+        title({result.method_label, sprintf('All p = %.3g', result.perm_p)}, ...
+            'Interpreter', 'none')
         box off
     end
+    sgtitle({populations{p}.name, ...
+        'Filled bars have permutation p < 0.05. Open bars do not.'}, ...
+        'Interpreter', 'none')
+    save_script_figure(folder)
 end
-sgtitle({sprintf('Gray bars are label shuffles. The red line is the real accuracy. classifier_method = %s.', method)}, ...
-    'Interpreter', 'none')
-save_script_figure(folder)
 end
 
 
@@ -2739,10 +2825,31 @@ save_script_figure(folder)
 end
 
 
-function [groups, names] = values_by_lock(feature_table, neuron_type, feature_name, min_n)
+function [groups, names] = values_by_lock(feature_table, neuron_type, feature_name, min_n, row_keep)
 %VALUES_BY_LOCK  Feature values for trough, peak, and unlocked neurons.
 
 values = feature_column(feature_table, feature_name);
+if nargin < 5
+    row_keep = [];
+end
+if nargin >= 5
+    row_keep = row_keep(:);
+    n = min(numel(values), numel(neuron_type));
+    if isempty(row_keep)
+        values = values([]);
+        neuron_type = neuron_type([]);
+    elseif islogical(row_keep)
+        mask = false(n, 1);
+        use = row_keep(1:min(numel(row_keep), n));
+        mask(1:numel(use)) = use(:);
+        values = values(mask);
+        neuron_type = neuron_type(mask);
+    else
+        row_keep = unique(round(row_keep(row_keep >= 1 & row_keep <= n)), 'stable');
+        values = values(row_keep);
+        neuron_type = neuron_type(row_keep);
+    end
+end
 kept = {'Trough', 'Peak', 'Unlocked'};
 labels = cell(numel(neuron_type), 1);
 for i = 1:numel(neuron_type)
@@ -2762,6 +2869,154 @@ end
 end
 
 
+function anova = lock_type_feature_anova(feature_table, neuron_type, feature_names, feature_titles, row_keep)
+%LOCK_TYPE_FEATURE_ANOVA  One-way lock-type ANOVA for every high-power feature.
+
+use_rows = nargin >= 5;
+n_features = numel(feature_names);
+anova = repmat(empty_area_anova(), n_features, 1);
+for j = 1:n_features
+    if use_rows
+        [groups, names] = values_by_lock(feature_table, neuron_type, ...
+            feature_names{j}, 2, row_keep);
+    else
+        [groups, names] = values_by_lock(feature_table, neuron_type, ...
+            feature_names{j}, 2);
+    end
+    anova(j).feature = feature_titles{j};
+    anova(j).areas = names;
+    anova(j).groups = groups;
+    stats = one_way_anova(groups);
+    anova(j).n = stats.n;
+    anova(j).mean = stats.mean;
+    anova(j).F = stats.F;
+    anova(j).df1 = stats.df1;
+    anova(j).df2 = stats.df2;
+    anova(j).raw_p = stats.p;
+    anova(j).eta = stats.eta;
+end
+holm = holm_sidak_adjust([anova.raw_p]);
+for j = 1:n_features
+    anova(j).holm_p = holm(j);
+    names = anova(j).areas;
+    groups = anova(j).groups;
+    if ~isfinite(anova(j).holm_p) || anova(j).holm_p >= 0.05 || numel(names) < 2
+        continue
+    end
+    pair_list = empty_feature_stats();
+    pair_list(1) = [];
+    pair_index = zeros(0, 2);
+    for a = 1:numel(names)
+        for b = a + 1:numel(names)
+            pair = compare_two_samples(groups{a}, groups{b}, 'unpaired');
+            pair.feature = sprintf('%s vs %s', names{a}, names{b});
+            pair.role = anova(j).feature;
+            pair_list(end + 1) = pair; %#ok<AGROW>
+            pair_index(end + 1, :) = [a, b]; %#ok<AGROW>
+        end
+    end
+    if isempty(pair_list)
+        continue
+    end
+    pair_holm = holm_sidak_adjust([pair_list.raw_p]);
+    for p = 1:numel(pair_list)
+        pair_list(p).holm_p = pair_holm(p);
+    end
+    anova(j).pairs = pair_list;
+    anova(j).pair_index = pair_index;
+end
+end
+
+
+function draw_lock_feature_figure(anova, folder, n_cols, figure_name, title_lines)
+open_full_figure(figure_name)
+n_features = numel(anova);
+tiledlayout(ceil(n_features / n_cols), n_cols, 'TileSpacing', 'compact')
+for j = 1:n_features
+    nexttile
+    hold on
+    names = anova(j).areas;
+    groups = anova(j).groups;
+    for a = 1:numel(names)
+        y = groups{a}(:);
+        y = y(isfinite(y));
+        if isempty(y)
+            continue
+        end
+        scatter(a + violin_point_offset(numel(y)), y, 12, [0 0 0], 'filled', ...
+            'MarkerFaceAlpha', 0.45, 'MarkerEdgeColor', 'none')
+    end
+    for a = 1:numel(names)
+        if ~isfinite(anova(j).mean(a))
+            continue
+        end
+        bar(a, anova(j).mean(a), 0.55, 'FaceColor', lock_bar_color(names{a}), ...
+            'FaceAlpha', 0.45, 'EdgeColor', 'none')
+        hold on
+    end
+    y_top = nan;
+    if ~isempty(anova(j).pairs)
+        show = find([anova(j).pairs.holm_p] < 0.05);
+        if ~isempty(show)
+            pooled = [];
+            for a = 1:numel(groups)
+                pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
+            end
+            y_top = draw_sig_brackets(anova(j).pair_index(show, :), ...
+                [anova(j).pairs(show).holm_p], pooled);
+        end
+    end
+    if ~isempty(names)
+        set(gca, 'XTick', 1:numel(names), 'XTickLabel', names)
+        xlim([0.4, numel(names) + 0.6])
+    end
+    try
+        set(gca, 'TickLabelInterpreter', 'none')
+    catch
+    end
+    if isfinite(y_top)
+        yl = ylim;
+        ylim([yl(1), max(yl(2), y_top)])
+    end
+    if ~isfinite(anova(j).holm_p)
+        p_text = 'Too few neurons';
+    else
+        p_text = sprintf('Holm-Sidak p = %.3g', anova(j).holm_p);
+    end
+    title({anova(j).feature, p_text}, 'Interpreter', 'none')
+    grid on
+    box off
+end
+sgtitle(title_lines)
+save_script_figure(folder)
+end
+
+
+function [names, titles, sources] = significant_lock_features(anova_all, anova_osc, feature_names, feature_titles)
+%SIGNIFICANT_LOCK_FEATURES  Features with a lock-type difference in either set.
+
+names = {};
+titles = {};
+sources = {};
+for j = 1:numel(feature_names)
+    in_all = isfinite(anova_all(j).holm_p) && anova_all(j).holm_p < 0.05;
+    in_osc = isfinite(anova_osc(j).holm_p) && anova_osc(j).holm_p < 0.05;
+    if ~(in_all || in_osc)
+        continue
+    end
+    names{end + 1} = feature_names{j}; %#ok<AGROW>
+    titles{end + 1} = feature_titles{j}; %#ok<AGROW>
+    if in_all && in_osc
+        sources{end + 1} = 'all classified neurons and oscillatory neurons'; %#ok<AGROW>
+    elseif in_all
+        sources{end + 1} = 'all classified neurons'; %#ok<AGROW>
+    else
+        sources{end + 1} = 'oscillatory neurons'; %#ok<AGROW>
+    end
+end
+end
+
+
 function color = lock_bar_color(name)
 switch name
     case 'Trough'
@@ -2769,7 +3024,7 @@ switch name
     case 'Peak'
         color = [0.85 0.25 0.20];
     case 'Unlocked'
-        color = [0.45 0.45 0.45];
+        color = [0.18 0.62 0.18];
     otherwise
         color = [0.75 0.75 0.75];
 end
@@ -3714,11 +3969,15 @@ write_summary_section(folder, '4. High power minus low power across lag', join_s
     'These lag tests are not part of the Holm-Sidak correction used for the feature panels.', ...
     lag_line))
 write_summary_section(folder, '4. Low-power points in the PCA and t-SNE', join_summary_lines( ...
-    sprintf('PCA counts. Oscillatory high power: %d. Other high-power group: %d. Oscillatory low power with a finite projection: %d.', ...
-        n_osc_high, n_other_high, n_osc_low_pca), ...
-    sprintf('New t-SNE perplexity: %g.', embed_perplexity), ...
-    sprintf('Low-power oscillatory neurons included: %d. Omitted for missing low-power features: %d.', ...
-        n_osc_low_tsne, n_omitted)))
+    'One PCA and one t-SNE are fit on the high-power neurons plus the oscillatory neurons at low power.', ...
+    'The oscillatory and non-oscillatory figures, and the lock-type figures, use that shared plane.', ...
+    'One PCA figure and one t-SNE figure draw only the high-power neurons. Another pair draws those same points and adds the low-power oscillatory neurons as triangles.', ...
+    'Orange is oscillatory at high power. Purple is non-oscillatory at high power. Blue triangles are oscillatory at low power.', ...
+    'Green is reserved for unlocked neurons on the lock-type figures.', ...
+    sprintf('Oscillatory high power: %d. Other high-power neurons: %d. Oscillatory low power included: %d. Omitted for missing low-power features: %d.', ...
+        n_osc_high, n_other_high, n_osc_low_pca, n_omitted), ...
+    sprintf('Shared t-SNE perplexity: %g. Low-power rows in that t-SNE: %d.', ...
+        embed_perplexity, n_osc_low_tsne)))
 write_summary_section(folder, '4. Feature comparison, high versus low power', ...
     feature_comparison_report(paired_stats, 'paired'))
 write_summary_section(folder, '4. Oscillatory share of each lock type', join_summary_lines( ...
