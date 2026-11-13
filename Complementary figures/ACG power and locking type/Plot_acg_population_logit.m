@@ -15,14 +15,16 @@
 % lock-type model cache are written to
 % Data\Analysis results\acg population logit. A cache or matrix saved by
 % an earlier run is read from output_folder or from spike train parsing.
-% n_example_neurons and n_example_subplots are set at the start of section 4.
+% n_example_neurons, n_neurons_per_figure, example_smooth_ms, and
+% plot_example_neurons_only are set at the start of section 4.
 % n_example_neurons chooses how many of the strongest oscillatory neurons
 % are drawn. The examples also keep the strongest oscillatory neuron from
 % each analysed area except VLPAG, so that count can be larger than
-% n_example_neurons. n_example_subplots is how many panels go on each figure.
-% Each neuron uses three panels: high-power autocorrelogram, low-power
-% autocorrelogram, then both shuffle percentiles. The figures continue
-% until every requested neuron is drawn.
+% n_example_neurons. n_neurons_per_figure is how many neurons go on each
+% figure. Each neuron is one column: both autocorrelograms on the top row,
+% both shuffle percentiles on the bottom row. example_smooth_ms is the
+% Gaussian smoothing width in milliseconds. plot_example_neurons_only
+% draws those neurons and leaves the other section 4 figures unrun.
 % classifier_method is set just before the lock-type classifier.
 % The default is naive Bayes, LDA, and a medium Gaussian SVM.
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
@@ -667,7 +669,9 @@ if ~exist('output_folder', 'var')
 end
 [output_folder, estimate_folder] = logit_folders(output_folder);
 n_example_neurons = 10;
-n_example_subplots = 6;
+n_neurons_per_figure = 3;
+example_smooth_ms = 0.05;
+plot_example_neurons_only = false;
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
@@ -675,7 +679,7 @@ if ~exist('shown_logit', 'var')
     error('Plot_acg_population_logit:shown', ...
         'shown_logit is not in the workspace. Run section 3 first.');
 end
-
+if ~plot_example_neurons_only
 % Open intervals, in seconds, for the cycle scatter below.
 trough_windows_s = [0.05 0.15; 0.35 0.45];
 peak_windows_s = [0.25 0.35; 0.45 0.55];
@@ -1385,6 +1389,15 @@ write_summary_section(output_folder, '4. Lock-type classifier', ...
     lock_classifier_report(classifier_titles, classifier_sources, classifier_method_name, ...
     n_accuracy_permutations, classifier_populations))
 end
+end
+
+if ~exist('feature_table_low', 'var') || size(feature_table_low, 1) ~= numel(neuron_type)
+    if exist('imagesc_sum_power_low', 'var') && exist('lag', 'var')
+        positive_lag = lag > 0;
+        feature_table_low = acg2features( ...
+            imagesc_sum_power_low(:, positive_lag), lag(positive_lag));
+    end
+end
 if ~exist('acg_method', 'var') || isempty(acg_method)
     acg_method = 'overlap';
 end
@@ -1400,9 +1413,13 @@ end
 example_bank = load_example_acg_bank(example_summary_path);
 example_pos = example_positions(osc_rows, neuron_area, n_example_neurons, 'VLPAG');
 n_example = numel(example_pos);
-example_names = [comparison_names, {'Peak1 - Peak2'}];
-n_example_rows = 3;
-neurons_per_figure = max(1, floor(n_example_subplots / n_example_rows));
+example_names = { ...
+    'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
+    'OscillationScore', 'Baseline', ...
+    'DominantFrequency', 'PeakFrequency', 'TroughFrequency', ...
+    'Persistence', 'Peak1', 'Peak2', 'Trough1', 'Trough2', 'Peak1 - Peak2'};
+n_example_rows = 2;
+neurons_per_figure = max(1, round(n_neurons_per_figure));
 n_example_cols = neurons_per_figure;
 high_color = [0.75 0.22 0.18];
 low_color = [0.15 0.35 0.70];
@@ -1422,69 +1439,76 @@ if n_example > 0
             lock_label = display_lock_label(neuron_type{pop_row});
             [acg_lag, acg_high, acg_low, found_high, found_low] = example_stratum_curves( ...
                 example_bank, neuron_session{pop_row}, neuron_cluster_id(pop_row));
+            acg_high = smooth_example_trace(acg_lag, acg_high, example_smooth_ms);
+            acg_low = smooth_example_trace(acg_lag, acg_low, example_smooth_ms);
+            pct_high = smooth_example_trace(lag, ...
+                shown_percentile.sum.power_high(rank, :), example_smooth_ms);
+            pct_low = smooth_example_trace(lag, ...
+                shown_percentile.sum.power_low(rank, :), example_smooth_ms);
             shared_ylim = example_acg_ylim(acg_lag, [acg_high(:), acg_low(:)], lag_limits);
             subplot(n_example_rows, n_example_cols, k)
+            hold on
             if found_high
                 plot(acg_lag, acg_high, 'Color', high_color, 'LineWidth', 1.4)
+            end
+            if found_low
+                plot(acg_lag, acg_low, 'Color', low_color, 'LineWidth', 1.4)
+            end
+            if found_high || found_low
                 xlim(lag_limits)
                 ylim(shared_ylim)
+                if k == 1
+                    legend_names = {};
+                    if found_high
+                        legend_names{end + 1} = 'High 25% power'; %#ok<AGROW>
+                    end
+                    if found_low
+                        legend_names{end + 1} = 'Low 25% power'; %#ok<AGROW>
+                    end
+                    legend(legend_names, 'Location', 'northeast', 'Box', 'off')
+                end
             else
-                text(0.5, 0.5, 'High ACG not in summary', 'HorizontalAlignment', 'center')
+                text(0.5, 0.5, 'ACG not in summary', 'HorizontalAlignment', 'center')
                 axis([0 1 0 1])
             end
-            ylabel('High, sum-to-1')
+            ylabel('Sum-to-1')
             title({sprintf('%s, %s', this_area, lock_label), ...
                 sprintf('%s id %g', neuron_session{pop_row}, neuron_cluster_id(pop_row))}, ...
                 'Interpreter', 'none')
             box off
             subplot(n_example_rows, n_example_cols, n_example_cols + k)
-            if found_low
-                plot(acg_lag, acg_low, 'Color', low_color, 'LineWidth', 1.4)
-                xlim(lag_limits)
-                ylim(shared_ylim)
-            else
-                text(0.5, 0.5, 'Low ACG not in summary', 'HorizontalAlignment', 'center')
-                axis([0 1 0 1])
-            end
-            ylabel('Low, sum-to-1')
-            box off
-            subplot(n_example_rows, n_example_cols, 2 * n_example_cols + k)
             hold on
-            plot(lag, shown_percentile.sum.power_high(rank, :), 'Color', high_color, ...
-                'LineWidth', 1.4)
-            plot(lag, shown_percentile.sum.power_low(rank, :), 'Color', low_color, ...
-                'LineWidth', 1.4)
+            plot(lag, pct_high, 'Color', high_color, 'LineWidth', 1.4)
+            plot(lag, pct_low, 'Color', low_color, 'LineWidth', 1.4)
             xlim(lag_limits)
             ylim([0 100])
             xlabel('Lag (s)')
             ylabel('Percentile')
-            if k == 1
-                legend({'High 25% power', 'Low 25% power'}, 'Location', 'northeast', 'Box', 'off')
-            end
             box off
             example_lines{i} = example_neuron_summary(i, neuron_session{pop_row}, ...
                 neuron_cluster_id(pop_row), this_area, lock_label, osc_score(pop_row), ...
                 found_high, found_low, feature_table, feature_table_low, pop_row, example_names);
         end
         sgtitle({sprintf('Neurons %d-%d of %d. VLPAG is left out.', i0, i1, n_example), ...
-            'Top two rows: high-power and low-power autocorrelograms, one shared scale per neuron.', ...
-            'Bottom row: high-power and low-power shuffle percentiles.'}, ...
+            'Each column is one neuron. Top: high-power and low-power autocorrelograms.', ...
+            'Bottom: high-power and low-power shuffle percentiles.', ...
+            sprintf('Gaussian smooth, T = %g ms.', example_smooth_ms)}, ...
             'Interpreter', 'none')
         save_script_figure(output_folder)
     end
     write_summary_section(output_folder, '4. Example oscillatory neurons', join_summary_lines( ...
-        sprintf('n_example_neurons = %d. Drawn: %d. Subplots per figure: %d.', ...
-            n_example_neurons, n_example, n_example_rows * neurons_per_figure), ...
-        sprintf('Figures: %d. Each figure holds up to %d neurons.', ...
-            n_example_figures, neurons_per_figure), ...
-        'Each neuron has three rows: high-power autocorrelogram, low-power autocorrelogram, then both percentiles.', ...
+        sprintf('n_example_neurons = %d. Drawn: %d. Neurons per figure: %d.', ...
+            n_example_neurons, n_example, neurons_per_figure), ...
+        sprintf('Figures: %d. Each neuron is one column with two rows.', n_example_figures), ...
+        'Top row: high-power and low-power autocorrelograms on one axes.', ...
+        'Bottom row: high-power and low-power sum-to-1 shuffle percentiles on one axes.', ...
+        sprintf('Gaussian smoothing width T = %g ms.', example_smooth_ms), ...
         'VLPAG is left out. Each other area that has an oscillatory neuron contributes its strongest one.', ...
         'Further neurons are the next highest modulation scores outside VLPAG, until n_example_neurons is reached.', ...
         'If those areas already exceed n_example_neurons, every area representative is still drawn.', ...
         'The drawn order is strongest modulation first.', ...
         example_bank.note, ...
-        'The two autocorrelogram rows share a y-axis taken from that neuron, using lags at and after 0.05 s, so the bin beside zero does not flatten the trace.', ...
-        'The bottom row plots the high-power and low-power sum-to-1 shuffle percentiles on the same axes.', ...
+        'The autocorrelogram y-axis is taken from that neuron, using lags at and after 0.05 s, so the bin beside zero does not flatten the trace.', ...
         'Features are the high-power and low-power values for that neuron.', ...
         example_lines))
 else
@@ -1492,11 +1516,13 @@ else
         sprintf('n_example_neurons = %d. Drawn: 0.', n_example_neurons), ...
         'No oscillatory neuron outside VLPAG was available.'))
 end
+if ~plot_example_neurons_only
 write_section_4_summary(output_folder, stratum_titles, cycle_n, cycle_r, cycle_p, ...
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
     sum(osc_in_complete), sum(~osc_in_complete), sum(low_member), ...
     sum(low_member), sum(osc_in_complete) - sum(low_member), embed_perplexity, ...
     paired_stats, lock_type_label, type_observed, type_total, type_percent)
+end
 
 %% 5. Within-neuron delta-power gap and the feature changes
 % Re-run this section after section 3. One row per neuron that has both
@@ -6247,6 +6273,42 @@ x_lim = [min(lag) - pad, max(lag) + pad];
 if min(lag) >= 0
     x_lim(1) = 0;
 end
+end
+
+
+function y = smooth_example_trace(x, y, width_ms)
+%SMOOTH_EXAMPLE_TRACE  Gaussian smooth. width_ms is the standard deviation.
+
+y = double(y(:)).';
+x = double(x(:));
+n = min(numel(x), numel(y));
+x = x(1:n);
+y = y(1:n);
+if n < 3 || ~isfinite(width_ms) || width_ms <= 0
+    return
+end
+bin_s = median(diff(x));
+if ~isfinite(bin_s) || bin_s <= 0
+    return
+end
+sigma_bins = (width_ms / 1000) / bin_s;
+if sigma_bins < 0.05
+    return
+end
+half_width = max(1, ceil(4 * sigma_bins));
+t = -half_width:half_width;
+kernel = exp(-0.5 * (t / sigma_bins) .^ 2);
+kernel = kernel / sum(kernel);
+finite = isfinite(y);
+filled = y;
+filled(~finite) = 0;
+numer = conv(filled, kernel, 'same');
+denom = conv(double(finite), kernel, 'same');
+out = y;
+use = denom > 0;
+out(use) = numer(use) ./ denom(use);
+out(~finite) = nan;
+y = out;
 end
 
 
