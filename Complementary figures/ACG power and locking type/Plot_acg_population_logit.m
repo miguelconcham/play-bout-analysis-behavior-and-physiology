@@ -49,6 +49,11 @@
 % shown_logit is that group, strongest modulation first.
 % imagesc_osc_sum_all is the same sum-to-1 image under a plain name.
 % osc_neuron_type is its lock group. feature_table has one row per neuron.
+% Section 5 stores the mean channel delta power of the runs that form
+% each neuron's high-power autocorrelogram. It compares the skewness of
+% that power with the skewness of its logarithm, then predicts the less
+% skewed scale from the six oscillatory features and from the oscillatory
+% or non-oscillatory group.
 
 %% 1. Load the checkpoint and build the imagesc matrices
 output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
@@ -106,6 +111,7 @@ neuron_type = neuron_type(row_order);
 neuron_record_index = neuron_record_index(row_order);
 [neuron_session, neuron_area, neuron_cluster_id] = ...
     neuron_identity_from_records(records, neuron_record_index);
+high_power_delta = high_power_mean_delta(records, neuron_record_index);
 
 imagesc_logit = struct();
 sort_score = struct();
@@ -140,7 +146,7 @@ feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positi
 save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
     'neuron_type', 'neuron_record_index', 'neuron_session', 'neuron_area', ...
-    'neuron_cluster_id', 'feature_table', ...
+    'neuron_cluster_id', 'feature_table', 'high_power_delta', ...
     'column_id', 'column_title', 'scale_id', 'scale_title', ...
     'n_shuffles', 'sort_window_s', 'checkpoint', 'prep_file');
 disp(['Section 1 saved the matrices to ', prep_file])
@@ -154,6 +160,8 @@ write_summary_section(output_folder, '1. Checkpoint and population matrices', st
     ['Checkpoint: ', checkpoint], ...
     sprintf('Shuffles: %d', n_shuffles), ...
     sprintf('Neurons with all, high-power, and low-power curves: %d', numel(neuron_type)), ...
+    sprintf('Neurons with a finite high-power mean delta power: %d', sum(isfinite(high_power_delta))), ...
+    'high_power_delta is the mean, across that neuron''s high-power runs, of the squared median delta-band envelope on the neuron channel.', ...
     sprintf('Lag axis: %.3f to %.3f s, %d bins', lag(1), lag(end), numel(lag)), ...
     sprintf('Sort window for the stored row order: %.3f to %.3f s', ...
         sort_window_s(1), sort_window_s(2)), ...
@@ -1450,6 +1458,103 @@ write_section_4_summary(output_folder, column_title, cycle_n, cycle_r, cycle_p, 
     sum(osc_in_complete), sum(~osc_in_complete), sum(low_member), ...
     sum(low_member), sum(osc_in_complete) - sum(low_member), embed_perplexity, ...
     paired_stats, lock_type_label, type_observed, type_total, type_percent)
+
+%% 5. Mean high-power delta and the feature model
+% Re-run this section after section 3. high_power_delta comes from section
+% 1. The six predictors are the features that define the oscillatory split.
+% The seventh predictor is that split: oscillatory or non-oscillatory.
+if ~exist('output_folder', 'var') || isempty(output_folder)
+    output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
+end
+this_dir = fileparts(mfilename('fullpath'));
+addpath(this_dir);
+addpath(fileparts(this_dir));
+if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
+        || ~exist('complete_rows', 'var') || ~exist('osc_rows', 'var')
+    error('Plot_acg_population_logit:powerModel', ...
+        'The oscillatory split is not in the workspace. Run sections 2 and 3 first.');
+end
+if ~exist('high_power_delta', 'var') || numel(high_power_delta) ~= numel(neuron_type)
+    if ~exist('records', 'var') || ~exist('neuron_record_index', 'var')
+        error('Plot_acg_population_logit:powerModel', ...
+            'high_power_delta is not in the workspace. Run section 1 first.');
+    end
+    high_power_delta = high_power_mean_delta(records, neuron_record_index);
+end
+power_feature_names = { ...
+    'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
+    'OscillationScore', 'Baseline'};
+power_feature_names = power_feature_names( ...
+    ismember(power_feature_names, feature_table.Properties.VariableNames));
+if isempty(power_feature_names)
+    error('Plot_acg_population_logit:powerModel', ...
+        'None of the oscillatory features are in feature_table.');
+end
+power_rows = complete_rows(:);
+power_rows = power_rows(power_rows >= 1 & power_rows <= numel(neuron_type));
+power_x = feature_table{power_rows, power_feature_names};
+power_y = high_power_delta(power_rows);
+power_group = double(ismember(power_rows, osc_rows(:)));
+power_keep = all(isfinite(power_x), 2) & isfinite(power_y) & power_y > 0;
+power_x = power_x(power_keep, :);
+power_y = power_y(power_keep);
+power_group = power_group(power_keep);
+if size(power_x, 1) < numel(power_feature_names) + 4
+    error('Plot_acg_population_logit:powerModel', ...
+        'Too few neurons with a positive high-power delta and finite features.');
+end
+power_scale = choose_positive_scale(power_y);
+if strcmp(power_scale.name, 'log')
+    power_outcome = log(power_y);
+    power_outcome_label = 'log high-power delta';
+else
+    power_outcome = power_y;
+    power_outcome_label = 'high-power delta';
+end
+power_design = [power_x, power_group];
+power_predictor_names = [power_feature_names, {'Oscillatory'}];
+power_fit = fit_power_feature_model(power_outcome, power_design, power_predictor_names);
+fprintf('High-power mean delta, n = %d (%d oscillatory, %d non-oscillatory).\n', ...
+    numel(power_y), sum(power_group == 1), sum(power_group == 0))
+fprintf('Skewness of power: %.3f. Skewness of log power: %.3f.\n', ...
+    power_scale.skew_raw, power_scale.skew_log)
+fprintf('%s\n', power_scale.reason)
+fprintf('Model outcome: %s. R^2 = %.3f. Adjusted R^2 = %.3f. F(%g,%g) = %.3f, p = %.3g.\n', ...
+    power_outcome_label, power_fit.rsq, power_fit.adj_rsq, ...
+    power_fit.df1, power_fit.df, power_fit.F, power_fit.F_p)
+for i = 1:numel(power_fit.names)
+    fprintf('  %-18s  coefficient %.4g  SE %.4g  t %.3f  p %.3g\n', ...
+        power_fit.names{i}, power_fit.beta(i), power_fit.se(i), ...
+        power_fit.t(i), power_fit.p_value(i))
+end
+draw_power_scale_check(power_y, power_scale, output_folder)
+draw_power_model_coefficients(power_fit, power_outcome_label, output_folder)
+power_lines = cell(numel(power_fit.names), 1);
+for i = 1:numel(power_fit.names)
+    power_lines{i} = sprintf('%-18s %12.4g %12.4g %10.3f %10.3g', ...
+        power_fit.names{i}, power_fit.beta(i), power_fit.se(i), ...
+        power_fit.t(i), power_fit.p_value(i));
+end
+write_summary_section(output_folder, '5. High-power delta model', join_summary_lines( ...
+    ['Output folder: ', output_folder], ...
+    'The outcome is the mean delta power of the firing runs that form the high-power autocorrelogram.', ...
+    'A run is in that tail when its delta power is at or above the neuron''s own 75th percentile.', ...
+    'Delta power of a run is the square of the median delta-band envelope on the neuron channel.', ...
+    'The mean gives each of those runs the same weight.', ...
+    sprintf('Neurons in the model: %d. Oscillatory: %d. Non-oscillatory: %d.', ...
+        numel(power_y), sum(power_group == 1), sum(power_group == 0)), ...
+    sprintf('Mean power, oscillatory: %.4g. Mean power, non-oscillatory: %.4g.', ...
+        mean(power_y(power_group == 1)), mean(power_y(power_group == 0))), ...
+    sprintf('Skewness of the power: %.3f.', power_scale.skew_raw), ...
+    sprintf('Skewness of the logarithm: %.3f.', power_scale.skew_log), ...
+    power_scale.reason, ...
+    sprintf('Fitted outcome: %s.', power_outcome_label), ...
+    'Predictors are Modulation1, Modulation2, PeakInterval, TroughInterval, OscillationScore, and Baseline, plus the oscillatory group.', ...
+    'Oscillatory is 1 for cluster 1 and 0 for the other neurons with complete features. The intercept is the non-oscillatory level.', ...
+    sprintf('R^2 = %.3f. Adjusted R^2 = %.3f. F(%g, %g) = %.3f. p = %.3g.', ...
+        power_fit.rsq, power_fit.adj_rsq, power_fit.df1, power_fit.df, power_fit.F, power_fit.F_p), ...
+    sprintf('%-18s %12s %12s %10s %10s', 'Term', 'Coefficient', 'SE', 't', 'p'), ...
+    power_lines))
 
 
 function draw_power_embedding(xy, group_id, shown, colors, labels, folder, figure_name, x_label, y_label, caption)
@@ -3707,6 +3812,169 @@ for i = 1:n
     area{i} = record_text(record, 'area');
     cluster_id(i) = record_number(record, 'cluster_id');
 end
+end
+
+
+function power = high_power_mean_delta(records, record_index)
+%HIGH_POWER_MEAN_DELTA  Mean channel delta power of each high-power tail.
+%
+% power.score_high is the mean of the squared median delta-band envelopes
+% of the runs at or above that neuron's 75th percentile.
+
+n = numel(record_index);
+power = nan(n, 1);
+for i = 1:n
+    record = records{record_index(i)};
+    if ~isstruct(record) || ~isfield(record, 'power') || ~isstruct(record.power) ...
+            || ~isfield(record.power, 'score_high')
+        continue
+    end
+    value = record.power.score_high;
+    if isnumeric(value) && isscalar(value)
+        power(i) = double(value);
+    end
+end
+end
+
+
+function scale = choose_positive_scale(y)
+%CHOOSE_POSITIVE_SCALE  Use log when it has the smaller absolute skewness.
+
+y = y(:);
+scale.name = 'raw';
+scale.skew_raw = moment_skewness(y);
+scale.skew_log = nan;
+if any(~isfinite(y)) || any(y <= 0) || ~isfinite(scale.skew_raw)
+    scale.reason = ['The power is not positive for every neuron, so the model uses the power itself.'];
+    return
+end
+scale.skew_log = moment_skewness(log(y));
+if isfinite(scale.skew_log) && abs(scale.skew_log) < abs(scale.skew_raw)
+    scale.name = 'log';
+    scale.reason = sprintf(['Absolute skewness is %.3f for the power and %.3f for its logarithm. ', ...
+        'The logarithm is less skewed, so the model uses log power.'], ...
+        abs(scale.skew_raw), abs(scale.skew_log));
+    return
+end
+scale.reason = sprintf(['Absolute skewness is %.3f for the power and %.3f for its logarithm. ', ...
+    'The power is less skewed, so the model uses the power itself.'], ...
+    abs(scale.skew_raw), abs(scale.skew_log));
+end
+
+
+function g = moment_skewness(x)
+x = x(:);
+x = x(isfinite(x));
+if numel(x) < 3
+    g = nan;
+    return
+end
+sigma = std(x, 0);
+if ~isfinite(sigma) || sigma == 0
+    g = 0;
+    return
+end
+g = mean(((x - mean(x)) / sigma) .^ 3);
+end
+
+
+function fit = fit_power_feature_model(y, X, names)
+%FIT_POWER_FEATURE_MODEL  Ordinary least squares with an intercept column.
+
+y = y(:);
+n = size(X, 1);
+A = [ones(n, 1), X];
+fit.names = [{'Intercept'}, names];
+fit.n = n;
+fit.p = size(A, 2);
+fit.df = n - fit.p;
+fit.df1 = fit.p - 1;
+fit.beta = A \ y;
+fit.beta = fit.beta(:);
+resid = y - A * fit.beta;
+ss_res = sum(resid .^ 2);
+ss_tot = sum((y - mean(y)) .^ 2);
+fit.rsq = 1 - ss_res / ss_tot;
+if fit.df > 0 && n > 1 && ss_tot > 0
+    fit.adj_rsq = 1 - (ss_res / fit.df) / (ss_tot / (n - 1));
+    fit.sigma = sqrt(ss_res / fit.df);
+else
+    fit.adj_rsq = nan;
+    fit.sigma = nan;
+end
+fit.se = nan(fit.p, 1);
+fit.t = nan(fit.p, 1);
+fit.p_value = nan(fit.p, 1);
+xtx = A' * A;
+fit.collinear = ~isfinite(rcond(xtx)) || rcond(xtx) < 1e-8;
+if ~fit.collinear && fit.df > 0 && fit.sigma > 0
+    covariance = (fit.sigma ^ 2) * inv(xtx);
+    fit.se = sqrt(max(diag(covariance), 0));
+    fit.t = fit.beta ./ fit.se;
+    for i = 1:fit.p
+        fit.p_value(i) = two_sided_t_p(fit.t(i), fit.df);
+    end
+end
+fit.ss_model = ss_tot - ss_res;
+if fit.df > 0 && fit.df1 > 0 && ss_res > 0
+    fit.F = (fit.ss_model / fit.df1) / (ss_res / fit.df);
+    fit.F_p = f_survival(fit.F, fit.df1, fit.df);
+else
+    fit.F = nan;
+    fit.F_p = nan;
+end
+fit.resid_skew = moment_skewness(resid);
+end
+
+
+function draw_power_scale_check(power, scale, folder)
+open_full_figure('High-power delta scale')
+subplot(1, 2, 1)
+histogram(power, 'FaceColor', [0.35 0.45 0.65], 'EdgeColor', 'none')
+xlabel('Mean high-power delta')
+ylabel('Neurons')
+title(sprintf('Power, skewness %.3f', scale.skew_raw), 'Interpreter', 'none')
+box off
+subplot(1, 2, 2)
+histogram(log(power), 'FaceColor', [0.75 0.45 0.25], 'EdgeColor', 'none')
+xlabel('log mean high-power delta')
+ylabel('Neurons')
+title(sprintf('Logarithm, skewness %.3f', scale.skew_log), 'Interpreter', 'none')
+box off
+sgtitle({scale.reason, sprintf('The model uses the %s scale.', scale.name)}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function draw_power_model_coefficients(fit, outcome_label, folder)
+open_full_figure('High-power delta model')
+shown = 2:numel(fit.names);
+hold on
+for i = 1:numel(shown)
+    k = shown(i);
+    if strcmp(fit.names{k}, 'Oscillatory')
+        color = [0.84 0.37 0.00];
+    else
+        color = [0.25 0.35 0.55];
+    end
+    plot([i i], fit.beta(k) + fit.se(k) * [-1.96 1.96], 'Color', color, 'LineWidth', 1.4)
+    plot(i, fit.beta(k), 'o', 'MarkerFaceColor', color, 'MarkerEdgeColor', color)
+end
+plot([0.5, numel(shown) + 0.5], [0 0], 'Color', [0.5 0.5 0.5])
+set(gca, 'XTick', 1:numel(shown), 'XTickLabel', fit.names(shown))
+try
+    set(gca, 'TickLabelInterpreter', 'none')
+    xtickangle(30)
+catch
+end
+ylabel(['Coefficient on ', outcome_label])
+box off
+sgtitle({sprintf('%s. R^2 = %.3f. F p = %.3g.', outcome_label, fit.rsq, fit.F_p), ...
+    'Orange is the oscillatory group. Its reference level is non-oscillatory.', ...
+    'Whiskers are coefficient plus or minus 1.96 standard errors.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
 end
 
 
