@@ -68,9 +68,9 @@ output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit
 this_dir = fileparts(mfilename('fullpath'));
 figures_dir = fileparts(this_dir);
 repo_root = fileparts(figures_dir);
-addpath(this_dir);
-addpath(figures_dir);
 addpath(repo_root);
+addpath(figures_dir);
+addpath(this_dir);
 if exist('align_population_percentiles', 'file') ~= 2
     run(fullfile(repo_root, 'add_repo_paths.m'));
 end
@@ -194,8 +194,8 @@ if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
 this_dir = fileparts(mfilename('fullpath'));
-addpath(this_dir);
 addpath(fileparts(this_dir));
+addpath(this_dir);
 if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
         || ~exist('imagesc_sum_power_high', 'var')
     data_root = ['\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\' ...
@@ -563,8 +563,8 @@ if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
 this_dir = fileparts(mfilename('fullpath'));
-addpath(this_dir);
 addpath(fileparts(this_dir));
+addpath(this_dir);
 if ~exist('idx_cluster', 'var') || ~exist('complete_rows', 'var') ...
         || ~exist('modulation_score', 'var') || ~exist('neuron_type', 'var')
     error('Plot_acg_population_logit:cluster', ...
@@ -624,8 +624,8 @@ end
 n_example_neurons = 10;
 n_example_subplots = 6;
 this_dir = fileparts(mfilename('fullpath'));
-addpath(this_dir);
 addpath(fileparts(this_dir));
+addpath(this_dir);
 if ~exist('shown_logit', 'var')
     error('Plot_acg_population_logit:shown', ...
         'shown_logit is not in the workspace. Run section 3 first.');
@@ -1499,8 +1499,8 @@ if ~exist('output_folder', 'var') || isempty(output_folder)
     output_folder = fullfile(fileparts(mfilename('fullpath')), 'acg_population_logit_figures');
 end
 this_dir = fileparts(mfilename('fullpath'));
-addpath(this_dir);
 addpath(fileparts(this_dir));
+addpath(this_dir);
 if ~exist('feature_table', 'var') || ~exist('neuron_type', 'var') ...
         || ~exist('complete_rows', 'var') || ~exist('osc_rows', 'var')
     error('Plot_acg_population_logit:powerModel', ...
