@@ -43,6 +43,8 @@
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
 % The features are those whose lock-type ANOVA has Holm-Sidak p below 0.05
 % in all classified neurons or in the oscillatory neurons only.
+% Oscillatory features and non-oscillatory features are separate comparisons.
+% Each t-test, paired t-test, and ANOVA figure corrects only within its group.
 % Each classifier is naive Bayes, LDA, or a medium Gaussian SVM. Each one is
 % trained twice, with inverse-frequency weights and with equal weights, on
 % every trough, peak, and unlocked neuron and again on the oscillatory
@@ -507,6 +509,7 @@ table_names = feature_table.Properties.VariableNames;
 descriptor_values = zeros(numel(complete_rows), 0);
 shown_titles = {};
 shown_roles = {};
+shown_group = {};
 for j = 1:numel(descriptor_names)
     this_name = descriptor_names{j};
     if ~ismember(this_name, table_names)
@@ -523,12 +526,14 @@ for j = 1:numel(descriptor_names)
     else
         shown_roles{end + 1} = 'not used in the split'; %#ok<AGROW>
     end
+    shown_group{end + 1} = component_group_name(this_name); %#ok<AGROW>
 end
 if all(ismember({'Peak1', 'Peak2'}, table_names))
     descriptor_values(:, end + 1) = feature_table{complete_rows, 'Peak1'} ...
         - feature_table{complete_rows, 'Peak2'}; %#ok<AGROW>
     shown_titles{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
     shown_roles{end + 1} = 'not used in the split'; %#ok<AGROW>
+    shown_group{end + 1} = 'oscillatory'; %#ok<AGROW>
 end
 if ~isempty(shown_titles)
     n_shown = numel(shown_titles);
@@ -540,54 +545,59 @@ if ~isempty(shown_titles)
         cluster_stats(j).feature = shown_titles{j};
         cluster_stats(j).role = shown_roles{j};
     end
-    cluster_raw_p = [cluster_stats.raw_p].';
-    cluster_adjusted_p = holm_sidak_adjust(cluster_raw_p);
-    for j = 1:n_shown
-        cluster_stats(j).holm_p = cluster_adjusted_p(j);
-    end
-    open_full_figure(['Feature distributions by ', cluster_method_label, ' group'])
-    n_descriptor_cols = 5;
-    tiledlayout(ceil(numel(shown_titles) / n_descriptor_cols), n_descriptor_cols, ...
-        'TileSpacing', 'compact')
-    for j = 1:numel(shown_titles)
-        nexttile
-        hold on
-        group_values = cell(1, 2);
-        group_mean = nan(1, 2);
-        for group = 1:2
-            this_group = descriptor_values(idx_cluster == group, j);
-            this_group = this_group(isfinite(this_group));
-            group_values{group} = this_group;
-            if ~isempty(this_group)
-                group_mean(group) = mean(this_group);
+    cluster_stats = assign_holm_by_group(cluster_stats, shown_group);
+    component_groups = {'oscillatory', 'non-oscillatory'};
+    for g = 1:numel(component_groups)
+        keep = find(strcmp(shown_group, component_groups{g}));
+        if isempty(keep)
+            continue
+        end
+        open_full_figure(['Feature distributions by ', cluster_method_label, ...
+            ' group, ', component_groups{g}, ' features'])
+        n_descriptor_cols = 5;
+        tiledlayout(ceil(numel(keep) / n_descriptor_cols), n_descriptor_cols, ...
+            'TileSpacing', 'compact')
+        for ii = 1:numel(keep)
+            j = keep(ii);
+            nexttile
+            hold on
+            group_values = cell(1, 2);
+            group_mean = nan(1, 2);
+            for group = 1:2
+                this_group = descriptor_values(idx_cluster == group, j);
+                this_group = this_group(isfinite(this_group));
+                group_values{group} = this_group;
+                if ~isempty(this_group)
+                    group_mean(group) = mean(this_group);
+                end
+                draw_one_violin(group, this_group, [0.75 0.75 0.75])
             end
-            draw_one_violin(group, this_group, [0.75 0.75 0.75])
-        end
-        if all(isfinite(group_mean))
-            plot([1 2], group_mean, '-', 'Color', [0.1 0.1 0.1], ...
-                'LineWidth', 2.4, 'HandleVisibility', 'off')
-        end
-        for group = 1:2
-            draw_violin_mean_bar(group, group_values{group})
-            if isempty(group_values{group})
-                continue
+            if all(isfinite(group_mean))
+                plot([1 2], group_mean, '-', 'Color', [0.1 0.1 0.1], ...
+                    'LineWidth', 2.4, 'HandleVisibility', 'off')
             end
-            point_x = group + violin_point_offset(numel(group_values{group}));
-            scatter(point_x, group_values{group}, 12, [0 0 0], 'filled', ...
-                'MarkerFaceAlpha', 0.55, 'MarkerEdgeColor', 'none')
+            for group = 1:2
+                draw_violin_mean_bar(group, group_values{group})
+                if isempty(group_values{group})
+                    continue
+                end
+                point_x = group + violin_point_offset(numel(group_values{group}));
+                scatter(point_x, group_values{group}, 12, [0 0 0], 'filled', ...
+                    'MarkerFaceAlpha', 0.55, 'MarkerEdgeColor', 'none')
+            end
+            set(gca, 'XTick', [1 2])
+            xlim([0.4 2.6])
+            p_text = comparison_p_title(cluster_stats(j).raw_p, cluster_stats(j).holm_p);
+            title({shown_titles{j}, shown_roles{j}, p_text}, 'Interpreter', 'none')
+            xlabel([cluster_method_label, ' group'])
+            grid on
         end
-        set(gca, 'XTick', [1 2])
-        xlim([0.4 2.6])
-        p_text = comparison_p_title(cluster_stats(j).raw_p, cluster_stats(j).holm_p);
-        title({shown_titles{j}, shown_roles{j}, p_text}, 'Interpreter', 'none')
-        xlabel([cluster_method_label, ' group'])
-        grid on
+        sgtitle({[cluster_method_label, ' cluster 1 is the higher modulation.'], ...
+            [component_groups{g}, ' features only.'], ...
+            'Black bars are means, joined to show the group difference.', ...
+            'Holm-Sidak is computed only across the panels in this figure.'})
+        save_script_figure(output_folder)
     end
-    sgtitle({[cluster_method_label, ' cluster 1 is the higher modulation.'], ...
-        'Black bars are means, joined to show the group difference.', ...
-        'The title gives the raw p and the Holm-Sidak p across these panels.', ...
-        'Peak1 - Peak2 is the drop from the first peak to the second.'})
-    save_script_figure(output_folder)
 end
 
 ACG_PCA = struct( ...
@@ -612,7 +622,7 @@ write_section_2_summary(output_folder, feature_names, size(X_raw, 1), size(X, 1)
     sum(~valid_rows), feature_correlation, pca_explained, perplexity_values, ...
     group_counts, counts_after, kmeans_sizes, ward_sizes, ...
     mean(sil_kmeans), mean(sil_ward), cluster_method_label, ...
-    kmeans_modulation, ward_modulation, cluster_stats)
+    kmeans_modulation, ward_modulation, cluster_stats, shown_group)
 disp(['Run section 3 to keep ', cluster_method_label, ' cluster 1.'])
 
 %% 3. Choose the oscillatory neurons
@@ -948,6 +958,7 @@ high_names = feature_table.Properties.VariableNames;
 high_compare = zeros(numel(osc_rows), 0);
 low_compare = zeros(numel(osc_rows), 0);
 compare_titles = {};
+compare_group = {};
 for j = 1:numel(comparison_names)
     this_name = comparison_names{j};
     if ~ismember(this_name, high_names) || ~ismember(this_name, low_names)
@@ -961,6 +972,7 @@ for j = 1:numel(comparison_names)
     high_compare(:, end + 1) = high_column; %#ok<AGROW>
     low_compare(:, end + 1) = low_column; %#ok<AGROW>
     compare_titles{end + 1} = comparison_titles{j}; %#ok<AGROW>
+    compare_group{end + 1} = component_group_name(this_name); %#ok<AGROW>
 end
 if all(ismember({'Peak1', 'Peak2'}, high_names)) ...
         && all(ismember({'Peak1', 'Peak2'}, low_names))
@@ -969,6 +981,7 @@ if all(ismember({'Peak1', 'Peak2'}, high_names)) ...
     low_compare(:, end + 1) = feature_table_low{osc_rows, 'Peak1'} ...
         - feature_table_low{osc_rows, 'Peak2'}; %#ok<AGROW>
     compare_titles{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
+    compare_group{end + 1} = 'oscillatory'; %#ok<AGROW>
 end
 if ~isempty(compare_titles)
     n_compare = numel(compare_titles);
@@ -980,48 +993,54 @@ if ~isempty(compare_titles)
         paired_stats(j).feature = compare_titles{j};
         paired_stats(j).role = '';
     end
-    paired_adjusted_p = holm_sidak_adjust([paired_stats.raw_p].');
-    for j = 1:n_compare
-        paired_stats(j).holm_p = paired_adjusted_p(j);
-    end
-    open_full_figure('High versus low power features, oscillatory neurons')
-    n_compare_cols = 5;
-    tiledlayout(ceil(numel(compare_titles) / n_compare_cols), n_compare_cols, ...
-        'TileSpacing', 'compact')
-    for j = 1:numel(compare_titles)
-        nexttile
-        high_vals = high_compare(:, j);
-        low_vals = low_compare(:, j);
-        pair = isfinite(high_vals) & isfinite(low_vals);
-        hold on
-        if any(pair)
-            y_high = high_vals(pair);
-            y_low = low_vals(pair);
-            point_offset = violin_point_offset(numel(y_high));
-            draw_one_violin(1, y_high, [0.84 0.37 0.00])
-            draw_one_violin(2, y_low, [0.00 0.45 0.70])
-            plot([1 + point_offset.'; 2 + point_offset.'], ...
-                [y_high.'; y_low.'], '-', 'Color', [0.62 0.62 0.62], ...
-                'LineWidth', 0.3)
-            plot([1 2], [mean(y_high), mean(y_low)], '-', ...
-                'Color', [0.1 0.1 0.1], 'LineWidth', 2.4, 'HandleVisibility', 'off')
-            draw_violin_mean_bar(1, y_high)
-            draw_violin_mean_bar(2, y_low)
-            scatter(1 + point_offset, y_high, 12, [0 0 0], 'filled', ...
-                'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
-            scatter(2 + point_offset, y_low, 12, [0 0 0], 'filled', ...
-                'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
+    paired_stats = assign_holm_by_group(paired_stats, compare_group);
+    component_groups = {'oscillatory', 'non-oscillatory'};
+    for g = 1:numel(component_groups)
+        keep = find(strcmp(compare_group, component_groups{g}));
+        if isempty(keep)
+            continue
         end
-        title({compare_titles{j}, comparison_p_title( ...
-            paired_stats(j).raw_p, paired_stats(j).holm_p)}, 'Interpreter', 'none')
-        xlim([0.4 2.6])
-        set(gca, 'XTick', [1 2], 'XTickLabel', {'High power', 'Low power'})
-        grid on
+        open_full_figure(['High versus low power, ', component_groups{g}, ' features'])
+        n_compare_cols = 5;
+        tiledlayout(ceil(numel(keep) / n_compare_cols), n_compare_cols, ...
+            'TileSpacing', 'compact')
+        for ii = 1:numel(keep)
+            j = keep(ii);
+            nexttile
+            high_vals = high_compare(:, j);
+            low_vals = low_compare(:, j);
+            pair = isfinite(high_vals) & isfinite(low_vals);
+            hold on
+            if any(pair)
+                y_high = high_vals(pair);
+                y_low = low_vals(pair);
+                point_offset = violin_point_offset(numel(y_high));
+                draw_one_violin(1, y_high, [0.84 0.37 0.00])
+                draw_one_violin(2, y_low, [0.00 0.45 0.70])
+                plot([1 + point_offset.'; 2 + point_offset.'], ...
+                    [y_high.'; y_low.'], '-', 'Color', [0.62 0.62 0.62], ...
+                    'LineWidth', 0.3)
+                plot([1 2], [mean(y_high), mean(y_low)], '-', ...
+                    'Color', [0.1 0.1 0.1], 'LineWidth', 2.4, 'HandleVisibility', 'off')
+                draw_violin_mean_bar(1, y_high)
+                draw_violin_mean_bar(2, y_low)
+                scatter(1 + point_offset, y_high, 12, [0 0 0], 'filled', ...
+                    'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
+                scatter(2 + point_offset, y_low, 12, [0 0 0], 'filled', ...
+                    'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
+            end
+            title({compare_titles{j}, comparison_p_title( ...
+                paired_stats(j).raw_p, paired_stats(j).holm_p)}, 'Interpreter', 'none')
+            xlim([0.4 2.6])
+            set(gca, 'XTick', [1 2], 'XTickLabel', {'High power', 'Low power'})
+            grid on
+        end
+        sgtitle({'Same oscillatory neurons at high and low power.', ...
+            [component_groups{g}, ' features only.'], ...
+            'Thin lines join one neuron. Thick bars are means and the line between them.', ...
+            'Holm-Sidak is computed only across the panels in this figure.'})
+        save_script_figure(output_folder)
     end
-    sgtitle({'Same oscillatory neurons at high and low power.', ...
-        'Thin lines join one neuron. Thick bars are means and the line between them.', ...
-        'The title gives the raw p and the Holm-Sidak p across these panels.'})
-    save_script_figure(output_folder)
 else
     paired_stats = empty_feature_stats();
     paired_stats(1) = [];
@@ -1140,211 +1159,127 @@ write_summary_section(output_folder, '4. Oscillatory share by brain area', join_
     missing_line))
 area_feature_names = [comparison_names, {'Peak1 - Peak2'}];
 area_feature_titles = [comparison_titles, {'Peak1 - Peak2'}];
-n_area_features = numel(area_feature_names);
-area_anova = repmat(empty_area_anova(), n_area_features, 1);
-for j = 1:n_area_features
-    [groups, names] = values_by_area(feature_table, neuron_area, ...
-        area_feature_names{j}, {'VLPAG', 'area unknown'}, 2);
-    area_anova(j).feature = area_feature_titles{j};
-    area_anova(j).areas = names;
-    area_anova(j).groups = groups;
-    stats = one_way_anova(groups);
-    area_anova(j).n = stats.n;
-    area_anova(j).mean = stats.mean;
-    area_anova(j).F = stats.F;
-    area_anova(j).df1 = stats.df1;
-    area_anova(j).df2 = stats.df2;
-    area_anova(j).raw_p = stats.p;
-    area_anova(j).eta = stats.eta;
-end
-area_anova_holm = holm_sidak_adjust([area_anova.raw_p]);
-for j = 1:n_area_features
-    area_anova(j).holm_p = area_anova_holm(j);
-    names = area_anova(j).areas;
-    groups = area_anova(j).groups;
-    if ~isfinite(area_anova(j).holm_p) || area_anova(j).holm_p >= 0.05 || numel(names) < 2
-        continue
-    end
-    pair_list = empty_feature_stats();
-    pair_list(1) = [];
-    pair_index = zeros(0, 2);
-    for a = 1:numel(names)
-        for b = a + 1:numel(names)
-            pair = compare_two_samples(groups{a}, groups{b}, 'unpaired');
-            pair.feature = sprintf('%s vs %s', names{a}, names{b});
-            pair.role = area_anova(j).feature;
-            pair_list(end + 1) = pair; %#ok<AGROW>
-            pair_index(end + 1, :) = [a, b]; %#ok<AGROW>
-        end
-    end
-    if isempty(pair_list)
-        continue
-    end
-    pair_holm = holm_sidak_adjust([pair_list.raw_p]);
-    for p = 1:numel(pair_list)
-        pair_list(p).holm_p = pair_holm(p);
-    end
-    area_anova(j).pairs = pair_list;
-    area_anova(j).pair_index = pair_index;
-end
-open_full_figure('Oscillatory features by brain area')
+[osc_feature_names, osc_feature_titles, nonosc_names, nonosc_titles] = ...
+    split_component_features(area_feature_names, area_feature_titles);
+component_feature_names = {osc_feature_names, nonosc_names};
+component_feature_titles = {osc_feature_titles, nonosc_titles};
+component_labels = {'oscillatory', 'non-oscillatory'};
 n_descriptor_cols = 5;
-tiledlayout(ceil(n_area_features / n_descriptor_cols), n_descriptor_cols, ...
-    'TileSpacing', 'compact')
-for j = 1:n_area_features
-    nexttile
-    hold on
-    names = area_anova(j).areas;
-    groups = area_anova(j).groups;
-    for a = 1:numel(names)
-        y = groups{a}(:);
-        y = y(isfinite(y));
-        if isempty(y)
-            continue
-        end
-        scatter(a + violin_point_offset(numel(y)), y, 12, [0 0 0], 'filled', ...
-            'MarkerFaceAlpha', 0.45, 'MarkerEdgeColor', 'none')
-    end
-    for a = 1:numel(names)
-        if ~isfinite(area_anova(j).mean(a))
-            continue
-        end
-        bar(a, area_anova(j).mean(a), 0.55, 'FaceColor', area_bar_color(names{a}), ...
-            'FaceAlpha', 0.45, 'EdgeColor', 'none')
-        hold on
-    end
-    y_top = nan;
-    if ~isempty(area_anova(j).pairs)
-        show = find([area_anova(j).pairs.holm_p] < 0.05);
-        if ~isempty(show)
-            pooled = [];
-            for a = 1:numel(groups)
-                pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
-            end
-            y_top = draw_sig_brackets(area_anova(j).pair_index(show, :), ...
-                [area_anova(j).pairs(show).holm_p], pooled);
-        end
-    end
-    if ~isempty(names)
-        set(gca, 'XTick', 1:numel(names), 'XTickLabel', names)
-        xlim([0.4, numel(names) + 0.6])
-    end
-    try
-        set(gca, 'TickLabelInterpreter', 'none')
-    catch
-    end
-    if isfinite(y_top)
-        yl = ylim;
-        ylim([yl(1), max(yl(2), y_top)])
-    end
-    p_text = comparison_p_title(area_anova(j).raw_p, area_anova(j).holm_p);
-    title({area_anova(j).feature, p_text}, 'Interpreter', 'none')
-    grid on
-    box off
+for g = 1:2
+    area_anova = area_feature_anova(feature_table, neuron_area, ...
+        component_feature_names{g}, component_feature_titles{g});
+    draw_area_feature_figure(area_anova, output_folder, n_descriptor_cols, ...
+        [component_labels{g}, ' features by brain area'], ...
+        {['High-power ', component_labels{g}, ' features by brain area. VLPAG is left out.'], ...
+        'Holm-Sidak is computed only across the features in this figure.', ...
+        'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
+    write_summary_section(output_folder, ...
+        ['4. ', component_labels{g}, ' features by brain area'], ...
+        area_feature_report(area_anova, { ...
+        ['One-way ANOVA of each high-power ', component_labels{g}, ' feature, with brain area as the factor.'], ...
+        'VLPAG is excluded. Neurons without a stored area are excluded.', ...
+        'An area is included in a feature only when it has at least two finite values.', ...
+        'Holm-Sidak adjusts the ANOVA p-values only across the features in this figure.', ...
+        'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
+        'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
 end
-sgtitle({'High-power oscillatory features by brain area. VLPAG is left out.', ...
-    'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
-save_script_figure(output_folder)
-write_summary_section(output_folder, '4. Oscillatory features by brain area', ...
-    area_feature_report(area_anova))
-lock_anova = lock_type_feature_anova(feature_table, neuron_type, ...
-    area_feature_names, area_feature_titles);
-draw_lock_feature_figure(lock_anova, output_folder, n_descriptor_cols, ...
-    'Oscillatory features by lock type', ...
-    {'High-power features by lock type, all classified neurons.', ...
-    'Non-classified cells are left out.', ...
-    'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
-write_summary_section(output_folder, '4. Oscillatory features by lock type', ...
-    area_feature_report(lock_anova, { ...
-    'One-way ANOVA of each high-power feature, with lock type as the factor.', ...
-    'Every classified high-power neuron is included.', ...
-    'The groups are trough, peak, and unlocked. Non-classified cells are excluded.', ...
-    'A lock type is included in a feature only when it has at least two finite values.', ...
-    'Holm-Sidak adjusts the ANOVA p-values across features.', ...
-    'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
-    'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
-osc_lock_anova = lock_type_feature_anova(feature_table, neuron_type, ...
-    area_feature_names, area_feature_titles, osc_rows);
-draw_lock_feature_figure(osc_lock_anova, output_folder, n_descriptor_cols, ...
-    'Oscillatory features by lock type, oscillatory neurons', ...
-    {'High-power features by lock type, oscillatory neurons only.', ...
-    'Oscillatory neurons are cluster 1 from section 3. Non-classified cells are left out.', ...
-    'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
-write_summary_section(output_folder, '4. Oscillatory features by lock type, oscillatory neurons', ...
-    area_feature_report(osc_lock_anova, { ...
-    'One-way ANOVA of each high-power feature, with lock type as the factor.', ...
-    'Only oscillatory neurons are included. They are cluster 1 from section 3.', ...
-    'The groups are trough, peak, and unlocked. Non-classified cells are excluded.', ...
-    'A lock type is included in a feature only when it has at least two finite values.', ...
-    'Holm-Sidak adjusts the ANOVA p-values across features.', ...
-    'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
-    'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
-% Subplot numbers on the feature panels, in reading order:
-% 1 Modulation1, 2 Modulation2, 6 Baseline, 12 Peak2, 13 Trough1,
-% 15 Peak1 - Peak2. The gamma, difference-of-exponentials, peak amplitude,
-% and AUC features follow.
-two_way_panels = [1 2 6 12 13 15];
-nonosc_feature_names = { ...
-    'GammaAmplitude', 'GammaShape', 'GammaScale', 'GammaBaseline', ...
-    'GammaR2', 'GammaRMSE', ...
-    'DiffExpAmplitude', 'DiffExpRise', 'DiffExpDecay', 'DiffExpBaseline', ...
-    'DiffExpR2', 'DiffExpRMSE', 'PeakAmplitude', 'AUC'};
-for j = 1:numel(nonosc_feature_names)
-    feature_index = find(strcmp(area_feature_names, nonosc_feature_names{j}), 1);
-    if ~isempty(feature_index)
-        two_way_panels(end + 1) = feature_index; %#ok<AGROW>
+lock_anova = repmat(empty_area_anova(), 0, 1);
+osc_lock_anova = lock_anova;
+classifier_feature_names = {};
+classifier_feature_titles = {};
+for g = 1:2
+    this_lock = lock_type_feature_anova(feature_table, neuron_type, ...
+        component_feature_names{g}, component_feature_titles{g});
+    draw_lock_feature_figure(this_lock, output_folder, n_descriptor_cols, ...
+        [component_labels{g}, ' features by lock type'], ...
+        {['High-power ', component_labels{g}, ' features by lock type, all classified neurons.'], ...
+        'Holm-Sidak is computed only across the features in this figure.', ...
+        'Non-classified cells are left out.', ...
+        'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
+    write_summary_section(output_folder, ...
+        ['4. ', component_labels{g}, ' features by lock type'], ...
+        area_feature_report(this_lock, { ...
+        ['One-way ANOVA of each high-power ', component_labels{g}, ' feature, with lock type as the factor.'], ...
+        'Every classified high-power neuron is included.', ...
+        'The groups are trough, peak, and unlocked. Non-classified cells are excluded.', ...
+        'A lock type is included in a feature only when it has at least two finite values.', ...
+        'Holm-Sidak adjusts the ANOVA p-values only across the features in this figure.', ...
+        'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
+        'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
+    this_osc_lock = lock_type_feature_anova(feature_table, neuron_type, ...
+        component_feature_names{g}, component_feature_titles{g}, osc_rows);
+    draw_lock_feature_figure(this_osc_lock, output_folder, n_descriptor_cols, ...
+        [component_labels{g}, ' features by lock type, oscillatory neurons'], ...
+        {['High-power ', component_labels{g}, ' features by lock type, oscillatory neurons only.'], ...
+        'Holm-Sidak is computed only across the features in this figure.', ...
+        'Oscillatory neurons are cluster 1 from section 3. Non-classified cells are left out.', ...
+        'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
+    write_summary_section(output_folder, ...
+        ['4. ', component_labels{g}, ' features by lock type, oscillatory neurons'], ...
+        area_feature_report(this_osc_lock, { ...
+        ['One-way ANOVA of each high-power ', component_labels{g}, ' feature, with lock type as the factor.'], ...
+        'Only oscillatory neurons are included. They are cluster 1 from section 3.', ...
+        'The groups are trough, peak, and unlocked. Non-classified cells are excluded.', ...
+        'A lock type is included in a feature only when it has at least two finite values.', ...
+        'Holm-Sidak adjusts the ANOVA p-values only across the features in this figure.', ...
+        'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
+        'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
+    lock_anova = [lock_anova, this_lock]; %#ok<AGROW>
+    osc_lock_anova = [osc_lock_anova, this_osc_lock]; %#ok<AGROW>
+    classifier_feature_names = [classifier_feature_names, component_feature_names{g}]; %#ok<AGROW>
+    classifier_feature_titles = [classifier_feature_titles, component_feature_titles{g}]; %#ok<AGROW>
+end
+osc_two_way_names = {'Modulation1', 'Modulation2', 'Baseline', 'Peak2', 'Trough1', 'Peak1 - Peak2'};
+two_way_name_sets = {osc_two_way_names, nonoscillatory_feature_names()};
+for g = 1:2
+    [two_way_samples, two_way_with, two_way_without] = two_way_component_models( ...
+        feature_table, neuron_area, neuron_type, ...
+        area_feature_names, area_feature_titles, two_way_name_sets{g});
+    two_way_panel_names = cell(1, numel(two_way_samples));
+    for j = 1:numel(two_way_samples)
+        two_way_panel_names{j} = two_way_samples{j}.feature;
     end
+    if isempty(two_way_panel_names)
+        two_way_panel_line = 'No feature in this group was drawn.';
+    else
+        two_way_panel_line = ['Panels: ', strjoin(two_way_panel_names, ', '), '.'];
+    end
+    draw_two_way_panels(two_way_samples, two_way_with, output_folder, ...
+        ['Two-factor ANOVA with interaction, ', component_labels{g}, ' features'], ...
+        {'Area and cell type, with an interaction.', ...
+        [component_labels{g}, ' features only.'], ...
+        'Blue is trough, red is peak, green is unlocked.', ...
+        'Holm-Sidak is computed only across the terms in this figure.'})
+    draw_two_way_panels(two_way_samples, two_way_without, output_folder, ...
+        ['Two-factor ANOVA without interaction, ', component_labels{g}, ' features'], ...
+        {'Area and cell type, without an interaction.', ...
+        [component_labels{g}, ' features only.'], ...
+        'Blue is trough, red is peak, green is unlocked.', ...
+        'Holm-Sidak is computed only across the terms in this figure.'})
+    write_summary_section(output_folder, ...
+        ['4. Two-factor ANOVA with interaction, ', component_labels{g}, ' features'], ...
+        two_way_report(two_way_samples, two_way_with, { ...
+        two_way_panel_line, ...
+        'The model is area + cell type + area x cell type.', ...
+        'Each term is tested after the other terms, with effect coding.', ...
+        'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
+        'Holm-Sidak adjusts every term in this figure together. The other component group is a separate comparison.', ...
+        'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
+    write_summary_section(output_folder, ...
+        ['4. Two-factor ANOVA without interaction, ', component_labels{g}, ' features'], ...
+        two_way_report(two_way_samples, two_way_without, { ...
+        two_way_panel_line, ...
+        'The model is area + cell type, with no interaction.', ...
+        'Each main effect is tested after the other main effect.', ...
+        'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
+        'Holm-Sidak adjusts every term in this figure together. The other component group is a separate comparison.', ...
+        'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
 end
-n_two_way = numel(two_way_panels);
-two_way_samples = cell(n_two_way, 1);
-two_way_with = cell(n_two_way, 1);
-two_way_without = cell(n_two_way, 1);
-for j = 1:n_two_way
-    feature_index = two_way_panels(j);
-    two_way_samples{j} = two_way_sample(feature_table, neuron_area, neuron_type, ...
-        area_feature_names{feature_index});
-    two_way_samples{j}.feature = area_feature_titles{feature_index};
-    [area_idx, type_idx] = two_way_indices(two_way_samples{j});
-    n_area = numel(two_way_samples{j}.area_names);
-    n_type = numel(two_way_samples{j}.type_names);
-    two_way_with{j} = two_way_anova(two_way_samples{j}.y, area_idx, type_idx, ...
-        n_area, n_type, true);
-    two_way_without{j} = two_way_anova(two_way_samples{j}.y, area_idx, type_idx, ...
-        n_area, n_type, false);
-end
-two_way_with = assign_two_way_holm(two_way_with);
-two_way_without = assign_two_way_holm(two_way_without);
-draw_two_way_panels(two_way_samples, two_way_with, output_folder, ...
-    'Two-factor ANOVA with interaction', ...
-    {'Area and cell type, with an interaction.', ...
-    'Blue is trough, red is peak, green is unlocked.', ...
-    'Each title line gives the raw p and the Holm-Sidak p of that term.'})
-draw_two_way_panels(two_way_samples, two_way_without, output_folder, ...
-    'Two-factor ANOVA without interaction', ...
-    {'Area and cell type, without an interaction.', ...
-    'Blue is trough, red is peak, green is unlocked.', ...
-    'Each title line gives the raw p and the Holm-Sidak p of that term.'})
-write_summary_section(output_folder, '4. Two-factor ANOVA with interaction', ...
-    two_way_report(two_way_samples, two_way_with, { ...
-    'The panels are Modulation1, Modulation2, Baseline, Peak2, Trough1, Peak1 - Peak2, the gamma and difference-of-exponentials features, peak amplitude, and AUC.', ...
-    'The model is area + cell type + area x cell type.', ...
-    'Each term is tested after the other terms, with effect coding.', ...
-    'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
-    'Holm-Sidak adjusts every term in this figure together.', ...
-    'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
-write_summary_section(output_folder, '4. Two-factor ANOVA without interaction', ...
-    two_way_report(two_way_samples, two_way_without, { ...
-    'The panels are Modulation1, Modulation2, Baseline, Peak2, Trough1, Peak1 - Peak2, the gamma and difference-of-exponentials features, peak amplitude, and AUC.', ...
-    'The model is area + cell type, with no interaction.', ...
-    'Each main effect is tested after the other main effect.', ...
-    'VLPAG, neurons without a stored area, and non-classified cells are excluded.', ...
-    'Holm-Sidak adjusts every term in this figure together.', ...
-    'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
 classifier_method = {'svm', 'naivebayes', 'lda'};
 classifier_method_name = classifier_method_text(classifier_method);
 n_accuracy_permutations = 1000;
 [classifier_names, classifier_titles, classifier_sources] = significant_lock_features( ...
-    lock_anova, osc_lock_anova, area_feature_names, area_feature_titles);
+    lock_anova, osc_lock_anova, classifier_feature_names, classifier_feature_titles);
 lock_class_names = {'Trough', 'Peak', 'Unlocked'};
 classifier_methods = {'svm', 'naivebayes', 'lda'};
 fprintf('Classifier features (%d): %s\n', numel(classifier_titles), ...
@@ -1355,6 +1290,7 @@ if isempty(classifier_names)
     write_summary_section(output_folder, '4. Lock-type classifier', join_summary_lines( ...
         'No classifier was run.', ...
         'A feature is used when its lock-type ANOVA Holm-Sidak p is below 0.05 for all classified neurons or for oscillatory neurons only.', ...
+        'Oscillatory features and non-oscillatory features are corrected separately.', ...
         'Neither comparison marked a feature.'))
 else
 % Bump this when the fit itself changes. A file from another version is not loaded.
@@ -1568,7 +1504,7 @@ write_section_4_summary(output_folder, stratum_titles, cycle_n, cycle_r, cycle_p
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
     sum(osc_in_complete), sum(~osc_in_complete), sum(low_member), ...
     sum(low_member), sum(osc_in_complete) - sum(low_member), embed_perplexity, ...
-    paired_stats, lock_type_label, type_observed, type_total, type_percent)
+    paired_stats, compare_group, lock_type_label, type_observed, type_total, type_percent)
 end
 
 %% 5. Within-neuron delta-power gap and the feature changes
@@ -2437,10 +2373,16 @@ end
 
 
 function draw_two_way_panels(samples, models, folder, figure_name, caption)
+if isempty(samples)
+    return
+end
 open_full_figure(figure_name)
+n_cols = min(3, numel(samples));
+tiledlayout(ceil(numel(samples) / n_cols), n_cols, ...
+    'TileSpacing', 'compact', 'Padding', 'compact')
 type_gap = 0.24;
 for j = 1:numel(samples)
-    subplot(2, 3, j)
+    nexttile
     hold on
     sample = samples{j};
     model = models{j};
@@ -3419,7 +3361,7 @@ end
 lines = [{ ...
     'Classifier of lock type from the high-power features that differ by lock type.', ...
     'A feature is included when its one-way ANOVA Holm-Sidak p is below 0.05 for all classified neurons or for oscillatory neurons only.', ...
-    'Holm-Sidak is computed separately inside each of those two comparisons.', ...
+    'Holm-Sidak is computed separately for oscillatory features and for non-oscillatory features, and separately for all classified neurons and for oscillatory neurons.', ...
     'The selected features:'}, ...
     feature_lines, { ...
     'Naive Bayes, LDA, and the medium Gaussian SVM each have a weighted fit, an unweighted fit, and a joint decision.', ...
@@ -3763,6 +3705,208 @@ end
 end
 
 
+function names = nonoscillatory_feature_names()
+names = { ...
+    'GammaAmplitude', 'GammaShape', 'GammaScale', 'GammaBaseline', ...
+    'GammaR2', 'GammaRMSE', ...
+    'DiffExpAmplitude', 'DiffExpRise', 'DiffExpDecay', 'DiffExpBaseline', ...
+    'DiffExpR2', 'DiffExpRMSE', 'PeakAmplitude', 'AUC'};
+end
+
+
+function tf = is_nonoscillatory_feature(name)
+tf = any(strcmp(name, nonoscillatory_feature_names()));
+end
+
+
+function group = component_group_name(name)
+if is_nonoscillatory_feature(name)
+    group = 'non-oscillatory';
+else
+    group = 'oscillatory';
+end
+end
+
+
+function [osc_names, osc_titles, non_names, non_titles] = split_component_features(names, titles)
+osc_names = {};
+osc_titles = {};
+non_names = {};
+non_titles = {};
+for j = 1:numel(names)
+    if is_nonoscillatory_feature(names{j})
+        non_names{end + 1} = names{j}; %#ok<AGROW>
+        non_titles{end + 1} = titles{j}; %#ok<AGROW>
+    else
+        osc_names{end + 1} = names{j}; %#ok<AGROW>
+        osc_titles{end + 1} = titles{j}; %#ok<AGROW>
+    end
+end
+end
+
+
+function stats = assign_holm_by_group(stats, groups)
+labels = {'oscillatory', 'non-oscillatory'};
+for g = 1:numel(labels)
+    idx = find(strcmp(groups, labels{g}));
+    if isempty(idx)
+        continue
+    end
+    raw = nan(numel(idx), 1);
+    for k = 1:numel(idx)
+        raw(k) = stats(idx(k)).raw_p;
+    end
+    adjusted = holm_sidak_adjust(raw);
+    for k = 1:numel(idx)
+        stats(idx(k)).holm_p = adjusted(k);
+    end
+end
+end
+
+
+function anova = area_feature_anova(feature_table, neuron_area, feature_names, feature_titles)
+n_features = numel(feature_names);
+anova = repmat(empty_area_anova(), n_features, 1);
+for j = 1:n_features
+    [groups, names] = values_by_area(feature_table, neuron_area, ...
+        feature_names{j}, {'VLPAG', 'area unknown'}, 2);
+    anova(j).feature = feature_titles{j};
+    anova(j).areas = names;
+    anova(j).groups = groups;
+    stats = one_way_anova(groups);
+    anova(j).n = stats.n;
+    anova(j).mean = stats.mean;
+    anova(j).F = stats.F;
+    anova(j).df1 = stats.df1;
+    anova(j).df2 = stats.df2;
+    anova(j).raw_p = stats.p;
+    anova(j).eta = stats.eta;
+end
+if n_features == 0
+    return
+end
+adjusted = holm_sidak_adjust([anova.raw_p]);
+for j = 1:n_features
+    anova(j).holm_p = adjusted(j);
+    names = anova(j).areas;
+    groups = anova(j).groups;
+    if ~isfinite(anova(j).holm_p) || anova(j).holm_p >= 0.05 || numel(names) < 2
+        continue
+    end
+    pair_list = empty_feature_stats();
+    pair_list(1) = [];
+    pair_index = zeros(0, 2);
+    for a = 1:numel(names)
+        for b = a + 1:numel(names)
+            pair = compare_two_samples(groups{a}, groups{b}, 'unpaired');
+            pair.feature = sprintf('%s vs %s', names{a}, names{b});
+            pair.role = anova(j).feature;
+            pair_list(end + 1) = pair; %#ok<AGROW>
+            pair_index(end + 1, :) = [a, b]; %#ok<AGROW>
+        end
+    end
+    if isempty(pair_list)
+        continue
+    end
+    pair_holm = holm_sidak_adjust([pair_list.raw_p]);
+    for p = 1:numel(pair_list)
+        pair_list(p).holm_p = pair_holm(p);
+    end
+    anova(j).pairs = pair_list;
+    anova(j).pair_index = pair_index;
+end
+end
+
+
+function draw_area_feature_figure(anova, folder, n_cols, figure_name, title_lines)
+if isempty(anova)
+    return
+end
+open_full_figure(figure_name)
+n_features = numel(anova);
+tiledlayout(ceil(n_features / n_cols), n_cols, 'TileSpacing', 'compact')
+for j = 1:n_features
+    nexttile
+    hold on
+    names = anova(j).areas;
+    groups = anova(j).groups;
+    for a = 1:numel(names)
+        y = groups{a}(:);
+        y = y(isfinite(y));
+        if isempty(y)
+            continue
+        end
+        scatter(a + violin_point_offset(numel(y)), y, 12, [0 0 0], 'filled', ...
+            'MarkerFaceAlpha', 0.45, 'MarkerEdgeColor', 'none')
+    end
+    for a = 1:numel(names)
+        if ~isfinite(anova(j).mean(a))
+            continue
+        end
+        bar(a, anova(j).mean(a), 0.55, 'FaceColor', area_bar_color(names{a}), ...
+            'FaceAlpha', 0.45, 'EdgeColor', 'none')
+        hold on
+    end
+    y_top = nan;
+    if ~isempty(anova(j).pairs)
+        show = find([anova(j).pairs.holm_p] < 0.05);
+        if ~isempty(show)
+            pooled = [];
+            for a = 1:numel(groups)
+                pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
+            end
+            y_top = draw_sig_brackets(anova(j).pair_index(show, :), ...
+                [anova(j).pairs(show).holm_p], pooled);
+        end
+    end
+    if ~isempty(names)
+        set(gca, 'XTick', 1:numel(names), 'XTickLabel', names)
+        xlim([0.4, numel(names) + 0.6])
+    end
+    try
+        set(gca, 'TickLabelInterpreter', 'none')
+    catch
+    end
+    if isfinite(y_top)
+        yl = ylim;
+        ylim([yl(1), max(yl(2), y_top)])
+    end
+    title({anova(j).feature, comparison_p_title(anova(j).raw_p, anova(j).holm_p)}, ...
+        'Interpreter', 'none')
+    grid on
+    box off
+end
+sgtitle(title_lines, 'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function [samples, with_models, without_models] = two_way_component_models( ...
+    feature_table, neuron_area, neuron_type, all_names, all_titles, wanted_names)
+samples = {};
+with_models = {};
+without_models = {};
+for j = 1:numel(wanted_names)
+    feature_index = find(strcmp(all_names, wanted_names{j}), 1);
+    if isempty(feature_index)
+        continue
+    end
+    sample = two_way_sample(feature_table, neuron_area, neuron_type, all_names{feature_index});
+    sample.feature = all_titles{feature_index};
+    [area_idx, type_idx] = two_way_indices(sample);
+    n_area = numel(sample.area_names);
+    n_type = numel(sample.type_names);
+    samples{end + 1} = sample; %#ok<AGROW>
+    with_models{end + 1} = two_way_anova(sample.y, area_idx, type_idx, ...
+        n_area, n_type, true); %#ok<AGROW>
+    without_models{end + 1} = two_way_anova(sample.y, area_idx, type_idx, ...
+        n_area, n_type, false); %#ok<AGROW>
+end
+with_models = assign_two_way_holm(with_models);
+without_models = assign_two_way_holm(without_models);
+end
+
+
 function anova = lock_type_feature_anova(feature_table, neuron_type, feature_names, feature_titles, row_keep)
 %LOCK_TYPE_FEATURE_ANOVA  One-way lock-type ANOVA for every high-power feature.
 
@@ -3823,6 +3967,9 @@ end
 
 
 function draw_lock_feature_figure(anova, folder, n_cols, figure_name, title_lines)
+if isempty(anova)
+    return
+end
 open_full_figure(figure_name)
 n_features = numel(anova);
 tiledlayout(ceil(n_features / n_cols), n_cols, 'TileSpacing', 'compact')
@@ -3877,7 +4024,7 @@ for j = 1:n_features
     grid on
     box off
 end
-sgtitle(title_lines)
+sgtitle(title_lines, 'Interpreter', 'none')
 save_script_figure(folder)
 end
 
@@ -6648,7 +6795,7 @@ function write_section_2_summary(folder, feature_names, n_neurons, n_complete, .
     n_excluded, feature_correlation, pca_explained, perplexity_values, ...
     counts_before, counts_after, kmeans_sizes, ward_sizes, ...
     mean_sil_kmeans, mean_sil_ward, cluster_method_label, ...
-    kmeans_modulation, ward_modulation, cluster_stats)
+    kmeans_modulation, ward_modulation, cluster_stats, shown_group)
 
 pca_lines = cell(numel(pca_explained), 1);
 cumulative = cumsum(pca_explained(:));
@@ -6691,9 +6838,18 @@ write_summary_section(folder, '2. K-means and Ward', join_summary_lines( ...
     sprintf('Mean silhouette, Euclidean: k-means = %.4g, Ward = %.4g', ...
         mean_sil_kmeans, mean_sil_ward), ...
     ['The oscillatory group is ', cluster_method_label, ' cluster 1.']))
-write_summary_section(folder, ...
-    '2. Feature comparison, oscillatory versus non-oscillatory', ...
-    feature_comparison_report(cluster_stats, 'unpaired'))
+component_labels = {'oscillatory', 'non-oscillatory'};
+for g = 1:numel(component_labels)
+    if isempty(cluster_stats) || isempty(shown_group)
+        these_rows = cluster_stats([]);
+    else
+        these_rows = cluster_stats(strcmp(shown_group, component_labels{g}));
+    end
+    write_summary_section(folder, ...
+        ['2. Feature comparison, oscillatory versus non-oscillatory, ', ...
+        component_labels{g}, ' features'], ...
+        feature_comparison_report(these_rows, 'unpaired'))
+end
 end
 
 
@@ -6795,7 +6951,8 @@ end
 function write_section_4_summary(folder, column_title, cycle_n, cycle_r, cycle_p, ...
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
     n_osc_high, n_other_high, n_osc_low_pca, n_osc_low_tsne, n_omitted, ...
-    embed_perplexity, paired_stats, lock_type_label, type_observed, type_total, type_percent)
+    embed_perplexity, paired_stats, compare_group, lock_type_label, ...
+    type_observed, type_total, type_percent)
 
 cycle_lines = cycle_summary_lines(column_title, cycle_n, cycle_r, cycle_p);
 n_sig = sum(high_vs_low_h(:) == 1);
@@ -6836,8 +6993,17 @@ write_summary_section(folder, '4. Low-power points in the PCA and t-SNE', join_s
         n_osc_high, n_other_high, n_osc_low_pca, n_omitted), ...
     sprintf('Shared t-SNE perplexity: %g. Low-power rows in that t-SNE: %d.', ...
         embed_perplexity, n_osc_low_tsne)))
-write_summary_section(folder, '4. Feature comparison, high versus low power', ...
-    feature_comparison_report(paired_stats, 'paired'))
+component_labels = {'oscillatory', 'non-oscillatory'};
+for g = 1:numel(component_labels)
+    if isempty(paired_stats) || isempty(compare_group)
+        these_rows = paired_stats([]);
+    else
+        these_rows = paired_stats(strcmp(compare_group, component_labels{g}));
+    end
+    write_summary_section(folder, ...
+        ['4. Feature comparison, high versus low power, ', component_labels{g}, ' features'], ...
+        feature_comparison_report(these_rows, 'paired'))
+end
 write_summary_section(folder, '4. Oscillatory share of each lock type', join_summary_lines( ...
     'Percent of each lock type that belongs to the oscillatory group.', ...
     'The label is observed/total.', ...
@@ -6853,8 +7019,9 @@ if strcmp(kind, 'paired')
         'df = n - 1.', ...
         'Cohen dz = mean(high - low) / standard deviation of (high - low).', ...
         'Power is the two-sided probability of p < 0.05 if the true effect equals the observed t.', ...
-        'raw p is uncorrected. Holm-Sidak p is adjusted across every row with a finite raw p.', ...
-        'The panel title shows only the Holm-Sidak p.', ...
+        'raw p is uncorrected. Holm-Sidak p is adjusted across the rows in this table.', ...
+        'Oscillatory features and non-oscillatory features are separate tables.', ...
+        'The panel title shows the raw p and the Holm-Sidak p.', ...
         'A blank t means fewer than two complete pairs. That row is left out of the correction.'};
     header = sprintf('%-42s %6s %12s %12s %12s %10s %8s %10s %12s %14s %8s', ...
         'Feature', 'n', 'mean high', 'mean low', 'high-low', 't', 'df', ...
@@ -6866,8 +7033,9 @@ else
         'df = n1 + n2 - 2.', ...
         'Cohen d = (mean 1 - mean 2) / pooled standard deviation.', ...
         'Power is the two-sided probability of p < 0.05 if the true effect equals the observed t.', ...
-        'raw p is uncorrected. Holm-Sidak p is adjusted across every row with a finite raw p.', ...
-        'The panel title shows only the Holm-Sidak p.', ...
+        'raw p is uncorrected. Holm-Sidak p is adjusted across the rows in this table.', ...
+        'Oscillatory features and non-oscillatory features are separate tables.', ...
+        'The panel title shows the raw p and the Holm-Sidak p.', ...
         'A blank t means one group has fewer than two finite values. That row is left out of the correction.'};
     header = sprintf('%-42s %-22s %6s %6s %12s %12s %12s %10s %8s %10s %12s %14s %8s', ...
         'Feature', 'role', 'n1', 'n2', 'mean 1', 'mean 2', 'mean 1-2', 't', 'df', ...
