@@ -66,7 +66,10 @@
 % Row 1 is the highest all-runs sum-to-1 score.
 %
 % Section 2 builds ACG features from the high-power sum-to-1 logit and
-% splits the neurons with Ward and k-means. cluster_method chooses which
+% splits the neurons with Ward and k-means. The split uses every
+% non-oscillatory column and the same number of oscillatory columns:
+% the six original modulation features plus frequency, persistence, and
+% the two peaks and two troughs. cluster_method chooses which
 % split is kept. Ward is the default. Cluster 1 of that split is the
 % higher-modulation group.
 % shown_logit is that group, strongest modulation first.
@@ -261,6 +264,8 @@ rng(42);
 candidate_features = { ...
     'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
     'OscillationScore', 'Baseline', ...
+    'DominantFrequency', 'PeakFrequency', 'TroughFrequency', 'Persistence', ...
+    'Peak1', 'Peak2', 'Trough1', 'Trough2', ...
     'GammaAmplitude', 'GammaShape', 'GammaScale', 'GammaBaseline', ...
     'GammaR2', 'GammaRMSE', ...
     'DiffExpAmplitude', 'DiffExpRise', 'DiffExpDecay', 'DiffExpBaseline', ...
@@ -301,6 +306,10 @@ if any(~keep_features)
 end
 X = X(:, keep_features);
 feature_names = feature_names(keep_features);
+n_nonosc_split = nnz(cellfun(@is_nonoscillatory_feature, feature_names));
+n_osc_split = numel(feature_names) - n_nonosc_split;
+fprintf('Split features: %d oscillatory, %d non-oscillatory.\n', ...
+    n_osc_split, n_nonosc_split);
 if numel(feature_names) < 2
     error('Plot_acg_population_logit:features', ...
         'Fewer than two variable features remain.');
@@ -484,8 +493,7 @@ cluster_stats = empty_feature_stats();
 cluster_stats(1) = [];
 
 complete_rows = find(valid_rows);
-% The first six names entered the split when they had variance. The rest
-% are drawn so the two groups can be compared. Peak1 - Peak2 is positive
+% Every name that kept its variance entered the split. Peak1 - Peak2 is positive
 % when the first peak is larger than the second.
 descriptor_names = { ...
     'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
