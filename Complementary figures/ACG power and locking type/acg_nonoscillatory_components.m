@@ -3,7 +3,8 @@ function features = acg_nonoscillatory_components(acg_matrix, lags)
 %
 % Each row of acg_matrix is one autocorrelogram. lags are in seconds and
 % match the columns. Only positive lags are used. The gamma kernel is
-% amplitude * lag^(shape-1) * exp(-lag/scale), plus a baseline. The
+% amplitude * lag^(shape-1) * exp(-lag/scale), divided by its own peak,
+% plus a baseline. Amplitude is then the height of that bump. The
 % difference of exponentials is amplitude * (exp(-lag/decay) -
 % exp(-lag/rise)), plus a baseline, with decay longer than rise. The table
 % holds each fit's parameters and its goodness of fit. R2 is 1 minus the
@@ -115,6 +116,10 @@ log_g(t <= 0) = -inf;
 log_g(log_g > 40) = 40;
 g = exp(log_g);
 g(~isfinite(g)) = 0;
+peak = max(g);
+if peak > 0
+    g = g / peak;
+end
 end
 
 

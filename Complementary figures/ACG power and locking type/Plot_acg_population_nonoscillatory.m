@@ -288,7 +288,14 @@ if size(X, 1) < 10
 end
 
 feature_sd = std(X, 0, 1);
-keep_features = feature_sd > eps(max(abs(X(:))));
+keep_features = false(1, size(X, 2));
+for j = 1:size(X, 2)
+    column_scale = max(1, max(abs(X(:, j))));
+    keep_features(j) = isfinite(feature_sd(j)) && feature_sd(j) > eps(column_scale);
+end
+if any(~keep_features)
+    fprintf('Constant features left out: %s\n', strjoin(feature_names(~keep_features), ', '))
+end
 X = X(:, keep_features);
 feature_names = feature_names(keep_features);
 if numel(feature_names) < 2
