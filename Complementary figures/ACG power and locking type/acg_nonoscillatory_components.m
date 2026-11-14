@@ -9,7 +9,9 @@ function features = acg_nonoscillatory_components(acg_matrix, lags)
 % exp(-lag/rise)), plus a baseline, with decay longer than rise. The table
 % holds each fit's parameters and its goodness of fit. R2 is 1 minus the
 % residual sum of squares over the total sum of squares. RMSE is the root
-% mean squared residual. A neuron whose curve cannot be fit is NaN.
+% mean squared residual. PeakAmplitude is the maximum of the positive-lag
+% curve, and AUC is its integral over lag in seconds. Those two do not use
+% the fit. A neuron whose curve cannot be fit is NaN in the fit columns.
 
 acg_matrix = double(acg_matrix);
 lags = double(lags(:)).';
@@ -24,18 +26,23 @@ names = { ...
     'GammaAmplitude', 'GammaShape', 'GammaScale', 'GammaBaseline', ...
     'GammaR2', 'GammaRMSE', ...
     'DiffExpAmplitude', 'DiffExpRise', 'DiffExpDecay', 'DiffExpBaseline', ...
-    'DiffExpR2', 'DiffExpRMSE'};
+    'DiffExpR2', 'DiffExpRMSE', 'PeakAmplitude', 'AUC'};
 n = size(acg_matrix, 1);
 values = nan(n, numel(names));
 options = optimset('Display', 'off', 'MaxIter', 160, 'MaxFunEvals', 500);
 for i = 1:n
     y = acg_matrix(i, :);
     keep = isfinite(y) & isfinite(lags);
-    if nnz(keep) < 8
+    if nnz(keep) < 2
         continue
     end
     t = lags(keep);
     y = y(keep);
+    values(i, 13) = max(y);
+    values(i, 14) = trapz(t(:), y(:));
+    if nnz(keep) < 8
+        continue
+    end
     values(i, 1:6) = fit_gamma(t, y, options);
     values(i, 7:12) = fit_difference_of_exponentials(t, y, options);
 end
