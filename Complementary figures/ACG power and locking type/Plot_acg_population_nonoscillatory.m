@@ -766,6 +766,10 @@ if ~exist('imagesc_logit', 'var')
         'imagesc_logit is not in the workspace. Run section 1 first.');
 end
 non_osc_rows = oscillatory_member_rows(~osc_member, osc_score);
+classified_nonosc = false(numel(neuron_type), 1);
+classified_nonosc(complete_rows) = true;
+classified_nonosc(osc_rows) = false;
+classified_nonosc_rows = oscillatory_member_rows(classified_nonosc, osc_score);
 [cycle_n, cycle_r, cycle_p] = draw_power_logit_pair( ...
     imagesc_logit, osc_rows, stratum_columns, stratum_titles, ...
     'oscillatory', n_osc, n_before_osc, lag, logit_color_limit, logit_map, ...
@@ -834,6 +838,71 @@ ylabel('Mean logit difference')
 title('Red marks a paired difference at p < 0.05')
 box off
 save_script_figure(output_folder)
+non_n = numel(classified_nonosc_rows);
+non_high = imagesc_logit.sum.power_high(classified_nonosc_rows, :);
+non_low = imagesc_logit.sum.power_low(classified_nonosc_rows, :);
+non_difference = non_high - non_low;
+open_full_figure('ACG population logit, non-oscillatory, high minus low power')
+subplot(2, 1, 1)
+if non_n < 1
+    title('No non-oscillatory neurons')
+    axis off
+else
+    if non_n == 1
+        imagesc(lag, [0.5 1.5], non_difference)
+        ylim([0.5 1.5])
+    else
+        imagesc(lag, 1:non_n, non_difference)
+        set(gca, 'YTick', [1 non_n])
+    end
+    axis tight
+    clim([-logit_color_limit logit_color_limit])
+    colormap(gca, logit_map)
+    ylabel('Neuron')
+    title('High 25% power minus low 25% power')
+    colorbar
+    box off
+end
+subplot(2, 1, 2)
+hold on
+plot(lag([1 end]), [0 0], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+if non_n >= 2
+    [non_high_vs_low_h, non_high_vs_low_p] = ttest(non_high, non_low);
+    non_mean_difference = mean(non_difference, 1, 'omitnan');
+    plot(lag, non_mean_difference, 'k', 'LineWidth', 1.8)
+    non_significant = non_high_vs_low_h == 1 & isfinite(non_mean_difference);
+    plot(lag(non_significant), non_mean_difference(non_significant), '.', ...
+        'Color', [0.7 0.25 0.25], 'MarkerSize', 14)
+else
+    non_high_vs_low_h = false(1, numel(lag));
+    non_high_vs_low_p = nan(1, numel(lag));
+    if non_n == 1
+        plot(lag, non_difference, 'k', 'LineWidth', 1.8)
+    end
+end
+xlabel('Lag (s)')
+ylabel('Mean logit difference')
+title('Red marks a paired difference at p < 0.05')
+box off
+save_script_figure(output_folder)
+n_non_sig = sum(non_high_vs_low_h(:) == 1);
+finite_non_p = isfinite(non_high_vs_low_p);
+if any(finite_non_p)
+    [min_non_p, local_non] = min(non_high_vs_low_p(finite_non_p));
+    finite_non_index = find(finite_non_p);
+    min_non_lag = lag(finite_non_index(local_non));
+    non_lag_line = sprintf(['Paired t-tests across %d lag bins. %d bins have uncorrected p < 0.05. ', ...
+        'Smallest uncorrected p = %.4g at lag %.3f s.'], numel(lag), n_non_sig, min_non_p, min_non_lag);
+else
+    non_lag_line = sprintf('No paired lag test was run. Non-oscillatory neurons: %d.', non_n);
+end
+write_summary_section(output_folder, '4. Non-oscillatory high minus low power', join_summary_lines( ...
+    sprintf('Non-oscillatory neurons: %d. They entered the split and are not cluster 1.', non_n), ...
+    'The image is the high-power sum-to-1 logit minus the low-power sum-to-1 logit.', ...
+    'Rows are ordered by the remaining modulation score, strongest first.', ...
+    'Each lag is a paired t-test of the same non-oscillatory neurons, high power minus low power.', ...
+    'These lag tests are not part of a Holm-Sidak family.', ...
+    non_lag_line))
 
 % One PCA and one t-SNE include the high-power neurons and the oscillatory
 % neurons at low power. Every embedding figure below uses that plane.
@@ -1053,27 +1122,27 @@ else
     paired_stats = empty_feature_stats();
     paired_stats(1) = [];
 end
+draw_paired_power_features(feature_table, feature_table_low, classified_nonosc_rows, ...
+    comparison_names, comparison_titles, output_folder, ...
+    'non-oscillatory neurons', ...
+    'Same non-oscillatory neurons at high and low power.', ...
+    '4. Feature comparison, high versus low power, non-oscillatory neurons')
 
-open_full_figure('Oscillatory cells within each lock type')
-shown_percent = type_percent;
-shown_percent(~isfinite(shown_percent)) = 0;
-hold on
-type_legend = cell(1, 4);
-for k = 1:4
-    bar(k, shown_percent(k), 'FaceColor', lock_bar_color(lock_type_label{k}), 'BarWidth', 0.8)
-    type_legend{k} = sprintf('%s %d/%d', lock_type_label{k}, type_observed(k), type_total(k));
-    text(k, min(shown_percent(k) + 4, 108), sprintf('%d/%d', type_observed(k), type_total(k)), ...
-        'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom')
-end
-legend(type_legend, 'Location', 'northeast', 'Box', 'off')
-set(gca, 'XTick', 1:4, 'XTickLabel', lock_type_label)
-ylabel('Oscillatory within type (%)')
-ylim([0 115])
-title(sprintf('Trough %d/%d, peak %d/%d, unlocked %d/%d, non-classified %d/%d', ...
-    type_observed(1), type_total(1), type_observed(2), type_total(2), ...
-    type_observed(3), type_total(3), type_observed(4), type_total(4)))
-box off
-save_script_figure(output_folder)
+type_test = area_enrichment(lock_type_label, type_observed, type_total);
+draw_membership_bars(type_percent, type_observed, type_total, lock_type_label, type_test, ...
+    output_folder, 'Oscillatory cells within each lock type', ...
+    'Oscillatory within type (%)', ...
+    {sprintf('Trough %d/%d, peak %d/%d, unlocked %d/%d, non-classified %d/%d', ...
+        type_observed(1), type_total(1), type_observed(2), type_total(2), ...
+        type_observed(3), type_total(3), type_observed(4), type_total(4)), ...
+    'Holm-Sidak p: more oscillatory than the other lock types'}, true)
+write_enrichment_summary(output_folder, '4. Oscillatory share by lock type', ...
+    lock_type_label, type_observed, type_total, type_test, ...
+    'The denominator is every neuron of that lock type. The numerator is how many of them are in the oscillatory group.', ...
+    'a higher oscillatory count than expected from the other lock types', ...
+    'Area unknown is not a lock type, so every lock type with neurons is tested.', ...
+    'Every lock type has at least one oscillatory neuron.', ...
+    'Lock types with no oscillatory neuron: ')
 if ~exist('neuron_area', 'var') || numel(neuron_area) ~= numel(neuron_type)
     if exist('records', 'var') && exist('neuron_record_index', 'var')
         [neuron_session, neuron_area, neuron_cluster_id] = ...
@@ -1165,6 +1234,36 @@ write_summary_section(output_folder, '4. Oscillatory share by brain area', join_
     chi_caution, ...
     area_lines, ...
     missing_line))
+[non_type_percent, non_type_observed, non_type_total, non_type_label] = ...
+    lock_type_osc_rate(neuron_type, classified_nonosc_rows);
+non_type_test = area_enrichment(non_type_label, non_type_observed, non_type_total);
+draw_membership_bars(non_type_percent, non_type_observed, non_type_total, non_type_label, ...
+    non_type_test, output_folder, 'Non-oscillatory cells within each lock type', ...
+    'Non-oscillatory within type (%)', ...
+    {'Share of each lock type that is non-oscillatory.', ...
+    'Holm-Sidak p: more non-oscillatory than the other lock types'}, true)
+write_enrichment_summary(output_folder, '4. Non-oscillatory share by lock type', ...
+    non_type_label, non_type_observed, non_type_total, non_type_test, ...
+    'The denominator is every neuron of that lock type. The numerator is how many entered the split and are not cluster 1.', ...
+    'a higher non-oscillatory count than expected from the other lock types', ...
+    'Neurons that did not enter the split are in the denominator and not in the numerator.', ...
+    'Every lock type has at least one non-oscillatory neuron.', ...
+    'Lock types with no non-oscillatory neuron: ')
+[non_area_percent, non_area_observed, non_area_total, non_area_label] = ...
+    area_osc_rate(neuron_area, classified_nonosc_rows);
+non_area_test = area_enrichment(non_area_label, non_area_observed, non_area_total);
+draw_membership_bars(non_area_percent, non_area_observed, non_area_total, non_area_label, ...
+    non_area_test, output_folder, 'Non-oscillatory cells within each brain area', ...
+    'Non-oscillatory within area (%)', ...
+    {'Share of analysed neurons in each area that are non-oscillatory.', ...
+    'Holm-Sidak p: more non-oscillatory than the other analysed areas'}, false)
+write_enrichment_summary(output_folder, '4. Non-oscillatory share by brain area', ...
+    non_area_label, non_area_observed, non_area_total, non_area_test, ...
+    'The denominator is every analysed neuron in that area. The numerator is how many entered the split and are not cluster 1.', ...
+    'a higher non-oscillatory count than expected from those other neurons', ...
+    'Holm-Sidak adjusts the Fisher p-values across the tested areas. Area unknown is not tested.', ...
+    'Every analysed area has at least one non-oscillatory neuron.', ...
+    'Areas with no non-oscillatory neuron: ')
 area_feature_names = [comparison_names, {'Peak1 - Peak2'}];
 area_feature_titles = [comparison_titles, {'Peak1 - Peak2'}];
 [osc_feature_names, osc_feature_titles, nonosc_names, nonosc_titles] = ...
@@ -1370,6 +1469,9 @@ for p = 1:numel(classifier_populations)
     draw_lock_classifier(classifier_populations{p}.grid, output_folder, classifier_method_name, ...
         ['Lock type classifier, ', classifier_populations{p}.name], ...
         classifier_populations{p}.name)
+    draw_lock_classifier_percent(classifier_populations{p}.grid, output_folder, classifier_method_name, ...
+        ['Lock type classifier percent, ', classifier_populations{p}.name], ...
+        classifier_populations{p}.name)
 end
 draw_accuracy_null(classifier_populations, output_folder, classifier_method_name)
 draw_class_accuracy_bars(classifier_populations, output_folder)
@@ -1507,6 +1609,34 @@ else
         sprintf('n_example_neurons = %d. Drawn: 0.', n_example_neurons), ...
         'No oscillatory neuron outside VLPAG was available.'))
 end
+if ~exist('classified_nonosc_rows', 'var')
+    classified_nonosc = false(numel(neuron_type), 1);
+    if exist('complete_rows', 'var')
+        classified_nonosc(complete_rows) = true;
+    end
+    classified_nonosc(osc_rows) = false;
+    if ~exist('osc_score', 'var') || numel(osc_score) ~= numel(neuron_type)
+        osc_score = nan(numel(neuron_type), 1);
+    end
+    classified_nonosc_rows = oscillatory_member_rows(classified_nonosc, osc_score);
+end
+if ~exist('percentile', 'var')
+    error('Plot_acg_population_nonoscillatory:examples', ...
+        'The shuffle percentiles are not in the workspace. Run section 1 first.');
+end
+non_example_names = [example_names, nonoscillatory_feature_names()];
+non_example_pos = example_positions(classified_nonosc_rows, neuron_area, n_example_neurons, 'VLPAG');
+draw_example_neuron_pages(classified_nonosc_rows(non_example_pos), ...
+    percentile.sum.power_high, percentile.sum.power_low, ...
+    lag, example_bank, neuron_session, neuron_cluster_id, neuron_area, neuron_type, ...
+    osc_score, feature_table, feature_table_low, non_example_names, ...
+    output_folder, n_example_neurons, neurons_per_figure, ...
+    example_smooth_half_s, example_skip_abs_lag_s, example_bank.note, ...
+    'Example non-oscillatory neurons', '4. Example non-oscillatory neurons', ...
+    {'VLPAG is left out. Each other area that has a non-oscillatory neuron contributes its strongest one.', ...
+    'Further neurons are the next highest modulation scores outside VLPAG, until n_example_neurons is reached.', ...
+    'Non-oscillatory neurons entered the split and are not cluster 1.', ...
+    'The drawn order is strongest remaining modulation first.'})
 if ~plot_example_neurons_only
 write_section_4_summary(output_folder, stratum_titles, cycle_n, cycle_r, cycle_p, ...
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
@@ -1522,6 +1652,9 @@ end
 % high-minus-low change in an autocorrelogram feature, or in firing rate.
 % The intercept is the gap expected when those predictors do not change.
 % The same equation is fit again on the non-oscillatory neurons.
+% A separate equation replaces the six oscillatory predictors with the
+% non-oscillatory feature changes. Their changes are also correlated
+% with the firing-rate change.
 if ~exist('output_folder', 'var')
     output_folder = '';
 end
@@ -1704,6 +1837,106 @@ write_summary_section(output_folder, '5d. Feature changes and the firing-rate ch
     rate_scatter_note, ...
     sprintf('Neurons: %d.', rate_link.n), ...
     rate_link.lines))
+
+nonosc_gap_names = nonoscillatory_feature_names();
+nonosc_gap_names = nonosc_gap_names( ...
+    ismember(nonosc_gap_names, feature_table.Properties.VariableNames) ...
+    & ismember(nonosc_gap_names, feature_table_low.Properties.VariableNames));
+if isempty(nonosc_gap_names)
+    write_summary_section(output_folder, ...
+        '5e. Delta-power gap from non-oscillatory features', join_summary_lines( ...
+        'The non-oscillatory features are not in both power tables, so this model was not fit.'))
+else
+    x_high_non = feature_table{power_rows, nonosc_gap_names};
+    x_low_non = feature_table_low{power_rows, nonosc_gap_names};
+    high_ok_non = all(isfinite(x_high_non), 2) & isfinite(y_high) & y_high > 0;
+    low_ok_non = all(isfinite(x_low_non), 2) & isfinite(y_low) & y_low > 0;
+    both_non = high_ok_non & low_ok_non & rate_ok;
+    gap_x_non = [x_high_non(both_non, :) - x_low_non(both_non, :), ...
+        rate_high_rows(both_non) - rate_low_rows(both_non)];
+    gap_names_non = [nonosc_gap_names, {'FiringRate'}];
+    gap_raw_non = y_high(both_non) - y_low(both_non);
+    gap_log_non = log(y_high(both_non)) - log(y_low(both_non));
+    gap_osc_non = osc(both_non);
+    min_gap_n = numel(gap_names_non) + 2;
+    if sum(both_non) < min_gap_n
+        write_summary_section(output_folder, ...
+            '5e. Delta-power gap from non-oscillatory features', join_summary_lines( ...
+            sprintf('Too few neurons (%d) for %d non-oscillatory predictors plus firing rate.', ...
+                sum(both_non), numel(nonosc_gap_names)), ...
+            'The model was not fit.'))
+    else
+        nonosc_gap = fit_within_neuron_gap(gap_raw_non, gap_log_non, gap_x_non, ...
+            gap_names_non, 'All neurons, non-oscillatory feature changes');
+        fprintf('Non-oscillatory-feature gap model. n = %d.\n', nonosc_gap.n)
+        print_gap_model(nonosc_gap)
+        draw_power_gap_scale(gap_raw_non, gap_log_non, nonosc_gap.scale, output_folder, ...
+            'Delta power gap scale, non-oscillatory features')
+        draw_power_model_coefficients(nonosc_gap.fit, nonosc_gap.outcome_label, output_folder, ...
+            'Within-neuron delta power gap, non-oscillatory features')
+        nonosc_gap_partial = draw_ceteris_paribus(nonosc_gap, output_folder, ...
+            'Ceteris paribus, delta power gap, non-oscillatory features')
+        draw_regressor_correlation(nonosc_gap.correlation, nonosc_gap.names, output_folder, ...
+            'Delta power gap predictor correlations, non-oscillatory features')
+        write_summary_section(output_folder, ...
+            '5e. Delta-power gap from non-oscillatory features', join_summary_lines( ...
+            ['Output folder: ', output_folder], ...
+            'One row per neuron that has both power tails, a positive firing rate in each tail, and finite non-oscillatory features.', ...
+            'The outcome is the same high-minus-low delta-power gap as section 5.', ...
+            'Each autocorrelogram predictor is the high-power value minus the low-power value of a non-oscillatory feature.', ...
+            ['Features: ', strjoin(nonosc_gap_names, ', '), '.'], ...
+            'FiringRate is included, defined as in section 5.', ...
+            'A predictor with p below 0.05 is plotted against the power gap while every other predictor is fixed at its mean.', ...
+            nonosc_gap_partial, ...
+            nonosc_gap.dropped_line, ...
+            sprintf('Neurons in the model: %d. Oscillatory: %d. Non-oscillatory: %d.', ...
+                nonosc_gap.n, sum(gap_osc_non == 1), sum(gap_osc_non == 0)), ...
+            gap_fit_lines(nonosc_gap)))
+        nonosc_only = gap_osc_non == 0;
+        if sum(nonosc_only) < min_gap_n
+            write_summary_section(output_folder, ...
+                '5f. Delta-power gap from non-oscillatory features, non-oscillatory neurons', ...
+                join_summary_lines( ...
+                sprintf('Too few non-oscillatory neurons (%d) for this model. It was not fit.', ...
+                    sum(nonosc_only))))
+        else
+            nonosc_only_gap = fit_within_neuron_gap(gap_raw_non(nonosc_only), ...
+                gap_log_non(nonosc_only), gap_x_non(nonosc_only, :), gap_names_non, ...
+                'Non-oscillatory neurons, non-oscillatory feature changes');
+            print_gap_model(nonosc_only_gap)
+            draw_power_model_coefficients(nonosc_only_gap.fit, nonosc_only_gap.outcome_label, ...
+                output_folder, 'Within-neuron delta power gap, non-oscillatory neurons and features')
+            nonosc_only_partial = draw_ceteris_paribus(nonosc_only_gap, output_folder, ...
+                'Ceteris paribus, non-oscillatory neurons and features')
+            write_summary_section(output_folder, ...
+                '5f. Delta-power gap from non-oscillatory features, non-oscillatory neurons', ...
+                join_summary_lines( ...
+                'Same equation as section 5e, fit only on neurons outside the oscillatory group.', ...
+                'The predictors are the non-oscillatory feature changes and FiringRate.', ...
+                nonosc_only_partial, ...
+                sprintf('Non-oscillatory neurons in this fit: %d.', nonosc_only_gap.n), ...
+                gap_fit_lines(nonosc_only_gap)))
+        end
+        rate_link_non = feature_change_vs_rate(gap_x_non, gap_names_non);
+        fprintf('Non-oscillatory feature change versus firing-rate change, n = %d neurons.\n', ...
+            rate_link_non.n)
+        draw_feature_rate_link(rate_link_non, output_folder, ...
+            'Non-oscillatory feature change versus firing-rate change')
+        rate_scatter_non = draw_feature_rate_scatter(rate_link_non, output_folder, ...
+            'Significant non-oscillatory feature changes versus firing-rate change')
+        write_summary_section(output_folder, ...
+            '5g. Non-oscillatory feature changes and the firing-rate change', join_summary_lines( ...
+            ['Output folder: ', output_folder], ...
+            'Each row is one neuron with both power tails, a positive firing rate in each tail, and finite non-oscillatory features.', ...
+            'A feature change is the high-power non-oscillatory value minus the low-power value.', ...
+            'The firing-rate change is the high-power rate minus the low-power rate, in spikes per second.', ...
+            'Holm-Sidak adjusted p-values are for the Pearson tests across these non-oscillatory features only.', ...
+            'A feature whose Pearson p is below 0.05 is scattered against the firing-rate change.', ...
+            rate_scatter_non, ...
+            sprintf('Neurons: %d.', rate_link_non.n), ...
+            rate_link_non.lines))
+    end
+end
 
 % Firing rates are already stored on the power-split summary. This block
 % only reads them. It does not rebuild the autocorrelograms.
@@ -3307,6 +3540,338 @@ prediction = prediction(:);
 end
 
 
+function draw_paired_power_features(feature_table, feature_table_low, rows, ...
+    comparison_names, comparison_titles, folder, population_name, caption, summary_title)
+%DRAW_PAIRED_POWER_FEATURES  High versus low features for one neuron set.
+
+rows = rows(:);
+rows = rows(rows >= 1 & rows <= size(feature_table, 1));
+high_names = feature_table.Properties.VariableNames;
+low_names = feature_table_low.Properties.VariableNames;
+high_compare = zeros(numel(rows), 0);
+low_compare = zeros(numel(rows), 0);
+compare_titles = {};
+compare_group = {};
+for j = 1:numel(comparison_names)
+    this_name = comparison_names{j};
+    if ~ismember(this_name, high_names) || ~ismember(this_name, low_names)
+        continue
+    end
+    high_column = feature_table{rows, this_name};
+    low_column = feature_table_low{rows, this_name};
+    if ~isnumeric(high_column) || ~isnumeric(low_column)
+        continue
+    end
+    high_compare(:, end + 1) = high_column; %#ok<AGROW>
+    low_compare(:, end + 1) = low_column; %#ok<AGROW>
+    compare_titles{end + 1} = comparison_titles{j}; %#ok<AGROW>
+    compare_group{end + 1} = component_group_name(this_name); %#ok<AGROW>
+end
+if all(ismember({'Peak1', 'Peak2'}, high_names)) && all(ismember({'Peak1', 'Peak2'}, low_names))
+    high_compare(:, end + 1) = feature_table{rows, 'Peak1'} - feature_table{rows, 'Peak2'}; %#ok<AGROW>
+    low_compare(:, end + 1) = feature_table_low{rows, 'Peak1'} - feature_table_low{rows, 'Peak2'}; %#ok<AGROW>
+    compare_titles{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
+    compare_group{end + 1} = 'oscillatory'; %#ok<AGROW>
+end
+if isempty(compare_titles)
+    write_summary_section(folder, summary_title, join_summary_lines( ...
+        sprintf('No paired feature comparison was drawn for %s.', population_name)))
+    return
+end
+n_compare = numel(compare_titles);
+paired_stats = repmat(empty_feature_stats(), n_compare, 1);
+for j = 1:n_compare
+    pair = isfinite(high_compare(:, j)) & isfinite(low_compare(:, j));
+    paired_stats(j) = compare_two_samples(high_compare(pair, j), low_compare(pair, j), 'paired');
+    paired_stats(j).feature = compare_titles{j};
+    paired_stats(j).role = '';
+end
+paired_stats = assign_holm_by_group(paired_stats, compare_group);
+component_groups = {'oscillatory', 'non-oscillatory'};
+for g = 1:numel(component_groups)
+    keep = find(strcmp(compare_group, component_groups{g}));
+    if isempty(keep)
+        continue
+    end
+    open_full_figure(['High versus low power, ', population_name, ', ', component_groups{g}, ' features'])
+    n_compare_cols = 5;
+    tiledlayout(ceil(numel(keep) / n_compare_cols), n_compare_cols, 'TileSpacing', 'compact')
+    for ii = 1:numel(keep)
+        j = keep(ii);
+        nexttile
+        high_vals = high_compare(:, j);
+        low_vals = low_compare(:, j);
+        pair = isfinite(high_vals) & isfinite(low_vals);
+        hold on
+        if any(pair)
+            y_high = high_vals(pair);
+            y_low = low_vals(pair);
+            point_offset = violin_point_offset(numel(y_high));
+            draw_one_violin(1, y_high, [0.84 0.37 0.00])
+            draw_one_violin(2, y_low, [0.00 0.45 0.70])
+            plot([1 + point_offset.'; 2 + point_offset.'], [y_high.'; y_low.'], ...
+                '-', 'Color', [0.62 0.62 0.62], 'LineWidth', 0.3)
+            plot([1 2], [mean(y_high), mean(y_low)], '-', 'Color', [0.1 0.1 0.1], ...
+                'LineWidth', 2.4, 'HandleVisibility', 'off')
+            draw_violin_mean_bar(1, y_high)
+            draw_violin_mean_bar(2, y_low)
+            scatter(1 + point_offset, y_high, 12, [0 0 0], 'filled', ...
+                'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
+            scatter(2 + point_offset, y_low, 12, [0 0 0], 'filled', ...
+                'MarkerFaceAlpha', 0.65, 'MarkerEdgeColor', 'none')
+        end
+        title({compare_titles{j}, comparison_p_title(paired_stats(j).raw_p, paired_stats(j).holm_p)}, ...
+            'Interpreter', 'none')
+        xlim([0.4 2.6])
+        set(gca, 'XTick', [1 2], 'XTickLabel', {'High power', 'Low power'})
+        grid on
+    end
+    sgtitle({caption, [component_groups{g}, ' features only.'], ...
+        'Thin lines join one neuron. Thick bars are means and the line between them.', ...
+        'Holm-Sidak is computed only across the panels in this figure.'}, 'Interpreter', 'none')
+    save_script_figure(folder)
+    write_summary_section(folder, [summary_title, ', ', component_groups{g}, ' features'], ...
+        feature_comparison_report(paired_stats(keep), 'paired', ...
+        ['Paired t-tests. The same ', population_name, ' are compared at high and low power.']))
+end
+end
+
+
+function draw_membership_bars(percent, observed, total, labels, test, folder, ...
+    figure_name, y_label, title_lines, use_lock_colors)
+shown = percent;
+shown(~isfinite(shown)) = 0;
+open_full_figure(figure_name)
+hold on
+legend_names = cell(1, numel(labels));
+for k = 1:numel(labels)
+    if use_lock_colors
+        color = lock_bar_color(labels{k});
+    else
+        color = [0.20 0.45 0.80];
+    end
+    bar(k, shown(k), 'FaceColor', color, 'BarWidth', 0.8)
+    legend_names{k} = sprintf('%s %d/%d', labels{k}, observed(k), total(k));
+    if test.tested(k) && isfinite(test.holm_p(k))
+        bar_text = sprintf('%d/%d\nHolm-Sidak p = %.3g', observed(k), total(k), test.holm_p(k));
+    else
+        bar_text = sprintf('%d/%d', observed(k), total(k));
+    end
+    text(k, min(shown(k) + 4, 112), bar_text, 'HorizontalAlignment', 'center', ...
+        'VerticalAlignment', 'bottom', 'Interpreter', 'none')
+end
+if use_lock_colors
+    legend(legend_names, 'Location', 'northeast', 'Box', 'off')
+end
+set(gca, 'XTick', 1:numel(labels), 'XTickLabel', labels)
+try
+    set(gca, 'TickLabelInterpreter', 'none')
+catch
+end
+ylabel(y_label)
+ylim([0 145])
+title(title_lines, 'Interpreter', 'none')
+box off
+save_script_figure(folder)
+end
+
+
+function write_enrichment_summary(folder, title, labels, observed, total, test, ...
+    denominator_note, alternative_note, extra_note, none_missing_line, missing_prefix)
+lines = cell(1, numel(labels));
+for k = 1:numel(labels)
+    if test.tested(k)
+        lines{k} = sprintf('%-16s %4d/%-4d  expected %7.2f  raw p %8.3g  Holm-Sidak p %8.3g', ...
+            labels{k}, observed(k), total(k), test.expected(k), test.raw_p(k), test.holm_p(k));
+    else
+        lines{k} = sprintf('%-16s %4d/%-4d  not tested', labels{k}, observed(k), total(k));
+    end
+end
+missing = labels(observed == 0);
+if isempty(missing)
+    missing_line = none_missing_line;
+else
+    missing_line = [missing_prefix, strjoin(missing, ', '), '.'];
+end
+if isfinite(test.chi2_p)
+    chi_line = sprintf('Pearson chi-square across tested groups: chi2 = %.4g, df = %.0f, p = %.4g. Smallest expected cell = %.2f.', ...
+        test.chi2, test.df, test.chi2_p, test.min_expected);
+else
+    chi_line = 'The chi-square test was not run. Fewer than two groups had analysed neurons.';
+end
+if isfinite(test.min_expected) && test.min_expected < 5
+    chi_caution = 'An expected cell is below 5, so the chi-square p is a rough check. Use the Fisher p-values for each group.';
+else
+    chi_caution = 'The chi-square p asks whether the groups share one rate.';
+end
+write_summary_section(folder, title, join_summary_lines( ...
+    denominator_note, ...
+    'Each tested group is compared with the other analysed neurons by a one-sided Fisher exact test.', ...
+    ['The alternative is ', alternative_note, '.'], ...
+    'The expected count is the group size times the rate of all tested neurons.', ...
+    'Holm-Sidak adjusts the Fisher p-values across the tested groups.', ...
+    extra_note, chi_line, chi_caution, lines, missing_line))
+end
+
+
+function draw_example_neuron_pages(pop_rows, percentile_high, percentile_low, ...
+    lag, example_bank, neuron_session, neuron_cluster_id, neuron_area, neuron_type, ...
+    osc_score, feature_table, feature_table_low, example_names, ...
+    folder, n_requested, neurons_per_figure, smooth_half_s, skip_abs_lag_s, bank_note, ...
+    figure_prefix, summary_title, selection_lines)
+pop_rows = pop_rows(:);
+n_example = numel(pop_rows);
+if n_example < 1
+    write_summary_section(folder, summary_title, join_summary_lines( ...
+        sprintf('n_example_neurons = %d. Drawn: 0.', n_requested), ...
+        'No neuron outside VLPAG was available.', selection_lines))
+    return
+end
+example_lines = cell(n_example, 1);
+lag_limits = example_lag_limits(lag);
+n_example_figures = ceil(n_example / neurons_per_figure);
+n_example_cols = neurons_per_figure;
+high_color = [0.75 0.22 0.18];
+low_color = [0.15 0.35 0.70];
+for page = 1:n_example_figures
+    i0 = (page - 1) * neurons_per_figure + 1;
+    i1 = min(page * neurons_per_figure, n_example);
+    open_full_figure(sprintf('%s %d', figure_prefix, page))
+    for k = 1:(i1 - i0 + 1)
+        i = i0 + k - 1;
+        pop_row = pop_rows(i);
+        this_area = area_display_name(neuron_area{pop_row});
+        lock_label = display_lock_label(neuron_type{pop_row});
+        [acg_lag, acg_high, acg_low, found_high, found_low] = example_stratum_curves( ...
+            example_bank, neuron_session{pop_row}, neuron_cluster_id(pop_row));
+        acg_high = smooth_example_acg(acg_lag, acg_high, smooth_half_s, skip_abs_lag_s);
+        acg_low = smooth_example_acg(acg_lag, acg_low, smooth_half_s, skip_abs_lag_s);
+        pct_high = percentile_high(pop_row, :);
+        pct_low = percentile_low(pop_row, :);
+        shared_ylim = example_acg_ylim(acg_lag, [acg_high(:), acg_low(:)], lag_limits);
+        subplot(2, n_example_cols, k)
+        hold on
+        if found_high
+            plot(acg_lag, acg_high, 'Color', high_color, 'LineWidth', 1.4)
+        end
+        if found_low
+            plot(acg_lag, acg_low, 'Color', low_color, 'LineWidth', 1.4)
+        end
+        if found_high || found_low
+            xlim(lag_limits)
+            ylim(shared_ylim)
+            if k == 1
+                legend_names = {};
+                if found_high
+                    legend_names{end + 1} = 'High 25% power'; %#ok<AGROW>
+                end
+                if found_low
+                    legend_names{end + 1} = 'Low 25% power'; %#ok<AGROW>
+                end
+                legend(legend_names, 'Location', 'northeast', 'Box', 'off')
+            end
+        else
+            text(0.5, 0.5, 'ACG not in summary', 'HorizontalAlignment', 'center')
+            axis([0 1 0 1])
+        end
+        ylabel('Sum-to-1')
+        title({sprintf('%s, %s', this_area, lock_label), ...
+            sprintf('%s id %g', neuron_session{pop_row}, neuron_cluster_id(pop_row))}, ...
+            'Interpreter', 'none')
+        box off
+        subplot(2, n_example_cols, n_example_cols + k)
+        hold on
+        plot(lag, pct_high, 'Color', high_color, 'LineWidth', 1.4)
+        plot(lag, pct_low, 'Color', low_color, 'LineWidth', 1.4)
+        xlim(lag_limits)
+        ylim([0 100])
+        xlabel('Lag (s)')
+        ylabel('Percentile')
+        box off
+        example_lines{i} = example_neuron_summary(i, neuron_session{pop_row}, ...
+            neuron_cluster_id(pop_row), this_area, lock_label, osc_score(pop_row), ...
+            found_high, found_low, feature_table, feature_table_low, pop_row, example_names);
+    end
+    sgtitle({sprintf('Neurons %d-%d of %d. VLPAG is left out.', i0, i1, n_example), ...
+        'Each column is one neuron. Top: high-power and low-power autocorrelograms.', ...
+        'Bottom: high-power and low-power shuffle percentiles.', ...
+        sprintf('Autocorrelogram Gaussian sigma = %g ms. Lags within %g ms of zero stay raw', ...
+            1000 * smooth_half_s / 4, 1000 * skip_abs_lag_s)}, 'Interpreter', 'none')
+    save_script_figure(folder)
+end
+write_summary_section(folder, summary_title, join_summary_lines( ...
+    sprintf('n_example_neurons = %d. Drawn: %d. Neurons per figure: %d.', ...
+        n_requested, n_example, neurons_per_figure), ...
+    sprintf('Figures: %d. Each neuron is one column with two rows.', n_example_figures), ...
+    'Top row: high-power and low-power autocorrelograms on one axes.', ...
+    'Bottom row: high-power and low-power sum-to-1 shuffle percentiles on one axes.', ...
+    sprintf('Example autocorrelograms use the percentile Gaussian, smooth_half = %g s, sigma = %g ms. Lags within %g s of zero stay raw', ...
+        smooth_half_s, 1000 * smooth_half_s / 4, skip_abs_lag_s), ...
+    selection_lines, bank_note, ...
+    'Features are the high-power and low-power values for that neuron.', ...
+    example_lines))
+end
+
+
+function draw_lock_classifier_percent(grid, folder, method, figure_name, population_name)
+open_full_figure(figure_name)
+[n_rows, n_cols] = size(grid);
+for row = 1:n_rows
+    for col = 1:n_cols
+        subplot(n_rows, n_cols, (row - 1) * n_cols + col)
+        result = grid{row, col};
+        if ~result.ok
+            axis off
+            title(result.method_label, 'Interpreter', 'none')
+            if ~isempty(result.note)
+                text(0.5, 0.5, result.note, 'HorizontalAlignment', 'center', ...
+                    'Interpreter', 'none')
+            end
+            continue
+        end
+        row_n = sum(result.counts, 2);
+        percent = nan(size(result.counts));
+        for r = 1:size(result.counts, 1)
+            if row_n(r) > 0
+                percent(r, :) = 100 * result.counts(r, :) / row_n(r);
+            end
+        end
+        shown = percent;
+        shown(~isfinite(shown)) = 0;
+        imagesc(shown)
+        set(gca, 'XTick', 1:numel(result.class_names), 'XTickLabel', result.class_names, ...
+            'YTick', 1:numel(result.class_names), 'YTickLabel', result.class_names)
+        try
+            set(gca, 'TickLabelInterpreter', 'none')
+        catch
+        end
+        colormap(gca, [linspace(0.97, 0.20, 64)', linspace(0.97, 0.45, 64)', linspace(0.97, 0.75, 64)'])
+        clim([0 100])
+        for r = 1:size(percent, 1)
+            for c = 1:size(percent, 2)
+                if isfinite(percent(r, c))
+                    label = sprintf('%.0f%%', percent(r, c));
+                else
+                    label = '';
+                end
+                text(c, r, label, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle')
+            end
+        end
+        xlabel('Predicted lock type')
+        ylabel('True lock type')
+        title({result.method_label, sprintf('Mean type accuracy %.1f%%', 100 * result.accuracy)}, ...
+            'Interpreter', 'none')
+        box off
+    end
+end
+sgtitle({sprintf('%s. Columns: %s.', population_name, method), ...
+    'Rows are weighted, unweighted, and the joint decision.', ...
+    'Each value is a percent of its row. A row is one true lock type and sums to 100%.', ...
+    'Columns are predicted lock type and are not normalized.'}, 'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
 function draw_lock_classifier(grid, folder, method, figure_name, population_name)
 open_full_figure(figure_name)
 [n_rows, n_cols] = size(grid);
@@ -3388,6 +3953,7 @@ lines = [{ ...
     'The equal-type reference is one divided by the number of lock types. A constant guess at one type scores that value on the mean accuracy.', ...
     sprintf('Figure columns, left to right: %s.', method), ...
     'Figure rows, top to bottom: weighted, unweighted, joint decision.', ...
+    'A second figure shows the same matrices as percentages of the true lock type. Each row sums to 100%. Columns are not normalized.', ...
     'svm is a Gaussian-kernel SVM with medium scale sqrt(number of features) and box constraint 1.', ...
     'Three SVM classes are compared one against one. Its class probabilities are a softmax of the SVM scores.', ...
     'naivebayes is Gaussian naive Bayes. lda is a linear discriminant.', ...
@@ -4991,11 +5557,14 @@ ranks(order) = ranks_in_order;
 end
 
 
-function draw_feature_rate_link(report, folder)
+function draw_feature_rate_link(report, folder, figure_name)
+if nargin < 3 || isempty(figure_name)
+    figure_name = 'Feature change versus firing-rate change';
+end
 if ~isfield(report, 'pearson') || isempty(report.pearson)
     return
 end
-open_full_figure('Feature change versus firing-rate change')
+open_full_figure(figure_name)
 hold on
 for i = 1:numel(report.pearson)
     significant = isfinite(report.pearson_p(i)) && report.pearson_p(i) < 0.05;
@@ -5101,9 +5670,12 @@ y_line = beta(1) + beta(column + 1) * x_line + held;
 end
 
 
-function note = draw_feature_rate_scatter(report, folder)
+function note = draw_feature_rate_scatter(report, folder, figure_name)
 %DRAW_FEATURE_RATE_SCATTER  Significant feature changes against the firing-rate change.
 
+if nargin < 3 || isempty(figure_name)
+    figure_name = 'Significant feature changes versus firing-rate change';
+end
 note = 'No feature has a Pearson p below 0.05, so the scatter was not drawn.';
 if ~isfield(report, 'pearson_p') || ~isfield(report, 'features') || isempty(report.features)
     return
@@ -5115,7 +5687,7 @@ end
 n_panels = numel(significant);
 n_cols = min(3, n_panels);
 n_rows = ceil(n_panels / n_cols);
-open_full_figure('Significant feature changes versus firing-rate change')
+open_full_figure(figure_name)
 tiledlayout(n_rows, n_cols, 'TileSpacing', 'compact')
 for s = 1:n_panels
     nexttile
@@ -7019,10 +7591,13 @@ write_summary_section(folder, '4. Oscillatory share of each lock type', join_sum
 end
 
 
-function text = feature_comparison_report(rows, kind)
+function text = feature_comparison_report(rows, kind, population_line)
 if strcmp(kind, 'paired')
+    if nargin < 3 || isempty(population_line)
+        population_line = 'Paired t-tests. The same oscillatory neurons are compared at high and low power.';
+    end
     intro = { ...
-        'Paired t-tests. The same oscillatory neurons are compared at high and low power.', ...
+        population_line, ...
         't uses the mean of (high - low) and the standard deviation of those differences.', ...
         'df = n - 1.', ...
         'Cohen dz = mean(high - low) / standard deviation of (high - low).', ...
