@@ -310,6 +310,19 @@ end
 if exist('imagesc_sum_power_high', 'var') && exist('lag', 'var')
     feature_table = append_nonosc_features(feature_table, imagesc_sum_power_high, lag);
 end
+if ~exist('n_shuffles', 'var') || isempty(n_shuffles)
+    n_shuffles = 500;
+end
+if exist('feature_table_low', 'var') && size(feature_table_low, 1) > 0
+    [feature_table, feature_table_low, outlier_lines] = screen_extreme_features( ...
+        feature_table, feature_table_low, n_shuffles);
+else
+    [feature_table, ~, outlier_lines] = screen_extreme_features( ...
+        feature_table, table(), n_shuffles);
+end
+for i_outlier = 1:numel(outlier_lines)
+    fprintf('%s\n', outlier_lines{i_outlier})
+end
 
 rng(42);
 
@@ -694,6 +707,8 @@ write_section_2_summary(output_folder, feature_names, size(X_raw, 1), size(X, 1)
     group_counts, counts_after, kmeans_sizes, ward_sizes, ...
     mean(sil_kmeans), mean(sil_ward), cluster_method_label, ...
     kmeans_modulation, ward_modulation, cluster_stats, shown_group)
+write_summary_section(output_folder, '2. Extreme feature values', join_summary_lines( ...
+    outlier_lines))
 disp(['Run section 3 to keep ', cluster_method_label, ' cluster 1.'])
 
 %% 3. Choose the oscillatory neurons
@@ -981,6 +996,16 @@ positive_lag = lag > 0;
 feature_table_low = acg2features( ...
     imagesc_sum_power_low(:, positive_lag), lag(positive_lag));
 feature_table_low = append_nonosc_features(feature_table_low, imagesc_sum_power_low, lag);
+if ~exist('n_shuffles', 'var') || isempty(n_shuffles)
+    n_shuffles = 500;
+end
+[feature_table, feature_table_low, outlier_lines] = screen_extreme_features( ...
+    feature_table, feature_table_low, n_shuffles);
+for i_outlier = 1:numel(outlier_lines)
+    fprintf('%s\n', outlier_lines{i_outlier})
+end
+write_summary_section(output_folder, '4. Extreme feature values', join_summary_lines( ...
+    outlier_lines))
 X_low = feature_table_low{complete_rows, feature_names};
 Xz_low = (X_low - feature_mean) ./ feature_sigma;
 osc_in_complete = ismember(complete_rows(:), osc_rows(:));
@@ -1762,6 +1787,16 @@ if ~exist('feature_table_low', 'var') || size(feature_table_low, 1) ~= numel(neu
     feature_table_low = append_nonosc_features( ...
         feature_table_low, imagesc_sum_power_low, lag);
 end
+if ~exist('n_shuffles', 'var') || isempty(n_shuffles)
+    n_shuffles = 500;
+end
+[feature_table, feature_table_low, outlier_lines] = screen_extreme_features( ...
+    feature_table, feature_table_low, n_shuffles);
+for i_outlier = 1:numel(outlier_lines)
+    fprintf('%s\n', outlier_lines{i_outlier})
+end
+write_summary_section(output_folder, '5. Extreme feature values', join_summary_lines( ...
+    outlier_lines))
 power_feature_names = { ...
     'Modulation1', 'Modulation2', 'PeakInterval', 'TroughInterval', ...
     'OscillationScore', 'Baseline'};
@@ -6203,6 +6238,75 @@ if nargin >= 2 && isfinite(y_top)
 end
 if all(isfinite(limits)) && limits(2) > limits(1)
     ylim(limits);
+end
+end
+
+
+function [feature_table, feature_table_low, lines] = screen_extreme_features( ...
+    feature_table, feature_table_low, n_shuffles)
+%SCREEN_EXTREME_FEATURES  Drop pathological feature values for 2000 shuffles.
+%
+% A 2000-permutation logit can make one fit parameter enormous. That single
+% number sets the scale of a standardized PCA and pulls t-tests and ANOVAs.
+% A value is removed when its absolute size is more than 20 times the 95th
+% percentile of the absolute values in that column, and it also sits outside
+% the 1st to 99th percentile. The cell becomes NaN. The 500-permutation run
+% is left unchanged.
+
+if ~isfinite(n_shuffles) || n_shuffles ~= 2000
+    lines = {['Outlier values were kept. This screen runs only when the ', ...
+        'checkpoint has 2000 permutations.']};
+    return
+end
+[feature_table, high_lines] = drop_extreme_feature_values(feature_table, 'high power');
+high_lines = high_lines(:).';
+lines = [{['2000-permutation screen. A feature value is set to NaN when it is ', ...
+    'more than 20 times the 95th percentile of absolute values in that column ', ...
+    'and outside the 1st to 99th percentile. Those cells leave the PCA, t-SNE, ', ...
+    'and any test that requires a finite value.']}, high_lines];
+if isempty(feature_table_low) || size(feature_table_low, 1) < 1
+    lines{end + 1} = 'The low-power feature table was not screened.'; %#ok<AGROW>
+    return
+end
+[feature_table_low, low_lines] = drop_extreme_feature_values(feature_table_low, 'low power');
+lines = [lines, low_lines(:).'];
+end
+
+
+function [feature_table, lines] = drop_extreme_feature_values(feature_table, power_name)
+lines = {sprintf('%s: no extreme feature value was removed.', power_name)};
+if isempty(feature_table) || size(feature_table, 1) < 1
+    return
+end
+names = feature_table.Properties.VariableNames;
+removed_lines = cell(1, 0);
+for j = 1:numel(names)
+    column = feature_table.(names{j});
+    if ~isnumeric(column) || size(column, 2) ~= 1
+        continue
+    end
+    column = double(column(:));
+    finite = isfinite(column);
+    if nnz(finite) < 20
+        continue
+    end
+    observed = column(finite);
+    fence = max(1, 20 * prctile(abs(observed), 95));
+    low = prctile(observed, 1);
+    high = prctile(observed, 99);
+    extreme = finite & abs(column) > fence & (column < low | column > high);
+    if ~any(extreme)
+        continue
+    end
+    removed = column(extreme);
+    column(extreme) = NaN;
+    feature_table.(names{j}) = column;
+    removed_lines{end + 1} = sprintf( ...
+        '%s, %s: removed %d value(s). Largest absolute value removed: %.6g. Fence: %.6g.', ...
+        power_name, names{j}, nnz(extreme), max(abs(removed)), fence); %#ok<AGROW>
+end
+if ~isempty(removed_lines)
+    lines = removed_lines;
 end
 end
 
