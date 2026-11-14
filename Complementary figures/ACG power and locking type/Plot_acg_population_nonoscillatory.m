@@ -1232,8 +1232,8 @@ for g = 1:2
         'Holm-Sidak adjusts the ANOVA p-values only across the features in this figure.', ...
         'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
         'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
-    lock_anova = [lock_anova, this_lock]; %#ok<AGROW>
-    osc_lock_anova = [osc_lock_anova, this_osc_lock]; %#ok<AGROW>
+    lock_anova = [lock_anova; this_lock(:)]; %#ok<AGROW>
+    osc_lock_anova = [osc_lock_anova; this_osc_lock(:)]; %#ok<AGROW>
     classifier_feature_names = [classifier_feature_names, component_feature_names{g}]; %#ok<AGROW>
     classifier_feature_titles = [classifier_feature_titles, component_feature_titles{g}]; %#ok<AGROW>
 end
