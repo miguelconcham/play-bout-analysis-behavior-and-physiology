@@ -6,9 +6,12 @@
 % names from Plot_acg_population_logit, so that script's prep file, model
 % cache, neuron table, summary, and figures are left in place.
 %
-% Overlap is the standard method. Section 1 loads
-% locking_period_acg_shuffle_n500.mat and builds the matrices and
-% feature_table. Section 2 runs PCA, t-SNE, and the two-group split.
+% Overlap is the standard method. Section 1 loads a saved shuffle
+% checkpoint and builds the matrices and feature_table. Set
+% n_shuffles_choice in section 1 to 500 or 2000. When more than one copy
+% of that count is saved, including a _v2 file from a locked checkpoint,
+% the newest file is used and the command window names the others.
+% Section 2 runs PCA, t-SNE, and the two-group split.
 % Section 3 keeps cluster 1 of cluster_method, the higher-modulation group.
 % cluster_method is 'ward' or 'kmeans'. Ward is the default.
 % Section 4 only draws. After section 3 has run, edit section 4 and run
@@ -122,18 +125,20 @@ end
 
 acg_method = 'overlap';
 acg_count = 'pairs';
-n_shuffles_default = 500;
+% Switch between the saved shuffles. Change 500 to 2000 to use the other one.
+n_shuffles_choice = 500;
+if ~ismember(n_shuffles_choice, [500 2000])
+    error('Plot_acg_population_logit:checkpoint', ...
+        'n_shuffles_choice must be 500 or 2000.');
+end
 % Mean percentile inside this lag window sets the stored row order.
 % 0.2 s is 200 ms. Section 2 sorts the figure again.
 sort_window_s = [0.200 0.400];
 
 data_root = experiment_data_root();
 parsing_folder = fullfile(data_root, 'Analysis results', 'spike train parsing');
-checkpoint = fullfile(parsing_folder, shuffle_checkpoint_filename(n_shuffles_default, acg_method, acg_count));
-if exist(checkpoint, 'file') ~= 2
-    error('Plot_acg_population_logit:checkpoint', ...
-        'No shuffle checkpoint at %s.', checkpoint);
-end
+[checkpoint, checkpoint_lines] = choose_saved_shuffle( ...
+    parsing_folder, n_shuffles_choice, acg_method, acg_count);
 
 stored = load(checkpoint, 'shuffle_records', 'parameters');
 if ~isfield(stored, 'shuffle_records') || ~isfield(stored, 'parameters') ...
@@ -147,6 +152,11 @@ if ~iscell(records)
 end
 records = records(:);
 n_shuffles = stored.parameters.n_shuffles;
+if n_shuffles ~= n_shuffles_choice
+    error('Plot_acg_population_logit:checkpoint', ...
+        '%s records %d permutations, and n_shuffles_choice is %d.', ...
+        checkpoint, n_shuffles, n_shuffles_choice);
+end
 
 column_id = {'all', 'power_high', 'power_low'};
 column_title = {'All neurons', 'All neurons, high 25% power', 'All neurons, low 25% power'};
@@ -221,7 +231,7 @@ save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'high_power_delta', 'low_power_delta', ...
     'all_power_delta', ...
     'column_id', 'column_title', 'scale_id', 'scale_title', ...
-    'n_shuffles', 'sort_window_s', 'checkpoint', 'prep_file');
+    'n_shuffles', 'n_shuffles_choice', 'sort_window_s', 'checkpoint', 'prep_file');
 disp(['Section 1 saved the matrices to ', prep_file])
 disp('imagesc_sum_all is neurons by lag. neuron_type is the lock group of each row.')
 disp('feature_table is the percentile-logit features. observed_feature_high is the smoothed observed ACG.')
@@ -252,6 +262,24 @@ write_summary_section(output_folder, '1. Checkpoint and population matrices', st
         observed_feature_finite_count(observed_feature_high), ...
         observed_feature_finite_count(observed_feature_low)), ...
     ['Prep file: ', prep_file]}, newline))
+script_parameter_lines = { ...
+    'Script: Plot_acg_population_nonoscillatory.', ...
+    sprintf('n_shuffles_choice: %d. The allowed values are 500 and 2000.', n_shuffles_choice), ...
+    sprintf('acg_method: %s. acg_count: %s.', acg_method, acg_count), ...
+    sprintf('Sort window for the stored row order: %.3f to %.3f s.', sort_window_s(1), sort_window_s(2)), ...
+    'Observed autocorrelogram features use a Gaussian of half-width 0.06 s. The standard deviation is one quarter of that width. Lags within 0.02 s of zero stay raw.', ...
+    ['Output folder: ', output_folder], ...
+    ['Estimate folder: ', estimate_folder], ...
+    'Section 2 sets cluster_method to ward unless that line is changed.', ...
+    'Section 4 sets example_smooth_half_s to 0.06 s and example_skip_abs_lag_s to 0.02 s.', ...
+    'The lock-type classifier uses naive Bayes, LDA, and a medium Gaussian SVM unless classifier_method is changed. n_accuracy_permutations is 1000.'};
+write_summary_opening(output_folder, '0. Shuffle file and analysis parameters', join_summary_lines( ...
+    'This block is the start of the summary. Later sections are added after it.', ...
+    checkpoint_lines, ...
+    'Parameters stored in the shuffle checkpoint:', ...
+    struct_parameter_lines(stored.parameters), ...
+    'Parameters of this script:', ...
+    script_parameter_lines))
 
 %% 2. ACG features, PCA, t-SNE, and the two-group split
 % Re-run this section after changing the feature list or cluster_method.
@@ -7703,6 +7731,168 @@ try
     set(chart, 'Position', pos)
 catch
 end
+end
+
+
+function [checkpoint, lines] = choose_saved_shuffle(folder, n_shuffles, method, count_method)
+%CHOOSE_SAVED_SHUFFLE  Newest saved checkpoint for one permutation count.
+%
+% The standard name is locking_period_acg_shuffle_nN.mat. A locked save
+% can sit beside it as _v2, _v3, and so on. When more than one of those
+% files exists, the newest modification time is used. An equal time keeps
+% the higher version number.
+
+base_name = shuffle_checkpoint_filename(n_shuffles, method, count_method);
+[~, base] = fileparts(base_name);
+listing = dir(fullfile(folder, [base, '*.mat']));
+keep = false(numel(listing), 1);
+for i = 1:numel(listing)
+    name = listing(i).name;
+    exact = strcmp(name, [base, '.mat']);
+    versioned = ~isempty(regexp(name, ...
+        ['^', regexptranslate('escape', base), '_v\d+\.mat$'], 'once'));
+    keep(i) = exact || versioned;
+end
+listing = listing(keep);
+if isempty(listing)
+    error('Plot_acg_population_logit:checkpoint', ...
+        ['No %d-permutation checkpoint in %s. Expected %s, or a copy ', ...
+        'whose name ends in _v2, _v3, and so on.'], ...
+        n_shuffles, folder, base_name);
+end
+stamps = zeros(numel(listing), 1);
+versions = zeros(numel(listing), 1);
+for i = 1:numel(listing)
+    if isfield(listing, 'datenum') && ~isempty(listing(i).datenum)
+        stamps(i) = listing(i).datenum;
+    else
+        stamps(i) = datenum(listing(i).date);
+    end
+    token = regexp(listing(i).name, '_v(\d+)\.mat$', 'tokens', 'once');
+    if isempty(token)
+        versions(i) = 1;
+    else
+        versions(i) = str2double(token{1});
+    end
+end
+[~, order] = sortrows([stamps, versions], [-1, -2]);
+listing = listing(order);
+stamps = stamps(order);
+checkpoint = fullfile(folder, listing(1).name);
+lines = { ...
+    sprintf('Permutation count requested: %d.', n_shuffles), ...
+    sprintf('Checkpoint used: %s', checkpoint), ...
+    sprintf('That file was last modified %s.', datestr(stamps(1)))};
+if numel(listing) > 1
+    lines{end + 1} = sprintf(['More than one %d-permutation checkpoint was found. ', ...
+        'The newest file was used.'], n_shuffles); %#ok<AGROW>
+    lines{end + 1} = 'Other copies:'; %#ok<AGROW>
+    for i = 2:numel(listing)
+        lines{end + 1} = sprintf('  %s (modified %s)', ...
+            fullfile(folder, listing(i).name), datestr(stamps(i))); %#ok<AGROW>
+    end
+else
+    lines{end + 1} = 'This was the only saved copy of that permutation count.'; %#ok<AGROW>
+end
+for i = 1:numel(lines)
+    fprintf('%s\n', lines{i})
+end
+end
+
+
+function lines = struct_parameter_lines(parameters)
+if ~isstruct(parameters) || numel(parameters) ~= 1
+    lines = {'The checkpoint has no parameter struct.'};
+    return
+end
+fields = fieldnames(parameters);
+lines = cell(numel(fields), 1);
+for i = 1:numel(fields)
+    lines{i} = sprintf('%s: %s', fields{i}, parameter_value_text(parameters.(fields{i})));
+end
+end
+
+
+function text = parameter_value_text(value)
+if ischar(value)
+    text = value;
+    return
+end
+if isstring(value)
+    text = strjoin(cellstr(value(:)), ', ');
+    return
+end
+if iscell(value)
+    if isempty(value)
+        text = '';
+        return
+    end
+    parts = cell(1, numel(value));
+    for k = 1:numel(value)
+        parts{k} = parameter_value_text(value{k});
+    end
+    text = strjoin(parts, ', ');
+    return
+end
+if isnumeric(value) || islogical(value)
+    value = double(value(:).');
+    if isempty(value)
+        text = '[]';
+    elseif isscalar(value)
+        if isfinite(value) && value == round(value) && abs(value) < 1e12
+            text = sprintf('%.0f', value);
+        else
+            text = sprintf('%.6g', value);
+        end
+    elseif numel(value) <= 8
+        text = strtrim(sprintf('%.6g ', value));
+    else
+        text = sprintf('%.6g ... %.6g (%d values)', value(1), value(end), numel(value));
+    end
+    return
+end
+text = class(value);
+end
+
+
+function write_summary_opening(folder, title, body)
+%WRITE_SUMMARY_OPENING  Write one summary block and keep it first in the file.
+
+write_summary_section(folder, title, body);
+path = fullfile(folder, 'analysis_summary_nonosc.txt');
+previous = fileread(path);
+if ~text_ends_with(previous, newline)
+    previous = [previous, newline];
+end
+starts = regexp(previous, '(?m)^-------\r?\n');
+if numel(starts) < 2
+    return
+end
+starts = [starts, numel(previous) + 1];
+opening = '';
+rest = cell(1, 0);
+for k = 1:numel(starts) - 1
+    chunk = previous(starts(k):starts(k + 1) - 1);
+    lines = regexp(chunk, '\r?\n', 'split');
+    this_title = '';
+    if numel(lines) >= 2
+        this_title = lines{2};
+    end
+    if strcmp(this_title, title)
+        opening = chunk;
+    else
+        rest{end + 1} = chunk; %#ok<AGROW>
+    end
+end
+if isempty(opening)
+    return
+end
+fid = fopen(path, 'w');
+if fid < 0
+    error('Plot_acg_population_logit:summary', 'Could not write %s.', path);
+end
+fwrite(fid, [opening, rest{:}]);
+fclose(fid);
 end
 
 
