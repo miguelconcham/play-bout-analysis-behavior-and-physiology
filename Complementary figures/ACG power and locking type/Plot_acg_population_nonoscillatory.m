@@ -341,10 +341,19 @@ end
 fprintf('Features retained after variance check:\n');
 disp(feature_names(:)')
 
-feature_correlation = corr(X, 'Rows', 'complete');
+[feature_correlation, feature_correlation_p] = corr(X, 'Rows', 'complete');
+correlation_limit = correlation_color_limit(feature_correlation);
 open_full_figure('ACG feature correlations')
-heatmap(feature_names, feature_names, feature_correlation, 'ColorLimits', [-1 1])
-title('Correlation between ACG features')
+imagesc(feature_correlation)
+axis square
+set(gca, 'XTick', 1:numel(feature_names), 'XTickLabel', feature_names, ...
+    'YTick', 1:numel(feature_names), 'YTickLabel', feature_names, ...
+    'TickLabelInterpreter', 'none', 'XTickLabelRotation', 90)
+colormap(gca, correlation_colormap())
+clim([-correlation_limit correlation_limit])
+colorbar
+title(sprintf(['Correlation between ACG features. Color limit %.3f is 80%% of the largest |r| off the diagonal.'], ...
+    correlation_limit), 'Interpreter', 'none')
 save_script_figure(output_folder)
 
 feature_mean = mean(X, 1);
@@ -623,11 +632,13 @@ if ~isempty(shown_titles)
             title({shown_titles{j}, shown_roles{j}, p_text}, 'Interpreter', 'none')
             xlabel([cluster_method_label, ' group'])
             grid on
+            apply_comparison_ylim([group_values{1}; group_values{2}])
         end
         sgtitle({[cluster_method_label, ' cluster 1 is the higher modulation.'], ...
             [component_groups{g}, ' features only.'], ...
             'Black bars are means, joined to show the group difference.', ...
-            'Holm-Sidak is computed only across the panels in this figure.'})
+            'Holm-Sidak is computed only across the panels in this figure.', ...
+            comparison_axis_note()})
         save_script_figure(output_folder)
     end
 end
@@ -651,7 +662,7 @@ ACG_PCA = struct( ...
     'modulation_score', modulation_score, ...
     'valid_rows', valid_rows);
 write_section_2_summary(output_folder, feature_names, size(X_raw, 1), size(X, 1), ...
-    sum(~valid_rows), feature_correlation, pca_explained, perplexity_values, ...
+    sum(~valid_rows), feature_correlation, feature_correlation_p, pca_explained, perplexity_values, ...
     group_counts, counts_after, kmeans_sizes, ward_sizes, ...
     mean(sil_kmeans), mean(sil_ward), cluster_method_label, ...
     kmeans_modulation, ward_modulation, cluster_stats, shown_group)
@@ -1135,11 +1146,15 @@ if ~isempty(compare_titles)
             xlim([0.4 2.6])
             set(gca, 'XTick', [1 2], 'XTickLabel', {'High power', 'Low power'})
             grid on
+            if any(pair)
+                apply_comparison_ylim([y_high; y_low])
+            end
         end
         sgtitle({'Same oscillatory neurons at high and low power.', ...
             [component_groups{g}, ' features only.'], ...
             'Thin lines join one neuron. Thick bars are means and the line between them.', ...
-            'Holm-Sidak is computed only across the panels in this figure.'})
+            'Holm-Sidak is computed only across the panels in this figure.', ...
+            comparison_axis_note()})
         save_script_figure(output_folder)
     end
 else
@@ -1894,6 +1909,24 @@ else
                 sum(both_non), numel(nonosc_gap_names)), ...
             'The model was not fit.'))
     else
+        nonosc_change = columns_with_tail_change(gap_x_non);
+        if ~any(nonosc_change) || size(gap_x_non, 1) < nnz(nonosc_change) + 2
+            constant_names = 'none';
+            if any(~nonosc_change)
+                constant_names = strjoin(gap_names_non(~nonosc_change), ', ');
+            end
+            write_summary_section(output_folder, ...
+                '5e. Delta-power gap from non-oscillatory features', join_summary_lines( ...
+                'No predictor has a high-minus-low change that can enter the model, so it was not fit.', ...
+                'A constant gap is judged within that predictor. A huge constant column does not hide a smaller change in another predictor.', ...
+                ['Unchanged predictors: ', constant_names, '.'], ...
+                sprintf('Neurons with both tails: %d. Predictors with a change: %d.', ...
+                    size(gap_x_non, 1), nnz(nonosc_change))))
+            write_summary_section(output_folder, ...
+                '5f. Delta-power gap from non-oscillatory features, non-oscillatory neurons', ...
+                join_summary_lines( ...
+                'The all-neuron model was not fit, so this subset was not fit either.'))
+        else
         nonosc_gap = fit_within_neuron_gap(gap_raw_non, gap_log_non, gap_x_non, ...
             gap_names_non, 'All neurons, non-oscillatory feature changes');
         fprintf('Non-oscillatory-feature gap model. n = %d.\n', nonosc_gap.n)
@@ -1921,12 +1954,20 @@ else
                 nonosc_gap.n, sum(gap_osc_non == 1), sum(gap_osc_non == 0)), ...
             gap_fit_lines(nonosc_gap)))
         nonosc_only = gap_osc_non == 0;
+        nonosc_only_change = columns_with_tail_change(gap_x_non(nonosc_only, :));
         if sum(nonosc_only) < min_gap_n
             write_summary_section(output_folder, ...
                 '5f. Delta-power gap from non-oscillatory features, non-oscillatory neurons', ...
                 join_summary_lines( ...
                 sprintf('Too few non-oscillatory neurons (%d) for this model. It was not fit.', ...
                     sum(nonosc_only))))
+        elseif ~any(nonosc_only_change) || sum(nonosc_only) < nnz(nonosc_only_change) + 2
+            write_summary_section(output_folder, ...
+                '5f. Delta-power gap from non-oscillatory features, non-oscillatory neurons', ...
+                join_summary_lines( ...
+                'No predictor changes between the tails in the non-oscillatory neurons, so this model was not fit.', ...
+                sprintf('Non-oscillatory neurons: %d. Predictors with a change: %d.', ...
+                    sum(nonosc_only), nnz(nonosc_only_change))))
         else
             nonosc_only_gap = fit_within_neuron_gap(gap_raw_non(nonosc_only), ...
                 gap_log_non(nonosc_only), gap_x_non(nonosc_only, :), gap_names_non, ...
@@ -1944,6 +1985,7 @@ else
                 nonosc_only_partial, ...
                 sprintf('Non-oscillatory neurons in this fit: %d.', nonosc_only_gap.n), ...
                 gap_fit_lines(nonosc_only_gap)))
+        end
         end
         rate_link_non = feature_change_vs_rate(gap_x_non, gap_names_non);
         fprintf('Non-oscillatory feature change versus firing-rate change, n = %d neurons.\n', ...
@@ -2770,8 +2812,12 @@ for j = 1:numel(samples)
     title(two_way_title(sample.feature, model), 'Interpreter', 'none')
     grid on
     box off
+    apply_comparison_ylim(sample.y)
 end
-sgtitle(caption, 'Interpreter', 'none')
+if ischar(caption)
+    caption = {caption};
+end
+sgtitle([caption, {comparison_axis_note()}], 'Interpreter', 'none')
 save_script_figure(folder)
 end
 
@@ -3734,10 +3780,14 @@ for g = 1:numel(component_groups)
         xlim([0.4 2.6])
         set(gca, 'XTick', [1 2], 'XTickLabel', {'High power', 'Low power'})
         grid on
+        if any(pair)
+            apply_comparison_ylim([y_high; y_low])
+        end
     end
     sgtitle({caption, [component_groups{g}, ' features only.'], ...
         'Thin lines join one neuron. Thick bars are means and the line between them.', ...
-        'Holm-Sidak is computed only across the panels in this figure.'}, 'Interpreter', 'none')
+        'Holm-Sidak is computed only across the panels in this figure.', ...
+        comparison_axis_note()}, 'Interpreter', 'none')
     save_script_figure(folder)
     write_summary_section(folder, [summary_title, ', ', component_groups{g}, ' features'], ...
         feature_comparison_report(paired_stats(keep), 'paired', ...
@@ -4530,14 +4580,14 @@ for j = 1:n_features
             'FaceAlpha', 0.45, 'EdgeColor', 'none')
         hold on
     end
+    pooled = [];
+    for a = 1:numel(groups)
+        pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
+    end
     y_top = nan;
     if ~isempty(anova(j).pairs)
         show = find([anova(j).pairs.holm_p] < 0.05);
         if ~isempty(show)
-            pooled = [];
-            for a = 1:numel(groups)
-                pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
-            end
             y_top = draw_sig_brackets(anova(j).pair_index(show, :), ...
                 [anova(j).pairs(show).holm_p], pooled);
         end
@@ -4550,16 +4600,16 @@ for j = 1:n_features
         set(gca, 'TickLabelInterpreter', 'none')
     catch
     end
-    if isfinite(y_top)
-        yl = ylim;
-        ylim([yl(1), max(yl(2), y_top)])
-    end
+    finish_comparison_axis(pooled, y_top)
     title({anova(j).feature, comparison_p_title(anova(j).raw_p, anova(j).holm_p)}, ...
         'Interpreter', 'none')
     grid on
     box off
 end
-sgtitle(title_lines, 'Interpreter', 'none')
+if ischar(title_lines)
+    title_lines = {title_lines};
+end
+sgtitle([title_lines, {comparison_axis_note()}], 'Interpreter', 'none')
 save_script_figure(folder)
 end
 
@@ -4678,14 +4728,14 @@ for j = 1:n_features
             'FaceAlpha', 0.45, 'EdgeColor', 'none')
         hold on
     end
+    pooled = [];
+    for a = 1:numel(groups)
+        pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
+    end
     y_top = nan;
     if ~isempty(anova(j).pairs)
         show = find([anova(j).pairs.holm_p] < 0.05);
         if ~isempty(show)
-            pooled = [];
-            for a = 1:numel(groups)
-                pooled = [pooled; groups{a}(:)]; %#ok<AGROW>
-            end
             y_top = draw_sig_brackets(anova(j).pair_index(show, :), ...
                 [anova(j).pairs(show).holm_p], pooled);
         end
@@ -4698,16 +4748,16 @@ for j = 1:n_features
         set(gca, 'TickLabelInterpreter', 'none')
     catch
     end
-    if isfinite(y_top)
-        yl = ylim;
-        ylim([yl(1), max(yl(2), y_top)])
-    end
+    finish_comparison_axis(pooled, y_top)
     p_text = comparison_p_title(anova(j).raw_p, anova(j).holm_p);
     title({anova(j).feature, p_text}, 'Interpreter', 'none')
     grid on
     box off
 end
-sgtitle(title_lines, 'Interpreter', 'none')
+if ischar(title_lines)
+    title_lines = {title_lines};
+end
+sgtitle([title_lines, {comparison_axis_note()}], 'Interpreter', 'none')
 save_script_figure(folder)
 end
 
@@ -4775,9 +4825,14 @@ y_top = nan;
 if isempty(y_values) || isempty(index_pairs)
     return
 end
-y_hi = max(y_values);
-y_lo = min(y_values);
-span = y_hi - y_lo;
+if numel(y_values) >= 8
+    y_hi = prctile(y_values, 95);
+    y_span_lo = prctile(y_values, 5);
+else
+    y_hi = max(y_values);
+    y_span_lo = min(y_values);
+end
+span = y_hi - y_span_lo;
 if span <= 0
     span = max(abs(y_hi), 1);
 end
@@ -5314,12 +5369,7 @@ if size(gap_x, 1) < 3
     error('Plot_acg_population_logit:powerModel', ...
         'Too few neurons for the gap model (%s).', sample_name);
 end
-span = max(abs(gap_x(:)));
-if isempty(span) || ~isfinite(span)
-    span = 1;
-end
-gap_sd = std(gap_x, 0, 1);
-keep = isfinite(gap_sd) & gap_sd > eps(span);
+keep = columns_with_tail_change(gap_x);
 if ~any(keep)
     error('Plot_acg_population_logit:powerModel', ...
         'No predictor changes between the tails for %s.', sample_name);
@@ -5703,12 +5753,7 @@ if n < min_n || isempty(names) || size(gap_x, 1) ~= n
     fprintf('%s was not fit. Neurons: %d.\n', section_title, n)
     return
 end
-span = max(abs(gap_x(:)));
-if isempty(span) || ~isfinite(span)
-    span = 1;
-end
-gap_sd = std(gap_x, 0, 1);
-if ~any(isfinite(gap_sd) & gap_sd > eps(span))
+if ~any(columns_with_tail_change(gap_x))
     write_summary_section(output_folder, section_title, join_summary_lines( ...
         intro, ...
         'No predictor changes between the tails, so the model was not fit.'));
@@ -6064,6 +6109,126 @@ if height(extra) ~= height(feature_table)
 end
 for j = 1:numel(names)
     feature_table.(names{j}) = extra.(names{j});
+end
+end
+
+
+function keep = columns_with_tail_change(gap_x)
+%COLUMNS_WITH_TAIL_CHANGE  Predictors whose high-minus-low values are not constant.
+%
+% Each column is judged on its own scale. A huge constant column does not
+% make a smaller change in another column look like zero.
+
+n_col = size(gap_x, 2);
+keep = false(1, n_col);
+if isempty(gap_x) || size(gap_x, 1) < 2
+    return
+end
+for j = 1:n_col
+    column = gap_x(:, j);
+    column = column(isfinite(column));
+    if numel(column) < 2
+        continue
+    end
+    column_scale = max(1, max(abs(column)));
+    keep(j) = std(column, 0) > eps(column_scale);
+end
+end
+
+
+function limits = comparison_ylim(values)
+%COMPARISON_YLIM  Window that keeps the central cloud of a comparison panel.
+
+values = values(isfinite(values(:)));
+if isempty(values)
+    limits = [0 1];
+    return
+end
+if numel(values) >= 8
+    low = prctile(values, 5);
+    high = prctile(values, 95);
+else
+    low = min(values);
+    high = max(values);
+end
+span = high - low;
+if ~isfinite(span) || span <= 0
+    span = max(abs(high), 1);
+end
+pad = 0.15 * span;
+limits = [low - pad, high + pad];
+end
+
+
+function apply_comparison_ylim(values)
+limits = comparison_ylim(values);
+if all(isfinite(limits)) && limits(2) > limits(1)
+    ylim(limits);
+end
+end
+
+
+function finish_comparison_axis(values, y_top)
+limits = comparison_ylim(values);
+if nargin >= 2 && isfinite(y_top)
+    limits(2) = max(limits(2), y_top);
+end
+if all(isfinite(limits)) && limits(2) > limits(1)
+    ylim(limits);
+end
+end
+
+
+function note = comparison_axis_note()
+note = ['When a panel has at least eight points, the vertical axis is the 5th to 95th percentile. ', ...
+    'A few extreme points stay outside the frame.'];
+end
+
+
+function limit = correlation_color_limit(correlation)
+%CORRELATION_COLOR_LIMIT  80% of the largest absolute correlation off the diagonal.
+
+n = size(correlation, 1);
+limit = 1;
+if n < 2
+    return
+end
+values = abs(correlation(~eye(n)));
+values = values(isfinite(values));
+if isempty(values)
+    return
+end
+limit = 0.8 * max(values);
+if ~isfinite(limit) || limit <= 0
+    limit = 1;
+end
+end
+
+
+function map = correlation_colormap()
+%CORRELATION_COLORMAP  Blue, white, red. White is zero correlation.
+
+n = 256;
+half = n / 2;
+rising = linspace(0, 1, half)';
+falling = linspace(1, 0, half)';
+blue = [rising, rising, ones(half, 1)];
+red = [ones(half, 1), falling, falling];
+map = [blue; red];
+end
+
+
+function lines = correlation_pair_lines(names, correlation, p_values)
+lines = cell(0, 1);
+n = numel(names);
+for r = 1:n
+    for c = r + 1:n
+        lines{end + 1, 1} = sprintf('%-28s vs %-28s  r = %8.3f  p = %.4g', ...
+            names{r}, names{c}, correlation(r, c), p_values(r, c)); %#ok<AGROW>
+    end
+end
+if isempty(lines)
+    lines = {'No off-diagonal pairs.'};
 end
 end
 
@@ -6668,17 +6833,15 @@ catch
 end
 ylabel(['Session-adjusted ', result.scale_label])
 box off
-if isfinite(y_top)
-    yl = ylim;
-    ylim([yl(1), max(yl(2), y_top)])
-end
+finish_comparison_axis(result.tested.adjusted, y_top)
 sgtitle({sprintf('%s. Area after session intercepts: F(%g, %g) = %.3f, p = %.3g.', ...
     result.condition_label, result.tested.df1, result.tested.df2, ...
     result.tested.F, result.tested.p), ...
     'Each point is one session, after that session intercept is subtracted.', ...
     'It starts as the mean of the channel means in that area.', ...
     'The line is the area level from the model.', ...
-    'A connecting line and stars mark a pair whose Holm-Sidak p is below 0.05.'}, ...
+    'A connecting line and stars mark a pair whose Holm-Sidak p is below 0.05.', ...
+    comparison_axis_note()}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 end
@@ -7660,7 +7823,7 @@ end
 
 
 function write_section_2_summary(folder, feature_names, n_neurons, n_complete, ...
-    n_excluded, feature_correlation, pca_explained, perplexity_values, ...
+    n_excluded, feature_correlation, feature_correlation_p, pca_explained, perplexity_values, ...
     counts_before, counts_after, kmeans_sizes, ward_sizes, ...
     mean_sil_kmeans, mean_sil_ward, cluster_method_label, ...
     kmeans_modulation, ward_modulation, cluster_stats, shown_group)
@@ -7680,8 +7843,15 @@ write_summary_section(folder, '2. Features kept for the split', join_summary_lin
     sprintf('Complete rows used in PCA, t-SNE, and the split: %d', n_complete), ...
     sprintf('Rows excluded for a missing feature: %d', n_excluded), ...
     ['Features in the split: ', strjoin(feature_names, ', ')], ...
-    'Correlation of those standardized features:', ...
-    labeled_number_matrix('Feature', feature_names, feature_names, feature_correlation, '%.3f')))
+    'Pearson correlation of those features. Each pair uses the complete rows.', ...
+    sprintf(['The figure color scale runs to %.3f, which is 80%% of the largest absolute correlation off the diagonal. A larger correlation uses the end of the scale.'], ...
+        correlation_color_limit(feature_correlation)), ...
+    'Correlation r:', ...
+    labeled_number_matrix('Feature', feature_names, feature_names, feature_correlation, '%.3f'), ...
+    'Uncorrected p-value of each correlation:', ...
+    labeled_number_matrix('Feature', feature_names, feature_names, feature_correlation_p, '%.3g'), ...
+    'Each off-diagonal pair, with r and its uncorrected p-value:', ...
+    correlation_pair_lines(feature_names, feature_correlation, feature_correlation_p)))
 write_summary_section(folder, '2. PCA', join_summary_lines( ...
     'PCA of the standardized features that entered the split.', ...
     'Variance explained:', pca_lines))
