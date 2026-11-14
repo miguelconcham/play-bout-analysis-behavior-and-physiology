@@ -16,7 +16,11 @@
 % The second cycle is compared only when the observed curve could measure
 % it. A shuffle that finds no second cycle counts as prominence 0.
 %
-% The result file is rewritten after every neuron. resume is false, so
+% The result file is rewritten after every neuron. If that file is open
+% or cannot be written, the same variables are saved beside it. The copy
+% keeps this run's permutation count in the file name. A checkpoint that
+% already ends in that count is saved as _nN_v2 instead, and later neurons
+% plus the figure call use the file that was written. resume is false, so
 % this run starts at neuron 0 and deletes a previous checkpoint. Set
 % resume to true only to continue a run that this script has already
 % started. Every firing run of an included neuron is shuffled, so the
@@ -453,7 +457,20 @@ for f = 1:numel(parsing_files)
             done_keys{end + 1, 1} = this_key; %#ok<SAGROW>
             shuffle_records = records; %#ok<NASGU>
             grand_average = grand; %#ok<NASGU>
-            save(checkpoint, 'shuffle_records', 'parameters', 'grand_average');
+            try
+                save(checkpoint, 'shuffle_records', 'parameters', 'grand_average');
+            catch ME
+                if ~checkpoint_write_blocked(ME)
+                    rethrow(ME);
+                end
+                fallback = alternate_shuffle_checkpoint(checkpoint, n_shuffles);
+                warning('Analyze_locking_period_acg_shuffle:checkpointLocked', ...
+                    ['Could not write %s (%s). Saving the %d-permutation ' ...
+                    'checkpoint beside it at %s.'], ...
+                    checkpoint, ME.message, n_shuffles, fallback);
+                save(fallback, 'shuffle_records', 'parameters', 'grand_average');
+                checkpoint = fallback;
+            end
             disp(['    saved ', num2str(numel(records)), ' neurons'])
         end
 
@@ -1187,6 +1204,21 @@ pctl = 100 * (below + 0.5 * equal) ./ n;
 pctl(n == 0 | ~isfinite(observed)) = NaN;
 end
 
+
+
+function blocked = checkpoint_write_blocked(ME)
+% An open or dropped checkpoint is saved beside the original file.
+text = lower([ME.identifier ' ' ME.message]);
+blocked = contains(text, 'permission') ...
+    || contains(text, 'unable to write') ...
+    || contains(text, 'unable to open') ...
+    || contains(text, 'in use') ...
+    || contains(text, 'being used') ...
+    || contains(text, 'inaccessible') ...
+    || contains(text, 'access is denied') ...
+    || contains(text, 'cannot access') ...
+    || contains(text, 'could not open');
+end
 
 
 function rate = tail_firing_rate(rt, idx)
