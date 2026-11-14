@@ -13,8 +13,9 @@ end
 out_dir = fileparts(checkpoint);
 [~, base] = fileparts(checkpoint);
 count_tag = sprintf('_n%d', round(n_shuffles));
+had_count = ~isempty(regexp(base, '_n\d+$', 'once'));
 new_base = regexprep(base, '_n\d+$', count_tag);
-if strcmp(new_base, base)
+if ~had_count
     new_base = [base count_tag];
 end
 out_file = fullfile(out_dir, [new_base '.mat']);
