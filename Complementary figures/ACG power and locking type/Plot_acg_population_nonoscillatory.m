@@ -197,17 +197,34 @@ prep_file = fullfile(estimate_folder, 'acg_population_nonosc_prep.mat');
 positive_lag = lag > 0;
 feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positive_lag));
 feature_table = append_nonosc_features(feature_table, imagesc_sum_power_high, lag);
+feature_table_low = acg2features(imagesc_sum_power_low(:, positive_lag), lag(positive_lag));
+feature_table_low = append_nonosc_features(feature_table_low, imagesc_sum_power_low, lag);
+% Percentile features above are bounded by the shuffle count. The observed
+% sum-to-1 curves are scored after the same Gaussian used on the example plots.
+summary_path = stratum_summary_path(checkpoint, acg_method, acg_count);
+[observed_feature_high, observed_feature_low, observed_feature_note] = ...
+    observed_acg_feature_tables(summary_path, neuron_session, neuron_cluster_id);
+write_population_feature_csv(estimate_folder, 'acg_features_percentile_high.csv', ...
+    feature_table, neuron_session, neuron_cluster_id);
+write_population_feature_csv(estimate_folder, 'acg_features_percentile_low.csv', ...
+    feature_table_low, neuron_session, neuron_cluster_id);
+write_population_feature_csv(estimate_folder, 'acg_features_observed_high.csv', ...
+    observed_feature_high, neuron_session, neuron_cluster_id);
+write_population_feature_csv(estimate_folder, 'acg_features_observed_low.csv', ...
+    observed_feature_low, neuron_session, neuron_cluster_id);
 
 save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
     'neuron_type', 'neuron_record_index', 'neuron_session', 'neuron_area', ...
-    'neuron_cluster_id', 'feature_table', 'high_power_delta', 'low_power_delta', ...
+    'neuron_cluster_id', 'feature_table', 'feature_table_low', ...
+    'observed_feature_high', 'observed_feature_low', 'observed_feature_note', ...
+    'high_power_delta', 'low_power_delta', ...
     'all_power_delta', ...
     'column_id', 'column_title', 'scale_id', 'scale_title', ...
     'n_shuffles', 'sort_window_s', 'checkpoint', 'prep_file');
 disp(['Section 1 saved the matrices to ', prep_file])
 disp('imagesc_sum_all is neurons by lag. neuron_type is the lock group of each row.')
-disp('feature_table is one row of ACG features per neuron. Run section 2 to classify.')
+disp('feature_table is the percentile-logit features. observed_feature_high is the smoothed observed ACG.')
 if exist(output_folder, 'dir') ~= 7
     mkdir(output_folder);
 end
@@ -225,8 +242,15 @@ write_summary_section(output_folder, '1. Checkpoint and population matrices', st
     sprintf('Lag axis: %.3f to %.3f s, %d bins', lag(1), lag(end), numel(lag)), ...
     sprintf('Sort window for the stored row order: %.3f to %.3f s', ...
         sort_window_s(1), sort_window_s(2)), ...
-    ['Feature columns from the high-power sum-to-1 logit, positive lags: ', ...
+    ['Percentile-logit feature columns, high-power sum-to-1, positive lags: ', ...
         strjoin(feature_table.Properties.VariableNames, ', ')], ...
+    'feature_table and feature_table_low are those percentile features after the logit. A percentile cannot pass the shuffle count, so high and low power can both sit on that ceiling.', ...
+    'observed_feature_high and observed_feature_low are the oscillatory features of the observed sum-to-1 autocorrelogram.', ...
+    'Each observed curve averages the positive lag with its negative-lag partner, then uses the example-plot Gaussian: half-width 0.06 s, standard deviation one quarter of that width, lags within 0.02 s of zero left raw.', ...
+    observed_feature_note, ...
+    sprintf('Observed high-power rows with a finite Baseline: %d. Low-power rows: %d.', ...
+        observed_feature_finite_count(observed_feature_high), ...
+        observed_feature_finite_count(observed_feature_low)), ...
     ['Prep file: ', prep_file]}, newline))
 
 %% 2. ACG features, PCA, t-SNE, and the two-group split
@@ -1655,6 +1679,10 @@ end
 % A separate equation replaces the six oscillatory predictors with the
 % non-oscillatory feature changes. Their changes are also correlated
 % with the firing-rate change.
+% The six oscillatory predictors are then taken from the observed
+% sum-to-1 autocorrelogram after the example-plot Gaussian, for every
+% neuron in the split and again for DR neurons only. The percentile
+% models above stay in place.
 if ~exist('output_folder', 'var')
     output_folder = '';
 end
@@ -1936,6 +1964,87 @@ else
             sprintf('Neurons: %d.', rate_link_non.n), ...
             rate_link_non.lines))
     end
+end
+
+% Percentile features cannot exceed the shuffle count. The same gap
+% equation is fit on the observed sum-to-1 curves after the plot Gaussian.
+if ~exist('observed_feature_high', 'var') || ~exist('observed_feature_low', 'var') ...
+        || size(observed_feature_high, 1) ~= numel(neuron_type) ...
+        || size(observed_feature_low, 1) ~= numel(neuron_type)
+    observed_summary_path = stratum_summary_path(checkpoint, acg_method, acg_count);
+    [observed_feature_high, observed_feature_low, observed_feature_note] = ...
+        observed_acg_feature_tables(observed_summary_path, neuron_session, neuron_cluster_id);
+end
+if ~exist('observed_feature_note', 'var') || isempty(observed_feature_note)
+    observed_feature_note = ['Observed features use the example-plot Gaussian: ', ...
+        'half-width 0.06 s, standard deviation one quarter of that width, ', ...
+        'lags within 0.02 s of zero left raw.'];
+end
+observed_names = power_feature_names;
+if ~isempty(observed_feature_high) && ~isempty(observed_feature_low) ...
+        && size(observed_feature_high, 1) == numel(neuron_type)
+    observed_names = power_feature_names( ...
+        ismember(power_feature_names, observed_feature_high.Properties.VariableNames) ...
+        & ismember(power_feature_names, observed_feature_low.Properties.VariableNames));
+else
+    observed_names = {};
+end
+raw_intro = { ...
+    ['Output folder: ', output_folder], ...
+    'This repeats the section 5 equation on the observed autocorrelogram instead of the percentile logit.', ...
+    'A percentile cannot pass the shuffle count, so high and low power can both sit on that ceiling and their difference shrinks.', ...
+    observed_feature_note, ...
+    'Each autocorrelogram predictor is the high-power value minus the low-power value of that feature on the smoothed observed curve.', ...
+    'Features are Modulation1, Modulation2, PeakInterval, TroughInterval, OscillationScore, and Baseline.', ...
+    'FiringRate is the high-power firing rate minus the low-power firing rate, in spikes per second, as in section 5.', ...
+    'The outcome is the high-minus-low delta-power gap. The log or raw scale is chosen from the skewness of this sample.', ...
+    'One row per neuron that entered the split, has both power tails, a positive firing rate in each tail, and finite observed features.'};
+if isempty(observed_names)
+    report_raw_osc_gap([], [], zeros(0, 0), observed_names, ...
+        'Observed autocorrelogram', output_folder, ...
+        '5h. Delta-power gap from raw smoothed oscillatory features', ...
+        [raw_intro, {'The observed feature tables are missing, so this model was not fit.'}], ...
+        'raw ACG')
+    report_raw_osc_gap([], [], zeros(0, 0), observed_names, ...
+        'DR, observed autocorrelogram', output_folder, ...
+        '5i. Delta-power gap from raw smoothed oscillatory features, DR neurons', ...
+        [raw_intro, {'The observed feature tables are missing, so the DR model was not fit.'}], ...
+        'raw ACG, DR')
+else
+    x_high_raw = observed_feature_high{power_rows, observed_names};
+    x_low_raw = observed_feature_low{power_rows, observed_names};
+    raw_both = all(isfinite(x_high_raw), 2) & all(isfinite(x_low_raw), 2) ...
+        & isfinite(y_high) & isfinite(y_low) & y_high > 0 & y_low > 0 & rate_ok;
+    gap_x_raw = [x_high_raw(raw_both, :) - x_low_raw(raw_both, :), ...
+        rate_high_rows(raw_both) - rate_low_rows(raw_both)];
+    gap_names_raw = [observed_names, {'FiringRate'}];
+    gap_raw_obs = y_high(raw_both) - y_low(raw_both);
+    gap_log_obs = log(y_high(raw_both)) - log(y_low(raw_both));
+    report_raw_osc_gap(gap_raw_obs, gap_log_obs, gap_x_raw, gap_names_raw, ...
+        'All neurons, raw smoothed oscillatory features', output_folder, ...
+        '5h. Delta-power gap from raw smoothed oscillatory features', raw_intro, ...
+        'raw ACG')
+    dr_mask = false(numel(power_rows), 1);
+    dr_area_line = 'neuron_area is not in the workspace, so the DR model was not fit.';
+    if exist('neuron_area', 'var') && numel(neuron_area) == numel(neuron_type)
+        for i_dr = 1:numel(power_rows)
+            dr_mask(i_dr) = strcmp(area_display_name(neuron_area{power_rows(i_dr)}), 'DR');
+        end
+        dr_area_line = sprintf( ...
+            'DR neurons that entered the split: %d. DR neurons in this fit: %d.', ...
+            sum(dr_mask), sum(raw_both & dr_mask));
+    end
+    dr_both = raw_both & dr_mask;
+    report_raw_osc_gap(y_high(dr_both) - y_low(dr_both), ...
+        log(y_high(dr_both)) - log(y_low(dr_both)), ...
+        [x_high_raw(dr_both, :) - x_low_raw(dr_both, :), ...
+            rate_high_rows(dr_both) - rate_low_rows(dr_both)], ...
+        gap_names_raw, 'DR neurons, raw smoothed oscillatory features', output_folder, ...
+        '5i. Delta-power gap from raw smoothed oscillatory features, DR neurons', ...
+        [raw_intro, { ...
+            'The sample is restricted to neurons whose area label is DR.', ...
+            dr_area_line}], ...
+        'raw ACG, DR')
 end
 
 % Firing rates are already stored on the power-split summary. This block
@@ -5445,6 +5554,185 @@ high(use) = rate_high(loc(use));
 bad = ~(isfinite(low) & isfinite(high) & low > 0 & high > 0);
 low(bad) = nan;
 high(bad) = nan;
+end
+
+
+function [high_table, low_table, note] = observed_acg_feature_tables(summary_path, session, cluster_id)
+%OBSERVED_ACG_FEATURE_TABLES  Oscillatory features of the smoothed observed ACG.
+%
+% The curves are the sum-to-1 high-power and low-power autocorrelograms in
+% the locking summary. Positive and negative lags are averaged. The result
+% is smoothed with the example-plot Gaussian before acg2features. Rows
+% follow the population order. An unmatched neuron is NaN.
+
+high_table = table();
+low_table = table();
+note = ['Observed features use the example-plot Gaussian: half-width 0.06 s, ', ...
+    'standard deviation one quarter of that width, lags within 0.02 s of zero left raw.'];
+smooth_half_s = 0.06;
+skip_abs_lag_s = 0.02;
+n_pop = numel(cluster_id);
+if isempty(summary_path) || exist(summary_path, 'file') ~= 2
+    note = 'The locking summary was not found, so the observed autocorrelogram features were not extracted.';
+    return
+end
+try
+    stored = load(summary_path, 'power_acg');
+catch
+    note = 'The locking summary could not be read, so the observed autocorrelogram features were not extracted.';
+    return
+end
+if ~isfield(stored, 'power_acg') || ~isfield(stored.power_acg, 'all_neurons') ...
+        || ~isfield(stored.power_acg, 'centers')
+    note = 'The summary has no power_acg.all_neurons curves, so the observed features were not extracted.';
+    return
+end
+block = stored.power_acg.all_neurons;
+if ~isfield(block, 'high') || ~isfield(block, 'low') ...
+        || ~isfield(block, 'session') || ~isfield(block, 'cluster_id')
+    note = 'The power summary has no high and low autocorrelograms, so the observed features were not extracted.';
+    return
+end
+centers = double(stored.power_acg.centers(:).');
+high_curves = double(block.high);
+low_curves = double(block.low);
+if size(high_curves, 2) ~= numel(centers) || size(low_curves, 2) ~= numel(centers) ...
+        || size(high_curves, 1) ~= size(low_curves, 1)
+    note = 'The observed autocorrelograms do not share one lag axis, so their features were not extracted.';
+    return
+end
+[high_fold, pos_lag] = mirror_acg_matrix(high_curves, centers);
+[low_fold, ~] = mirror_acg_matrix(low_curves, centers);
+if numel(pos_lag) < 10
+    note = 'The observed autocorrelogram has too few positive lags, so its features were not extracted.';
+    return
+end
+high_smooth = smooth_observed_matrix(high_fold, pos_lag, smooth_half_s, skip_abs_lag_s);
+low_smooth = smooth_observed_matrix(low_fold, pos_lag, smooth_half_s, skip_abs_lag_s);
+high_source = acg2features(high_smooth, pos_lag);
+low_source = acg2features(low_smooth, pos_lag);
+summary_keys = neuron_keys(block.session, block.cluster_id);
+if isempty(summary_keys) || size(high_source, 1) < 1
+    note = 'The power summary has no observed autocorrelogram rows, so their features were not extracted.';
+    return
+end
+n_src = min([size(high_curves, 1), size(high_source, 1), size(low_source, 1), numel(summary_keys)]);
+pop_keys = neuron_keys(session, cluster_id);
+if numel(pop_keys) ~= n_pop
+    note = 'Session and cluster id do not match the population rows, so the observed features were not aligned.';
+    return
+end
+[found, loc] = ismember(pop_keys, summary_keys(1:n_src));
+high_table = align_feature_rows(high_source, loc, found, n_pop, n_src);
+low_table = align_feature_rows(low_source, loc, found, n_pop, n_src);
+note = sprintf(['%s Matched %d of %d population neurons to the observed curves.'], ...
+    note, sum(found(:) & loc(:) >= 1 & loc(:) <= n_src), n_pop);
+end
+
+
+function smoothed = smooth_observed_matrix(curves, pos_lag, smooth_half_s, skip_abs_lag_s)
+smoothed = nan(size(curves));
+n_col = min(size(curves, 2), numel(pos_lag));
+for i = 1:size(curves, 1)
+    smoothed(i, 1:n_col) = smooth_example_acg( ...
+        pos_lag(1:n_col), curves(i, 1:n_col), smooth_half_s, skip_abs_lag_s);
+end
+end
+
+
+function aligned = align_feature_rows(source, loc, found, n_pop, n_src)
+aligned = source(1, :);
+if n_pop < 1
+    aligned(1, :) = [];
+    return
+end
+aligned = repmat(aligned, n_pop, 1);
+aligned{:, :} = NaN;
+use = found(:) & loc(:) >= 1 & loc(:) <= n_src;
+if any(use)
+    aligned(use, :) = source(loc(use), :);
+end
+if ismember('NeuronIndex', aligned.Properties.VariableNames)
+    aligned.NeuronIndex = (1:n_pop)';
+end
+end
+
+
+function n = observed_feature_finite_count(feature_table)
+n = 0;
+if isempty(feature_table) || size(feature_table, 1) < 1
+    return
+end
+if ~ismember('Baseline', feature_table.Properties.VariableNames)
+    return
+end
+n = sum(isfinite(feature_table.Baseline));
+end
+
+
+function write_population_feature_csv(folder, file_name, feature_table, session, cluster_id)
+if isempty(folder) || isempty(feature_table) || size(feature_table, 1) < 1
+    return
+end
+if exist(folder, 'dir') ~= 7
+    mkdir(folder);
+end
+out = feature_table;
+if numel(session) == size(out, 1) && numel(cluster_id) == size(out, 1)
+    out.Session = session(:);
+    out.ClusterId = double(cluster_id(:));
+end
+writetable(out, fullfile(folder, file_name));
+end
+
+
+function report_raw_osc_gap(gap_raw, gap_log, gap_x, names, sample_name, ...
+    output_folder, section_title, intro, figure_stem)
+%REPORT_RAW_OSC_GAP  One delta-power model on raw smoothed oscillatory features.
+
+gap_raw = gap_raw(:);
+gap_log = gap_log(:);
+names = names(:)';
+n = numel(gap_raw);
+min_n = numel(names) + 2;
+if n < min_n || isempty(names) || size(gap_x, 1) ~= n
+    write_summary_section(output_folder, section_title, join_summary_lines( ...
+        intro, ...
+        sprintf('Too few neurons (%d) for %d predictors. The model was not fit.', ...
+            n, numel(names))));
+    fprintf('%s was not fit. Neurons: %d.\n', section_title, n)
+    return
+end
+span = max(abs(gap_x(:)));
+if isempty(span) || ~isfinite(span)
+    span = 1;
+end
+gap_sd = std(gap_x, 0, 1);
+if ~any(isfinite(gap_sd) & gap_sd > eps(span))
+    write_summary_section(output_folder, section_title, join_summary_lines( ...
+        intro, ...
+        'No predictor changes between the tails, so the model was not fit.'));
+    fprintf('%s was not fit. No predictor variance.\n', section_title)
+    return
+end
+result = fit_within_neuron_gap(gap_raw, gap_log, gap_x, names, sample_name);
+fprintf('%s\n', section_title)
+print_gap_model(result)
+draw_power_gap_scale(gap_raw, gap_log, result.scale, output_folder, ...
+    ['Delta power gap scale, ', figure_stem])
+draw_power_model_coefficients(result.fit, result.outcome_label, output_folder, ...
+    ['Within-neuron delta power gap, ', figure_stem])
+partial = draw_ceteris_paribus(result, output_folder, ...
+    ['Ceteris paribus, delta power gap, ', figure_stem])
+draw_regressor_correlation(result.correlation, result.names, output_folder, ...
+    ['Delta power gap predictor correlations, ', figure_stem])
+write_summary_section(output_folder, section_title, join_summary_lines( ...
+    intro, ...
+    'A predictor with p below 0.05 is plotted against the power gap while every other predictor is fixed at its mean.', ...
+    partial, ...
+    result.dropped_line, ...
+    sprintf('Neurons in the model: %d.', result.n), ...
+    gap_fit_lines(result)))
 end
 
 
