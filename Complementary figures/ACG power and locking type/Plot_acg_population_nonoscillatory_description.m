@@ -2278,11 +2278,12 @@ for condition_index = 1:numel(area_power_conditions)
         join_summary_lines(area_nest.lines))
 end
 
-%% 7. Runs per neuron and spikes per run, by area
+%% 7. Runs per neuron, spikes per run, and run length, by area
 % The upper row is every run with a finite spike count in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row keeps the runs that enter the ACG
 % shuffle for neurons stored in the shuffle checkpoint. The spike panels
-% are counts, not firing rates. This section can run after section 1.
+% are counts, not firing rates. The length panels are the mean duration of
+% each neuron's runs, in seconds. This section can run after section 1.
 if ~exist('output_folder', 'var')
     output_folder = '';
 end
@@ -2321,6 +2322,16 @@ for i_area = 1:numel(run_areas)
     fprintf('  %s: %d neurons, median %.3g runs.\n', run_areas{i_area}, ...
         numel(run_counts.shuffle_runs{i_area}), median_or_nan(run_counts.shuffle_runs{i_area}))
 end
+fprintf('Mean run length per neuron, all runs.\n')
+for i_area = 1:numel(run_areas)
+    fprintf('  %s: %d neurons, median %.3g s.\n', run_areas{i_area}, ...
+        numel(run_counts.all_length{i_area}), median_or_nan(run_counts.all_length{i_area}))
+end
+fprintf('Mean run length per neuron, ACG shuffle.\n')
+for i_area = 1:numel(run_areas)
+    fprintf('  %s: %d neurons, median %.3g s.\n', run_areas{i_area}, ...
+        numel(run_counts.shuffle_length{i_area}), median_or_nan(run_counts.shuffle_length{i_area}))
+end
 draw_area_count_figure(run_counts.all_runs, run_counts.shuffle_runs, run_areas, ...
     output_folder, 'Runs per neuron by area', 'Runs per neuron', ...
     {'Each point is one neuron. The bar is the mean.', ...
@@ -2332,17 +2343,27 @@ draw_area_count_figure(run_counts.all_spikes, run_counts.shuffle_spikes, run_are
     'The bar is the mean.', ...
     'Upper row: every run with a finite spike count.', ...
     'Lower row: runs that enter the ACG shuffle.'})
-write_summary_section(output_folder, '7. Runs and spikes by area', join_summary_lines( ...
+draw_area_count_figure(run_counts.all_length, run_counts.shuffle_length, run_areas, ...
+    output_folder, 'Mean run length per neuron by area', 'Mean run length (s)', ...
+    {'Each point is one neuron. The value is the mean run length in seconds.', ...
+    'The bar is the mean across neurons.', ...
+    'Upper row: every run with a finite spike count and a finite duration.', ...
+    'Lower row: runs that enter the ACG shuffle.'})
+write_summary_section(output_folder, '7. Runs, spikes, and run length by area', join_summary_lines( ...
     'Areas are DR, SC, LPAG, VLPAG, and DLPAG. SupCol is counted as SC.', ...
     'A run is counted when RunNumSpikes is finite and at least zero.', ...
     'The spike panels use that count. They are not divided by run duration.', ...
+    'The run-length panels are the mean duration of each neuron, in seconds.', ...
+    'A run without a finite positive duration is left out of that mean.', ...
     'The shuffle rows keep neurons stored in the shuffle checkpoint.', ...
     'A shuffle run is a firing run with a finite autocorrelogram, plus a tail run when that tail is pooled.', ...
     run_counts.note, ...
     area_count_summary_lines('All runs, runs per neuron', run_areas, run_counts.all_runs), ...
     area_count_summary_lines('ACG shuffle, runs per neuron', run_areas, run_counts.shuffle_runs), ...
     area_count_summary_lines('All runs, spikes per run', run_areas, run_counts.all_spikes), ...
-    area_count_summary_lines('ACG shuffle, spikes per run', run_areas, run_counts.shuffle_spikes)))
+    area_count_summary_lines('ACG shuffle, spikes per run', run_areas, run_counts.shuffle_spikes), ...
+    area_count_summary_lines('All runs, mean run length per neuron (s)', run_areas, run_counts.all_length), ...
+    area_count_summary_lines('ACG shuffle, mean run length per neuron (s)', run_areas, run_counts.shuffle_length)))
 
 
 function counts = collect_area_run_counts(parsing_folder, records, stored, areas)
@@ -2352,11 +2373,15 @@ counts.all_runs = cell(1, numel(areas));
 counts.shuffle_runs = cell(1, numel(areas));
 counts.all_spikes = cell(1, numel(areas));
 counts.shuffle_spikes = cell(1, numel(areas));
+counts.all_length = cell(1, numel(areas));
+counts.shuffle_length = cell(1, numel(areas));
 for i_area = 1:numel(areas)
     counts.all_runs{i_area} = zeros(0, 1);
     counts.shuffle_runs{i_area} = zeros(0, 1);
     counts.all_spikes{i_area} = zeros(0, 1);
     counts.shuffle_spikes{i_area} = zeros(0, 1);
+    counts.all_length{i_area} = zeros(0, 1);
+    counts.shuffle_length{i_area} = zeros(0, 1);
 end
 counts.note = 'The parsing folder was not read.';
 if isempty(parsing_folder) || exist(parsing_folder, 'dir') ~= 7
@@ -2415,8 +2440,8 @@ for f = 1:numel(files)
             end
             area_index = find(strcmp(areas, this_area), 1);
             this_key = neuron_keys({animal}, id_col(nn));
-            [n_all, spikes_all, n_shuffle, spikes_shuffle, used_shuffle] = ...
-                neuron_run_spike_counts(rt, this_key{1}, ...
+            [n_all, spikes_all, n_shuffle, spikes_shuffle, used_shuffle, ...
+                mean_all, mean_shuffle] = neuron_run_spike_counts(rt, this_key{1}, ...
                 shuffle_keys, settings, ppc_col, already_corrected);
             if n_all < 1
                 continue
@@ -2424,10 +2449,16 @@ for f = 1:numel(files)
             n_neurons = n_neurons + 1;
             counts.all_runs{area_index}(end + 1, 1) = n_all; %#ok<AGROW>
             counts.all_spikes{area_index} = [counts.all_spikes{area_index}; spikes_all(:)]; %#ok<AGROW>
+            if isfinite(mean_all)
+                counts.all_length{area_index}(end + 1, 1) = mean_all; %#ok<AGROW>
+            end
             if used_shuffle && n_shuffle > 0
                 found_shuffle{end + 1} = this_key{1}; %#ok<AGROW>
                 counts.shuffle_runs{area_index}(end + 1, 1) = n_shuffle; %#ok<AGROW>
                 counts.shuffle_spikes{area_index} = [counts.shuffle_spikes{area_index}; spikes_shuffle(:)]; %#ok<AGROW>
+                if isfinite(mean_shuffle)
+                    counts.shuffle_length{area_index}(end + 1, 1) = mean_shuffle; %#ok<AGROW>
+                end
             end
         end
     end
@@ -2443,14 +2474,21 @@ counts.note = sprintf(['Parsing sessions read: %d. Neurons with a finite spike c
 end
 
 
-function [n_all, spikes_all, n_shuffle, spikes_shuffle, used_shuffle] = ...
+function [n_all, spikes_all, n_shuffle, spikes_shuffle, used_shuffle, mean_all, mean_shuffle] = ...
     neuron_run_spike_counts(rt, key, shuffle_keys, settings, ppc_col, already_corrected)
 spikes = double(rt.RunNumSpikes(:));
 finite_count = isfinite(spikes) & spikes >= 0;
+duration = description_run_lengths(rt);
+if numel(duration) ~= numel(finite_count)
+    duration = nan(numel(finite_count), 1);
+end
+timed = finite_count & isfinite(duration) & duration > 0;
 n_all = nnz(finite_count);
 spikes_all = spikes(finite_count);
+mean_all = mean_or_nan(duration(timed));
 n_shuffle = 0;
 spikes_shuffle = zeros(0, 1);
+mean_shuffle = NaN;
 used_shuffle = any(strcmp(shuffle_keys, key));
 if ~used_shuffle || n_all < 1
     return
@@ -2458,6 +2496,7 @@ end
 keep = shuffle_run_mask(rt, finite_count, settings, ppc_col, already_corrected);
 n_shuffle = nnz(keep);
 spikes_shuffle = spikes(keep);
+mean_shuffle = mean_or_nan(duration(keep & timed));
 end
 
 
