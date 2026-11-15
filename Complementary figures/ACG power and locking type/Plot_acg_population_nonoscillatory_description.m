@@ -27,6 +27,10 @@
 % Section 7 counts runs per neuron and spikes per run in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row of each figure keeps only the runs that
 % enter the ACG shuffle. It can run after section 1.
+% Section 8 draws one example neuron. Set plot_one_neuron_only to true
+% and detail_neuron_id to the id printed on an example figure, then run
+% that section alone. The figure marks peaks and troughs. The text file
+% named for that neuron holds every feature.
 %
 % Set output_folder in the workspace before running a section. That path is
 % where each figure and analysis_summary_nonosc_description.txt are written. This script does
@@ -2478,6 +2482,127 @@ write_summary_section(output_folder, '7. Runs, spikes, and run length by area', 
     area_count_summary_lines('ACG shuffle, spikes per run', run_areas, run_counts.shuffle_spikes), ...
     area_count_summary_lines('All runs, mean run length per neuron (s)', run_areas, run_counts.all_length), ...
     area_count_summary_lines('ACG shuffle, mean run length per neuron (s)', run_areas, run_counts.shuffle_length)))
+
+%% 8. One neuron: observed ACG, percentile logit, and spectra
+% Run this section alone. plot_one_neuron_only must be true.
+% detail_neuron_id is the id printed on an example neuron, for example
+% the number in "session id 12". detail_session is that session name.
+% Leave detail_session empty when the id belongs to only one neuron.
+% The percentile panels use the percentile-logit autocorrelogram that
+% acg2features scores. Peaks and troughs are marked on the curves.
+% Peak period, trough period, and the oscillation score are written on
+% the percentile panels. Every feature is written to a text file named
+% for the neuron. A non-oscillatory neuron also shows the gamma and
+% difference-of-exponentials fits, with high and low power in separate
+% autocorrelogram panels that share a y-axis.
+plot_one_neuron_only = false;
+detail_neuron_id = [];
+detail_session = '';
+if ~plot_one_neuron_only
+    fprintf(['Section 8 is off. Set plot_one_neuron_only to true and ', ...
+        'detail_neuron_id to an example neuron, then run this section.\n'])
+else
+if ~exist('output_folder', 'var')
+    output_folder = '';
+end
+[output_folder, ~] = logit_folders(output_folder);
+this_dir = fileparts(mfilename('fullpath'));
+addpath(fileparts(this_dir));
+addpath(this_dir);
+if ~exist('neuron_session', 'var') || ~exist('neuron_cluster_id', 'var') ...
+        || ~exist('neuron_type', 'var') || ~exist('lag', 'var') ...
+        || ~exist('feature_table', 'var') || ~exist('osc_rows', 'var')
+    error('Plot_acg_population_nonoscillatory_description:neuronDetail', ...
+        'The population is not in the workspace. Run sections 1 and 3 first.');
+end
+if isempty(detail_neuron_id) || ~isscalar(detail_neuron_id) || ~isfinite(detail_neuron_id)
+    error('Plot_acg_population_nonoscillatory_description:neuronDetail', ...
+        'Set detail_neuron_id to the id printed on an example neuron.');
+end
+if ~exist('imagesc_sum_power_high', 'var') || ~exist('imagesc_sum_power_low', 'var')
+    if exist('imagesc_logit', 'var')
+        imagesc_sum_power_high = imagesc_logit.sum.power_high;
+        imagesc_sum_power_low = imagesc_logit.sum.power_low;
+    else
+        error('Plot_acg_population_nonoscillatory_description:neuronDetail', ...
+            'The percentile-logit autocorrelograms are not in the workspace. Run section 1 first.');
+    end
+end
+if ~exist('neuron_area', 'var') || numel(neuron_area) ~= numel(neuron_type)
+    neuron_area = repmat({''}, numel(neuron_type), 1);
+end
+if ~exist('example_smooth_half_s', 'var') || isempty(example_smooth_half_s)
+    example_smooth_half_s = 0.06;
+end
+if ~exist('example_skip_abs_lag_s', 'var') || isempty(example_skip_abs_lag_s)
+    example_skip_abs_lag_s = 0.02;
+end
+if ~exist('acg_method', 'var') || isempty(acg_method)
+    acg_method = 'overlap';
+end
+if ~exist('acg_count', 'var') || isempty(acg_count)
+    acg_count = 'pairs';
+end
+detail_row = find_detail_neuron(neuron_session, neuron_cluster_id, ...
+    detail_session, detail_neuron_id);
+if ~exist('classified_nonosc_rows', 'var')
+    classified_nonosc = false(numel(neuron_type), 1);
+    if exist('complete_rows', 'var')
+        classified_nonosc(complete_rows) = true;
+    end
+    classified_nonosc(osc_rows) = false;
+    if ~exist('osc_score', 'var') || numel(osc_score) ~= numel(neuron_type)
+        osc_score = nan(numel(neuron_type), 1);
+    end
+    classified_nonosc_rows = oscillatory_member_rows(classified_nonosc, osc_score);
+end
+if exist('checkpoint', 'var')
+    detail_summary_path = fullfile(fileparts(checkpoint), ...
+        locking_summary_filename(false, acg_method, acg_count));
+else
+    detail_summary_path = '';
+end
+detail_bank = load_example_acg_bank(detail_summary_path);
+[detail_real_lag, detail_real_high, detail_real_low, detail_found_high, detail_found_low] = ...
+    example_stratum_curves(detail_bank, neuron_session{detail_row}, neuron_cluster_id(detail_row));
+detail_real_high = smooth_example_acg(detail_real_lag, detail_real_high, ...
+    example_smooth_half_s, example_skip_abs_lag_s);
+detail_real_low = smooth_example_acg(detail_real_lag, detail_real_low, ...
+    example_smooth_half_s, example_skip_abs_lag_s);
+detail_group = 'not classified';
+if any(osc_rows(:) == detail_row)
+    detail_group = 'oscillatory';
+elseif any(classified_nonosc_rows(:) == detail_row)
+    detail_group = 'non-oscillatory';
+end
+if ~exist('feature_table_low', 'var') || isempty(feature_table_low)
+    feature_table_low = table();
+end
+if detail_row > size(imagesc_sum_power_high, 1) || detail_row > size(imagesc_sum_power_low, 1)
+    error('Plot_acg_population_nonoscillatory_description:neuronDetail', ...
+        'The percentile-logit matrices do not have a row for this neuron.');
+end
+detail_file = draw_one_neuron_detail(output_folder, detail_row, ...
+    neuron_session{detail_row}, neuron_cluster_id(detail_row), ...
+    area_display_name(neuron_area{detail_row}), display_lock_label(neuron_type{detail_row}), ...
+    detail_group, detail_real_lag, detail_real_high, detail_real_low, ...
+    detail_found_high, detail_found_low, lag, ...
+    imagesc_sum_power_high(detail_row, :), imagesc_sum_power_low(detail_row, :), ...
+    feature_table, feature_table_low);
+fprintf('Neuron detail features: %s\n', detail_file)
+write_summary_section(output_folder, '8. One neuron detail', join_summary_lines( ...
+    sprintf('Session %s, id %g, %s, %s, %s.', ...
+        neuron_session{detail_row}, neuron_cluster_id(detail_row), ...
+        area_display_name(neuron_area{detail_row}), ...
+        display_lock_label(neuron_type{detail_row}), detail_group), ...
+    'The observed autocorrelogram is the smoothed sum-to-1 curve from the locking summary.', ...
+    'The percentile panels are the percentile-logit curves scored by acg2features.', ...
+    'Peaks and troughs are the extrema inside the standard peak and trough windows.', ...
+    'The oscillation score is the peak FFT magnitude in 2-5 Hz divided by the mean magnitude.', ...
+    'Peak period, trough period, and that score are written on the percentile panels.', ...
+    'Every feature is in the text file named for this neuron.', ...
+    ['Feature file: ', detail_file]))
+end
 
 
 function counts = collect_area_run_counts(parsing_folder, records, stored, areas)
@@ -8785,6 +8910,500 @@ end
 curves = nan(n, size(acg_y, 2));
 n_copy = min(n, size(acg_y, 1));
 curves(1:n_copy, :) = acg_y(1:n_copy, :);
+end
+
+
+function row = find_detail_neuron(neuron_session, neuron_cluster_id, session_query, id_query)
+%FIND_DETAIL_NEURON  One population row for an example-figure id.
+
+ids = double(neuron_cluster_id(:));
+match = abs(ids - double(id_query)) < 1e-6;
+session_query = strtrim(char(session_query));
+if ~isempty(session_query)
+    wanted = lower(session_query);
+    for i = 1:numel(match)
+        if ~match(i)
+            continue
+        end
+        match(i) = strcmp(lower(strtrim(value_text(neuron_session{i}))), wanted);
+    end
+end
+hits = find(match);
+if numel(hits) == 1
+    row = hits;
+    return
+end
+if isempty(hits)
+    error('Plot_acg_population_nonoscillatory_description:neuronDetail', ...
+        'No neuron has id %g. Use the id printed on an example figure.', double(id_query));
+end
+shown = cell(1, min(8, numel(hits)));
+for k = 1:numel(shown)
+    shown{k} = value_text(neuron_session{hits(k)});
+end
+error('Plot_acg_population_nonoscillatory_description:neuronDetail', ...
+    'Id %g matches %d neurons (%s). Set detail_session to one of those sessions.', ...
+    double(id_query), numel(hits), strjoin(shown, ', '));
+end
+
+
+function file_path = draw_one_neuron_detail(folder, row, session, cluster_id, ...
+    area_label, lock_label, group_name, real_lag, real_high, real_low, ...
+    found_high, found_low, pct_lag, pct_high, pct_low, feature_table, feature_table_low)
+%DRAW_ONE_NEURON_DETAIL  Observed and percentile-logit curves, plus spectra.
+
+high_color = [0.75 0.22 0.18];
+low_color = [0.15 0.35 0.70];
+real_high_rhythm = rhythm_on_positive(real_high, real_lag, found_high);
+real_low_rhythm = rhythm_on_positive(real_low, real_lag, found_low);
+pct_high_rhythm = rhythm_on_positive(pct_high, pct_lag, true);
+pct_low_rhythm = rhythm_on_positive(pct_low, pct_lag, true);
+[gamma_high, diff_high] = component_curves(pct_lag, feature_table, row);
+[gamma_low, diff_low] = component_curves(pct_lag, feature_table_low, row);
+separate = strcmp(group_name, 'non-oscillatory');
+open_full_figure(sprintf('Neuron detail %s id %g', session, cluster_id))
+if separate
+    tiledlayout(2, 3, 'TileSpacing', 'compact')
+    real_high_ax = nexttile;
+    draw_detail_acg(real_lag, real_high, high_color, real_high_rhythm, found_high, '')
+    title('Observed high power', 'Interpreter', 'none')
+    ylabel('Sum-to-1')
+    real_low_ax = nexttile;
+    draw_detail_acg(real_lag, real_low, low_color, real_low_rhythm, found_low, '')
+    title('Observed low power', 'Interpreter', 'none')
+    apply_shared_ylim([real_high_ax, real_low_ax], real_lag, ...
+        {real_high, real_low}, {real_high_rhythm, real_low_rhythm})
+    nexttile
+    draw_detail_spectra(real_high_rhythm, real_low_rhythm, high_color, low_color, ...
+        'Observed spectrum')
+    pct_high_ax = nexttile;
+    draw_detail_acg(pct_lag, pct_high, high_color, pct_high_rhythm, true, 'Autocorrelogram')
+    draw_component_overlay(pct_lag, gamma_high, diff_high)
+    show_detail_legend()
+    title({'Percentile logit, high power', rhythm_caption(pct_high_rhythm)}, ...
+        'Interpreter', 'none')
+    ylabel('Percentile logit')
+    pct_low_ax = nexttile;
+    draw_detail_acg(pct_lag, pct_low, low_color, pct_low_rhythm, true, 'Autocorrelogram')
+    draw_component_overlay(pct_lag, gamma_low, diff_low)
+    show_detail_legend()
+    title({'Percentile logit, low power', rhythm_caption(pct_low_rhythm)}, ...
+        'Interpreter', 'none')
+    apply_shared_ylim([pct_high_ax, pct_low_ax], pct_lag, ...
+        {pct_high, pct_low, gamma_high, gamma_low, diff_high, diff_low}, ...
+        {pct_high_rhythm, pct_low_rhythm})
+    nexttile
+    draw_detail_spectra(pct_high_rhythm, pct_low_rhythm, high_color, low_color, ...
+        'Percentile-logit spectrum')
+else
+    tiledlayout(2, 2, 'TileSpacing', 'compact')
+    real_ax = nexttile;
+    hold on
+    draw_detail_acg(real_lag, real_high, high_color, real_high_rhythm, found_high, 'High power')
+    draw_detail_acg(real_lag, real_low, low_color, real_low_rhythm, found_low, 'Low power')
+    title('Observed autocorrelogram', 'Interpreter', 'none')
+    ylabel('Sum-to-1')
+    show_detail_legend()
+    apply_shared_ylim(real_ax, real_lag, {real_high, real_low}, ...
+        {real_high_rhythm, real_low_rhythm})
+    nexttile
+    draw_detail_spectra(real_high_rhythm, real_low_rhythm, high_color, low_color, ...
+        'Observed spectrum')
+    pct_ax = nexttile;
+    hold on
+    draw_detail_acg(pct_lag, pct_high, high_color, pct_high_rhythm, true, 'High power')
+    draw_detail_acg(pct_lag, pct_low, low_color, pct_low_rhythm, true, 'Low power')
+    title({'Percentile logit', ...
+        ['High: ', rhythm_caption(pct_high_rhythm)], ...
+        ['Low: ', rhythm_caption(pct_low_rhythm)]}, 'Interpreter', 'none')
+    ylabel('Percentile logit')
+    show_detail_legend()
+    apply_shared_ylim(pct_ax, pct_lag, {pct_high, pct_low}, ...
+        {pct_high_rhythm, pct_low_rhythm})
+    nexttile
+    draw_detail_spectra(pct_high_rhythm, pct_low_rhythm, high_color, low_color, ...
+        'Percentile-logit spectrum')
+end
+sgtitle({sprintf('%s, id %g, %s, %s, %s', session, cluster_id, area_label, lock_label, group_name), ...
+    'Circles are peaks. Triangles are troughs. The spectrum is the oscillation-score FFT.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+file_path = write_detail_feature_file(folder, session, cluster_id, area_label, ...
+    lock_label, group_name, feature_table, feature_table_low, row);
+end
+
+
+function show_detail_legend()
+lines = findobj(gca, 'Type', 'line');
+keep = gobjects(0);
+for k = 1:numel(lines)
+    if strcmpi(get(lines(k), 'HandleVisibility'), 'on')
+        keep(end + 1) = lines(k); %#ok<AGROW>
+    end
+end
+if isempty(keep)
+    return
+end
+legend(keep(end:-1:1), 'Location', 'northeast', 'Box', 'off')
+end
+
+
+function draw_detail_acg(lag, curve, color, rhythm, found, display_name)
+%DRAW_DETAIL_ACG  One autocorrelogram and its peak and trough markers.
+
+if nargin < 6
+    display_name = '';
+end
+if ~found || isempty(curve)
+    return
+end
+lag = double(lag(:)).';
+curve = double(curve(:)).';
+n = min(numel(lag), numel(curve));
+hold on
+line_handle = plot(lag(1:n), curve(1:n), 'Color', color, 'LineWidth', 1.4);
+if isempty(display_name)
+    set(line_handle, 'HandleVisibility', 'off')
+else
+    set(line_handle, 'DisplayName', display_name)
+end
+mark_rhythm_extrema(rhythm, color, lag, curve)
+xlabel('Lag (s)')
+box off
+end
+
+
+function mark_rhythm_extrema(rhythm, color, lag, curve)
+if ~isstruct(rhythm)
+    return
+end
+peaks = isfinite(rhythm.PeakLags) & isfinite(rhythm.PeakValues);
+troughs = isfinite(rhythm.TroughLags) & isfinite(rhythm.TroughValues);
+if any(peaks)
+    plot(rhythm.PeakLags(peaks), rhythm.PeakValues(peaks), 'o', ...
+        'Color', color, 'MarkerFaceColor', color, 'MarkerSize', 7, ...
+        'HandleVisibility', 'off')
+    mark_mirrored_extrema(rhythm.PeakLags(peaks), color, lag, curve, 'o')
+end
+if any(troughs)
+    plot(rhythm.TroughLags(troughs), rhythm.TroughValues(troughs), 'v', ...
+        'Color', color, 'MarkerFaceColor', 'w', 'MarkerSize', 7, ...
+        'HandleVisibility', 'off')
+    mark_mirrored_extrema(rhythm.TroughLags(troughs), color, lag, curve, 'v')
+end
+end
+
+
+function mark_mirrored_extrema(positive_lags, color, lag, curve, marker)
+query = -double(positive_lags(:));
+value = curve_at(lag, curve, query);
+keep = isfinite(query) & isfinite(value) & query < 0;
+if ~any(keep)
+    return
+end
+if strcmp(marker, 'o')
+    face = color;
+else
+    face = 'w';
+end
+plot(query(keep), value(keep), marker, 'Color', color, ...
+    'MarkerFaceColor', face, 'MarkerSize', 7, 'HandleVisibility', 'off')
+end
+
+
+function value = curve_at(lag, curve, query)
+lag = double(lag(:));
+curve = double(curve(:));
+n = min(numel(lag), numel(curve));
+ok = isfinite(lag(1:n)) & isfinite(curve(1:n));
+value = nan(numel(query), 1);
+if nnz(ok) < 2
+    return
+end
+x = lag(ok);
+y = curve(ok);
+[x, order] = sort(x);
+y = y(order);
+keep = [true; diff(x) > 0];
+if nnz(keep) < 2
+    return
+end
+value = interp1(x(keep), y(keep), double(query(:)), 'linear', nan);
+end
+
+
+function text = rhythm_caption(rhythm)
+text = sprintf('peak period %s s, trough period %s s, score %s', ...
+    detail_num(rhythm.PeakInterval), detail_num(rhythm.TroughInterval), ...
+    detail_num(rhythm.OscillationScore));
+end
+
+
+function text = detail_num(value)
+if isempty(value) || ~isscalar(value) || ~isfinite(value)
+    text = 'n/a';
+    return
+end
+text = sprintf('%.3g', value);
+end
+
+
+function draw_component_overlay(lag, gamma_y, diff_y)
+lag = double(lag(:)).';
+hold on
+if any(isfinite(gamma_y))
+    plot(lag, gamma_y(:).', '--', 'Color', [0.15 0.15 0.15], 'LineWidth', 1.2, ...
+        'DisplayName', 'Gamma')
+end
+if any(isfinite(diff_y))
+    plot(lag, diff_y(:).', ':', 'Color', [0.35 0.35 0.35], 'LineWidth', 1.4, ...
+        'DisplayName', 'Difference of exponentials')
+end
+end
+
+
+function draw_detail_spectra(high_rhythm, low_rhythm, high_color, low_color, panel_title)
+hold on
+drew_high = plot_detail_spectrum(high_rhythm, high_color, 'High power');
+drew_low = plot_detail_spectrum(low_rhythm, low_color, 'Low power');
+if ~(drew_high || drew_low)
+    axis off
+    title(panel_title, 'Interpreter', 'none')
+    text(0.5, 0.5, 'The spectrum was not estimated.', ...
+        'HorizontalAlignment', 'center', 'Interpreter', 'none')
+    return
+end
+yl = ylim;
+patch([2 5 5 2], [yl(1) yl(1) yl(2) yl(2)], [0.85 0.85 0.85], ...
+    'EdgeColor', 'none', 'FaceAlpha', 0.4, 'HandleVisibility', 'off')
+mark_dominant_frequency(high_rhythm, high_color, yl)
+mark_dominant_frequency(low_rhythm, low_color, yl)
+uistack(findobj(gca, 'Type', 'patch'), 'bottom')
+xlabel('Frequency (Hz)')
+ylabel('Magnitude')
+title({panel_title, 'Gray band is 2-5 Hz. Dashed lines are the band peaks.'}, ...
+    'Interpreter', 'none')
+show_detail_legend()
+box off
+end
+
+
+function drew = plot_detail_spectrum(rhythm, color, display_name)
+drew = false;
+if ~isstruct(rhythm) || isempty(rhythm.SpectrumFrequencyHz) || isempty(rhythm.SpectrumMagnitude)
+    return
+end
+freq = rhythm.SpectrumFrequencyHz(:);
+mag = rhythm.SpectrumMagnitude(:);
+n = min(numel(freq), numel(mag));
+ok = isfinite(freq(1:n)) & isfinite(mag(1:n));
+if ~any(ok)
+    return
+end
+plot(freq(ok), mag(ok), 'Color', color, 'LineWidth', 1.4, 'DisplayName', display_name)
+drew = true;
+end
+
+
+function mark_dominant_frequency(rhythm, color, yl)
+if ~isstruct(rhythm) || ~isfinite(rhythm.DominantFrequencyHz)
+    return
+end
+plot([rhythm.DominantFrequencyHz, rhythm.DominantFrequencyHz], yl, '--', ...
+    'Color', color, 'LineWidth', 1, 'HandleVisibility', 'off')
+end
+
+
+function apply_shared_ylim(axes_handle, lag, curves, rhythms)
+lag = double(lag(:));
+n = numel(lag);
+cols = nan(n, numel(curves));
+for k = 1:numel(curves)
+    curve = double(curves{k}(:));
+    m = min(n, numel(curve));
+    cols(1:m, k) = curve(1:m);
+end
+x_lim = example_lag_limits(lag);
+y_lim = example_acg_ylim(lag, cols, x_lim);
+extra = zeros(0, 1);
+for k = 1:numel(rhythms)
+    if ~isstruct(rhythms{k})
+        continue
+    end
+    extra = [extra; rhythms{k}.PeakValues(isfinite(rhythms{k}.PeakValues))]; %#ok<AGROW>
+    extra = [extra; rhythms{k}.TroughValues(isfinite(rhythms{k}.TroughValues))]; %#ok<AGROW>
+end
+if ~isempty(extra)
+    y_lim(1) = min(y_lim(1), min(extra));
+    y_lim(2) = max(y_lim(2), max(extra));
+    span = y_lim(2) - y_lim(1);
+    if span <= 1e-6 * max(abs(y_lim(2)), 1)
+        span = max(abs(y_lim(2)), 1);
+    end
+    y_lim = y_lim + [-0.08, 0.08] * span;
+end
+for k = 1:numel(axes_handle)
+    xlim(axes_handle(k), x_lim)
+    ylim(axes_handle(k), y_lim)
+end
+end
+
+
+function rhythm = rhythm_on_positive(curve, lag, found)
+rhythm = empty_detail_rhythm();
+if ~found || isempty(curve) || isempty(lag)
+    rhythm.note = 'This curve was not available.';
+    return
+end
+curve = double(curve(:)).';
+lag = double(lag(:)).';
+n = min(numel(curve), numel(lag));
+pos = lag(1:n) > 0 & isfinite(lag(1:n));
+if nnz(pos) < 10
+    rhythm.note = 'Too few positive lags.';
+    return
+end
+try
+    scored = quantify_acg_rhythmicity(curve(pos).', lag(pos).');
+catch
+    rhythm.note = 'The rhythmicity function did not accept this curve.';
+    return
+end
+rhythm.PeakLags = scored.PeakLags;
+rhythm.TroughLags = scored.TroughLags;
+rhythm.PeakValues = scored.PeakValues;
+rhythm.TroughValues = scored.TroughValues;
+rhythm.PeakInterval = scored.PeakInterval;
+rhythm.TroughInterval = scored.TroughInterval;
+rhythm.OscillationScore = scored.OscillationScore;
+rhythm.DominantFrequencyHz = scored.DominantFrequencyHz;
+rhythm.SpectrumFrequencyHz = scored.SpectrumFrequencyHz;
+rhythm.SpectrumMagnitude = scored.SpectrumMagnitude;
+end
+
+
+function rhythm = empty_detail_rhythm()
+rhythm = struct( ...
+    'PeakLags', nan(2, 1), 'TroughLags', nan(2, 1), ...
+    'PeakValues', nan(2, 1), 'TroughValues', nan(2, 1), ...
+    'PeakInterval', nan, 'TroughInterval', nan, ...
+    'OscillationScore', nan, 'DominantFrequencyHz', nan, ...
+    'SpectrumFrequencyHz', zeros(0, 1), 'SpectrumMagnitude', zeros(0, 1), ...
+    'note', '');
+end
+
+
+function [gamma_y, diff_y] = component_curves(lag, feature_table, row)
+lag = double(lag(:)).';
+gamma_y = nan(size(lag));
+diff_y = nan(size(lag));
+pos = lag > 0 & isfinite(lag);
+if ~any(pos) || isempty(feature_table) || row < 1 || row > size(feature_table, 1)
+    return
+end
+t = lag(pos);
+amplitude = table_feature_value(feature_table, row, 'GammaAmplitude');
+shape = table_feature_value(feature_table, row, 'GammaShape');
+scale = table_feature_value(feature_table, row, 'GammaScale');
+baseline = table_feature_value(feature_table, row, 'GammaBaseline');
+if all(isfinite([amplitude, shape, scale, baseline]))
+    gamma_y(pos) = baseline + amplitude * detail_gamma_kernel(t, shape, scale);
+end
+amplitude = table_feature_value(feature_table, row, 'DiffExpAmplitude');
+rise = table_feature_value(feature_table, row, 'DiffExpRise');
+decay = table_feature_value(feature_table, row, 'DiffExpDecay');
+baseline = table_feature_value(feature_table, row, 'DiffExpBaseline');
+if all(isfinite([amplitude, rise, decay, baseline])) && decay > rise
+    diff_y(pos) = baseline + amplitude * (exp(-t ./ decay) - exp(-t ./ rise));
+end
+end
+
+
+function g = detail_gamma_kernel(t, shape, scale)
+log_g = (shape - 1) * log(t) - t ./ scale;
+log_g(t <= 0) = -inf;
+log_g(log_g > 40) = 40;
+g = exp(log_g);
+g(~isfinite(g)) = 0;
+peak = max(g);
+if peak > 0
+    g = g / peak;
+end
+end
+
+
+function file_path = write_detail_feature_file(folder, session, cluster_id, ...
+    area_label, lock_label, group_name, feature_table, feature_table_low, row)
+if exist(folder, 'dir') ~= 7
+    mkdir(folder);
+end
+file_path = fullfile(folder, [detail_file_stem(session, cluster_id), '.txt']);
+names = detail_feature_names(feature_table, feature_table_low);
+fid = fopen(file_path, 'w');
+if fid < 0
+    error('Plot_acg_population_nonoscillatory_description:neuronDetail', ...
+        'Could not write %s.', file_path);
+end
+cleaner = onCleanup(@() fclose(fid)); %#ok<NASGU>
+fprintf(fid, 'Session: %s\n', session);
+fprintf(fid, 'Neuron id: %g\n', cluster_id);
+fprintf(fid, 'Area: %s\n', area_label);
+fprintf(fid, 'Lock: %s\n', lock_label);
+fprintf(fid, 'Group: %s\n\n', group_name);
+fprintf(fid, '%-42s %14s %14s\n', 'Feature', 'high power', 'low power');
+for j = 1:numel(names)
+    fprintf(fid, '%-42s %14s %14s\n', names{j}, ...
+        feature_cell(table_feature_value(feature_table, row, names{j})), ...
+        feature_cell(table_feature_value(feature_table_low, row, names{j})));
+end
+end
+
+
+function text = feature_cell(value)
+if isempty(value) || ~isscalar(value) || ~isfinite(value)
+    text = 'n/a';
+    return
+end
+text = sprintf('%.6g', value);
+end
+
+
+function names = detail_feature_names(feature_table, feature_table_low)
+names = feature_names_of(feature_table);
+if isempty(names)
+    names = feature_names_of(feature_table_low);
+end
+names = names(~strcmp(names, 'NeuronIndex'));
+if all(ismember({'Peak1', 'Peak2'}, names)) && ~any(strcmp(names, 'Peak1 - Peak2'))
+    names{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
+end
+end
+
+
+function names = feature_names_of(feature_table)
+names = {};
+if isempty(feature_table)
+    return
+end
+try
+    names = feature_table.Properties.VariableNames;
+catch
+    names = {};
+end
+if ~iscell(names)
+    names = {};
+end
+names = names(:).';
+end
+
+
+function stem = detail_file_stem(session, cluster_id)
+raw = sprintf('%s_id_%g', value_text(session), double(cluster_id));
+stem = regexprep(raw, '[^\w.-]+', '_');
+stem = regexprep(stem, '^_|_$', '');
+if isempty(stem)
+    stem = 'neuron';
+end
 end
 
 
