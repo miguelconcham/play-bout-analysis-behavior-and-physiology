@@ -20,6 +20,9 @@
 % cluster_method is 'ward' or 'kmeans'. Ward is the default.
 % Section 4 only draws. After section 3 has run, edit section 4 and run
 % that section alone.
+% Section 7 counts runs per neuron and spikes per run in DR, SC, LPAG,
+% VLPAG, and DLPAG. The lower row of each figure keeps only the runs that
+% enter the ACG shuffle. It can run after section 1.
 %
 % Set output_folder in the workspace before running a section. That path is
 % where each figure and analysis_summary_nonosc_description.txt are written. This script does
@@ -2273,6 +2276,482 @@ for condition_index = 1:numel(area_power_conditions)
     write_summary_section(output_folder, ...
         ['6. Nested area comparison of delta power, ', area_power_condition], ...
         join_summary_lines(area_nest.lines))
+end
+
+%% 7. Runs per neuron and spikes per run, by area
+% The upper row is every run with a finite spike count in DR, SC, LPAG,
+% VLPAG, and DLPAG. The lower row keeps the runs that enter the ACG
+% shuffle for neurons stored in the shuffle checkpoint. The spike panels
+% are counts, not firing rates. This section can run after section 1.
+if ~exist('output_folder', 'var')
+    output_folder = '';
+end
+[output_folder, ~] = logit_folders(output_folder);
+if ~exist('parsing_folder', 'var') || isempty(parsing_folder)
+    parsing_folder = default_parsing_folder();
+end
+if ~exist('records', 'var') || isempty(records)
+    if ~exist('checkpoint', 'var') || exist(checkpoint, 'file') ~= 2
+        error('Plot_acg_population_nonoscillatory_description:runs', ...
+            'The shuffle checkpoint is not in the workspace. Run section 1 first.');
+    end
+    stored_runs = load(checkpoint, 'shuffle_records', 'parameters');
+    if ~isfield(stored_runs, 'shuffle_records')
+        error('Plot_acg_population_nonoscillatory_description:runs', ...
+            '%s has no shuffle records.', checkpoint);
+    end
+    records = stored_runs.shuffle_records;
+end
+if ~exist('stored', 'var') || ~isfield(stored, 'parameters')
+    if exist('checkpoint', 'var') && exist(checkpoint, 'file') == 2
+        stored = load(checkpoint, 'parameters');
+    else
+        stored = struct();
+    end
+end
+run_areas = {'DR', 'SC', 'LPAG', 'VLPAG', 'DLPAG'};
+run_counts = collect_area_run_counts(parsing_folder, records, stored, run_areas);
+fprintf('Runs per neuron, all runs.\n')
+for i_area = 1:numel(run_areas)
+    fprintf('  %s: %d neurons, median %.3g runs.\n', run_areas{i_area}, ...
+        numel(run_counts.all_runs{i_area}), median_or_nan(run_counts.all_runs{i_area}))
+end
+fprintf('Runs per neuron, ACG shuffle.\n')
+for i_area = 1:numel(run_areas)
+    fprintf('  %s: %d neurons, median %.3g runs.\n', run_areas{i_area}, ...
+        numel(run_counts.shuffle_runs{i_area}), median_or_nan(run_counts.shuffle_runs{i_area}))
+end
+draw_area_count_figure(run_counts.all_runs, run_counts.shuffle_runs, run_areas, ...
+    output_folder, 'Runs per neuron by area', 'Runs per neuron', ...
+    {'Each point is one neuron. The bar is the mean.', ...
+    'Upper row: every run with a finite spike count.', ...
+    'Lower row: runs that enter the ACG shuffle.'})
+draw_area_count_figure(run_counts.all_spikes, run_counts.shuffle_spikes, run_areas, ...
+    output_folder, 'Spikes per run by area', 'Spikes per run', ...
+    {'Each point is one run. The value is the spike count, not a firing rate.', ...
+    'The bar is the mean.', ...
+    'Upper row: every run with a finite spike count.', ...
+    'Lower row: runs that enter the ACG shuffle.'})
+write_summary_section(output_folder, '7. Runs and spikes by area', join_summary_lines( ...
+    'Areas are DR, SC, LPAG, VLPAG, and DLPAG. SupCol is counted as SC.', ...
+    'A run is counted when RunNumSpikes is finite and at least zero.', ...
+    'The spike panels use that count. They are not divided by run duration.', ...
+    'The shuffle rows keep neurons stored in the shuffle checkpoint.', ...
+    'A shuffle run is a firing run with a finite autocorrelogram, plus a tail run when that tail is pooled.', ...
+    run_counts.note, ...
+    area_count_summary_lines('All runs, runs per neuron', run_areas, run_counts.all_runs), ...
+    area_count_summary_lines('ACG shuffle, runs per neuron', run_areas, run_counts.shuffle_runs), ...
+    area_count_summary_lines('All runs, spikes per run', run_areas, run_counts.all_spikes), ...
+    area_count_summary_lines('ACG shuffle, spikes per run', run_areas, run_counts.shuffle_spikes)))
+
+
+function counts = collect_area_run_counts(parsing_folder, records, stored, areas)
+%COLLECT_AREA_RUN_COUNTS  Runs and spike counts for all runs and the shuffle.
+
+counts.all_runs = cell(1, numel(areas));
+counts.shuffle_runs = cell(1, numel(areas));
+counts.all_spikes = cell(1, numel(areas));
+counts.shuffle_spikes = cell(1, numel(areas));
+for i_area = 1:numel(areas)
+    counts.all_runs{i_area} = zeros(0, 1);
+    counts.shuffle_runs{i_area} = zeros(0, 1);
+    counts.all_spikes{i_area} = zeros(0, 1);
+    counts.shuffle_spikes{i_area} = zeros(0, 1);
+end
+counts.note = 'The parsing folder was not read.';
+if isempty(parsing_folder) || exist(parsing_folder, 'dir') ~= 7
+    counts.note = sprintf('The parsing folder was not found at %s.', parsing_folder);
+    return
+end
+files = parsing_mat_files(parsing_folder);
+if isempty(files)
+    counts.note = sprintf('No spike-train parsing file was found in %s.', parsing_folder);
+    return
+end
+shuffle_keys = shuffle_record_keys(records);
+settings = run_count_settings(stored);
+seen_session = {};
+found_shuffle = {};
+n_neurons = 0;
+for f = 1:numel(files)
+    try
+        loaded = load(files(f).path, 'parsing_struct');
+    catch
+        continue
+    end
+    if ~isfield(loaded, 'parsing_struct')
+        continue
+    end
+    blocks = loaded.parsing_struct;
+    for b = 1:numel(blocks)
+        block = blocks(b);
+        if ~isfield(block, 'animal_code') || ~isfield(block, 'cluster_info') ...
+                || ~isfield(block, 'run_events_table_per_cell')
+            continue
+        end
+        animal = strtrim(value_text(block.animal_code));
+        if isempty(animal) || any(strcmp(seen_session, animal))
+            continue
+        end
+        id_col = cluster_id_values(block.cluster_info);
+        area_col = cluster_area_values(block.cluster_info);
+        run_cell = block.run_events_table_per_cell;
+        n_row = min([numel(id_col), numel(area_col), numel(run_cell)]);
+        if n_row < 1
+            continue
+        end
+        seen_session{end + 1} = animal; %#ok<AGROW>
+        ppc_col = parsing_ppc_column(block);
+        already_corrected = isfield(block, 'config') && isfield(block.config, 'acg_edge_corrected') ...
+            && block.config.acg_edge_corrected;
+        for nn = 1:n_row
+            this_area = canonical_kept_area(area_col{nn}, areas);
+            if isempty(this_area)
+                continue
+            end
+            rt = run_cell{nn};
+            if ~is_run_table(rt)
+                continue
+            end
+            area_index = find(strcmp(areas, this_area), 1);
+            this_key = neuron_keys({animal}, id_col(nn));
+            [n_all, spikes_all, n_shuffle, spikes_shuffle, used_shuffle] = ...
+                neuron_run_spike_counts(rt, this_key{1}, ...
+                shuffle_keys, settings, ppc_col, already_corrected);
+            if n_all < 1
+                continue
+            end
+            n_neurons = n_neurons + 1;
+            counts.all_runs{area_index}(end + 1, 1) = n_all; %#ok<AGROW>
+            counts.all_spikes{area_index} = [counts.all_spikes{area_index}; spikes_all(:)]; %#ok<AGROW>
+            if used_shuffle && n_shuffle > 0
+                found_shuffle{end + 1} = this_key{1}; %#ok<AGROW>
+                counts.shuffle_runs{area_index}(end + 1, 1) = n_shuffle; %#ok<AGROW>
+                counts.shuffle_spikes{area_index} = [counts.shuffle_spikes{area_index}; spikes_shuffle(:)]; %#ok<AGROW>
+            end
+        end
+    end
+    clear loaded
+end
+n_missing = numel(shuffle_keys);
+if ~isempty(found_shuffle)
+    n_missing = sum(~ismember(shuffle_keys, found_shuffle));
+end
+counts.note = sprintf(['Parsing sessions read: %d. Neurons with a finite spike count in the five areas: %d. ', ...
+    'Shuffle-checkpoint neurons without a counted shuffle run: %d.'], ...
+    numel(seen_session), n_neurons, n_missing);
+end
+
+
+function [n_all, spikes_all, n_shuffle, spikes_shuffle, used_shuffle] = ...
+    neuron_run_spike_counts(rt, key, shuffle_keys, settings, ppc_col, already_corrected)
+spikes = double(rt.RunNumSpikes(:));
+finite_count = isfinite(spikes) & spikes >= 0;
+n_all = nnz(finite_count);
+spikes_all = spikes(finite_count);
+n_shuffle = 0;
+spikes_shuffle = zeros(0, 1);
+used_shuffle = any(strcmp(shuffle_keys, key));
+if ~used_shuffle || n_all < 1
+    return
+end
+keep = shuffle_run_mask(rt, finite_count, settings, ppc_col, already_corrected);
+n_shuffle = nnz(keep);
+spikes_shuffle = spikes(keep);
+end
+
+
+function keep = shuffle_run_mask(rt, finite_count, settings, ppc_col, already_corrected)
+duration = description_run_lengths(rt);
+acg = [];
+if ismember('autoccorrelograms', rt.Properties.VariableNames)
+    acg = double(rt.autoccorrelograms);
+end
+n_runs = numel(finite_count);
+usable = finite_count & isfinite(duration) & duration > 0;
+if size(acg, 1) == n_runs
+    all_idx = usable & any(isfinite(acg), 2);
+else
+    all_idx = usable;
+end
+keep = all_idx;
+if isempty(settings.edges) || size(acg, 1) ~= n_runs || size(acg, 2) ~= numel(settings.edges) - 1
+    return
+end
+if ~strcmp(settings.method, 'overlap')
+    return
+end
+ppc = nan(n_runs, 1);
+if ismember('phase_entrainment', rt.Properties.VariableNames) ...
+        && ~isempty(ppc_col) && size(rt.phase_entrainment, 2) >= ppc_col
+    ppc = double(rt.phase_entrainment(:, ppc_col));
+end
+power = description_run_power(rt);
+lock_use = combine_shuffle_use(acg, settings.edges, duration, ppc, ...
+    settings.low_percent, settings.high_percent, already_corrected, settings.count);
+power_use = combine_shuffle_use(acg, settings.edges, duration, power, ...
+    settings.low_percent, settings.high_percent, already_corrected, settings.count);
+keep = (all_idx | lock_use | power_use) & finite_count;
+end
+
+
+function use = combine_shuffle_use(acg, edges, duration, score, low_percent, high_percent, already_corrected, count_method)
+use = false(size(duration));
+try
+    pooled = pool_period_acgs(acg, [], edges, duration, score, ...
+        already_corrected, low_percent, high_percent, 'overlap', count_method);
+catch
+    return
+end
+if numel(pooled.all_index) == numel(use)
+    use = pooled.all_index(:);
+end
+if pooled.n_low >= 1 && pooled.n_high >= 1 ...
+        && any(isfinite(pooled.low)) && any(isfinite(pooled.high))
+    use = use | pooled.low_index(:) | pooled.high_index(:);
+end
+end
+
+
+function settings = run_count_settings(stored)
+settings.low_percent = 25;
+settings.high_percent = 75;
+settings.method = 'overlap';
+settings.count = 'pairs';
+settings.edges = [];
+if ~isstruct(stored) || ~isfield(stored, 'parameters')
+    return
+end
+parameters = stored.parameters;
+if isfield(parameters, 'low_percent') && isfinite(parameters.low_percent)
+    settings.low_percent = parameters.low_percent;
+end
+if isfield(parameters, 'high_percent') && isfinite(parameters.high_percent)
+    settings.high_percent = parameters.high_percent;
+end
+if isfield(parameters, 'acg_method') && ~isempty(parameters.acg_method)
+    settings.method = char(string(parameters.acg_method));
+end
+if isfield(parameters, 'acg_count') && ~isempty(parameters.acg_count)
+    settings.count = char(string(parameters.acg_count));
+end
+if isfield(parameters, 'n_bins') && isfield(parameters, 'summary_edge_start') ...
+        && isfield(parameters, 'summary_edge_end') && parameters.n_bins >= 1
+    settings.edges = linspace(parameters.summary_edge_start, ...
+        parameters.summary_edge_end, parameters.n_bins + 1);
+end
+end
+
+
+function keys = shuffle_record_keys(records)
+keys = cell(0, 1);
+if isempty(records)
+    return
+end
+if ~iscell(records)
+    records = num2cell(records(:));
+end
+sessions = cell(numel(records), 1);
+ids = nan(numel(records), 1);
+keep = false(numel(records), 1);
+for i = 1:numel(records)
+    rec = records{i};
+    if ~isstruct(rec) || ~isfield(rec, 'session') || ~isfield(rec, 'cluster_id')
+        continue
+    end
+    sessions{i} = value_text(rec.session);
+    ids(i) = double(rec.cluster_id);
+    keep(i) = true;
+end
+if ~any(keep)
+    return
+end
+keys = neuron_keys(sessions(keep), ids(keep));
+end
+
+
+function id_col = cluster_id_values(info)
+names = cluster_table_names(info);
+id_name = first_present(names, {'cluster_id', 'id'});
+if isempty(id_name)
+    id_col = zeros(0, 1);
+    return
+end
+id_col = double(cluster_table_column(info, id_name));
+id_col = id_col(:);
+end
+
+
+function area_col = cluster_area_values(info)
+names = cluster_table_names(info);
+if ~any(strcmp(names, 'area'))
+    area_col = {};
+    return
+end
+raw = cluster_table_column(info, 'area');
+if iscell(raw)
+    area_col = raw(:);
+    return
+end
+if isstring(raw) || iscategorical(raw)
+    area_col = cellstr(raw(:));
+    return
+end
+if ischar(raw)
+    area_col = cellstr(raw);
+    return
+end
+area_col = cell(numel(raw), 1);
+for i = 1:numel(raw)
+    area_col{i} = value_text(raw(i));
+end
+end
+
+
+function col = parsing_ppc_column(block)
+col = [];
+if isfield(block, 'config') && isfield(block.config, 'phase_entrainment_fields')
+    hit = find(strcmp(block.config.phase_entrainment_fields, 'PPC'), 1);
+    if ~isempty(hit)
+        col = hit;
+        return
+    end
+end
+if ~isfield(block, 'run_events_table_per_cell')
+    return
+end
+for j = 1:numel(block.run_events_table_per_cell)
+    rt = block.run_events_table_per_cell{j};
+    if is_run_table(rt) && ismember('phase_entrainment', rt.Properties.VariableNames)
+        if size(rt.phase_entrainment, 2) >= 5
+            col = 5;
+        end
+        return
+    end
+end
+end
+
+
+function tf = is_run_table(rt)
+tf = false;
+if isempty(rt)
+    return
+end
+try
+    tf = istable(rt) && ismember('RunNumSpikes', rt.Properties.VariableNames);
+catch
+    tf = false;
+end
+end
+
+
+function T = description_run_lengths(rt)
+if ismember('RunLength', rt.Properties.VariableNames)
+    T = double(rt.RunLength);
+elseif ismember('RunStartTime', rt.Properties.VariableNames) ...
+        && ismember('RunEndTime', rt.Properties.VariableNames)
+    T = double(rt.RunEndTime) - double(rt.RunStartTime);
+else
+    T = nan(height(rt), 1);
+end
+T = T(:);
+end
+
+
+function power = description_run_power(rt)
+if ~ismember('lfp_param', rt.Properties.VariableNames) || size(rt.lfp_param, 2) < 2
+    power = nan(height(rt), 1);
+    return
+end
+power = double(rt.lfp_param(:, 2)) .^ 2;
+end
+
+
+function draw_area_count_figure(upper, lower, areas, folder, figure_name, y_label, caption)
+open_full_figure(figure_name)
+subplot(2, 1, 1)
+draw_area_count_row(upper, areas)
+ylabel(y_label)
+title('All runs')
+subplot(2, 1, 2)
+draw_area_count_row(lower, areas)
+ylabel(y_label)
+title('Runs used in the ACG shuffle')
+xlabel('Area')
+sgtitle([caption, {comparison_axis_note()}], 'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function draw_area_count_row(groups, areas)
+hold on
+pooled = zeros(0, 1);
+for i_area = 1:numel(areas)
+    y = groups{i_area};
+    y = y(isfinite(y));
+    pooled = [pooled; y(:)]; %#ok<AGROW>
+    draw_one_violin(i_area, y, area_count_color(areas{i_area}))
+    if isempty(y)
+        continue
+    end
+    point_x = i_area + violin_point_offset(numel(y));
+    scatter(point_x, y, 12, [0 0 0], 'filled', ...
+        'MarkerFaceAlpha', 0.35, 'MarkerEdgeColor', 'none')
+end
+set(gca, 'XTick', 1:numel(areas), 'XTickLabel', areas)
+xlim([0.4, numel(areas) + 0.6])
+apply_comparison_ylim(pooled)
+grid on
+box off
+end
+
+
+function color = area_count_color(name)
+switch name
+    case 'DR'
+        color = [0.49 0.18 0.56];
+    case 'SC'
+        color = [0.20 0.45 0.80];
+    case 'LPAG'
+        color = [0.85 0.33 0.10];
+    case 'VLPAG'
+        color = [0.93 0.69 0.13];
+    case 'DLPAG'
+        color = [0.47 0.67 0.19];
+    otherwise
+        color = [0.45 0.45 0.45];
+end
+end
+
+
+function lines = area_count_summary_lines(title, areas, groups)
+lines = {title};
+for i_area = 1:numel(areas)
+    y = groups{i_area};
+    y = y(isfinite(y));
+    lines{end + 1} = sprintf('%s: n = %d, median = %.6g, mean = %.6g.', ...
+        areas{i_area}, numel(y), median_or_nan(y), mean_or_nan(y)); %#ok<AGROW>
+end
+end
+
+
+function value = median_or_nan(y)
+y = y(isfinite(y));
+if isempty(y)
+    value = NaN;
+else
+    value = median(y);
+end
+end
+
+
+function value = mean_or_nan(y)
+y = y(isfinite(y));
+if isempty(y)
+    value = NaN;
+else
+    value = mean(y);
+end
 end
 
 
