@@ -21,8 +21,9 @@
 % Section 4 only draws. After section 3 has run, edit section 4 and run
 % that section alone. area_comparison_areas, at the start of that section,
 % is the list of areas in the one-way and two-factor area ANOVAs. Those
-% ANOVAs keep a feature only when oscillatory and non-oscillatory neurons
-% differ on it.
+% ANOVAs keep a feature when oscillatory and non-oscillatory neurons
+% differ on the high-power value, or when high and low power differ
+% in the neurons that entered the split.
 % Section 7 counts runs per neuron and spikes per run in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row of each figure keeps only the runs that
 % enter the ACG shuffle. It can run after section 1.
@@ -840,8 +841,10 @@ plot_example_neurons_only = false;
 % Delete a name to leave that area out. Neurons with any other label,
 % including an unstored area, stay out. A feature still needs two finite
 % values in an area before that area enters its test. A feature enters
-% these ANOVAs only when oscillatory and non-oscillatory neurons differ
-% on it, with Holm-Sidak p below 0.05 inside its feature family.
+% these ANOVAs when oscillatory and non-oscillatory neurons differ on
+% the high-power value, or when high and low power differ in the neurons
+% that entered the split. Each contrast uses Holm-Sidak p below 0.05
+% inside its feature family.
 area_comparison_areas = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
@@ -1408,25 +1411,30 @@ area_feature_titles = [comparison_titles, {'Peak1 - Peak2'}];
 component_feature_names = {osc_feature_names, nonosc_names};
 component_feature_titles = {osc_feature_titles, nonosc_titles};
 component_labels = {'oscillatory', 'non-oscillatory'};
-[screened_names, screened_titles, screen_lines] = features_differing_by_oscillation( ...
-    feature_table, osc_rows, classified_nonosc_rows, area_feature_names, area_feature_titles);
+if ~exist('feature_table_low', 'var')
+    feature_table_low = table();
+end
+[screened_names, screened_titles, screen_lines] = features_for_area_anova( ...
+    feature_table, feature_table_low, osc_rows, classified_nonosc_rows, ...
+    complete_rows, area_feature_names, area_feature_titles);
 [area_osc_names, area_osc_titles, area_non_names, area_non_titles] = ...
     split_component_features(screened_names, screened_titles);
 area_component_names = {area_osc_names, area_non_names};
 area_component_titles = {area_osc_titles, area_non_titles};
 if isempty(screened_titles)
     fprintf(['No feature differed between oscillatory and non-oscillatory ', ...
-        'neurons, so the area ANOVAs were not drawn.\n'])
+        'neurons or between high and low power, so the area ANOVAs were not drawn.\n'])
 else
-    fprintf(['Area ANOVA features that differ between oscillatory and ', ...
-        'non-oscillatory neurons: %s\n'], strjoin(screened_titles, ', '))
+    fprintf(['Area ANOVA features that differ by oscillatory group or by ', ...
+        'high versus low power: %s\n'], strjoin(screened_titles, ', '))
 end
 write_summary_section(output_folder, '4. Features kept for the area ANOVAs', ...
     join_summary_lines(screen_lines))
 n_descriptor_cols = 5;
 area_scope = ['Areas: ', strjoin(area_comparison_areas, ', '), '.'];
-area_feature_rule = ['A feature is included only when oscillatory and non-oscillatory ', ...
-    'neurons differ on it. Holm-Sidak p is below 0.05 within that feature family.'];
+area_feature_rule = ['A feature is included when oscillatory and non-oscillatory neurons ', ...
+    'differ on the high-power value, or when high and low power differ in the neurons that entered the split. ', ...
+    'Each contrast uses Holm-Sidak p below 0.05 within its feature family.'];
 for g = 1:2
     area_anova = area_feature_anova(feature_table, neuron_area, ...
         area_component_names{g}, area_component_titles{g}, area_comparison_areas);
@@ -5172,51 +5180,80 @@ end
 end
 
 
-function [kept_names, kept_titles, lines] = features_differing_by_oscillation( ...
-    feature_table, osc_rows, nonosc_rows, names, titles)
-%FEATURES_DIFFERING_BY_OSCILLATION  Features that separate the two groups.
+function [kept_names, kept_titles, lines] = features_for_area_anova( ...
+    feature_table, feature_table_low, osc_rows, nonosc_rows, paired_rows, names, titles)
+%FEATURES_FOR_AREA_ANOVA  Features that separate groups or power levels.
 %
-% An unpaired equal-variance t-test compares oscillatory neurons with
-% non-oscillatory neurons. Holm-Sidak is applied within each feature
-% family. A feature is kept when that adjusted p is below 0.05.
+% A feature is kept when either contrast has Holm-Sidak p below 0.05
+% inside its feature family. The group contrast is an unpaired t-test of
+% the high-power value. The power contrast is a paired t-test of high
+% versus low power in the neurons that entered the split.
 
 n = numel(names);
 kept_names = {};
 kept_titles = {};
+power_ready = istable(feature_table_low) && ~isempty(feature_table_low) ...
+    && height(feature_table_low) == height(feature_table);
+if power_ready
+    power_line = 'The power contrast pairs high and low power in every neuron that entered the split.';
+else
+    power_line = 'The low-power feature table was not available, so the power contrast was not run.';
+end
 lines = { ...
-    'Unpaired t-test of each high-power feature, oscillatory versus non-oscillatory neurons.', ...
+    'A feature is kept when either contrast below has Holm-Sidak p below 0.05.', ...
+    'Group contrast: unpaired t-test of the high-power value, oscillatory versus non-oscillatory neurons.', ...
     'Oscillatory neurons are cluster 1. Non-oscillatory neurons entered the split and are not cluster 1.', ...
     'Neurons that did not enter the split are in neither group.', ...
-    'Holm-Sidak adjusts the oscillatory features together, and the non-oscillatory features together.', ...
-    'A feature is kept for the area ANOVAs when that adjusted p is below 0.05.'};
+    'Power contrast: paired t-test of high versus low power.', ...
+    power_line, ...
+    'A neuron without both power values is left out of that feature''s paired test.', ...
+    'Holm-Sidak is computed separately for each contrast, within the oscillatory features and within the non-oscillatory features.'};
 if n == 0
     lines{end + 1} = 'No feature was available.'; %#ok<AGROW>
     return
 end
-stats = repmat(empty_feature_stats(), n, 1);
+group_stats = repmat(empty_feature_stats(), n, 1);
+power_stats = group_stats;
 groups = cell(1, n);
 for j = 1:n
-    values = feature_column(feature_table, names{j});
-    stats(j) = compare_two_samples(values(osc_rows), values(nonosc_rows), 'unpaired');
-    stats(j).feature = titles{j};
+    high_values = feature_column(feature_table, names{j});
+    group_stats(j) = compare_two_samples( ...
+        high_values(osc_rows), high_values(nonosc_rows), 'unpaired');
+    if power_ready
+        low_values = feature_column(feature_table_low, names{j});
+        power_stats(j) = compare_two_samples( ...
+            high_values(paired_rows), low_values(paired_rows), 'paired');
+    end
     groups{j} = component_group_name(names{j});
 end
-stats = assign_holm_by_group(stats, groups);
+group_stats = assign_holm_by_group(group_stats, groups);
+power_stats = assign_holm_by_group(power_stats, groups);
 for j = 1:n
-    kept = isfinite(stats(j).holm_p) && stats(j).holm_p < 0.05;
-    if kept
-        decision = 'kept';
-        kept_names{end + 1} = names{j}; %#ok<AGROW>
-        kept_titles{end + 1} = titles{j}; %#ok<AGROW>
+    group_hit = isfinite(group_stats(j).holm_p) && group_stats(j).holm_p < 0.05;
+    power_hit = isfinite(power_stats(j).holm_p) && power_stats(j).holm_p < 0.05;
+    if group_hit && power_hit
+        decision = 'kept, both';
+    elseif group_hit
+        decision = 'kept, group';
+    elseif power_hit
+        decision = 'kept, power';
     else
         decision = 'left out';
     end
-    lines{end + 1} = sprintf(['%-28s %-8s family = %-16s t = %s   df = %s   ', ...
-        'd = %s   raw p = %s   Holm-Sidak p = %s   n oscillatory = %g   n non-oscillatory = %g'], ...
-        titles{j}, decision, groups{j}, stat_num(stats(j).t, '%.4g'), ...
-        stat_num(stats(j).df, '%.0f'), stat_num(stats(j).effect, '%.4g'), ...
-        stat_num(stats(j).raw_p, '%.4g'), stat_num(stats(j).holm_p, '%.4g'), ...
-        stats(j).n1, stats(j).n2); %#ok<AGROW>
+    if group_hit || power_hit
+        kept_names{end + 1} = names{j}; %#ok<AGROW>
+        kept_titles{end + 1} = titles{j}; %#ok<AGROW>
+    end
+    lines{end + 1} = sprintf(['%-28s %-12s family = %-16s ', ...
+        'group t = %s   group p = %s   group Holm = %s   ', ...
+        'power t = %s   power p = %s   power Holm = %s   ', ...
+        'n oscillatory = %g   n non-oscillatory = %g   n paired = %g'], ...
+        titles{j}, decision, groups{j}, ...
+        stat_num(group_stats(j).t, '%.4g'), stat_num(group_stats(j).raw_p, '%.4g'), ...
+        stat_num(group_stats(j).holm_p, '%.4g'), ...
+        stat_num(power_stats(j).t, '%.4g'), stat_num(power_stats(j).raw_p, '%.4g'), ...
+        stat_num(power_stats(j).holm_p, '%.4g'), ...
+        group_stats(j).n1, group_stats(j).n2, power_stats(j).n1); %#ok<AGROW>
 end
 if isempty(kept_titles)
     lines{end + 1} = 'No feature was kept.'; %#ok<AGROW>
