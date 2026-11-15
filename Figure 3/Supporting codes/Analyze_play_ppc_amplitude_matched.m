@@ -3,10 +3,14 @@
 % significance value and does not include non-play behaviors.
 %
 % Outputs:
-%   matched_summary       one row per neuron
-%   matched_draw_table    repeated amplitude-matched arrangements
-%   null_draw_table       play-free pre-play partitions under no condition
-%   ppc_power_spike_model PPC change ~ power change + spike-count terms
+%   matched_summary         one row per neuron
+%   matched_draw_table      repeated amplitude-matched arrangements
+%   null_draw_table         play-free pre-play partitions under no condition
+%   ppc_power_spike_model   PPC change ~ power change + spike-count terms
+%   session_paired_summary  one mean per session, within each plotted area
+%   animal_paired_summary   one mean per animal; sessions of that animal pooled
+%   paired_level_result     neuron, session-mean, and animal-mean signed-rank tests
+%   neuron_count_relation   within-unit significance and effect size versus neuron count
 
 data_root = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data';
 saving_folder = fullfile(data_root, 'Analysis results', ...
@@ -39,6 +43,7 @@ MIN_SPIKES_PER_CONDITION = 20;
 MIN_RELIABLE_MATCHED_DRAWS = 50;
 MAX_ABS_POWER_SMD = 0.10;
 LOCKING_ALPHA = 0.01;
+PAIR_ALPHA = 0.05;
 N_ANIMAL_BOOTSTRAP = 10000;
 N_SIGN_FLIP = 100000;
 RANDOM_SEED = 73491;
@@ -407,17 +412,81 @@ for an = 1:numel(paper_areas)
     plot_paired_ppc(pre_z(in_area), play_z(in_area), axis_limit)
     title(sprintf('%s n=%d p=%s', paper_labels(an), sum(in_area), ...
         paired_signrank_text(pre_z(in_area), play_z(in_area))))
-    xlabel('Pre-play PPC (atanh)')
+    xlabel('Play PPC (atanh)')
     if an == 1
-        ylabel('Play PPC (atanh)')
+        ylabel('Pre-play PPC (atanh)')
     end
 end
 subplot(1, numel(paper_areas)+1, numel(paper_areas)+1)
 plot_paired_ppc(pre_z, play_z, axis_limit)
-xlabel('Pre-play PPC (atanh)')
+xlabel('Play PPC (atanh)')
 title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
     height(plot_rows), numel(unique(string(plot_rows.Animal))), ...
     paired_signrank_text(pre_z, play_z)))
+
+%% Session means and animal means of the same paired comparison
+% Each neuron pair stays on the atanh scale used above. A session mean
+% averages the neurons recorded in that session. An animal mean averages
+% every neuron from that animal, including neurons from its other sessions.
+% The signed-rank p-value in each title treats those means as the pairs.
+% A circle is filled when the neuron pairs inside that session or animal
+% themselves reject zero at PAIR_ALPHA.
+plot_rows.AnimalID = batch_animal_id(plot_rows.Session);
+unparsed_animal = plot_rows.AnimalID == string(plot_rows.Session);
+if any(unparsed_animal)
+    warning('Analyze_play_ppc_amplitude_matched:AnimalId', ...
+        ['%d sessions did not match the Batch animal-name pattern. ' ...
+        'Each of those sessions is kept as its own animal.'], ...
+        numel(unique(plot_rows.Session(unparsed_animal))));
+end
+animal_names = unique(plot_rows.AnimalID);
+animal_colors = paired_animal_colors(numel(animal_names));
+area_names = ["ALL"; paper_areas(:)];
+area_labels = ["ALL"; paper_labels(:)];
+session_blocks = cell(numel(area_names), 1);
+animal_blocks = cell(numel(area_names), 1);
+level_blocks = cell(numel(area_names), 1);
+relation_blocks = cell(numel(area_names)*2, 1);
+for an = 1:numel(area_names)
+    if area_names(an) == "ALL"
+        in_area = true(height(plot_rows), 1);
+    else
+        in_area = present_areas == area_names(an);
+    end
+    session_blocks{an} = summarize_session_pairs(area_labels(an), ...
+        plot_rows.Session(in_area), plot_rows.AnimalID(in_area), ...
+        pre_z(in_area), play_z(in_area), PAIR_ALPHA);
+    animal_blocks{an} = summarize_animal_pairs(area_labels(an), ...
+        plot_rows.AnimalID(in_area), plot_rows.Session(in_area), ...
+        pre_z(in_area), play_z(in_area), PAIR_ALPHA);
+    level_blocks{an} = paired_level_rows(area_labels(an), ...
+        pre_z(in_area), play_z(in_area), ...
+        session_blocks{an}, animal_blocks{an});
+    relation_blocks{2*an-1} = one_neuron_count_relation( ...
+        "Session", area_labels(an), session_blocks{an});
+    relation_blocks{2*an} = one_neuron_count_relation( ...
+        "Animal", area_labels(an), animal_blocks{an});
+end
+session_paired_summary = vertcat(session_blocks{:});
+animal_paired_summary = vertcat(animal_blocks{:});
+paired_level_result = vertcat(level_blocks{:});
+neuron_count_relation = vertcat(relation_blocks{:});
+disp(paired_level_result)
+fprintf(['Filled circles are within-session or within-animal signed-rank ' ...
+    'tests at p < %.2g. A signed-rank test needs several pairs before it ' ...
+    'can cross that line, so significance can track neuron count even when ' ...
+    'the paired difference does not. The Spearman row asks whether the ' ...
+    'mean difference itself grows with the neuron count.\n'], PAIR_ALPHA);
+disp(neuron_count_relation)
+
+plot_paired_unit_figure('Power-balanced PPC by session', ...
+    paper_labels, session_paired_summary, animal_names, animal_colors, ...
+    axis_limit, 'session-mean', PAIR_ALPHA);
+plot_paired_unit_figure('Power-balanced PPC by animal', ...
+    paper_labels, animal_paired_summary, animal_names, animal_colors, ...
+    axis_limit, 'animal-mean', PAIR_ALPHA);
+plot_neuron_count_figure(session_paired_summary, animal_paired_summary, ...
+    animal_names, animal_colors, neuron_count_relation, PAIR_ALPHA);
 
 analysis_parameters = struct( ...
     'epoch_seconds', EPOCH_SECONDS, ...
@@ -428,6 +497,7 @@ analysis_parameters = struct( ...
     'min_reliable_matched_draws', MIN_RELIABLE_MATCHED_DRAWS, ...
     'max_abs_power_smd', MAX_ABS_POWER_SMD, ...
     'locking_alpha_from_original_analysis', LOCKING_ALPHA, ...
+    'within_unit_pair_alpha', PAIR_ALPHA, ...
     'n_animal_bootstrap', N_ANIMAL_BOOTSTRAP, ...
     'n_sign_flip', N_SIGN_FLIP, ...
     'random_seed', RANDOM_SEED);
@@ -435,7 +505,10 @@ save(fullfile(saving_folder, ...
     'play_ppc_amplitude_matched_analysis.mat'), ...
     'matched_summary', 'matched_draw_table', 'null_draw_table', ...
     'excluded_neurons', 'ppc_power_spike_model', ...
-    'animal_summary', 'overall_result', 'analysis_parameters', '-v7.3');
+    'animal_summary', 'overall_result', ...
+    'session_paired_summary', 'animal_paired_summary', ...
+    'paired_level_result', 'neuron_count_relation', ...
+    'analysis_parameters', '-v7.3');
 
 %% Local functions
 function [pairs, caliper_db] = nearest_power_pairs( ...
@@ -659,26 +732,36 @@ selected = reshape(data(index(:)), size(index));
 end
 
 function label = paired_signrank_text(pre_z, play_z)
-finite_pairs = isfinite(pre_z) & isfinite(play_z);
-if nnz(finite_pairs) < 1
-    label = "NA";
-    return
-end
-try
-    p_value = signrank(pre_z(finite_pairs), play_z(finite_pairs));
-catch
+p_value = paired_signrank_p(pre_z, play_z);
+if ~isfinite(p_value)
     label = "NA";
     return
 end
 label = sprintf('%.3g', p_value);
 end
 
+function p_value = paired_signrank_p(pre_z, play_z)
+pre_z = pre_z(:);
+play_z = play_z(:);
+finite_pairs = isfinite(pre_z) & isfinite(play_z);
+if nnz(finite_pairs) < 1
+    p_value = NaN;
+    return
+end
+try
+    p_value = signrank(pre_z(finite_pairs), play_z(finite_pairs));
+catch
+    p_value = NaN;
+end
+end
+
 function plot_paired_ppc(pre_z, play_z, axis_limit)
-plot(pre_z, play_z, 'k.')
+% Play is the horizontal axis and pre-play is the vertical axis.
+plot(play_z, pre_z, 'k.')
 hold on
 finite_pairs = isfinite(pre_z) & isfinite(play_z);
 if any(finite_pairs)
-    pair_median = [median(pre_z(finite_pairs)), median(play_z(finite_pairs))];
+    pair_median = [median(play_z(finite_pairs)), median(pre_z(finite_pairs))];
     plot(pair_median(1), pair_median(2), 'rx', 'LineWidth', 1.2)
 end
 plot(axis_limit, axis_limit, 'r-')
@@ -719,4 +802,394 @@ else
     end
     p_value = (1+sum(null_mean >= observed_mean))/(n_random+1);
 end
+end
+
+function animal_id = batch_animal_id(session_names)
+% Same Batch id as the area-limit lookup: sessions of one animal share it.
+session_names = string(session_names);
+animal_id = strings(size(session_names));
+for ii = 1:numel(session_names)
+    animal_id(ii) = one_batch_animal_id(session_names(ii));
+end
+end
+
+function animal_id = one_batch_animal_id(session_name)
+parts = strsplit(strtrim(char(session_name)));
+if numel(parts) < 3
+    animal_id = string(strtrim(session_name));
+    return
+end
+animal_batch = parts{1};
+repeated_animal = parts{3};
+if numel(animal_batch) < 2
+    animal_id = string(strtrim(session_name));
+    return
+end
+if strcmp(repeated_animal, 'Single2')
+    animal_id = string(['Batch', animal_batch(2), repeated_animal]);
+    return
+end
+if numel(animal_batch) < 4
+    animal_id = string(strtrim(session_name));
+    return
+end
+animal_id = string(['Batch', animal_batch(2), repeated_animal, animal_batch(4)]);
+end
+
+function summary = summarize_session_pairs(area_label, session_id, ...
+    animal_id, pre_z, play_z, pair_alpha)
+names = {'Area','Session','AnimalID','NNeurons','PreMean','PlayMean', ...
+    'MeanDifference','SignrankP','Significant'};
+session_id = string(session_id(:));
+animal_id = string(animal_id(:));
+pre_z = pre_z(:);
+play_z = play_z(:);
+if isempty(session_id)
+    summary = table(strings(0,1), strings(0,1), strings(0,1), ...
+        zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), ...
+        false(0,1), 'VariableNames', names);
+    return
+end
+[group_index, group_names] = findgroups(session_id);
+n_groups = numel(group_names);
+animal_out = strings(n_groups, 1);
+n_neurons = zeros(n_groups, 1);
+pre_mean = nan(n_groups, 1);
+play_mean = nan(n_groups, 1);
+mean_difference = nan(n_groups, 1);
+signrank_p = nan(n_groups, 1);
+significant = false(n_groups, 1);
+for gg = 1:n_groups
+    in_group = group_index == gg;
+    stats = paired_group_stats(pre_z(in_group), play_z(in_group), pair_alpha);
+    these_animals = unique(animal_id(in_group));
+    animal_out(gg) = these_animals(1);
+    n_neurons(gg) = stats.n_neurons;
+    pre_mean(gg) = stats.pre_mean;
+    play_mean(gg) = stats.play_mean;
+    mean_difference(gg) = stats.mean_difference;
+    signrank_p(gg) = stats.p_value;
+    significant(gg) = stats.significant;
+end
+summary = table(repmat(string(area_label), n_groups, 1), ...
+    string(group_names(:)), animal_out, n_neurons, pre_mean, play_mean, ...
+    mean_difference, signrank_p, significant, 'VariableNames', names);
+end
+
+function summary = summarize_animal_pairs(area_label, animal_id, ...
+    session_id, pre_z, play_z, pair_alpha)
+names = {'Area','AnimalID','NSessions','NNeurons','PreMean','PlayMean', ...
+    'MeanDifference','SignrankP','Significant','Sessions'};
+animal_id = string(animal_id(:));
+session_id = string(session_id(:));
+pre_z = pre_z(:);
+play_z = play_z(:);
+if isempty(animal_id)
+    summary = table(strings(0,1), strings(0,1), zeros(0,1), zeros(0,1), ...
+        zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), false(0,1), ...
+        strings(0,1), 'VariableNames', names);
+    return
+end
+[group_index, group_names] = findgroups(animal_id);
+n_groups = numel(group_names);
+n_sessions = zeros(n_groups, 1);
+n_neurons = zeros(n_groups, 1);
+pre_mean = nan(n_groups, 1);
+play_mean = nan(n_groups, 1);
+mean_difference = nan(n_groups, 1);
+signrank_p = nan(n_groups, 1);
+significant = false(n_groups, 1);
+sessions = strings(n_groups, 1);
+for gg = 1:n_groups
+    in_group = group_index == gg;
+    stats = paired_group_stats(pre_z(in_group), play_z(in_group), pair_alpha);
+    these_sessions = unique(session_id(in_group));
+    these_sessions = these_sessions(these_sessions ~= "" & ~ismissing(these_sessions));
+    n_sessions(gg) = numel(these_sessions);
+    if isempty(these_sessions)
+        sessions(gg) = "";
+    else
+        sessions(gg) = string(strjoin(cellstr(these_sessions), ', '));
+    end
+    n_neurons(gg) = stats.n_neurons;
+    pre_mean(gg) = stats.pre_mean;
+    play_mean(gg) = stats.play_mean;
+    mean_difference(gg) = stats.mean_difference;
+    signrank_p(gg) = stats.p_value;
+    significant(gg) = stats.significant;
+end
+summary = table(repmat(string(area_label), n_groups, 1), ...
+    string(group_names(:)), n_sessions, n_neurons, pre_mean, play_mean, ...
+    mean_difference, signrank_p, significant, sessions, ...
+    'VariableNames', names);
+end
+
+function stats = paired_group_stats(pre_values, play_values, pair_alpha)
+pre_values = pre_values(:);
+play_values = play_values(:);
+finite = isfinite(pre_values) & isfinite(play_values);
+pre_values = pre_values(finite);
+play_values = play_values(finite);
+stats.n_neurons = numel(pre_values);
+if stats.n_neurons == 0
+    stats.pre_mean = NaN;
+    stats.play_mean = NaN;
+    stats.mean_difference = NaN;
+    stats.p_value = NaN;
+    stats.significant = false;
+    return
+end
+stats.pre_mean = mean(pre_values);
+stats.play_mean = mean(play_values);
+stats.mean_difference = mean(play_values - pre_values);
+stats.p_value = paired_signrank_p(pre_values, play_values);
+stats.significant = isfinite(stats.p_value) && stats.p_value < pair_alpha;
+end
+
+function rows = paired_level_rows(area_label, pre_z, play_z, ...
+    session_summary, animal_summary)
+neuron_row = one_level_row(area_label, "Neuron", pre_z, play_z, NaN);
+session_row = one_level_row(area_label, "Session", ...
+    session_summary.PreMean, session_summary.PlayMean, ...
+    within_unit_significant_count(session_summary));
+animal_row = one_level_row(area_label, "Animal", ...
+    animal_summary.PreMean, animal_summary.PlayMean, ...
+    within_unit_significant_count(animal_summary));
+rows = [neuron_row; session_row; animal_row];
+end
+
+function count = within_unit_significant_count(summary)
+if isempty(summary)
+    count = NaN;
+    return
+end
+count = sum(summary.Significant);
+end
+
+function row = one_level_row(area_label, level_name, pre_values, ...
+    play_values, n_within_significant)
+pre_values = pre_values(:);
+play_values = play_values(:);
+finite = isfinite(pre_values) & isfinite(play_values);
+pre_values = pre_values(finite);
+play_values = play_values(finite);
+difference = play_values - pre_values;
+row = table(string(area_label), string(level_name), numel(difference), ...
+    sum(difference > 0), sum(difference < 0), ...
+    paired_signrank_p(pre_values, play_values), n_within_significant, ...
+    'VariableNames', {'Area','Level','N','NPositive','NNegative', ...
+    'SignrankP','NWithinUnitSignificant'});
+end
+
+function row = one_neuron_count_relation(level_name, area_label, summary)
+names = {'Level','Area','NUnits','NSignificant','NNotSignificant', ...
+    'MedianNeuronsSignificant','MedianNeuronsNotSignificant', ...
+    'RanksumP','SpearmanRho','SpearmanP'};
+if isempty(summary)
+    row = table(string(level_name), string(area_label), 0, 0, 0, ...
+        NaN, NaN, NaN, NaN, NaN, 'VariableNames', names);
+    return
+end
+usable = isfinite(summary.NNeurons) & isfinite(summary.MeanDifference);
+n_neurons = summary.NNeurons(usable);
+significant = summary.Significant(usable);
+effect = summary.MeanDifference(usable);
+n_significant = sum(significant);
+n_not = sum(~significant);
+if n_significant > 0
+    median_significant = median(n_neurons(significant));
+else
+    median_significant = NaN;
+end
+if n_not > 0
+    median_not = median(n_neurons(~significant));
+else
+    median_not = NaN;
+end
+ranksum_p = NaN;
+if n_significant >= 1 && n_not >= 1
+    try
+        ranksum_p = ranksum(n_neurons(significant), n_neurons(~significant));
+    catch
+        ranksum_p = NaN;
+    end
+end
+[rho, rho_p] = spearman_pair(n_neurons, effect);
+row = table(string(level_name), string(area_label), numel(n_neurons), ...
+    n_significant, n_not, median_significant, median_not, ranksum_p, ...
+    rho, rho_p, 'VariableNames', names);
+end
+
+function [rho, p_value] = spearman_pair(x, y)
+rho = NaN;
+p_value = NaN;
+x = x(:);
+y = y(:);
+keep = isfinite(x) & isfinite(y);
+if nnz(keep) < 3
+    return
+end
+x = x(keep);
+y = y(keep);
+if numel(unique(x)) < 2 || numel(unique(y)) < 2
+    return
+end
+try
+    [rho, p_value] = corr(x, y, 'Type', 'Spearman');
+catch
+end
+end
+
+function plot_paired_unit_figure(figure_name, paper_labels, summary, ...
+    animal_names, animal_colors, axis_limit, level_word, pair_alpha)
+figure('Name', figure_name, 'Units', 'normalized', ...
+    'OuterPosition', [0.02 0.28 0.96 0.42]);
+n_areas = numel(paper_labels);
+for an = 1:n_areas+1
+    subplot(1, n_areas+2, an)
+    if an <= n_areas
+        area_label = paper_labels(an);
+        title_area = char(paper_labels(an));
+    else
+        area_label = "ALL";
+        title_area = 'ALL AREAS';
+    end
+    in_area = summary.Area == area_label;
+    hold on
+    plot(axis_limit, axis_limit, 'r-')
+    plot_colored_markers(summary.PlayMean(in_area), summary.PreMean(in_area), ...
+        summary.AnimalID(in_area), summary.Significant(in_area), ...
+        animal_names, animal_colors)
+    axis([axis_limit axis_limit])
+    axis square
+    n_units = nnz(in_area);
+    n_positive = sum(summary.MeanDifference(in_area) > 0);
+    n_significant = sum(summary.Significant(in_area));
+    title({sprintf('%s %s p=%s', title_area, level_word, ...
+        format_p_value(paired_signrank_p( ...
+        summary.PreMean(in_area), summary.PlayMean(in_area)))), ...
+        sprintf('%d/%d > 0, filled %d/%d', n_positive, n_units, ...
+        n_significant, n_units)})
+    xlabel('Play PPC (atanh)')
+    if an == 1
+        ylabel('Pre-play PPC (atanh)')
+    end
+end
+subplot(1, n_areas+2, n_areas+2)
+draw_pair_color_key(animal_names, animal_colors, pair_alpha)
+end
+
+function plot_neuron_count_figure(session_summary, animal_summary, ...
+    animal_names, animal_colors, relation, pair_alpha)
+figure('Name', 'PPC significance and neuron count', ...
+    'Units', 'normalized', 'OuterPosition', [0.08 0.12 0.84 0.46]);
+subplot(1, 3, 1)
+plot_count_panel(session_summary, animal_names, animal_colors, ...
+    relation, "Session", 'Neurons in the session')
+subplot(1, 3, 2)
+plot_count_panel(animal_summary, animal_names, animal_colors, ...
+    relation, "Animal", 'Neurons in the animal')
+subplot(1, 3, 3)
+draw_pair_color_key(animal_names, animal_colors, pair_alpha)
+end
+
+function plot_count_panel(summary, animal_names, animal_colors, ...
+    relation, level_name, x_label)
+in_area = summary.Area == "ALL";
+hold on
+yline(0, 'Color', 'r')
+plot_colored_markers(summary.NNeurons(in_area), ...
+    summary.MeanDifference(in_area), summary.AnimalID(in_area), ...
+    summary.Significant(in_area), animal_names, animal_colors)
+xlabel(x_label)
+ylabel('Mean play - pre PPC (atanh)')
+this_relation = relation(relation.Level == level_name & ...
+    relation.Area == "ALL", :);
+if height(this_relation) == 1
+    title({char(level_name), ...
+        sprintf('neuron-count ranksum p=%s', ...
+        format_p_value(this_relation.RanksumP)), ...
+        sprintf('effect Spearman \\rho=%.2f p=%s', ...
+        this_relation.SpearmanRho, format_p_value(this_relation.SpearmanP))})
+end
+end
+
+function plot_colored_markers(x, y, animal_id, is_significant, ...
+    animal_names, colors)
+x = x(:);
+y = y(:);
+animal_id = string(animal_id(:));
+is_significant = logical(is_significant(:));
+for ii = 1:numel(x)
+    if ~isfinite(x(ii)) || ~isfinite(y(ii))
+        continue
+    end
+    color = animal_color(animal_id(ii), animal_names, colors);
+    if is_significant(ii)
+        face = color;
+    else
+        face = 'none';
+    end
+    plot(x(ii), y(ii), 'o', ...
+        'MarkerEdgeColor', color, ...
+        'MarkerFaceColor', face, ...
+        'MarkerSize', 8, ...
+        'LineWidth', 1.2)
+end
+end
+
+function draw_pair_color_key(animal_names, animal_colors, pair_alpha)
+animal_names = string(animal_names(:));
+hold on
+key_handles = gobjects(numel(animal_names)+2, 1);
+key_handles(1) = plot(nan, nan, 'o', ...
+    'MarkerEdgeColor', [0.15 0.15 0.15], ...
+    'MarkerFaceColor', [0.15 0.15 0.15], ...
+    'MarkerSize', 8, ...
+    'DisplayName', sprintf('filled: p < %.2g', pair_alpha));
+key_handles(2) = plot(nan, nan, 'o', ...
+    'MarkerEdgeColor', [0.15 0.15 0.15], ...
+    'MarkerFaceColor', 'none', ...
+    'MarkerSize', 8, ...
+    'LineWidth', 1.2, ...
+    'DisplayName', 'open: not significant');
+for aa = 1:numel(animal_names)
+    key_handles(aa+2) = plot(nan, nan, 'o', ...
+        'MarkerEdgeColor', animal_colors(aa, :), ...
+        'MarkerFaceColor', animal_colors(aa, :), ...
+        'MarkerSize', 8, ...
+        'DisplayName', char(animal_names(aa)));
+end
+xlim([0 1])
+ylim([0 1])
+color_key = legend(key_handles, 'Location', 'best', ...
+    'FontSize', 7, 'Interpreter', 'none');
+set(gca, 'Visible', 'off')
+set(color_key, 'Visible', 'on')
+end
+
+function color = animal_color(animal_id, animal_names, colors)
+index = find(string(animal_names(:)) == string(animal_id), 1);
+if isempty(index)
+    color = [0.45 0.45 0.45];
+    return
+end
+color = colors(index, :);
+end
+
+function colors = paired_animal_colors(n_animals)
+if n_animals < 1
+    colors = zeros(0, 3);
+    return
+end
+hue = (0:n_animals-1)' / n_animals;
+colors = hsv2rgb([hue, repmat(0.75, n_animals, 1), repmat(0.90, n_animals, 1)]);
+end
+
+function label = format_p_value(p_value)
+if numel(p_value) ~= 1 || ~isfinite(p_value)
+    label = 'NA';
+    return
+end
+label = sprintf('%.3g', p_value);
 end
