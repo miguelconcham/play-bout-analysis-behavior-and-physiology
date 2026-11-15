@@ -412,14 +412,14 @@ for an = 1:numel(paper_areas)
     plot_paired_ppc(pre_z(in_area), play_z(in_area), axis_limit)
     title(sprintf('%s n=%d p=%s', paper_labels(an), sum(in_area), ...
         paired_signrank_text(pre_z(in_area), play_z(in_area))))
-    xlabel('Pre-play PPC (atanh)')
+    xlabel('Play PPC (atanh)')
     if an == 1
-        ylabel('Play PPC (atanh)')
+        ylabel('Pre-play PPC (atanh)')
     end
 end
 subplot(1, numel(paper_areas)+1, numel(paper_areas)+1)
 plot_paired_ppc(pre_z, play_z, axis_limit)
-xlabel('Pre-play PPC (atanh)')
+xlabel('Play PPC (atanh)')
 title(sprintf('ALL AREAS n=%d neurons, %d animals, p=%s', ...
     height(plot_rows), numel(unique(string(plot_rows.Animal))), ...
     paired_signrank_text(pre_z, play_z)))
@@ -756,11 +756,12 @@ end
 end
 
 function plot_paired_ppc(pre_z, play_z, axis_limit)
-plot(pre_z, play_z, 'k.')
+% Play is the horizontal axis and pre-play is the vertical axis.
+plot(play_z, pre_z, 'k.')
 hold on
 finite_pairs = isfinite(pre_z) & isfinite(play_z);
 if any(finite_pairs)
-    pair_median = [median(pre_z(finite_pairs)), median(play_z(finite_pairs))];
+    pair_median = [median(play_z(finite_pairs)), median(pre_z(finite_pairs))];
     plot(pair_median(1), pair_median(2), 'rx', 'LineWidth', 1.2)
 end
 plot(axis_limit, axis_limit, 'r-')
@@ -1056,7 +1057,7 @@ for an = 1:n_areas+1
     in_area = summary.Area == area_label;
     hold on
     plot(axis_limit, axis_limit, 'r-')
-    plot_colored_markers(summary.PreMean(in_area), summary.PlayMean(in_area), ...
+    plot_colored_markers(summary.PlayMean(in_area), summary.PreMean(in_area), ...
         summary.AnimalID(in_area), summary.Significant(in_area), ...
         animal_names, animal_colors)
     axis([axis_limit axis_limit])
@@ -1069,9 +1070,9 @@ for an = 1:n_areas+1
         summary.PreMean(in_area), summary.PlayMean(in_area)))), ...
         sprintf('%d/%d > 0, filled %d/%d', n_positive, n_units, ...
         n_significant, n_units)})
-    xlabel('Pre-play PPC (atanh)')
+    xlabel('Play PPC (atanh)')
     if an == 1
-        ylabel('Play PPC (atanh)')
+        ylabel('Pre-play PPC (atanh)')
     end
 end
 subplot(1, n_areas+2, n_areas+2)
