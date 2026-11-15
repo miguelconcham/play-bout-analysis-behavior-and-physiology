@@ -23,7 +23,9 @@
 % is the list of areas in the one-way and two-factor area ANOVAs. Those
 % ANOVAs keep a feature when oscillatory and non-oscillatory neurons
 % differ on the high-power value, or when high and low power differ
-% in the neurons that entered the split.
+% in the neurons that entered the split. Section 4 also draws each
+% high-power feature whose correlation with Baseline has Holm-Sidak
+% p below 0.05. Baseline is the median percentile-logit from 0.8 to 1 s.
 % Section 7 counts runs per neuron and spikes per run in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row of each figure keeps only the runs that
 % enter the ACG shuffle. It can run after section 1.
@@ -1175,6 +1177,16 @@ comparison_titles = { ...
     'Gamma R2', 'Gamma RMSE', ...
     'Diff-exp amplitude', 'Diff-exp rise', 'Diff-exp decay', 'Diff-exp baseline', ...
     'Diff-exp R2', 'Diff-exp RMSE', 'Peak amplitude', 'AUC'};
+baseline_names = comparison_names;
+baseline_titles = comparison_titles;
+if all(ismember({'Peak1', 'Peak2'}, feature_table.Properties.VariableNames))
+    baseline_names{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
+    baseline_titles{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
+end
+baseline_links = baseline_feature_links(feature_table, baseline_names, baseline_titles);
+draw_baseline_regressions(baseline_links, output_folder);
+write_summary_section(output_folder, '4. Features correlated with baseline', ...
+    baseline_link_report(baseline_links))
 low_names = feature_table_low.Properties.VariableNames;
 high_names = feature_table.Properties.VariableNames;
 high_compare = zeros(numel(osc_rows), 0);
@@ -7113,6 +7125,173 @@ if any(others)
     held = predictor_means(others) * beta(find(others) + 1);
 end
 y_line = beta(1) + beta(column + 1) * x_line + held;
+end
+
+
+function report = baseline_feature_links(feature_table, names, titles)
+%BASELINE_FEATURE_LINKS  Correlate each high-power feature with Baseline.
+%
+% Baseline is the median percentile-logit from 0.8 to 1 s. Each other
+% feature is regressed on that value. Holm-Sidak is applied across those
+% correlations.
+
+n = size(feature_table, 1);
+baseline = feature_column(feature_table, 'Baseline');
+columns = cell(1, numel(names));
+for j = 1:numel(names)
+    column = feature_column(feature_table, names{j});
+    if numel(column) ~= n
+        column = nan(n, 1);
+    end
+    columns{j} = column(:);
+end
+report = baseline_link_rows(baseline, columns, names, titles);
+report.missing = ~ismember('Baseline', feature_table.Properties.VariableNames);
+end
+
+
+function report = baseline_link_rows(baseline, columns, names, titles)
+%BASELINE_LINK_ROWS  Pearson correlation and slope of each column on Baseline.
+
+baseline = baseline(:);
+n_in = numel(names);
+use = false(1, n_in);
+r = nan(1, n_in);
+raw_p = nan(1, n_in);
+slope = nan(1, n_in);
+intercept = nan(1, n_in);
+n_pair = zeros(1, n_in);
+x_keep = cell(1, n_in);
+y_keep = cell(1, n_in);
+for j = 1:n_in
+    if strcmp(names{j}, 'Baseline')
+        continue
+    end
+    use(j) = true;
+    values = columns{j}(:);
+    n_copy = min(numel(baseline), numel(values));
+    x_all = baseline(1:n_copy);
+    y_all = values(1:n_copy);
+    ok = isfinite(x_all) & isfinite(y_all);
+    x = x_all(ok);
+    y = y_all(ok);
+    x_keep{j} = x;
+    y_keep{j} = y;
+    n_pair(j) = numel(x);
+    r(j) = column_pearson(x, y);
+    raw_p(j) = correlation_p(r(j), n_pair(j));
+    if n_pair(j) >= 3 && sum((x - mean(x)) .^ 2) > 0
+        slope(j) = sum((x - mean(x)) .* (y - mean(y))) / sum((x - mean(x)) .^ 2);
+        intercept(j) = mean(y) - slope(j) * mean(x);
+    end
+end
+holm = nan(1, n_in);
+if any(use)
+    adjusted = holm_sidak_adjust(raw_p(use));
+    holm(use) = adjusted(:).';
+end
+report.names = names(use);
+report.titles = titles(use);
+report.r = r(use);
+report.raw_p = raw_p(use);
+report.holm = holm(use);
+report.slope = slope(use);
+report.intercept = intercept(use);
+report.n = n_pair(use);
+report.x = x_keep(use);
+report.y = y_keep(use);
+report.kept = isfinite(report.holm) & report.holm < 0.05;
+end
+
+
+function draw_baseline_regressions(report, folder)
+%DRAW_BASELINE_REGRESSIONS  One panel per feature correlated with Baseline.
+
+if ~any(report.kept)
+    fprintf(['No feature correlated with Baseline at Holm-Sidak p below 0.05, ', ...
+        'so the baseline regression figure was not drawn.\n'])
+    return
+end
+kept = find(report.kept);
+n_panels = numel(kept);
+n_cols = min(5, n_panels);
+n_rows = ceil(n_panels / n_cols);
+open_full_figure('Features correlated with baseline')
+tiledlayout(n_rows, n_cols, 'TileSpacing', 'compact')
+for s = 1:n_panels
+    j = kept(s);
+    nexttile
+    x = report.x{j};
+    y = report.y{j};
+    hold on
+    plot(x, y, 'o', 'MarkerFaceColor', [0.25 0.25 0.25], ...
+        'MarkerEdgeColor', 'none', 'MarkerSize', 5)
+    if isfinite(report.slope(j)) && ~isempty(x)
+        x_line = linspace(min(x), max(x), 40);
+        plot(x_line, report.intercept(j) + report.slope(j) * x_line, ...
+            'Color', [0.75 0.15 0.15], 'LineWidth', 1.6)
+    end
+    xlabel('Baseline')
+    ylabel(report.titles{j}, 'Interpreter', 'none')
+    title({report.titles{j}, ...
+        sprintf('slope = %.3g', report.slope(j)), ...
+        sprintf('Holm p = %.3g', report.holm(j))}, 'Interpreter', 'none')
+    box off
+end
+sgtitle({'High-power percentile-logit features against Baseline.', ...
+    'Baseline is the median logit of the sum-to-1 shuffle percentile from 0.8 to 1 s.', ...
+    'Each point is one neuron. The line regresses that feature on Baseline.', ...
+    'A panel is included when the Holm-Sidak p of its correlation is below 0.05.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+fprintf('Baseline regression panels: %s\n', strjoin(report.titles(kept), ', '))
+end
+
+
+function text = baseline_link_report(report)
+%BASELINE_LINK_REPORT  Summary of the Baseline correlations.
+
+lines = { ...
+    'Baseline is the median of the high-power sum-to-1 percentile-logit autocorrelogram from 0.8 to 1 s.', ...
+    'The percentile is pulled in by half a shuffle count before the logit, so it cannot be exactly 0 or 100.', ...
+    'Each other high-power feature is compared with Baseline by a Pearson correlation.', ...
+    'The slope is from the regression of that feature on Baseline. Its p-value is the Pearson p.', ...
+    'A neuron is used for a feature only when both values are finite.', ...
+    'Holm-Sidak adjusts these correlations together.', ...
+    'A feature is drawn when that adjusted p is below 0.05.', ...
+    'Gamma baseline and diff-exp baseline are the offsets of those curve fits. They are not this tail median.'};
+if isfield(report, 'missing') && report.missing
+    lines{end + 1} = 'Baseline is not in the high-power feature table, so the correlations were not run.'; %#ok<AGROW>
+end
+if ~isfield(report, 'titles') || isempty(report.titles)
+    if isfield(report, 'lines') && ~isempty(report.lines)
+        lines = [lines, report.lines(:)']; %#ok<AGROW>
+    else
+        lines{end + 1} = 'No feature was compared with Baseline.'; %#ok<AGROW>
+    end
+    text = strjoin(lines, newline);
+    return
+end
+lines{end + 1} = sprintf('%-28s %8s %10s %10s %10s %8s', ...
+    'Feature', 'r', 'p', 'Holm', 'slope', 'n'); %#ok<AGROW>
+for j = 1:numel(report.titles)
+    if report.kept(j)
+        decision = 'drawn';
+    else
+        decision = 'left out';
+    end
+    lines{end + 1} = sprintf('%-28s %8s %10s %10s %10s %8.0f  %s', ...
+        report.titles{j}, stat_num(report.r(j), '%.3f'), ...
+        stat_num(report.raw_p(j), '%.3g'), stat_num(report.holm(j), '%.3g'), ...
+        stat_num(report.slope(j), '%.3g'), report.n(j), decision); %#ok<AGROW>
+end
+drawn = report.titles(report.kept);
+if isempty(drawn)
+    lines{end + 1} = 'No feature was drawn.'; %#ok<AGROW>
+else
+    lines{end + 1} = ['Drawn: ', strjoin(drawn, ', '), '.']; %#ok<AGROW>
+end
+text = strjoin(lines, newline);
 end
 
 
