@@ -19,9 +19,8 @@
 % Section 3 keeps cluster 1 of cluster_method, the higher-modulation group.
 % cluster_method is 'ward' or 'kmeans'. Ward is the default.
 % Section 4 only draws. After section 3 has run, edit section 4 and run
-% that section alone. Each area ANOVA is drawn twice. The first copy
-% leaves VLPAG out. The second copy includes it. Each copy has its own
-% Holm-Sidak correction.
+% that section alone. area_comparison_areas, at the start of that section,
+% is the list of areas in the one-way and two-factor area ANOVAs.
 % Section 7 counts runs per neuron and spikes per run in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row of each figure keeps only the runs that
 % enter the ACG shuffle. It can run after section 1.
@@ -36,9 +35,11 @@
 % Figure files are prefixed with nonosc_description_. This script does not read or
 % write the files saved by Plot_acg_population_logit or
 % Plot_acg_population_nonoscillatory.
-% n_example_neurons, n_neurons_per_figure, example_smooth_half_s,
-% example_skip_abs_lag_s, and plot_example_neurons_only are set at the
-% start of section 4. n_example_neurons chooses how many of the strongest
+% area_comparison_areas, n_example_neurons, n_neurons_per_figure,
+% example_smooth_half_s, example_skip_abs_lag_s, and
+% plot_example_neurons_only are set at the start of section 4.
+% area_comparison_areas chooses which areas enter the area ANOVAs.
+% n_example_neurons chooses how many of the strongest
 % oscillatory neurons are drawn. The examples also keep the strongest
 % oscillatory neuron from each analysed area except VLPAG, so that count
 % can be larger than n_example_neurons. n_neurons_per_figure is how many
@@ -833,6 +834,11 @@ n_neurons_per_figure = 3;
 example_smooth_half_s = 0.06;
 example_skip_abs_lag_s = 0.02;
 plot_example_neurons_only = false;
+% Areas in the one-way and two-factor area ANOVAs, in axis order.
+% Delete a name to leave that area out. Neurons with any other label,
+% including an unstored area, stay out. A feature still needs two finite
+% values in an area before that area enters its test.
+area_comparison_areas = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 this_dir = fileparts(mfilename('fullpath'));
 addpath(fileparts(this_dir));
 addpath(this_dir);
@@ -1399,36 +1405,27 @@ component_feature_names = {osc_feature_names, nonosc_names};
 component_feature_titles = {osc_feature_titles, nonosc_titles};
 component_labels = {'oscillatory', 'non-oscillatory'};
 n_descriptor_cols = 5;
+area_scope = ['Areas: ', strjoin(area_comparison_areas, ', '), '.'];
 for g = 1:2
-    for include_vlpag = [false true]
-        if include_vlpag
-            area_skip = {'area unknown'};
-            area_name_suffix = ' including VLPAG';
-            area_caption = 'VLPAG is included.';
-            area_summary = 'VLPAG is included. Neurons without a stored area are excluded.';
-        else
-            area_skip = {'VLPAG', 'area unknown'};
-            area_name_suffix = '';
-            area_caption = 'VLPAG is left out.';
-            area_summary = 'VLPAG is excluded. Neurons without a stored area are excluded.';
-        end
-        area_anova = area_feature_anova(feature_table, neuron_area, ...
-            component_feature_names{g}, component_feature_titles{g}, area_skip);
-        draw_area_feature_figure(area_anova, output_folder, n_descriptor_cols, ...
-            [component_labels{g}, ' features by brain area', area_name_suffix], ...
-            {['High-power ', component_labels{g}, ' features by brain area. ', area_caption], ...
-            'Holm-Sidak is computed only across the features in this figure.', ...
-            'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
-        write_summary_section(output_folder, ...
-            ['4. ', component_labels{g}, ' features by brain area', area_name_suffix], ...
-            area_feature_report(area_anova, { ...
-            ['One-way ANOVA of each high-power ', component_labels{g}, ' feature, with brain area as the factor.'], ...
-            area_summary, ...
-            'An area is included in a feature only when it has at least two finite values.', ...
-            'Holm-Sidak adjusts the ANOVA p-values only across the features in this figure.', ...
-            'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
-            'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
-    end
+    area_anova = area_feature_anova(feature_table, neuron_area, ...
+        component_feature_names{g}, component_feature_titles{g}, area_comparison_areas);
+    draw_area_feature_figure(area_anova, output_folder, n_descriptor_cols, ...
+        [component_labels{g}, ' features by brain area'], ...
+        {['High-power ', component_labels{g}, ' features by brain area.'], ...
+        area_scope, ...
+        'Holm-Sidak is computed only across the features in this figure.', ...
+        'Points are neurons. Bars are means. Stars mark pairwise differences after a significant ANOVA.'})
+    write_summary_section(output_folder, ...
+        ['4. ', component_labels{g}, ' features by brain area'], ...
+        area_feature_report(area_anova, { ...
+        ['One-way ANOVA of each high-power ', component_labels{g}, ' feature, with brain area as the factor.'], ...
+        'The areas are area_comparison_areas, in that order.', ...
+        area_scope, ...
+        'Neurons in any other area, including an unstored area, are excluded.', ...
+        'An area is included in a feature only when it has at least two finite values.', ...
+        'Holm-Sidak adjusts the ANOVA p-values only across the features in this figure.', ...
+        'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
+        'Those pairs are then Holm-Sidak adjusted within the feature. Stars use that adjusted p.'}))
 end
 lock_anova = repmat(empty_area_anova(), 0, 1);
 osc_lock_anova = lock_anova;
@@ -1479,61 +1476,56 @@ end
 osc_two_way_names = {'Modulation1', 'Modulation2', 'Baseline', 'Peak2', 'Trough1', 'Peak1 - Peak2'};
 two_way_name_sets = {osc_two_way_names, nonoscillatory_feature_names()};
 for g = 1:2
-    for include_vlpag = [false true]
-        if include_vlpag
-            two_way_suffix = ' including VLPAG';
-            two_way_caption = 'VLPAG is included. Neurons without a stored area and non-classified cells are left out.';
-            two_way_summary = 'Neurons without a stored area and non-classified cells are excluded. VLPAG is included.';
-        else
-            two_way_suffix = '';
-            two_way_caption = 'VLPAG is left out, as are neurons without a stored area and non-classified cells.';
-            two_way_summary = 'VLPAG, neurons without a stored area, and non-classified cells are excluded.';
-        end
-        [two_way_samples, two_way_with, two_way_without] = two_way_component_models( ...
-            feature_table, neuron_area, neuron_type, ...
-            area_feature_names, area_feature_titles, two_way_name_sets{g}, include_vlpag);
-        two_way_panel_names = cell(1, numel(two_way_samples));
-        for j = 1:numel(two_way_samples)
-            two_way_panel_names{j} = two_way_samples{j}.feature;
-        end
-        if isempty(two_way_panel_names)
-            two_way_panel_line = 'No feature in this group was drawn.';
-        else
-            two_way_panel_line = ['Panels: ', strjoin(two_way_panel_names, ', '), '.'];
-        end
-        draw_two_way_panels(two_way_samples, two_way_with, output_folder, ...
-            ['Two-factor ANOVA with interaction, ', component_labels{g}, ' features', two_way_suffix], ...
-            {'Area and cell type, with an interaction.', ...
-            [component_labels{g}, ' features only.'], ...
-            two_way_caption, ...
-            'Blue is trough, red is peak, green is unlocked.', ...
-            'Holm-Sidak is computed only across the terms in this figure.'})
-        draw_two_way_panels(two_way_samples, two_way_without, output_folder, ...
-            ['Two-factor ANOVA without interaction, ', component_labels{g}, ' features', two_way_suffix], ...
-            {'Area and cell type, without an interaction.', ...
-            [component_labels{g}, ' features only.'], ...
-            two_way_caption, ...
-            'Blue is trough, red is peak, green is unlocked.', ...
-            'Holm-Sidak is computed only across the terms in this figure.'})
-        write_summary_section(output_folder, ...
-            ['4. Two-factor ANOVA with interaction, ', component_labels{g}, ' features', two_way_suffix], ...
-            two_way_report(two_way_samples, two_way_with, { ...
-            two_way_panel_line, ...
-            'The model is area + cell type + area x cell type.', ...
-            'Each term is tested after the other terms, with effect coding.', ...
-            two_way_summary, ...
-            'Holm-Sidak adjusts every term in this figure together. The other component group is a separate comparison.', ...
-            'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
-        write_summary_section(output_folder, ...
-            ['4. Two-factor ANOVA without interaction, ', component_labels{g}, ' features', two_way_suffix], ...
-            two_way_report(two_way_samples, two_way_without, { ...
-            two_way_panel_line, ...
-            'The model is area + cell type, with no interaction.', ...
-            'Each main effect is tested after the other main effect.', ...
-            two_way_summary, ...
-            'Holm-Sidak adjusts every term in this figure together. The other component group is a separate comparison.', ...
-            'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
+    [two_way_samples, two_way_with, two_way_without] = two_way_component_models( ...
+        feature_table, neuron_area, neuron_type, ...
+        area_feature_names, area_feature_titles, two_way_name_sets{g}, area_comparison_areas);
+    two_way_panel_names = cell(1, numel(two_way_samples));
+    for j = 1:numel(two_way_samples)
+        two_way_panel_names{j} = two_way_samples{j}.feature;
     end
+    if isempty(two_way_panel_names)
+        two_way_panel_line = 'No feature in this group was drawn.';
+    else
+        two_way_panel_line = ['Panels: ', strjoin(two_way_panel_names, ', '), '.'];
+    end
+    draw_two_way_panels(two_way_samples, two_way_with, output_folder, ...
+        ['Two-factor ANOVA with interaction, ', component_labels{g}, ' features'], ...
+        {'Area and cell type, with an interaction.', ...
+        [component_labels{g}, ' features only.'], ...
+        area_scope, ...
+        'Neurons outside that list and non-classified cells are left out.', ...
+        'Blue is trough, red is peak, green is unlocked.', ...
+        'Holm-Sidak is computed only across the terms in this figure.'})
+    draw_two_way_panels(two_way_samples, two_way_without, output_folder, ...
+        ['Two-factor ANOVA without interaction, ', component_labels{g}, ' features'], ...
+        {'Area and cell type, without an interaction.', ...
+        [component_labels{g}, ' features only.'], ...
+        area_scope, ...
+        'Neurons outside that list and non-classified cells are left out.', ...
+        'Blue is trough, red is peak, green is unlocked.', ...
+        'Holm-Sidak is computed only across the terms in this figure.'})
+    write_summary_section(output_folder, ...
+        ['4. Two-factor ANOVA with interaction, ', component_labels{g}, ' features'], ...
+        two_way_report(two_way_samples, two_way_with, { ...
+        two_way_panel_line, ...
+        'The model is area + cell type + area x cell type.', ...
+        'Each term is tested after the other terms, with effect coding.', ...
+        'The areas are area_comparison_areas, in that order.', ...
+        area_scope, ...
+        'Neurons in any other area, including an unstored area, and non-classified cells are excluded.', ...
+        'Holm-Sidak adjusts every term in this figure together. The other component group is a separate comparison.', ...
+        'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
+    write_summary_section(output_folder, ...
+        ['4. Two-factor ANOVA without interaction, ', component_labels{g}, ' features'], ...
+        two_way_report(two_way_samples, two_way_without, { ...
+        two_way_panel_line, ...
+        'The model is area + cell type, with no interaction.', ...
+        'Each main effect is tested after the other main effect.', ...
+        'The areas are area_comparison_areas, in that order.', ...
+        area_scope, ...
+        'Neurons in any other area, including an unstored area, and non-classified cells are excluded.', ...
+        'Holm-Sidak adjusts every term in this figure together. The other component group is a separate comparison.', ...
+        'A term is listed with its statistic only when that adjusted p is below 0.05.'}))
 end
 classifier_method = {'svm', 'naivebayes', 'lda'};
 classifier_method_name = classifier_method_text(classifier_method);
@@ -3068,35 +3060,43 @@ s.pairs(1) = [];
 end
 
 
-function [groups, names] = values_by_area(feature_table, neuron_area, feature_name, skip_names, min_n)
+function [groups, names] = values_by_area(feature_table, neuron_area, feature_name, kept_areas, min_n)
 values = feature_column(feature_table, feature_name);
 labels = cell(numel(neuron_area), 1);
 for i = 1:numel(neuron_area)
     labels{i} = area_display_name(neuron_area{i});
 end
-if any(strcmpi(skip_names, 'VLPAG'))
-    ordered = {'SC', 'LPAG', 'DLPAG', 'DR'};
-else
-    ordered = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
-end
-for i = 1:numel(labels)
-    if ~any(strcmp(ordered, labels{i}))
-        ordered{end + 1} = labels{i}; %#ok<AGROW>
-    end
+if nargin < 4 || isempty(kept_areas)
+    kept_areas = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 end
 groups = {};
 names = {};
-for k = 1:numel(ordered)
-    if any(strcmpi(skip_names, ordered{k}))
+for k = 1:numel(kept_areas)
+    this_name = strtrim(char(kept_areas{k}));
+    if isempty(this_name)
         continue
     end
-    y = values(strcmp(labels, ordered{k}));
+    matched = strcmpi(labels, this_name);
+    y = values(matched);
     y = y(isfinite(y));
     if numel(y) < min_n
         continue
     end
+    shown = labels(matched);
     groups{end + 1} = y(:); %#ok<AGROW>
-    names{end + 1} = ordered{k}; %#ok<AGROW>
+    names{end + 1} = shown{1}; %#ok<AGROW>
+end
+end
+
+
+function tf = area_is_selected(label, kept_areas)
+tf = false;
+label = strtrim(char(label));
+for k = 1:numel(kept_areas)
+    if strcmpi(label, strtrim(char(kept_areas{k})))
+        tf = true;
+        return
+    end
 end
 end
 
@@ -3191,11 +3191,11 @@ p = betainc(df2 / (df2 + df1 * F), df2 / 2, df1 / 2);
 end
 
 
-function sample = two_way_sample(feature_table, neuron_area, neuron_type, feature_name, include_vlpag)
+function sample = two_way_sample(feature_table, neuron_area, neuron_type, feature_name, kept_areas)
 %TWO_WAY_SAMPLE  Neurons kept for an area-by-cell-type ANOVA.
 
-if nargin < 5 || isempty(include_vlpag)
-    include_vlpag = false;
+if nargin < 5 || isempty(kept_areas)
+    kept_areas = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 end
 values = feature_column(feature_table, feature_name);
 n = numel(values);
@@ -3217,9 +3217,7 @@ for i = 1:n
     if ~keep(i)
         continue
     end
-    if strcmp(areas{i}, 'area unknown') || (~include_vlpag && strcmpi(areas{i}, 'VLPAG'))
-        keep(i) = false;
-    elseif ~any(strcmp(types{i}, kept_types))
+    if ~area_is_selected(areas{i}, kept_areas) || ~any(strcmp(types{i}, kept_types))
         keep(i) = false;
     end
 end
@@ -3227,19 +3225,19 @@ sample.y = values(keep);
 sample.area = areas(keep);
 sample.type = types(keep);
 sample.feature = feature_name;
-if include_vlpag
-    preferred = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
-else
-    preferred = {'SC', 'LPAG', 'DLPAG', 'DR'};
+preferred = cell(1, numel(kept_areas));
+for k = 1:numel(kept_areas)
+    preferred{k} = strtrim(char(kept_areas{k}));
 end
 sample.area_names = {};
 for k = 1:numel(preferred)
-    if any(strcmp(sample.area, preferred{k}))
-        sample.area_names{end + 1} = preferred{k}; %#ok<AGROW>
+    hit = find(strcmpi(sample.area, preferred{k}), 1);
+    if ~isempty(hit)
+        sample.area_names{end + 1} = sample.area{hit}; %#ok<AGROW>
     end
 end
 for i = 1:numel(sample.area)
-    if ~any(strcmp(sample.area_names, sample.area{i}))
+    if ~any(strcmpi(sample.area_names, sample.area{i}))
         sample.area_names{end + 1} = sample.area{i}; %#ok<AGROW>
     end
 end
@@ -5147,15 +5145,15 @@ end
 end
 
 
-function anova = area_feature_anova(feature_table, neuron_area, feature_names, feature_titles, skip_names)
-if nargin < 5 || isempty(skip_names)
-    skip_names = {'VLPAG', 'area unknown'};
+function anova = area_feature_anova(feature_table, neuron_area, feature_names, feature_titles, kept_areas)
+if nargin < 5 || isempty(kept_areas)
+    kept_areas = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 end
 n_features = numel(feature_names);
 anova = repmat(empty_area_anova(), n_features, 1);
 for j = 1:n_features
     [groups, names] = values_by_area(feature_table, neuron_area, ...
-        feature_names{j}, skip_names, 2);
+        feature_names{j}, kept_areas, 2);
     anova(j).feature = feature_titles{j};
     anova(j).areas = names;
     anova(j).groups = groups;
@@ -5268,9 +5266,9 @@ end
 
 
 function [samples, with_models, without_models] = two_way_component_models( ...
-    feature_table, neuron_area, neuron_type, all_names, all_titles, wanted_names, include_vlpag)
-if nargin < 7 || isempty(include_vlpag)
-    include_vlpag = false;
+    feature_table, neuron_area, neuron_type, all_names, all_titles, wanted_names, kept_areas)
+if nargin < 7 || isempty(kept_areas)
+    kept_areas = {'SC', 'LPAG', 'VLPAG', 'DLPAG', 'DR'};
 end
 samples = {};
 with_models = {};
@@ -5281,7 +5279,7 @@ for j = 1:numel(wanted_names)
         continue
     end
     sample = two_way_sample(feature_table, neuron_area, neuron_type, ...
-        all_names{feature_index}, include_vlpag);
+        all_names{feature_index}, kept_areas);
     sample.feature = all_titles{feature_index};
     [area_idx, type_idx] = two_way_indices(sample);
     n_area = numel(sample.area_names);
@@ -5536,7 +5534,7 @@ function text = area_feature_report(area_anova, intro)
 if nargin < 2 || isempty(intro)
     intro = { ...
         'One-way ANOVA of each high-power oscillatory feature, with brain area as the factor.', ...
-        'VLPAG is excluded. Neurons without a stored area are excluded.', ...
+        'The areas are area_comparison_areas. Neurons in any other area are excluded.', ...
         'An area is included in a feature only when it has at least two finite values.', ...
         'Holm-Sidak adjusts the ANOVA p-values across features.', ...
         'Pairwise equal-variance t-tests are run only when that ANOVA Holm-Sidak p is below 0.05.', ...
