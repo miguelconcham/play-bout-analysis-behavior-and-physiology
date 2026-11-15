@@ -5,13 +5,17 @@ function features = acg_nonoscillatory_components(acg_matrix, lags)
 % match the columns. Only positive lags are used. The gamma kernel is
 % amplitude * lag^(shape-1) * exp(-lag/scale), divided by its own peak,
 % plus a baseline. Amplitude is then the height of that bump. The
-% difference of exponentials is amplitude * (exp(-lag/decay) -
-% exp(-lag/rise)), plus a baseline, with decay longer than rise. The table
-% holds each fit's parameters and its goodness of fit. R2 is 1 minus the
-% residual sum of squares over the total sum of squares. RMSE is the root
-% mean squared residual. PeakAmplitude is the maximum of the positive-lag
-% curve, and AUC is its integral over lag in seconds. Those two do not use
-% the fit. A neuron whose curve cannot be fit is NaN in the fit columns.
+% difference of exponentials is the same kind of height: amplitude times
+% (exp(-lag/decay) - exp(-lag/rise)), divided by that kernel's own peak,
+% plus a baseline, with decay longer than rise. Dividing by the peak keeps
+% amplitude on the scale of the curve. Without that division, a decay that
+% sits close to the rise makes the raw kernel tiny and the amplitude runs
+% away to the top of the floating-point range. The table holds each fit's
+% parameters and its goodness of fit. R2 is 1 minus the residual sum of
+% squares over the total sum of squares. RMSE is the root mean squared
+% residual. PeakAmplitude is the maximum of the positive-lag curve, and
+% AUC is its integral over lag in seconds. Those two do not use the fit.
+% A neuron whose curve cannot be fit is NaN in the fit columns.
 
 acg_matrix = double(acg_matrix);
 lags = double(lags(:)).';
@@ -131,7 +135,8 @@ end
 
 
 function row = fit_difference_of_exponentials(t, y, options)
-% y = baseline + amplitude * (exp(-t/decay) - exp(-t/rise)), decay > rise
+% y = baseline + amplitude * unit-peak kernel, decay > rise.
+% amplitude is the height of the bump, matching GammaAmplitude.
 row = nan(1, 6);
 baseline0 = max(median(y(max(1, end - 4):end)), 0);
 peak = max(y) - baseline0;
@@ -140,9 +145,7 @@ if ~isfinite(peak) || peak <= 0
 end
 rise0 = max(min(t(t > 0)), 0.005);
 decay0 = max(0.05, rise0 * 4);
-height0 = exp_difference_height(rise0, decay0);
-amplitude0 = peak / max(height0, 1e-6);
-start = log([max(amplitude0, 1e-6), rise0, decay0 - rise0, max(baseline0, 1e-6)]);
+start = log([max(peak, 1e-6), rise0, decay0 - rise0, max(baseline0, 1e-6)]);
 try
     x = fminsearch(@(z) diffexp_loss(z, t, y), start, options);
 catch
@@ -155,7 +158,15 @@ amplitude = exp(x(1));
 rise = exp(x(2));
 decay = rise + exp(x(3));
 baseline = exp(x(4));
-yhat = baseline + amplitude * (exp(-t ./ decay) - exp(-t ./ rise));
+kernel = unit_diffexp_kernel(t, rise, decay);
+if any(~isfinite(kernel))
+    return
+end
+data_scale = max(1, max(abs(y)));
+if ~isfinite(amplitude) || amplitude > 1e6 * data_scale
+    return
+end
+yhat = baseline + amplitude * kernel;
 [r2, rmse] = goodness_of_fit(y, yhat);
 row = [amplitude, rise, decay, baseline, r2, rmse];
 end
@@ -166,11 +177,16 @@ amplitude = exp(x(1));
 rise = exp(x(2));
 decay = rise + exp(x(3));
 baseline = exp(x(4));
-if rise < 0.001 || decay > 3
+if rise < 0.001 || decay > 3 || ~isfinite(amplitude)
     loss = 1e6;
     return
 end
-yhat = baseline + amplitude * (exp(-t ./ decay) - exp(-t ./ rise));
+kernel = unit_diffexp_kernel(t, rise, decay);
+if any(~isfinite(kernel))
+    loss = 1e6;
+    return
+end
+yhat = baseline + amplitude * kernel;
 if any(~isfinite(yhat))
     loss = 1e6;
     return
@@ -179,14 +195,44 @@ loss = mean((y - yhat) .^ 2);
 end
 
 
-function height = exp_difference_height(rise, decay)
-% Maximum of exp(-t/decay) - exp(-t/rise) for decay > rise.
-if ~(decay > rise)
-    height = 0;
+function kernel = unit_diffexp_kernel(t, rise, decay)
+%UNIT_DIFFEXP_KERNEL  Difference of exponentials scaled to a peak of 1.
+%
+% When decay is barely longer than rise, exp(-t/decay) - exp(-t/rise)
+% underflows. The shape then matches (t/rise) * exp(1 - t/rise), which
+% already peaks at 1. Amplitude stays the bump height in either case.
+
+kernel = nan(size(t));
+if ~isfinite(rise) || ~isfinite(decay) || rise <= 0 || ~(decay > rise)
     return
 end
-t_peak = log(decay / rise) / (1 / rise - 1 / decay);
-height = exp(-t_peak / decay) - exp(-t_peak / rise);
+rel = (decay - rise) / rise;
+if rel < 1e-6
+    u = t ./ rise;
+    kernel = u .* exp(1 - u);
+    kernel(t <= 0 | ~isfinite(kernel)) = 0;
+    peak = max(kernel);
+    if ~isfinite(peak) || peak <= 0
+        kernel = nan(size(t));
+        return
+    end
+    kernel = kernel ./ peak;
+    return
+end
+raw = exp(-t ./ decay) - exp(-t ./ rise);
+t_peak = rise * decay * log(1 + rel) / (decay - rise);
+height = exp(-t_peak / rise) * rel;
+if ~isfinite(height) || height <= 0
+    return
+end
+kernel = raw ./ height;
+kernel(~isfinite(kernel) | t <= 0) = 0;
+peak = max(kernel);
+if ~isfinite(peak) || peak <= 0
+    kernel = nan(size(t));
+    return
+end
+kernel = kernel ./ peak;
 end
 
 

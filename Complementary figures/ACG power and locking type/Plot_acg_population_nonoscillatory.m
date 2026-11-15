@@ -1787,6 +1787,12 @@ if ~exist('feature_table_low', 'var') || size(feature_table_low, 1) ~= numel(neu
     feature_table_low = append_nonosc_features( ...
         feature_table_low, imagesc_sum_power_low, lag);
 end
+if exist('imagesc_sum_power_high', 'var') && exist('lag', 'var')
+    feature_table = append_nonosc_features(feature_table, imagesc_sum_power_high, lag);
+end
+if exist('feature_table_low', 'var') && exist('imagesc_sum_power_low', 'var') && exist('lag', 'var')
+    feature_table_low = append_nonosc_features(feature_table_low, imagesc_sum_power_low, lag);
+end
 if ~exist('n_shuffles', 'var') || isempty(n_shuffles)
     n_shuffles = 500;
 end
@@ -1972,18 +1978,14 @@ else
                 sum(both_non), numel(nonosc_gap_names)), ...
             'The model was not fit.'))
     else
-        nonosc_change = columns_with_tail_change(gap_x_non);
+        [nonosc_change, nonosc_why] = columns_with_tail_change(gap_x_non);
         if ~any(nonosc_change) || size(gap_x_non, 1) < nnz(nonosc_change) + 2
-            constant_names = 'none';
-            if any(~nonosc_change)
-                constant_names = strjoin(gap_names_non(~nonosc_change), ', ');
-            end
             write_summary_section(output_folder, ...
                 '5e. Delta-power gap from non-oscillatory features', join_summary_lines( ...
                 'No predictor has a high-minus-low change that can enter the model, so it was not fit.', ...
-                'A constant gap is judged within that predictor. A huge constant column does not hide a smaller change in another predictor.', ...
-                ['Unchanged predictors: ', constant_names, '.'], ...
-                sprintf('Neurons with both tails: %d. Predictors with a change: %d.', ...
+                'A constant gap is judged within that predictor. A column that is not finite on a usable scale is left out on its own and does not remove the other predictors.', ...
+                tail_change_drop_line(gap_names_non, nonosc_why), ...
+                sprintf('Neurons with both tails: %d. Predictors with a usable change: %d.', ...
                     size(gap_x_non, 1), nnz(nonosc_change))))
             write_summary_section(output_folder, ...
                 '5f. Delta-power gap from non-oscillatory features, non-oscillatory neurons', ...
@@ -2017,7 +2019,7 @@ else
                 nonosc_gap.n, sum(gap_osc_non == 1), sum(gap_osc_non == 0)), ...
             gap_fit_lines(nonosc_gap)))
         nonosc_only = gap_osc_non == 0;
-        nonosc_only_change = columns_with_tail_change(gap_x_non(nonosc_only, :));
+        [nonosc_only_change, nonosc_only_why] = columns_with_tail_change(gap_x_non(nonosc_only, :));
         if sum(nonosc_only) < min_gap_n
             write_summary_section(output_folder, ...
                 '5f. Delta-power gap from non-oscillatory features, non-oscillatory neurons', ...
@@ -2029,7 +2031,8 @@ else
                 '5f. Delta-power gap from non-oscillatory features, non-oscillatory neurons', ...
                 join_summary_lines( ...
                 'No predictor changes between the tails in the non-oscillatory neurons, so this model was not fit.', ...
-                sprintf('Non-oscillatory neurons: %d. Predictors with a change: %d.', ...
+                tail_change_drop_line(gap_names_non, nonosc_only_why), ...
+                sprintf('Non-oscillatory neurons: %d. Predictors with a usable change: %d.', ...
                     sum(nonosc_only), nnz(nonosc_only_change))))
         else
             nonosc_only_gap = fit_within_neuron_gap(gap_raw_non(nonosc_only), ...
@@ -5304,6 +5307,13 @@ function fit = fit_power_feature_model(y, X, names, cluster_id, weights)
 % the standard errors are cluster-robust, using the same G/(G-1) factor
 % and G - p degrees of freedom as the locking-period oscillation fits.
 % weights give each neuron total weight 1 when a neuron has two strata.
+% Each predictor is divided by its weighted dispersion before the solve
+% and the coefficients are scaled back. They stay in the original units.
+% The collinearity check uses that scaled design, so a column in seconds
+% is not treated as collinear with a column in spikes per second. A column
+% whose values overflow the normal equations still has to be left out
+% before this fit. Scaling cannot recover a column at the top of the
+% floating-point range.
 
 y = y(:);
 n = size(X, 1);
@@ -5319,6 +5329,8 @@ if nargin < 4
     cluster_id = [];
 end
 A = [ones(n, 1), X];
+scale = design_column_scale(A, weights);
+As = bsxfun(@rdivide, A, scale);
 fit.names = [{'Intercept'}, names];
 fit.n = n;
 fit.p = size(A, 2);
@@ -5328,10 +5340,10 @@ fit.clustered = ~isempty(cluster_id);
 fit.n_clusters = nan;
 fit.df = fit.df_resid;
 sw = sqrt(weights);
-Aw = A .* sw;
+Aw = As .* sw;
 yw = y .* sw;
-fit.beta = Aw \ yw;
-fit.beta = fit.beta(:);
+beta_scaled = Aw \ yw;
+fit.beta = beta_scaled(:) ./ scale(:);
 resid = y - A * fit.beta;
 ss_res = sum(weights .* resid .^ 2);
 y_bar = sum(weights .* y) / sum(weights);
@@ -5363,7 +5375,7 @@ end
 if ~fit.clustered
     if fit.df > 0 && fit.sigma > 0
         covariance = (fit.sigma ^ 2) * inv(xtx);
-        fit.se = sqrt(max(diag(covariance), 0));
+        fit.se = sqrt(max(diag(covariance), 0)) ./ scale(:);
         fit.t = fit.beta ./ fit.se;
         for i = 1:fit.p
             fit.p_value(i) = two_sided_t_p(fit.t(i), fit.df);
@@ -5388,13 +5400,14 @@ bread = inv(xtx);
 meat = zeros(fit.p, fit.p);
 for i = 1:G
     in = cluster_id == ids(i);
-    score = A(in, :)' * (weights(in) .* resid(in));
+    score = As(in, :)' * (weights(in) .* resid(in));
     meat = meat + score * score';
 end
 if G > 1
     meat = meat * (G / (G - 1));
 end
 V = bread * meat * bread;
+V = V ./ (scale(:) * scale(:)');
 V = (V + V') / 2;
 fit.se = sqrt(max(real(diag(V)), 0));
 fit.t = fit.beta ./ fit.se;
@@ -5418,6 +5431,29 @@ end
 end
 
 
+function scale = design_column_scale(A, weights)
+%DESIGN_COLUMN_SCALE  Weighted dispersion of each predictor. The intercept stays 1.
+
+p = size(A, 2);
+scale = ones(1, p);
+total = sum(weights);
+if ~isfinite(total) || total <= 0
+    return
+end
+for j = 2:p
+    column = A(:, j);
+    if any(~isfinite(column))
+        continue
+    end
+    mu = sum(weights .* column) / total;
+    sigma = sqrt(sum(weights .* (column - mu) .^ 2) / total);
+    if isfinite(sigma) && sigma > 0
+        scale(j) = sigma;
+    end
+end
+end
+
+
 function result = fit_within_neuron_gap(gap_raw, gap_log, gap_x, names, sample_name)
 %FIT_WITHIN_NEURON_GAP  Power gap on predictor gaps, plus their correlation.
 
@@ -5432,20 +5468,14 @@ if size(gap_x, 1) < 3
     error('Plot_acg_population_logit:powerModel', ...
         'Too few neurons for the gap model (%s).', sample_name);
 end
-keep = columns_with_tail_change(gap_x);
+[keep, why] = columns_with_tail_change(gap_x);
 if ~any(keep)
     error('Plot_acg_population_logit:powerModel', ...
         'No predictor changes between the tails for %s.', sample_name);
 end
-dropped = names(~keep);
+result.dropped_line = tail_change_drop_line(names, why);
 names = names(keep);
 gap_x = gap_x(:, keep);
-if isempty(dropped)
-    result.dropped_line = 'Every listed predictor has some high-minus-low change.';
-else
-    result.dropped_line = ['Left out because the high-minus-low change has no variance: ', ...
-        strjoin(dropped, ', '), '.'];
-end
 if size(gap_x, 1) < numel(names) + 2
     error('Plot_acg_population_logit:powerModel', ...
         'Too few neurons for the predictors that remain (%s).', sample_name);
@@ -6161,7 +6191,8 @@ names = { ...
     'GammaR2', 'GammaRMSE', ...
     'DiffExpAmplitude', 'DiffExpRise', 'DiffExpDecay', 'DiffExpBaseline', ...
     'DiffExpR2', 'DiffExpRMSE', 'PeakAmplitude', 'AUC'};
-if all(ismember(names, feature_table.Properties.VariableNames))
+if all(ismember(names, feature_table.Properties.VariableNames)) ...
+        && ~diffexp_amplitude_needs_refit(feature_table)
     return
 end
 extra = acg_nonoscillatory_components(acg, lag);
@@ -6176,26 +6207,89 @@ end
 end
 
 
-function keep = columns_with_tail_change(gap_x)
-%COLUMNS_WITH_TAIL_CHANGE  Predictors whose high-minus-low values are not constant.
+function tf = diffexp_amplitude_needs_refit(feature_table)
+%DIFFEXP_AMPLITUDE_NEEDS_REFIT  True when a stored amplitude is unnormalized.
 %
-% Each column is judged on its own scale. A huge constant column does not
-% make a smaller change in another column look like zero.
+% Bump height on these logit autocorrelograms is order 1. An amplitude
+% above 1e6 is the old coefficient on the raw difference of exponentials.
+
+tf = false;
+if ~ismember('DiffExpAmplitude', feature_table.Properties.VariableNames)
+    return
+end
+amplitude = feature_table.DiffExpAmplitude;
+tf = any(isfinite(amplitude) & abs(amplitude) > 1e6);
+end
+
+
+function [keep, why] = columns_with_tail_change(gap_x)
+%COLUMNS_WITH_TAIL_CHANGE  Predictors that can enter the power-gap regression.
+%
+% why is 0 when the column is kept, 1 when the high-minus-low change has
+% no variance, and 2 when the column is not finite or is larger than 1e6.
+% Each column is judged on its own. A huge column does not hide a smaller
+% change in another column, and it does not enter the fit. An unnormalized
+% difference-of-exponentials amplitude can reach the top of the
+% floating-point range. That one column makes every coefficient come out
+% as zero.
 
 n_col = size(gap_x, 2);
 keep = false(1, n_col);
+why = ones(1, n_col);
 if isempty(gap_x) || size(gap_x, 1) < 2
     return
 end
 for j = 1:n_col
-    column = gap_x(:, j);
-    column = column(isfinite(column));
-    if numel(column) < 2
+    raw = gap_x(:, j);
+    if any(~isfinite(raw)) || max(abs(raw)) > 1e6
+        why(j) = 2;
         continue
     end
-    column_scale = max(1, max(abs(column)));
-    keep(j) = std(column, 0) > eps(column_scale);
+    if numel(raw) < 2
+        why(j) = 1;
+        continue
+    end
+    column_scale = max(1, max(abs(raw)));
+    sigma = std(raw, 0);
+    if ~isfinite(sigma) || ~isfinite(sum(raw .^ 2))
+        why(j) = 2;
+        continue
+    end
+    if sigma > eps(column_scale)
+        keep(j) = true;
+        why(j) = 0;
+    else
+        why(j) = 1;
+    end
 end
+end
+
+
+function line = tail_change_drop_line(names, why)
+%TAIL_CHANGE_DROP_LINE  Says which predictors were left out of the gap model.
+
+names = names(:)';
+why = why(:)';
+if isempty(names) || numel(why) ~= numel(names)
+    line = 'Every listed predictor has some high-minus-low change.';
+    return
+end
+constant_names = names(why == 1);
+overflow_names = names(why == 2);
+if isempty(constant_names) && isempty(overflow_names)
+    line = 'Every listed predictor has some high-minus-low change.';
+    return
+end
+parts = cell(1, 0);
+if ~isempty(constant_names)
+    parts{end + 1} = ['Left out because the high-minus-low change has no variance: ', ...
+        strjoin(constant_names, ', '), '.']; %#ok<AGROW>
+end
+if ~isempty(overflow_names)
+    parts{end + 1} = ['Left out because the high-minus-low change is not finite on a usable scale: ', ...
+        strjoin(overflow_names, ', '), '.']; %#ok<AGROW>
+end
+line = strjoin(parts, ' ');
 end
 
 
