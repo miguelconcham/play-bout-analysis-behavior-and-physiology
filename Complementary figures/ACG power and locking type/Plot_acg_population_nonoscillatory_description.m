@@ -74,6 +74,15 @@
 % lock_type_model_cache_nonosc_description.mat under Analysis results\acg population nonoscillatory description. The same code version,
 % features, neurons, and permutation count load that file instead of
 % fitting again. lock_model_cache_version is 1 for this fit.
+% A second prediction uses those same features. Its first model separates
+% unlocked neurons from locked neurons, where locked means peak or trough.
+% Its second model separates peak from trough and uses only those two
+% types. Both models use naive Bayes, LDA, and a medium Gaussian SVM, with
+% the same weighted, unweighted, and joint fits. Each model is run for all
+% classified neurons in its stage, and again for the oscillatory neurons.
+% That fit is written to
+% lock_stage_model_cache_nonosc_description.mat. stage_model_cache_version
+% is 1.
 %
 % Every matrix shares one row order. Row i of imagesc_logit.sum.all is
 % the same neuron as row i of imagesc_logit.sum.power_high, power_low,
@@ -1658,6 +1667,56 @@ draw_class_accuracy_bars(classifier_populations, output_folder)
 write_summary_section(output_folder, '4. Lock-type classifier', ...
     lock_classifier_report(classifier_titles, classifier_sources, classifier_method_name, ...
     n_accuracy_permutations, classifier_populations))
+stage_model_cache_version = 1;
+stage_model_cache_file = stage_cache_file(estimate_folder, output_folder);
+stage_base = { ...
+    struct('name', 'All classified neurons', 'rows', (1:size(feature_table, 1)).'), ...
+    struct('name', 'Oscillatory neurons', 'rows', osc_rows(:))};
+stage_tasks = { ...
+    struct('label', 'locked versus unlocked', 'class_names', {{'Unlocked', 'Locked'}}), ...
+    struct('label', 'peak versus trough', 'class_names', {{'Trough', 'Peak'}})};
+stage_populations = cell(1, numel(stage_tasks) * numel(stage_base));
+stage_slot = 0;
+for task = 1:numel(stage_tasks)
+    for p = 1:numel(stage_base)
+        [stage_X, stage_y] = staged_lock_data(feature_table, neuron_type, ...
+            classifier_names, stage_base{p}.rows, stage_tasks{task}.class_names);
+        stage_slot = stage_slot + 1;
+        stage_populations{stage_slot} = struct( ...
+            'name', [stage_base{p}.name, ', ', stage_tasks{task}.label], ...
+            'rows', stage_base{p}.rows, ...
+            'class_names', {stage_tasks{task}.class_names}, ...
+            'X', stage_X, ...
+            'y', stage_y);
+    end
+end
+[stage_populations, stage_cache_loaded] = try_load_stage_model_cache( ...
+    stage_model_cache_file, stage_model_cache_version, 42, n_accuracy_permutations, ...
+    classifier_methods, classifier_names, stage_populations);
+if ~stage_cache_loaded
+    rng(42);
+    fprintf(['Two-stage lock models: unlocked versus locked, then peak versus trough. ', ...
+        '%d shuffles, shared by the weighted, unweighted, and joint fits of each classifier.\n'], ...
+        n_accuracy_permutations)
+    stage_populations = fit_classifier_populations( ...
+        stage_populations, classifier_methods, n_accuracy_permutations);
+    write_stage_model_cache(stage_model_cache_file, stage_model_cache_version, 42, ...
+        n_accuracy_permutations, classifier_methods, classifier_names, stage_populations)
+end
+for p = 1:numel(stage_populations)
+    report_lock_model_population(stage_populations{p}, stage_populations{p}.class_names)
+    draw_lock_classifier(stage_populations{p}.grid, output_folder, classifier_method_name, ...
+        ['Two-stage lock classifier, ', stage_populations{p}.name], ...
+        stage_populations{p}.name)
+    draw_lock_classifier_percent(stage_populations{p}.grid, output_folder, classifier_method_name, ...
+        ['Two-stage lock classifier percent, ', stage_populations{p}.name], ...
+        stage_populations{p}.name)
+end
+draw_accuracy_null(stage_populations, output_folder, classifier_method_name)
+draw_class_accuracy_bars(stage_populations, output_folder)
+write_summary_section(output_folder, '4. Two-stage lock classifier', ...
+    stage_classifier_report(classifier_titles, classifier_sources, classifier_method_name, ...
+    n_accuracy_permutations, stage_populations))
 end
 end
 
@@ -3872,6 +3931,283 @@ fprintf('Saved lock-type models to %s (code version %d).\n', file, version)
 end
 
 
+function [X, y] = staged_lock_data(feature_table, neuron_type, feature_names, rows, class_names)
+%STAGED_LOCK_DATA  Features for one step of the two-stage lock classifier.
+%
+% The three-class codes are trough 1, peak 2, and unlocked 3. Locked versus
+% unlocked keeps every classified neuron. Peak versus trough keeps only the
+% peak and trough neurons.
+
+[X3, y3] = lock_classifier_data(feature_table, neuron_type, feature_names, rows);
+[X, y] = apply_stage_labels(X3, y3, class_names);
+end
+
+
+function [X, y] = apply_stage_labels(X, y3, class_names)
+%APPLY_STAGE_LABELS  Recode the three lock types into one binary question.
+
+y3 = y3(:);
+if isequal(class_names, {'Unlocked', 'Locked'})
+    y = ones(size(y3));
+    y(y3 == 1 | y3 == 2) = 2;
+    return
+end
+if isequal(class_names, {'Trough', 'Peak'})
+    keep = y3 == 1 | y3 == 2;
+    X = X(keep, :);
+    y = y3(keep);
+    return
+end
+error('Plot_acg_population_logit:classifier', ...
+    'The two-stage classifier uses unlocked versus locked, or peak versus trough.');
+end
+
+
+function populations = fit_classifier_populations(populations, methods, n_perm)
+%FIT_CLASSIFIER_POPULATIONS  Weighted, unweighted, and joint fits, plus shuffles.
+
+for p = 1:numel(populations)
+    class_names = populations{p}.class_names;
+    X = populations{p}.X;
+    y = populations{p}.y;
+    fprintf('%s: %d neurons, %d features.\n', ...
+        populations{p}.name, numel(y), size(X, 2))
+    shuffled_labels = shared_label_shuffles(y, n_perm);
+    model_grid = cell(3, numel(methods));
+    for m = 1:numel(methods)
+        method_label = classifier_method_label(methods{m});
+        fprintf('%s, %s: real labels.\n', populations{p}.name, method_label)
+        observed = classifier_weight_trio(X, y, class_names, methods{m});
+        null_accuracy = nan(n_perm, 3);
+        null_recall = nan(n_perm, 3, numel(class_names));
+        if observed{1}.ok || observed{2}.ok
+            shuffle_clock = tic;
+            for shuffle = 1:n_perm
+                shuffled = classifier_weight_trio(X, ...
+                    shuffled_labels(shuffle, :).', class_names, methods{m});
+                for row = 1:3
+                    if shuffled{row}.ok
+                        null_accuracy(shuffle, row) = shuffled{row}.accuracy;
+                        null_recall(shuffle, row, :) = shuffled{row}.recall;
+                    end
+                end
+                if shuffle == 1 || mod(shuffle, 25) == 0 || shuffle == n_perm
+                    fprintf('%s, %s: shuffle %d of %d (%.0f s).\n', ...
+                        populations{p}.name, method_label, shuffle, n_perm, toc(shuffle_clock))
+                end
+            end
+        else
+            fprintf('%s, %s: %s\n', populations{p}.name, method_label, observed{1}.note)
+        end
+        for row = 1:3
+            recall_null = reshape(null_recall(:, row, :), n_perm, []);
+            model_grid{row, m} = apply_shared_null(observed{row}, ...
+                null_accuracy(:, row), recall_null);
+        end
+    end
+    populations{p}.grid = model_grid;
+    populations{p}.results = model_grid(:);
+end
+end
+
+
+function [populations, loaded] = try_load_stage_model_cache(file, version, seed, n_perm, methods, feature_names, populations)
+%TRY_LOAD_STAGE_MODEL_CACHE  Use a saved two-stage fit only when it matches.
+
+loaded = false;
+if exist(file, 'file') ~= 2
+    fprintf('No saved two-stage lock model at %s. The fit will run.\n', file)
+    return
+end
+stored = load(file, 'stage_model_cache');
+if ~isfield(stored, 'stage_model_cache')
+    fprintf('%s has no stage_model_cache variable. The fit will run.\n', file)
+    return
+end
+reason = stage_model_cache_mismatch(stored.stage_model_cache, version, seed, ...
+    n_perm, methods, feature_names, populations);
+if ~isempty(reason)
+    fprintf('Saved two-stage lock model was not used: %s The fit will run.\n', reason)
+    return
+end
+populations = stored.stage_model_cache.populations;
+loaded = true;
+fprintf(['Loaded two-stage lock models from %s (code version %d, %d shuffles). ', ...
+    'The fit was not repeated.\n'], file, version, n_perm)
+end
+
+
+function reason = stage_model_cache_mismatch(cache, version, seed, n_perm, methods, feature_names, populations)
+reason = '';
+if ~isstruct(cache) || ~isfield(cache, 'version') || cache.version ~= version
+    reason = 'the code version differs.';
+    return
+end
+if ~isfield(cache, 'seed') || cache.seed ~= seed
+    reason = 'the random seed differs.';
+    return
+end
+if ~isfield(cache, 'n_permutations') || cache.n_permutations ~= n_perm
+    reason = 'the number of shuffles differs.';
+    return
+end
+if ~isfield(cache, 'methods') || ~isequal(cache.methods, methods)
+    reason = 'the classifier list differs.';
+    return
+end
+if ~isfield(cache, 'feature_names') || ~isequal(cache.feature_names, feature_names)
+    reason = 'the feature list differs.';
+    return
+end
+if ~isfield(cache, 'populations') || numel(cache.populations) ~= numel(populations)
+    reason = 'the neuron groups differ.';
+    return
+end
+for p = 1:numel(populations)
+    saved = cache.populations{p};
+    if ~isstruct(saved) || ~isfield(saved, 'name') || ~strcmp(saved.name, populations{p}.name)
+        reason = 'a neuron group name differs.';
+        return
+    end
+    if ~isfield(saved, 'class_names') || ~isequal(saved.class_names, populations{p}.class_names)
+        reason = 'a class list differs.';
+        return
+    end
+    if ~isfield(saved, 'X') || ~isfield(saved, 'y') ...
+            || ~isequal(saved.X, populations{p}.X) || ~isequal(saved.y, populations{p}.y)
+        reason = 'the neurons or their feature values differ.';
+        return
+    end
+    if ~isfield(saved, 'grid') || ~stage_model_grid_complete(saved.grid, n_perm, numel(methods))
+        reason = 'the saved fit is incomplete.';
+        return
+    end
+end
+end
+
+
+function complete = stage_model_grid_complete(grid, n_perm, n_methods)
+complete = iscell(grid) && isequal(size(grid), [3, n_methods]);
+if ~complete
+    return
+end
+for i = 1:numel(grid)
+    item = grid{i};
+    if ~isstruct(item) || ~isfield(item, 'ok')
+        complete = false;
+        return
+    end
+    if item.ok && (~isfield(item, 'n_perm') || item.n_perm ~= n_perm)
+        complete = false;
+        return
+    end
+end
+end
+
+
+function write_stage_model_cache(file, version, seed, n_perm, methods, feature_names, populations)
+stage_model_cache.version = version;
+stage_model_cache.seed = seed;
+stage_model_cache.n_permutations = n_perm;
+stage_model_cache.methods = methods;
+stage_model_cache.feature_names = feature_names;
+stage_model_cache.populations = populations;
+save(file, 'stage_model_cache')
+fprintf('Saved two-stage lock models to %s (code version %d).\n', file, version)
+end
+
+
+function text = stage_classifier_report(feature_titles, feature_sources, method, n_perm, populations)
+%STAGE_CLASSIFIER_REPORT  Summary for unlocked-versus-locked, then peak-versus-trough.
+
+feature_lines = cell(1, numel(feature_titles));
+for j = 1:numel(feature_titles)
+    feature_lines{j} = sprintf('  %s, significant for %s.', feature_titles{j}, feature_sources{j});
+end
+lines = [{ ...
+    'Two-stage prediction of lock type from the same high-power features as the three-class lock-type classifier.', ...
+    'A feature is included when its one-way ANOVA Holm-Sidak p is below 0.05 for all classified neurons or for oscillatory neurons only.', ...
+    'The selected features:'}, ...
+    feature_lines, { ...
+    'The first model separates unlocked neurons from locked neurons. Locked means peak or trough.', ...
+    'That model uses every trough, peak, and unlocked neuron with finite values on every selected feature.', ...
+    'The second model separates peak from trough.', ...
+    'It is trained and tested only on peak and trough neurons. Unlocked neurons are not in that model.', ...
+    'The two models are fit separately. The second model does not use the first model''s prediction.', ...
+    'Naive Bayes, LDA, and the medium Gaussian SVM each have a weighted fit, an unweighted fit, and a joint decision.', ...
+    'The weighted fit gives each neuron a weight equal to the inverse of its class count, scaled so the mean weight is 1.', ...
+    'The unweighted fit gives every neuron the same weight.', ...
+    'The joint decision mixes the two class probabilities. Each probability is scaled by that model''s mean class accuracy on the training fold.', ...
+    'Each model is run on all classified neurons in its stage, and again on the oscillatory neurons only.', ...
+    'Oscillatory neurons are cluster 1 from section 3.', ...
+    'Non-classified cells are excluded.', ...
+    'Accuracy is stratified cross-validation. Each class is split across the folds in stored order.', ...
+    'Within each training fold the features are standardized.', ...
+    'The accuracy of the whole model is the unweighted mean of the two class accuracies.', ...
+    'The equal-class reference is 50%. A constant guess at one class scores that value on the mean accuracy.', ...
+    sprintf('Figure columns, left to right: %s.', method), ...
+    'Figure rows, top to bottom: weighted, unweighted, joint decision.', ...
+    'svm is a Gaussian-kernel SVM with medium scale sqrt(number of features) and box constraint 1.', ...
+    'naivebayes is Gaussian naive Bayes. lda is a linear discriminant.', ...
+    sprintf('The permutation test draws %d shuffled label lists once per model and population.', n_perm), ...
+    'The features stay fixed. The random stream is reset to 42 before the two-stage fit.', ...
+    'A finished fit is saved as lock_stage_model_cache_nonosc_description.mat in the description estimate folder.', ...
+    'The same code version, features, neurons, labels, and permutation count load that file instead of fitting again.', ...
+    'p = (1 + number of shuffled accuracies at or above the real accuracy) / (1 + number of shuffles).', ...
+    'A bar is filled when that permutation p is below 0.05. Otherwise only the border is drawn.'}];
+for p = 1:numel(populations)
+    lines{end + 1} = populations{p}.name; %#ok<AGROW>
+    results = populations{p}.results;
+    shared = [];
+    for m = 1:numel(results)
+        if results{m}.ok
+            shared = results{m};
+            break
+        end
+    end
+    if ~isempty(shared)
+        lines{end + 1} = sprintf('  Neurons: %d. Folds: %d.', shared.n, shared.n_folds); %#ok<AGROW>
+        count_bits = cell(1, numel(shared.class_names));
+        for c = 1:numel(shared.class_names)
+            count_bits{c} = sprintf('%s %d', shared.class_names{c}, shared.class_n(c));
+        end
+        lines{end + 1} = ['  Class counts: ', strjoin(count_bits, ', ')]; %#ok<AGROW>
+        lines{end + 1} = sprintf('  Equal-class reference: %.1f%%.', 100 * shared.chance); %#ok<AGROW>
+    end
+    for m = 1:numel(results)
+        result = results{m};
+        lines{end + 1} = ['  ', result.method_label]; %#ok<AGROW>
+        if ~result.ok
+            lines{end + 1} = ['    ', result.note]; %#ok<AGROW>
+            continue
+        end
+        lines{end + 1} = sprintf('    Mean of the class accuracies: %.1f%%.', 100 * result.accuracy); %#ok<AGROW>
+        lines{end + 1} = sprintf('    Neuron-weighted accuracy: %.1f%%.', 100 * result.neuron_accuracy); %#ok<AGROW>
+        if result.n_perm < 1 || ~isfinite(result.perm_p)
+            lines{end + 1} = ['    ', result.perm_note]; %#ok<AGROW>
+        else
+            lines{end + 1} = sprintf('    Permutation shuffles: %d.', result.n_perm); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model null mean: %.1f%%.', 100 * result.null_mean); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model null 95th percentile: %.1f%%.', 100 * result.null_p95); %#ok<AGROW>
+            lines{end + 1} = sprintf('    Whole model permutation p, on the mean of the class accuracies: %.4g.', result.perm_p); %#ok<AGROW>
+        end
+        for c = 1:numel(result.class_names)
+            lines{end + 1} = sprintf('    %-16s accuracy %s   null mean %s   null 95th %s   permutation p %s', ...
+                result.class_names{c}, ...
+                stat_num(100 * result.recall(c), '%.1f%%'), ...
+                stat_num(100 * result.class_null_mean(c), '%.1f%%'), ...
+                stat_num(100 * result.class_null_p95(c), '%.1f%%'), ...
+                stat_num(result.class_perm_p(c), '%.4g')); %#ok<AGROW>
+        end
+        lines{end + 1} = '    Confusion counts, rows true and columns predicted:'; %#ok<AGROW>
+        lines{end + 1} = labeled_number_matrix('True', result.class_names, ...
+            result.class_names, result.counts, '%.0f'); %#ok<AGROW>
+    end
+end
+text = strjoin(lines, newline);
+end
+
+
 function report_lock_model_population(population, class_names)
 grid = population.grid;
 for row = 1:size(grid, 1)
@@ -5568,6 +5904,8 @@ switch name
         color = [0.85 0.25 0.20];
     case 'Unlocked'
         color = [0.18 0.62 0.18];
+    case 'Locked'
+        color = [0.55 0.30 0.70];
     otherwise
         color = [0.75 0.75 0.75];
 end
@@ -7134,6 +7472,16 @@ if nargin < 2
     figure_folder = ''; %#ok<NASGU>
 end
 path = fullfile(estimate_folder, 'lock_type_model_cache_nonosc_description.mat');
+end
+
+
+function path = stage_cache_file(estimate_folder, figure_folder)
+%STAGE_CACHE_FILE  Two-stage lock fit for this non-oscillatory script.
+% The figure folder is unused. The three-class model cache is not read.
+if nargin < 2
+    figure_folder = ''; %#ok<NASGU>
+end
+path = fullfile(estimate_folder, 'lock_stage_model_cache_nonosc_description.mat');
 end
 
 
