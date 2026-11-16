@@ -65,12 +65,24 @@
 % row is the stored percentile and is not smoothed again.
 % plot_example_neurons_only draws those neurons and leaves the other
 % section 4 figures unrun.
+% Section 4 also draws the all-runs sum-to-1 percentile logit by lock
+% type, once for oscillatory neurons and once for non-oscillatory
+% neurons. Trough, peak, and unlocked neurons are one column each. The
+% image of those neurons is above their mean, and the band is the 95%
+% confidence interval of that mean.
 % compare_power_on_observed_acg is also set at the start of section 4.
 % false draws the percentile-logit high and low images and the paired
 % feature differences from the percentile features. true draws the
 % Gaussian-filtered observed mean autocorrelograms and the paired
 % feature differences from those observed features. It does not change
 % classify_on_observed_acg.
+% Section 4 also draws one summary of the paired high-versus-low tests
+% for the oscillatory neurons and one for the non-oscillatory neurons.
+% Each summary keeps a feature when its Holm-Sidak p is below 0.05.
+% Oscillatory features are the top subplot and non-oscillatory features
+% are the bottom subplot. The bars are the high-power and low-power means
+% after z-scoring that feature across the complete pairs. Stars use that
+% Holm-Sidak p.
 % classifier_method is set just before the lock-type classifier.
 % The default is naive Bayes, LDA, and a medium Gaussian SVM.
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
@@ -116,6 +128,14 @@
 % and area counts, the ANOVAs, and the models. cluster_method chooses
 % which split is kept. Ward is the default. Cluster 1 of that split is
 % the higher-modulation group.
+% Section 2 also draws one summary of the unpaired t-tests between those
+% two groups. The top subplot stacks the oscillatory features whose
+% Holm-Sidak p is below 0.05. The bottom subplot does the same for the
+% non-oscillatory features. Each feature is two bars side by side, the
+% mean of each group, with that feature's neurons as dots and no violin.
+% Each feature is z-scored across both groups so different units share
+% the axis. The bar height is the group mean of that z-score. Stars use
+% the Holm-Sidak p: one below 0.05, two below 0.01, three below 0.001.
 % shown_logit is that group, strongest modulation first.
 % imagesc_osc_sum_all is the same sum-to-1 image under a plain name.
 % osc_neuron_type is its lock group. feature_table has one row per neuron.
@@ -355,7 +375,9 @@ figure_section = 2;
 % higher-modulation group, and section 3 uses it. Both
 % splits are still drawn. The violins after the split also show
 % frequency, amplitude, and the peak-to-peak drop. Those extra columns
-% do not enter the split.
+% do not enter the split. One later figure keeps only the significant
+% unpaired differences: oscillatory features on top, non-oscillatory
+% features below, each as two mean bars with the neurons drawn as dots.
 cluster_method = 'ward';
 if ~exist('output_folder', 'var')
     output_folder = '';
@@ -780,6 +802,14 @@ if ~isempty(shown_titles)
             comparison_axis_note()})
         save_script_figure(output_folder)
     end
+    holm_p = nan(n_shown, 1);
+    for j = 1:n_shown
+        holm_p(j) = cluster_stats(j).holm_p;
+    end
+    group_panels = significant_group_bars(descriptor_values, idx_cluster, ...
+        shown_titles, shown_group, holm_p);
+    draw_significant_group_bars(group_panels, cluster_method_label);
+    save_script_figure(output_folder)
 end
 
 ACG_PCA = struct( ...
@@ -964,6 +994,12 @@ classified_nonosc = false(numel(neuron_type), 1);
 classified_nonosc(complete_rows) = true;
 classified_nonosc(osc_rows) = false;
 classified_nonosc_rows = oscillatory_member_rows(classified_nonosc, osc_score);
+osc_mask = false(numel(neuron_type), 1);
+osc_mask(osc_rows) = true;
+draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, osc_mask, ...
+    'oscillatory', output_folder, logit_color_limit, logit_map)
+draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, ~osc_mask, ...
+    'non-oscillatory', output_folder, logit_color_limit, logit_map)
 cycle_n = nan(1, numel(stratum_titles));
 cycle_r = cycle_n;
 cycle_p = cycle_n;
@@ -1446,6 +1482,9 @@ if ~isempty(compare_titles)
             comparison_axis_note()})
         save_script_figure(output_folder)
     end
+    draw_power_pair_summary(high_compare, low_compare, compare_titles, ...
+        compare_group, paired_stats, output_folder, 'oscillatory neurons', ...
+        ['Same oscillatory neurons at high and low power. ', compare_source, '.'])
 else
     paired_stats = empty_feature_stats();
     paired_stats(1) = [];
@@ -4995,6 +5034,25 @@ for g = 1:numel(component_groups)
         feature_comparison_report(paired_stats(keep), 'paired', ...
         ['Paired t-tests. The same ', population_name, ' are compared at high and low power. ', caption]))
 end
+draw_power_pair_summary(high_compare, low_compare, compare_titles, ...
+    compare_group, paired_stats, folder, population_name, caption)
+end
+
+
+function draw_power_pair_summary(high_values, low_values, titles, families, stats, folder, population_name, title_line)
+%DRAW_POWER_PAIR_SUMMARY  Significant high-versus-low features for one neuron set.
+
+holm_p = nan(numel(stats), 1);
+for j = 1:numel(stats)
+    holm_p(j) = stats(j).holm_p;
+end
+panels = significant_paired_bars(high_values, low_values, titles, families, holm_p);
+draw_significant_group_bars(panels, '', {'High power', 'Low power'}, ...
+    ['Paired t summary high versus low power ', population_name], { ...
+    title_line, ...
+    'Only features with Holm-Sidak p < 0.05 in that family. Bars are group means of the within-feature z-score.', ...
+    '* p < 0.05, ** p < 0.01, *** p < 0.001.'});
+save_script_figure(folder)
 end
 
 
@@ -9125,7 +9183,8 @@ for k = 1:numel(ax)
         tag = get(ax(k), 'Tag');
     catch
     end
-    if strcmpi(tag, 'legend') || strcmpi(tag, 'Colorbar')
+    if strcmpi(tag, 'legend') || strcmpi(tag, 'Colorbar') ...
+            || strcmpi(tag, 'wide-bars')
         continue
     end
     try
@@ -9341,7 +9400,10 @@ end
 
 
 function save_script_figure(folder)
-%SAVE_SCRIPT_FIGURE  Write the current figure as svg and jpg.
+%SAVE_SCRIPT_FIGURE  Write the current figure as a vector svg and a jpg.
+%
+% print -vector keeps every mark as a path. Without it, a figure with
+% many elements is stored as an image inside the svg file.
 
 if nargin < 1 || isempty(folder)
     return
@@ -9362,7 +9424,7 @@ name = saved_figure_file_stem(section_n, figure_n, current_name);
 set(fig, 'PaperPositionMode', 'auto')
 svg_path = fullfile(folder, [name, '.svg']);
 jpg_path = fullfile(folder, [name, '.jpg']);
-print(fig, svg_path, '-dsvg')
+print(fig, '-vector', '-dsvg', svg_path)
 print(fig, jpg_path, '-djpeg', '-r200')
 fprintf('Saved %s\n', svg_path)
 fprintf('Saved %s\n', jpg_path)
@@ -9841,6 +9903,126 @@ color_map = [ ...
 end
 
 
+function draw_lock_type_acg(acg, lag, neuron_type, group_rows, group_name, ...
+    folder, color_limit, color_map)
+%DRAW_LOCK_TYPE_ACG  Mean all-runs logit by lock type, image above the mean.
+%
+% group_rows selects one population, oscillatory or non-oscillatory.
+% A logical mask keeps the population row order. Each column is one lock
+% type inside that population.
+
+names = {'Trough', 'Peak', 'Unlocked'};
+n_type = numel(names);
+lag = double(lag(:)).';
+group_rows = selected_population_rows(group_rows, numel(neuron_type));
+curves = cell(1, n_type);
+intervals = cell(1, n_type);
+y_abs = color_limit;
+for k = 1:n_type
+    keep = false(numel(group_rows), 1);
+    for i = 1:numel(group_rows)
+        keep(i) = strcmp(display_lock_label(neuron_type{group_rows(i)}), names{k});
+    end
+    curves{k} = acg(group_rows(keep), :);
+    intervals{k} = acg_mean_interval(curves{k});
+    band = [intervals{k}.low, intervals{k}.high, intervals{k}.mean];
+    peak = max(abs(band(isfinite(band))));
+    if isfinite(peak)
+        y_abs = max(y_abs, peak);
+    end
+end
+y_abs = y_abs * 1.08;
+open_full_figure(['ACG by lock type, ', group_name])
+count_lines = cell(1, n_type);
+for k = 1:n_type
+    this_acg = curves{k};
+    n = size(this_acg, 1);
+    count_lines{k} = sprintf('%s n = %d', names{k}, n);
+    subplot(2, n_type, k)
+    if n < 1
+        title({names{k}, 'n = 0'})
+        axis off
+    elseif n == 1
+        imagesc(lag, [0.5 1.5], this_acg)
+        ylim([0.5 1.5])
+        axis tight
+        clim([-color_limit color_limit])
+        colormap(gca, color_map)
+        ylabel('Neuron')
+        title({names{k}, sprintf('n = %d', n)})
+        box off
+    else
+        imagesc(lag, 1:n, this_acg)
+        set(gca, 'YTick', [1 n])
+        axis tight
+        clim([-color_limit color_limit])
+        colormap(gca, color_map)
+        ylabel('Neuron')
+        title({names{k}, sprintf('n = %d', n)})
+        box off
+    end
+    if k == n_type && n >= 1
+        colorbar
+    end
+    subplot(2, n_type, n_type + k)
+    hold on
+    plot(lag([1 end]), [0 0], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+    if n >= 1
+        draw_mean_interval(lag, intervals{k}, lock_bar_color(names{k}))
+    end
+    xlim(lag([1 end]))
+    ylim([-y_abs y_abs])
+    xlabel('Lag (s)')
+    ylabel('Mean logit')
+    box off
+end
+sgtitle({['All-runs sum-to-1 percentile logit, ', group_name, ' neurons, by lock type.'], ...
+    'The image is above the mean. The band is the 95% confidence interval of the mean.', ...
+    'Trough, peak, and unlocked neurons are separate columns. Unclassified neurons are left out.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+write_summary_section(folder, ['4. Mean autocorrelogram by lock type, ', group_name], ...
+    join_summary_lines( ...
+    ['All-runs sum-to-1 percentile logit, ', group_name, ' neurons.'], ...
+    'Each column is one lock type. The image keeps the population row order.', ...
+    'The band is the 95% t confidence interval of the mean at that lag.', ...
+    'A lag with fewer than two finite neurons has no interval.', ...
+    'Unclassified neurons are left out.', ...
+    sprintf('Neurons in this group: %d.', numel(group_rows)), ...
+    count_lines))
+end
+
+
+function rows = selected_population_rows(group_rows, n_neurons)
+group_rows = group_rows(:);
+if islogical(group_rows)
+    if numel(group_rows) ~= n_neurons
+        error('Plot_acg_population_logit:lockrows', ...
+            'The group mask must have one entry per neuron.')
+    end
+    rows = find(group_rows);
+    return
+end
+if any(~isfinite(group_rows)) || any(group_rows < 1) || any(group_rows > n_neurons)
+    error('Plot_acg_population_logit:lockrows', ...
+        'A group row is outside the population.')
+end
+rows = group_rows;
+end
+
+
+function draw_mean_interval(lag, interval, color)
+lag = double(lag(:)).';
+keep = isfinite(interval.mean) & isfinite(interval.low) & isfinite(interval.high);
+if any(keep)
+    x = lag(keep);
+    fill([x, fliplr(x)], [interval.low(keep), fliplr(interval.high(keep))], color, ...
+        'FaceAlpha', 0.28, 'EdgeColor', 'none', 'HandleVisibility', 'off')
+end
+plot(lag, interval.mean, 'Color', color, 'LineWidth', 2.2, 'HandleVisibility', 'off')
+end
+
+
 function [cycle_n, cycle_r, cycle_p] = draw_power_logit_pair(logit, rows, columns, titles, ...
     group_name, n_group, n_population, lag, color_limit, color_map, ...
     first_peak_lag, first_trough_lag, second_peak_lag, second_trough_lag, ...
@@ -10037,6 +10219,9 @@ if strcmp(kind, 'paired')
         'raw p is uncorrected. Holm-Sidak p is adjusted across the rows in this table.', ...
         'Oscillatory features and non-oscillatory features are separate tables.', ...
         'The panel title shows the raw p and the Holm-Sidak p.', ...
+        'The summary figure keeps a feature when its Holm-Sidak p is below 0.05.', ...
+        'Its bars are the high-power and low-power means of the within-feature z-score, and the neurons are dots.', ...
+        'Stars on that figure use the Holm-Sidak p.', ...
         'A blank t means fewer than two complete pairs. That row is left out of the correction.'};
     header = sprintf('%-42s %6s %12s %12s %12s %10s %8s %10s %12s %14s %8s', ...
         'Feature', 'n', 'mean high', 'mean low', 'high-low', 't', 'df', ...
@@ -10051,6 +10236,9 @@ else
         'raw p is uncorrected. Holm-Sidak p is adjusted across the rows in this table.', ...
         'Oscillatory features and non-oscillatory features are separate tables.', ...
         'The panel title shows the raw p and the Holm-Sidak p.', ...
+        'The summary figure keeps a feature when its Holm-Sidak p is below 0.05.', ...
+        'Its bars are the group means of the within-feature z-score, and the neurons are dots.', ...
+        'Stars on that figure use the Holm-Sidak p.', ...
         'A blank t means one group has fewer than two finite values. That row is left out of the correction.'};
     header = sprintf('%-42s %-22s %6s %6s %12s %12s %12s %10s %8s %10s %12s %14s %8s', ...
         'Feature', 'role', 'n1', 'n2', 'mean 1', 'mean 2', 'mean 1-2', 't', 'df', ...
