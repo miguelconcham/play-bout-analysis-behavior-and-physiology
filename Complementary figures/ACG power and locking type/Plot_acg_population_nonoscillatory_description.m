@@ -116,6 +116,14 @@
 % and area counts, the ANOVAs, and the models. cluster_method chooses
 % which split is kept. Ward is the default. Cluster 1 of that split is
 % the higher-modulation group.
+% Section 2 also draws one summary of the unpaired t-tests between those
+% two groups. The top subplot stacks the oscillatory features whose
+% Holm-Sidak p is below 0.05. The bottom subplot does the same for the
+% non-oscillatory features. Each feature is two bars side by side, the
+% mean of each group, with that feature's neurons as dots and no violin.
+% Each feature is z-scored across both groups so different units share
+% the axis. The bar height is the group mean of that z-score. Stars use
+% the Holm-Sidak p: one below 0.05, two below 0.01, three below 0.001.
 % shown_logit is that group, strongest modulation first.
 % imagesc_osc_sum_all is the same sum-to-1 image under a plain name.
 % osc_neuron_type is its lock group. feature_table has one row per neuron.
@@ -355,7 +363,9 @@ figure_section = 2;
 % higher-modulation group, and section 3 uses it. Both
 % splits are still drawn. The violins after the split also show
 % frequency, amplitude, and the peak-to-peak drop. Those extra columns
-% do not enter the split.
+% do not enter the split. One later figure keeps only the significant
+% unpaired differences: oscillatory features on top, non-oscillatory
+% features below, each as two mean bars with the neurons drawn as dots.
 cluster_method = 'ward';
 if ~exist('output_folder', 'var')
     output_folder = '';
@@ -780,6 +790,14 @@ if ~isempty(shown_titles)
             comparison_axis_note()})
         save_script_figure(output_folder)
     end
+    holm_p = nan(n_shown, 1);
+    for j = 1:n_shown
+        holm_p(j) = cluster_stats(j).holm_p;
+    end
+    group_panels = significant_group_bars(descriptor_values, idx_cluster, ...
+        shown_titles, shown_group, holm_p);
+    draw_significant_group_bars(group_panels, cluster_method_label);
+    save_script_figure(output_folder)
 end
 
 ACG_PCA = struct( ...
@@ -9125,7 +9143,8 @@ for k = 1:numel(ax)
         tag = get(ax(k), 'Tag');
     catch
     end
-    if strcmpi(tag, 'legend') || strcmpi(tag, 'Colorbar')
+    if strcmpi(tag, 'legend') || strcmpi(tag, 'Colorbar') ...
+            || strcmpi(tag, 'wide-bars')
         continue
     end
     try
@@ -10051,6 +10070,9 @@ else
         'raw p is uncorrected. Holm-Sidak p is adjusted across the rows in this table.', ...
         'Oscillatory features and non-oscillatory features are separate tables.', ...
         'The panel title shows the raw p and the Holm-Sidak p.', ...
+        'The summary figure keeps a feature when its Holm-Sidak p is below 0.05.', ...
+        'Its bars are the group means of the within-feature z-score, and the neurons are dots.', ...
+        'Stars on that figure use the Holm-Sidak p.', ...
         'A blank t means one group has fewer than two finite values. That row is left out of the correction.'};
     header = sprintf('%-42s %-22s %6s %6s %12s %12s %12s %10s %8s %10s %12s %14s %8s', ...
         'Feature', 'role', 'n1', 'n2', 'mean 1', 'mean 2', 'mean 1-2', 't', 'df', ...
