@@ -65,6 +65,10 @@
 % row is the stored percentile and is not smoothed again.
 % plot_example_neurons_only draws those neurons and leaves the other
 % section 4 figures unrun.
+% Section 4 also draws the all-runs sum-to-1 percentile logit by lock
+% type. Trough, peak, and unlocked neurons are one column each. The image
+% of those neurons is above their mean, and the band is the 95% confidence
+% interval of that mean.
 % compare_power_on_observed_acg is also set at the start of section 4.
 % false draws the percentile-logit high and low images and the paired
 % feature differences from the percentile features. true draws the
@@ -989,6 +993,8 @@ classified_nonosc = false(numel(neuron_type), 1);
 classified_nonosc(complete_rows) = true;
 classified_nonosc(osc_rows) = false;
 classified_nonosc_rows = oscillatory_member_rows(classified_nonosc, osc_score);
+draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, output_folder, ...
+    logit_color_limit, logit_map)
 cycle_n = nan(1, numel(stratum_titles));
 cycle_r = cycle_n;
 cycle_p = cycle_n;
@@ -9889,6 +9895,100 @@ half = 128;
 color_map = [ ...
     linspace(0.15, 0.96, half)', linspace(0.28, 0.96, half)', linspace(0.70, 0.96, half)'; ...
     linspace(0.96, 0.70, half)', linspace(0.96, 0.18, half)', linspace(0.96, 0.18, half)'];
+end
+
+
+function draw_lock_type_acg(acg, lag, neuron_type, folder, color_limit, color_map)
+%DRAW_LOCK_TYPE_ACG  Mean all-runs logit by lock type, image above the mean.
+
+names = {'Trough', 'Peak', 'Unlocked'};
+n_type = numel(names);
+lag = double(lag(:)).';
+curves = cell(1, n_type);
+intervals = cell(1, n_type);
+y_abs = color_limit;
+for k = 1:n_type
+    rows = false(numel(neuron_type), 1);
+    for i = 1:numel(neuron_type)
+        rows(i) = strcmp(display_lock_label(neuron_type{i}), names{k});
+    end
+    curves{k} = acg(rows, :);
+    intervals{k} = acg_mean_interval(curves{k});
+    band = [intervals{k}.low, intervals{k}.high, intervals{k}.mean];
+    peak = max(abs(band(isfinite(band))));
+    if isfinite(peak)
+        y_abs = max(y_abs, peak);
+    end
+end
+y_abs = y_abs * 1.08;
+open_full_figure('ACG by lock type')
+count_lines = cell(1, n_type);
+for k = 1:n_type
+    this_acg = curves{k};
+    n = size(this_acg, 1);
+    count_lines{k} = sprintf('%s n = %d', names{k}, n);
+    subplot(2, n_type, k)
+    if n < 1
+        title({names{k}, 'n = 0'})
+        axis off
+    elseif n == 1
+        imagesc(lag, [0.5 1.5], this_acg)
+        ylim([0.5 1.5])
+        axis tight
+        clim([-color_limit color_limit])
+        colormap(gca, color_map)
+        ylabel('Neuron')
+        title({names{k}, sprintf('n = %d', n)})
+        box off
+    else
+        imagesc(lag, 1:n, this_acg)
+        set(gca, 'YTick', [1 n])
+        axis tight
+        clim([-color_limit color_limit])
+        colormap(gca, color_map)
+        ylabel('Neuron')
+        title({names{k}, sprintf('n = %d', n)})
+        box off
+    end
+    if k == n_type && n >= 1
+        colorbar
+    end
+    subplot(2, n_type, n_type + k)
+    hold on
+    plot(lag([1 end]), [0 0], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+    if n >= 1
+        draw_mean_interval(lag, intervals{k}, lock_bar_color(names{k}))
+    end
+    xlim(lag([1 end]))
+    ylim([-y_abs y_abs])
+    xlabel('Lag (s)')
+    ylabel('Mean logit')
+    box off
+end
+sgtitle({'All-runs sum-to-1 percentile logit, by lock type.', ...
+    'The image is above the mean. The band is the 95% confidence interval of the mean.', ...
+    'Trough, peak, and unlocked neurons are separate columns. Unclassified neurons are left out.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+write_summary_section(folder, '4. Mean autocorrelogram by lock type', join_summary_lines( ...
+    'All-runs sum-to-1 percentile logit.', ...
+    'Each column is one lock type. The image keeps the population row order.', ...
+    'The band is the 95% t confidence interval of the mean at that lag.', ...
+    'A lag with fewer than two finite neurons has no interval.', ...
+    'Unclassified neurons are left out.', ...
+    count_lines))
+end
+
+
+function draw_mean_interval(lag, interval, color)
+lag = double(lag(:)).';
+keep = isfinite(interval.mean) & isfinite(interval.low) & isfinite(interval.high);
+if any(keep)
+    x = lag(keep);
+    fill([x, fliplr(x)], [interval.low(keep), fliplr(interval.high(keep))], color, ...
+        'FaceAlpha', 0.28, 'EdgeColor', 'none', 'HandleVisibility', 'off')
+end
+plot(lag, interval.mean, 'Color', color, 'LineWidth', 2.2, 'HandleVisibility', 'off')
 end
 
 
