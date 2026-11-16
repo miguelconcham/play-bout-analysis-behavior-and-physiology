@@ -13,14 +13,20 @@ end
 fig = figure('Name', 'Unpaired t summary oscillatory versus non-oscillatory', ...
     'Color', 'w');
 set(fig, 'Units', 'pixels', 'Position', [80 80 1400 900])
-ax = zeros(1, 2);
+% Keep each axes in its own variable. A numeric array cannot hold a
+% MATLAB axes object, and that assignment stopped the figure before it
+% was saved.
+positions = [0.08 0.54 0.88 0.30; 0.08 0.12 0.88 0.30];
+axes_list = cell(1, 2);
 for g = 1:2
-    ax(g) = subplot(2, 1, g);
+    ax = subplot(2, 1, g);
     draw_one_group_panel(panels(g))
-    set(ax(g), 'Tag', 'wide-bars')
+    set(ax, 'Tag', 'wide-bars')
+    axes_list{g} = ax;
 end
-set(ax(1), 'Position', [0.08 0.54 0.88 0.30])
-set(ax(2), 'Position', [0.08 0.12 0.88 0.30])
+for g = 1:2
+    set(axes_list{g}, 'Position', positions(g, :))
+end
 annotation(fig, 'textbox', [0.06 0.88 0.88 0.11], 'String', { ...
     ['Unpaired t-test. Oscillatory neurons are ', method_label, ' cluster 1.'], ...
     'Only features with Holm-Sidak p < 0.05 in that family. Bars are group means of the within-feature z-score.', ...
