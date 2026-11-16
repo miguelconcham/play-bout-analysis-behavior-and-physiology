@@ -1,13 +1,13 @@
 %% Estimate_playbout_behavior_variables
 % For each TWO ANIMALS session:
-%   1) Load ELAN behavior, tracking, USV Stats, video2NPX + audio2NPX
+%   1) Load ELAN behavior, tracking, and video2NPX
 %   2) Map tracking animal_pos = focal (focal txt); partner_pos = other
-%   3) Transform behavior/tracking -> NPX (video2NPX), calls -> NPX (audio2NPX)
+%   3) Transform behavior/tracking -> NPX (video2NPX)
 %   4) Estimate play bouts with canonical play_bout() (same params as MI GENERATE)
 %   5) Build peri-onset matrices (-20..+20 s, bin 10 ms) for each animal:
-%        vars: speed, acceleration, inter-animal distance, vocalization
-%        size: NP x (NVAR+1) x T
-%      Distance and vocalization are identical in both animals' matrices.
+%        vars: speed, acceleration, inter-animal distance
+%        size: NP x 3 x T
+%      Distance is identical in both animals' matrices.
 %   6) Save one .mat per session with clear animal-code field names.
 %
 % Plot the saved matrices across animals with
@@ -38,8 +38,8 @@ behavior_window = 0;
 % Peri-onset alignment
 hist_range = [-20 20];
 bin_size   = 0.01;   % 10 ms
-variable_names = {'speed', 'acceleration', 'distance', 'vocalization'};  % NVAR+1 = 4
-% indices: 1 speed, 2 accel (per animal); 3 distance, 4 voc (shared)
+variable_names = {'speed', 'acceleration', 'distance'};
+% indices: 1 speed, 2 accel (per animal); 3 distance (shared)
 
 % Which sessions: [] = all
 sessions_to_run = [];
@@ -97,15 +97,12 @@ for si = session_idx
 
     %% Sync
     video_sync_file = fullfile(session_path, 'synch_model_video2NPX.mat');
-    audio_sync_file = fullfile(session_path, 'synch_model_audio2NPX.mat');
-    if exist(video_sync_file, 'file') ~= 2 || exist(audio_sync_file, 'file') ~= 2
-        warning('Missing sync models in %s. Skipping.', session_name);
+    if exist(video_sync_file, 'file') ~= 2
+        warning('Missing video2NPX in %s. Skipping.', session_name);
         continue
     end
     V = load(video_sync_file);
-    A = load(audio_sync_file);
     synch_model_video2NPX = V.synch_model_video2NPX;
-    synch_model_audio2NPX = A.synch_model_audio2NPX;
 
     %% Behavior -> NPX, then play bouts
     Behavior = local_load_behavior(session_path);
@@ -192,19 +189,7 @@ for si = session_idx
     dist_track = sqrt(sum((TS.animal_pos - TS.partner_pos).^2, 2));
     dist_mid = interp1(track_time, dist_track, mid_time, 'linear', NaN);
 
-    %% Vocalizations -> NPX
-    CallStats = local_load_calls(session_path);
-    if isempty(CallStats)
-        warning('No calls in %s; vocalization channel = 0.', session_name);
-        call_begin = [];
-        call_end = [];
-    else
-        call_begin = predict(synch_model_audio2NPX, CallStats.BeginTimes);
-        call_end   = predict(synch_model_audio2NPX, CallStats.EndTimes);
-        fprintf('Calls: %d\n', numel(call_begin));
-    end
-
-    %% Build NP x (NVAR+1) x T matrices per animal
+    %% Build NP x n_var x T matrices per animal
     vars_A = nan(NP, n_var, T);
     vars_B = nan(NP, n_var, T);
 
@@ -222,19 +207,6 @@ for si = session_idx
         dist_trace = interp1(mid_time, dist_mid, t_abs, 'linear', NaN);
         vars_A(pb, 3, :) = dist_trace;
         vars_B(pb, 3, :) = dist_trace;
-
-        % Shared vocalization occupancy
-        if isempty(call_begin)
-            voc = zeros(1, T);
-        else
-            voc = zeros(1, T);
-            for c = 1:numel(call_begin)
-                voc = voc | (t_abs >= call_begin(c) & t_abs <= call_end(c));
-            end
-            voc = double(voc);
-        end
-        vars_A(pb, 4, :) = voc;
-        vars_B(pb, 4, :) = voc;
     end
 
     %% Package + save (animal-code field names)
@@ -248,11 +220,11 @@ for si = session_idx
     playbout_behavior.psth_time          = psth_time;             % 1 x T
     playbout_behavior.hist_range         = hist_range;
     playbout_behavior.bin_size           = bin_size;
-    playbout_behavior.variable_names     = variable_names;        % 1 x (NVAR+1)
+    playbout_behavior.variable_names     = variable_names;        % 1 x n_var
     playbout_behavior.play_bout_behaviors = play_bout_behaviors;
 
     % Matrices named by animal code for easy identification
-    playbout_behavior.(['vars_' local_safe_field(animal_A)]) = vars_A;  % NP x 4 x T
+    playbout_behavior.(['vars_' local_safe_field(animal_A)]) = vars_A;  % NP x n_var x T
     playbout_behavior.(['vars_' local_safe_field(animal_B)]) = vars_B;
 
     % Also store ordered cell for programmatic access
@@ -341,24 +313,6 @@ Behavior.Type2(Behavior.Type2 == "") = "Other";
 Behavior.Animal = cellstr(Behavior.Animal);
 Behavior.Type = cellstr(Behavior.Type);
 Behavior.Type2 = cellstr(Behavior.Type2);
-end
-
-function CallStats = local_load_calls(session_path)
-CallStats = [];
-xf = dir(fullfile(session_path, '*_Stats.xlsx'));
-if isempty(xf)
-    xf = dir(fullfile(session_path, '*.xlsx'));
-end
-if isempty(xf)
-    return
-end
-CallStats = readtable(fullfile(session_path, xf(1).name));
-CallStats.Properties.VariableNames = cellfun(@(x) strrep(x, '_', ''), ...
-    CallStats.Properties.VariableNames, 'UniformOutput', false);
-if ~ismember('BeginTimes', CallStats.Properties.VariableNames) || ...
-        ~ismember('EndTimes', CallStats.Properties.VariableNames)
-    error('Call table in %s lacks BeginTimes/EndTimes.', xf(1).name);
-end
 end
 
 function s = local_safe_field(name)

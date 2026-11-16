@@ -2,9 +2,8 @@
 % Stack the peri-play-bout variables saved by
 % Estimate_playbout_behavior_variables.m and plot one figure per variable.
 %
-% Variables plotted (each NP x T inside the saved matrices):
+% Variables (each NP x T inside the saved NP x 3 x T matrices):
 %   speed, acceleration, distance
-% Vocalization is saved with those matrices and is left out of these figures.
 % Window is the one stored with the matrices (onset at 0; default -20..+20 s).
 %
 % For each variable:
