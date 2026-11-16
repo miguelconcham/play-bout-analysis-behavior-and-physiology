@@ -24,6 +24,10 @@
 % ANOVAs keep a feature when oscillatory and non-oscillatory neurons
 % differ on the high-power value, or when high and low power differ
 % in the neurons that entered the split.
+% Section 4 also draws the Gaussian-filtered observed autocorrelogram
+% for oscillatory and non-oscillatory neurons. High power and low power
+% are separate images, each above its mean. The paired difference is a
+% separate figure.
 % Section 7 counts runs per neuron and spikes per run in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row of each figure keeps only the runs that
 % enter the ACG shuffle. It can run after section 1.
@@ -1035,6 +1039,74 @@ write_summary_section(output_folder, '4. Non-oscillatory high minus low power', 
     'Each lag is a paired t-test of the same non-oscillatory neurons, high power minus low power.', ...
     'These lag tests are not part of a Holm-Sidak family.', ...
     non_lag_line))
+
+% Observed sum-to-1 autocorrelograms, Gaussian-filtered like the examples.
+% The image of each neuron is above that tail's mean. The paired
+% difference is a separate figure for each group.
+if ~exist('acg_method', 'var') || isempty(acg_method)
+    acg_method = 'overlap';
+end
+if ~exist('acg_count', 'var') || isempty(acg_count)
+    acg_count = 'pairs';
+end
+if ~exist('checkpoint', 'var') || isempty(checkpoint)
+    checkpoint = '';
+end
+if ~exist('neuron_session', 'var') || ~exist('neuron_cluster_id', 'var') ...
+        || numel(neuron_session) ~= numel(neuron_type) ...
+        || numel(neuron_cluster_id) ~= numel(neuron_type)
+    observed_high = [];
+    observed_low = [];
+    observed_lag = [];
+    observed_note = ['Session and neuron id are not in the workspace, ', ...
+        'so the observed autocorrelograms were not drawn.'];
+else
+    observed_summary_path = stratum_summary_path(checkpoint, acg_method, acg_count);
+    [observed_high, observed_low, observed_lag, observed_note] = ...
+        smoothed_observed_population(observed_summary_path, neuron_session, ...
+        neuron_cluster_id, example_smooth_half_s, example_skip_abs_lag_s);
+end
+observed_ready = ~isempty(observed_lag) && size(observed_high, 1) == numel(neuron_type) ...
+    && size(observed_low, 1) == numel(neuron_type);
+if ~observed_ready
+    write_summary_section(output_folder, ...
+        '4. Observed autocorrelogram, high and low power', ...
+        join_summary_lines(observed_note))
+    fprintf('Observed autocorrelogram figures were not drawn. %s\n', observed_note)
+else
+    observed_groups = {'oscillatory', 'non-oscillatory'};
+    observed_row_sets = {osc_rows, classified_nonosc_rows};
+    observed_order_notes = { ...
+        'Cluster 1, strongest modulation first.', ...
+        'Entered the split and not cluster 1, strongest remaining modulation first.'};
+    observed_mean_lines = cell(1, 2);
+    observed_diff_lines = cell(1, 2);
+    for g = 1:2
+        these_rows = observed_row_sets{g};
+        matched = draw_observed_power_pair(observed_high, observed_low, observed_lag, ...
+            these_rows, observed_groups{g}, numel(neuron_type), output_folder);
+        [obs_h, obs_p] = draw_observed_power_difference(observed_high, observed_low, ...
+            observed_lag, these_rows, observed_groups{g}, numel(neuron_type), output_folder);
+        observed_mean_lines{g} = sprintf('%s: %d neurons, %d with a curve. %s', ...
+            observed_groups{g}, numel(these_rows), matched, observed_order_notes{g});
+        observed_diff_lines{g} = observed_difference_line(observed_lag, obs_h, obs_p, ...
+            observed_groups{g}, numel(these_rows));
+    end
+    write_summary_section(output_folder, ...
+        '4. Observed autocorrelogram, high and low power', join_summary_lines( ...
+        observed_note, ...
+        'Each group has one figure. The top row is the image of every neuron. The bottom row is the mean.', ...
+        'High power and low power share the color range and the mean y-axis.', ...
+        'The color range uses lags at and after 0.05 s, so the unsmoothed center does not set it.', ...
+        observed_mean_lines))
+    write_summary_section(output_folder, ...
+        '4. Observed autocorrelogram, high minus low power', join_summary_lines( ...
+        'Each group has its own difference figure. The image is high power minus low power.', ...
+        'The lower panel is the mean of that paired difference.', ...
+        'Red points mark a paired t-test at uncorrected p < 0.05. These tests are not in a Holm-Sidak family.', ...
+        'The color range uses lags at and after 0.05 s.', ...
+        observed_diff_lines))
+end
 
 % One PCA and one t-SNE include the high-power neurons and the oscillatory
 % neurons at low power. Both use the oscillatory features from the split.
@@ -6803,6 +6875,84 @@ end
 end
 
 
+function [high_pop, low_pop, pos_lag, note] = smoothed_observed_population( ...
+    summary_path, session, cluster_id, smooth_half_s, skip_abs_lag_s)
+%SMOOTHED_OBSERVED_POPULATION  Gaussian-filtered observed ACG in population order.
+%
+% Positive lags are averaged with the matching negative lag, then smoothed
+% with the example-plot Gaussian. Unmatched neurons are NaN.
+
+if nargin < 4 || isempty(smooth_half_s)
+    smooth_half_s = 0.06;
+end
+if nargin < 5 || isempty(skip_abs_lag_s)
+    skip_abs_lag_s = 0.02;
+end
+n_pop = numel(cluster_id);
+high_pop = zeros(0, 0);
+low_pop = zeros(0, 0);
+pos_lag = zeros(1, 0);
+note = sprintf(['Observed curves use the example-plot Gaussian: half-width %.3g s, ', ...
+    'standard deviation one quarter of that width, lags within %.3g s of zero left raw.'], ...
+    smooth_half_s, skip_abs_lag_s);
+if isempty(summary_path) || exist(summary_path, 'file') ~= 2
+    note = 'The locking summary was not found, so the observed autocorrelograms were not drawn.';
+    return
+end
+try
+    stored = load(summary_path, 'power_acg');
+catch
+    note = 'The locking summary could not be read, so the observed autocorrelograms were not drawn.';
+    return
+end
+if ~isfield(stored, 'power_acg') || ~isfield(stored.power_acg, 'all_neurons') ...
+        || ~isfield(stored.power_acg, 'centers')
+    note = 'The summary has no power_acg.all_neurons curves, so the observed autocorrelograms were not drawn.';
+    return
+end
+block = stored.power_acg.all_neurons;
+if ~isfield(block, 'high') || ~isfield(block, 'low') ...
+        || ~isfield(block, 'session') || ~isfield(block, 'cluster_id')
+    note = 'The power summary has no high and low autocorrelograms, so they were not drawn.';
+    return
+end
+centers = double(stored.power_acg.centers(:).');
+high_curves = double(block.high);
+low_curves = double(block.low);
+if size(high_curves, 2) ~= numel(centers) || size(low_curves, 2) ~= numel(centers) ...
+        || size(high_curves, 1) ~= size(low_curves, 1)
+    note = 'The observed autocorrelograms do not share one lag axis, so they were not drawn.';
+    return
+end
+[high_fold, pos_lag] = mirror_acg_matrix(high_curves, centers);
+[low_fold, ~] = mirror_acg_matrix(low_curves, centers);
+if numel(pos_lag) < 10
+    pos_lag = zeros(1, 0);
+    note = 'The observed autocorrelogram has too few positive lags, so it was not drawn.';
+    return
+end
+high_smooth = smooth_observed_matrix(high_fold, pos_lag, smooth_half_s, skip_abs_lag_s);
+low_smooth = smooth_observed_matrix(low_fold, pos_lag, smooth_half_s, skip_abs_lag_s);
+summary_keys = neuron_keys(block.session, block.cluster_id);
+pop_keys = neuron_keys(session, cluster_id);
+n_src = min([size(high_smooth, 1), size(low_smooth, 1), numel(summary_keys)]);
+if n_src < 1 || numel(pop_keys) ~= n_pop
+    pos_lag = zeros(1, 0);
+    note = 'The observed autocorrelograms could not be aligned to the population, so they were not drawn.';
+    return
+end
+[found, loc] = ismember(pop_keys, summary_keys(1:n_src));
+use = found(:) & loc(:) >= 1 & loc(:) <= n_src;
+high_pop = nan(n_pop, numel(pos_lag));
+low_pop = high_pop;
+if any(use)
+    high_pop(use, :) = high_smooth(loc(use), 1:numel(pos_lag));
+    low_pop(use, :) = low_smooth(loc(use), 1:numel(pos_lag));
+end
+note = sprintf('%s Matched %d of %d population neurons.', note, sum(use), n_pop);
+end
+
+
 function aligned = align_feature_rows(source, loc, found, n_pop, n_src)
 aligned = source(1, :);
 if n_pop < 1
@@ -9246,6 +9396,237 @@ for g = 1:numel(component_labels)
         component_labels{g}, ' features'], ...
         feature_comparison_report(these_rows, 'unpaired'))
 end
+end
+
+
+function matched = draw_observed_power_pair(high_pop, low_pop, lag, rows, ...
+    group_name, n_population, folder)
+%DRAW_OBSERVED_POWER_PAIR  High and low observed ACG, image above the mean.
+
+rows = rows(:);
+group_high = high_pop(rows, :);
+group_low = low_pop(rows, :);
+panels = {group_high, group_low};
+titles = {'High 25% power', 'Low 25% power'};
+image_limit = observed_image_limit(lag, [group_high; group_low]);
+x_lim = example_lag_limits(lag);
+high_mean = mean(group_high, 1, 'omitnan');
+low_mean = mean(group_low, 1, 'omitnan');
+y_lim = example_acg_ylim(lag, [high_mean(:), low_mean(:)], x_lim);
+means = {high_mean, low_mean};
+n = numel(rows);
+matched = 0;
+for i = 1:n
+    if any(isfinite(group_high(i, :))) || any(isfinite(group_low(i, :)))
+        matched = matched + 1;
+    end
+end
+open_full_figure(['Observed ACG, ', group_name, ', high and low power'])
+for c = 1:2
+    subplot(2, 2, c)
+    if n < 1
+        title({titles{c}, sprintf('%s/n = 0/%d', group_name, n_population)})
+        axis off
+    elseif n == 1
+        imagesc(lag, [0.5 1.5], panels{c})
+        ylim([0.5 1.5])
+        xlim(x_lim)
+        set(gca, 'CLim', image_limit)
+        colormap(gca, observed_sequential_map())
+        ylabel('Neuron')
+        title({titles{c}, sprintf('%s/n = %d/%d', group_name, n, n_population)})
+        box off
+    else
+        imagesc(lag, 1:n, panels{c})
+        set(gca, 'YTick', [1 n])
+        xlim(x_lim)
+        set(gca, 'CLim', image_limit)
+        colormap(gca, observed_sequential_map())
+        ylabel('Neuron')
+        title({titles{c}, sprintf('%s/n = %d/%d', group_name, n, n_population)})
+        box off
+    end
+    if c == 2 && n >= 1
+        colorbar
+    end
+    subplot(2, 2, 2 + c)
+    hold on
+    if n >= 1
+        plot(lag, means{c}, 'k', 'LineWidth', 2.4)
+    end
+    xlim(x_lim)
+    ylim(y_lim)
+    xlabel('Lag (s)')
+    ylabel('Mean sum-to-1')
+    box off
+end
+figure_group = group_name;
+figure_group(1) = upper(figure_group(1));
+sgtitle({[figure_group, ' neurons, Gaussian-filtered autocorrelogram'], ...
+    'Each image is above its mean. Positive lags, both sides averaged.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function [h, p] = draw_observed_power_difference(high_pop, low_pop, lag, rows, ...
+    group_name, n_population, folder)
+%DRAW_OBSERVED_POWER_DIFFERENCE  Paired high-minus-low observed ACG.
+
+rows = rows(:);
+group_high = high_pop(rows, :);
+group_low = low_pop(rows, :);
+difference = group_high - group_low;
+n = size(difference, 1);
+x_lim = example_lag_limits(lag);
+image_limit = observed_difference_limit(lag, difference);
+mean_difference = mean(difference, 1, 'omitnan');
+h = false(1, numel(lag));
+p = nan(1, numel(lag));
+if n >= 2
+    [h, p] = ttest(group_high, group_low);
+    h = h(:).';
+    p = p(:).';
+    if numel(h) ~= numel(lag)
+        h = false(1, numel(lag));
+        p = nan(1, numel(lag));
+    end
+end
+open_full_figure(['Observed ACG, ', group_name, ', high minus low power'])
+subplot(2, 1, 1)
+if n < 1
+    title('No neurons')
+    axis off
+elseif n == 1
+    imagesc(lag, [0.5 1.5], difference)
+    ylim([0.5 1.5])
+    xlim(x_lim)
+    set(gca, 'CLim', image_limit)
+    colormap(gca, observed_diverging_map())
+    ylabel('Neuron')
+    title({[group_name, ', high 25% power minus low 25% power'], ...
+        sprintf('n = %d/%d', n, n_population)})
+    colorbar
+    box off
+else
+    imagesc(lag, 1:n, difference)
+    set(gca, 'YTick', [1 n])
+    xlim(x_lim)
+    set(gca, 'CLim', image_limit)
+    colormap(gca, observed_diverging_map())
+    ylabel('Neuron')
+    title({[group_name, ', high 25% power minus low 25% power'], ...
+        sprintf('n = %d/%d', n, n_population)})
+    colorbar
+    box off
+end
+subplot(2, 1, 2)
+hold on
+plot(lag([1 end]), [0 0], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+if n >= 1 && any(isfinite(mean_difference))
+    plot(lag, mean_difference, 'k', 'LineWidth', 1.8)
+    significant = h == 1 & isfinite(mean_difference);
+    plot(lag(significant), mean_difference(significant), '.', ...
+        'Color', [0.7 0.25 0.25], 'MarkerSize', 14)
+end
+xlim(x_lim)
+ylim(observed_difference_mean_limit(mean_difference))
+xlabel('Lag (s)')
+ylabel('Mean difference')
+title('Red marks a paired difference at p < 0.05')
+box off
+figure_group = group_name;
+figure_group(1) = upper(figure_group(1));
+sgtitle({[figure_group, ' neurons, high power minus low power'], ...
+    'Gaussian-filtered sum-to-1 autocorrelogram.'}, 'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function line = observed_difference_line(lag, h, p, group_name, n_group)
+n_sig = sum(h(:) == 1);
+finite_p = isfinite(p);
+if any(finite_p)
+    [min_p, local_index] = min(p(finite_p));
+    finite_index = find(finite_p);
+    min_lag = lag(finite_index(local_index));
+    line = sprintf(['%s, n = %d. Paired t-tests across %d lag bins. ', ...
+        '%d bins have uncorrected p < 0.05. Smallest uncorrected p = %.4g at lag %.3f s.'], ...
+        group_name, n_group, numel(lag), n_sig, min_p, min_lag);
+else
+    line = sprintf('%s, n = %d. No paired lag test was run.', group_name, n_group);
+end
+end
+
+
+function image_limit = observed_image_limit(lag, curves)
+lag = double(lag(:)).';
+curves = double(curves);
+n = min(size(curves, 2), numel(lag));
+use = lag(1:n) >= 0.05;
+values = curves(:, use);
+values = values(isfinite(values(:)));
+if isempty(values)
+    image_limit = [0 1];
+    return
+end
+lo = min(values);
+hi = max(values);
+if lo >= 0
+    lo = 0;
+end
+if hi <= lo
+    hi = lo + 1;
+end
+image_limit = [lo, hi];
+end
+
+
+function image_limit = observed_difference_limit(lag, difference)
+lag = double(lag(:)).';
+difference = double(difference);
+n = min(size(difference, 2), numel(lag));
+use = lag(1:n) >= 0.05;
+values = difference(:, use);
+values = values(isfinite(values(:)));
+if isempty(values)
+    image_limit = [-1 1];
+    return
+end
+peak = max(abs(values));
+if ~isfinite(peak) || peak <= 0
+    peak = 1;
+end
+image_limit = [-peak, peak];
+end
+
+
+function y_lim = observed_difference_mean_limit(mean_difference)
+values = double(mean_difference(isfinite(mean_difference)));
+if isempty(values)
+    y_lim = [-1 1];
+    return
+end
+peak = max(abs([values(:); 0]));
+if ~isfinite(peak) || peak <= 0
+    peak = 1;
+end
+y_lim = [-1.08, 1.08] * peak;
+end
+
+
+function color_map = observed_sequential_map()
+n = 256;
+color_map = [linspace(0.97, 0.12, n)', linspace(0.97, 0.32, n)', ...
+    linspace(0.97, 0.62, n)'];
+end
+
+
+function color_map = observed_diverging_map()
+half = 128;
+color_map = [ ...
+    linspace(0.15, 0.96, half)', linspace(0.28, 0.96, half)', linspace(0.70, 0.96, half)'; ...
+    linspace(0.96, 0.70, half)', linspace(0.96, 0.18, half)', linspace(0.96, 0.18, half)'];
 end
 
 
