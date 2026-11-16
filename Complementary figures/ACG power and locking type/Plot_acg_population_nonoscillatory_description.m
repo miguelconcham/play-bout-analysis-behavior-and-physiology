@@ -9360,7 +9360,10 @@ end
 
 
 function save_script_figure(folder)
-%SAVE_SCRIPT_FIGURE  Write the current figure as svg and jpg.
+%SAVE_SCRIPT_FIGURE  Write the current figure as a vector svg and a jpg.
+%
+% print -vector keeps every mark as a path. Without it, a figure with
+% many elements is stored as an image inside the svg file.
 
 if nargin < 1 || isempty(folder)
     return
@@ -9381,7 +9384,7 @@ name = saved_figure_file_stem(section_n, figure_n, current_name);
 set(fig, 'PaperPositionMode', 'auto')
 svg_path = fullfile(folder, [name, '.svg']);
 jpg_path = fullfile(folder, [name, '.jpg']);
-print(fig, svg_path, '-dsvg')
+print(fig, '-vector', '-dsvg', svg_path)
 print(fig, jpg_path, '-djpeg', '-r200')
 fprintf('Saved %s\n', svg_path)
 fprintf('Saved %s\n', jpg_path)
