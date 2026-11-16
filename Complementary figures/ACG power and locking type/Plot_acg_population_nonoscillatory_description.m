@@ -42,7 +42,10 @@
 % Data\Analysis results\acg population nonoscillatory description. The files are
 % acg_population_nonosc_description_prep.mat, lock_type_model_cache_nonosc_description.mat,
 % oscillatory_neuron_labels_nonosc_description.csv, and analysis_summary_nonosc_description.txt.
-% Figure files are prefixed with nonosc_description_. This script does not read or
+% Figure files are prefixed with nonosc_description_. Each saved figure is
+% named Section XX Figure YYY, then its current name. XX is the script
+% section. YYY counts every figure in the run, and does not restart in
+% each section. Section 1 sets that count back to zero. This script does not read or
 % write the files saved by Plot_acg_population_logit or
 % Plot_acg_population_nonoscillatory.
 % area_comparison_areas, n_example_neurons, n_neurons_per_figure,
@@ -145,6 +148,10 @@
 %% 1. Load the checkpoint and build the imagesc matrices
 % output_folder is an input. Set it in the workspace before running this
 % section. Figures and analysis_summary_nonosc_description.txt are written there.
+% figure_count is the running total used in saved figure names. It starts
+% again here. Later sections keep the same count.
+figure_section = 1;
+figure_count = 0;
 if ~exist('output_folder', 'var') || isempty(output_folder)
     error('Plot_acg_population_logit:outputFolder', ...
         ['Set output_folder to the folder where figures should be saved, ' ...
@@ -340,6 +347,7 @@ write_summary_opening(output_folder, '0. Shuffle file and analysis parameters', 
     script_parameter_lines))
 
 %% 2. ACG features, PCA, t-SNE, and the two-group split
+figure_section = 2;
 % Re-run this section after changing the feature list or cluster_method.
 % Section 1 does not need to run again while feature_table is still in
 % the workspace. cluster_method is 'ward' by default. Set it to 'kmeans'
@@ -803,6 +811,7 @@ write_summary_section(output_folder, '2. Extreme feature values', join_summary_l
 disp(['Run section 3 to keep ', cluster_method_label, ' cluster 1.'])
 
 %% 3. Choose the oscillatory neurons
+figure_section = 3;
 % Cluster 1 is the higher-modulation group of cluster_method. Its rows are
 % the complete feature rows, not yet the image rows. The strongest
 % modulation is placed first. This section also writes
@@ -880,6 +889,7 @@ write_summary_section(output_folder, '3. Oscillatory neurons kept for the figure
     type_lines))
 
 %% 4. Figures
+figure_section = 4;
 % Re-run this section after editing the figure. Section 3 does not need
 % to run again while shown_logit is still in the workspace. The low-power
 % PCA figure and the paired feature figure also need the section 2 PCA.
@@ -2055,6 +2065,7 @@ write_section_4_summary(output_folder, stratum_titles, cycle_n, cycle_r, cycle_p
 end
 
 %% 5. Within-neuron delta-power gap and the feature changes
+figure_section = 5;
 % Re-run this section after section 3. One row per neuron that has both
 % tails and a positive firing rate in each tail. The outcome is the
 % high-power mean minus the low-power mean. Each predictor is that same
@@ -2503,6 +2514,7 @@ write_summary_section(output_folder, '5b. Firing rates of the power strata', ...
 
 
 %% 6. Nested comparison of delta power across areas
+figure_section = 6;
 % Re-run this section after section 1. area_power_conditions chooses the
 % set of runs. 'high' is the high-power mean, 'low' is the low-power mean,
 % and 'all' is the mean over every run with a finite score.
@@ -2563,6 +2575,7 @@ for condition_index = 1:numel(area_power_conditions)
 end
 
 %% 7. Runs per neuron, spikes per run, and run length, by area
+figure_section = 7;
 % The upper row is every run with a finite spike count in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row keeps the runs that enter the ACG
 % shuffle for neurons stored in the shuffle checkpoint. The spike panels
@@ -9340,12 +9353,12 @@ fig = gcf;
 make_figure_fullscreen(fig)
 square_plot_boxes(fig)
 drawnow
-name = regexprep(strtrim(get(fig, 'Name')), '[^\w]+', '_');
-name = regexprep(name, '^_|_$', '');
-if isempty(name)
-    name = sprintf('figure_%d', double(get(fig, 'Number')));
+[section_n, figure_n] = next_saved_figure_index();
+current_name = strtrim(get(fig, 'Name'));
+if isempty(current_name)
+    current_name = sprintf('figure %d', double(get(fig, 'Number')));
 end
-name = ['nonosc_description_', name];
+name = saved_figure_file_stem(section_n, figure_n, current_name);
 set(fig, 'PaperPositionMode', 'auto')
 svg_path = fullfile(folder, [name, '.svg']);
 jpg_path = fullfile(folder, [name, '.jpg']);
@@ -9353,6 +9366,48 @@ print(fig, svg_path, '-dsvg')
 print(fig, jpg_path, '-djpeg', '-r200')
 fprintf('Saved %s\n', svg_path)
 fprintf('Saved %s\n', jpg_path)
+end
+
+
+function [section_n, figure_n] = next_saved_figure_index()
+%NEXT_SAVED_FIGURE_INDEX  Section label and the running figure total.
+%
+% figure_section and figure_count live in the base workspace. Section 1
+% sets the count to zero. Every saved figure adds one, including figures
+% saved from a later section.
+
+section_n = base_figure_number('figure_section', 0);
+figure_n = base_figure_number('figure_count', 0) + 1;
+assignin('base', 'figure_count', figure_n);
+end
+
+
+function value = base_figure_number(name, fallback)
+value = fallback;
+try
+    value = evalin('base', name);
+catch
+    value = fallback;
+end
+if ~isscalar(value) || ~isfinite(value)
+    value = fallback;
+end
+value = round(double(value));
+end
+
+
+function name = saved_figure_file_stem(section_n, figure_n, current_name)
+%SAVED_FIGURE_FILE_STEM  Section XX Figure YYY, then the current figure name.
+%
+% YYY is the running total, not the count inside the section.
+
+label = sprintf('Section %02d Figure %03d %s', section_n, figure_n, current_name);
+name = regexprep(label, '[^\w]+', '_');
+name = regexprep(name, '^_|_$', '');
+if isempty(name)
+    name = sprintf('Section_%02d_Figure_%03d', section_n, figure_n);
+end
+name = ['nonosc_description_', name];
 end
 
 
