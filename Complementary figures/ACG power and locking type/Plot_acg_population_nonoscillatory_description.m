@@ -65,17 +65,18 @@
 % row is the stored percentile and is not smoothed again.
 % plot_example_neurons_only draws those neurons and leaves the other
 % section 4 figures unrun.
-% Section 4 also draws the all-runs sum-to-1 percentile logit by lock
-% type, once for oscillatory neurons and once for non-oscillatory
-% neurons. Trough, peak, and unlocked neurons are one column each. The
-% image of those neurons is above their mean, and the band is the 95%
-% confidence interval of that mean.
+% Section 4 also draws the all-runs autocorrelogram by lock type, once
+% for oscillatory neurons and once for non-oscillatory neurons. Trough,
+% peak, and unlocked neurons are one column each. The image of those
+% neurons is above their mean, and the band is the 95% confidence
+% interval of that mean.
 % compare_power_on_observed_acg is also set at the start of section 4.
-% false draws the percentile-logit high and low images and the paired
-% feature differences from the percentile features. true draws the
-% Gaussian-filtered observed mean autocorrelograms and the paired
-% feature differences from those observed features. It does not change
-% classify_on_observed_acg.
+% false draws the percentile-logit high and low images, the lock-type
+% figures, and the paired feature differences from the percentile
+% features. true draws the Gaussian-filtered observed autocorrelogram
+% for those same figures and the paired feature differences from those
+% observed features. The lock-type figures then use the all-runs
+% observed curve. It does not change classify_on_observed_acg.
 % Section 4 also draws one summary of the paired high-versus-low tests
 % for the oscillatory neurons and one for the non-oscillatory neurons.
 % Each summary keeps a feature when its Holm-Sidak p is below 0.05.
@@ -996,10 +997,65 @@ classified_nonosc(osc_rows) = false;
 classified_nonosc_rows = oscillatory_member_rows(classified_nonosc, osc_score);
 osc_mask = false(numel(neuron_type), 1);
 osc_mask(osc_rows) = true;
-draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, osc_mask, ...
-    'oscillatory', output_folder, logit_color_limit, logit_map)
-draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, ~osc_mask, ...
-    'non-oscillatory', output_folder, logit_color_limit, logit_map)
+if ~compare_power_on_observed_acg
+    lock_style = lock_acg_style( ...
+        'All-runs sum-to-1 percentile logit', 'Mean logit', ...
+        [-logit_color_limit, logit_color_limit], logit_map, true, ...
+        'percentile logit');
+    draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, osc_mask, ...
+        'oscillatory', output_folder, lock_style)
+    draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, ~osc_mask, ...
+        'non-oscillatory', output_folder, lock_style)
+else
+    lock_checkpoint = '';
+    lock_method = 'overlap';
+    lock_count = 'pairs';
+    session_ready = exist('neuron_session', 'var') && exist('neuron_cluster_id', 'var') ...
+        && numel(neuron_session) == numel(neuron_type) ...
+        && numel(neuron_cluster_id) == numel(neuron_type);
+    if exist('checkpoint', 'var') && ~isempty(checkpoint)
+        lock_checkpoint = checkpoint;
+    end
+    if exist('acg_method', 'var') && ~isempty(acg_method)
+        lock_method = acg_method;
+    end
+    if exist('acg_count', 'var') && ~isempty(acg_count)
+        lock_count = acg_count;
+    end
+    if ~session_ready
+        observed_all = zeros(0, 0);
+        observed_all_lag = zeros(1, 0);
+        observed_all_note = ['Session and neuron id are not in the workspace, ', ...
+            'so the observed lock-type autocorrelograms were not drawn.'];
+    else
+        [observed_all, observed_all_lag, observed_all_note] = ...
+            lock_type_observed_acg(lock_checkpoint, lock_method, lock_count, ...
+            neuron_session, neuron_cluster_id, example_smooth_half_s, ...
+            example_skip_abs_lag_s);
+    end
+    observed_lock_ready = ~isempty(observed_all_lag) ...
+        && size(observed_all, 1) == numel(neuron_type);
+    if ~observed_lock_ready
+        write_summary_section(output_folder, ...
+            '4. Mean autocorrelogram by lock type, oscillatory', ...
+            join_summary_lines(observed_all_note))
+        write_summary_section(output_folder, ...
+            '4. Mean autocorrelogram by lock type, non-oscillatory', ...
+            join_summary_lines(observed_all_note))
+        fprintf('Lock-type observed autocorrelograms were not drawn. %s\n', ...
+            observed_all_note)
+    else
+        lock_style = lock_acg_style( ...
+            'All-runs Gaussian-filtered observed autocorrelogram', ...
+            'Mean sum-to-1', ...
+            observed_image_limit(observed_all_lag, observed_all), ...
+            observed_sequential_map(), false, 'observed ACG');
+        draw_lock_type_acg(observed_all, observed_all_lag, neuron_type, osc_mask, ...
+            'oscillatory', output_folder, lock_style)
+        draw_lock_type_acg(observed_all, observed_all_lag, neuron_type, ~osc_mask, ...
+            'non-oscillatory', output_folder, lock_style)
+    end
+end
 cycle_n = nan(1, numel(stratum_titles));
 cycle_r = cycle_n;
 cycle_p = cycle_n;
@@ -7046,6 +7102,89 @@ end
 end
 
 
+function [pop, pos_lag, note] = lock_type_observed_acg(checkpoint, method, count, ...
+    session, cluster_id, smooth_half_s, skip_abs_lag_s)
+%LOCK_TYPE_OBSERVED_ACG  All-runs observed ACG, smoothed, in population order.
+
+summary_path = stratum_summary_path(checkpoint, method, count);
+[pop, pos_lag, note] = smoothed_observed_named(summary_path, session, ...
+    cluster_id, 'all', smooth_half_s, skip_abs_lag_s);
+end
+
+
+function [pop, pos_lag, note] = smoothed_observed_named( ...
+    summary_path, session, cluster_id, curve_name, smooth_half_s, skip_abs_lag_s)
+%SMOOTHED_OBSERVED_NAMED  One Gaussian-filtered observed curve in population order.
+%
+% Positive lags are averaged with the matching negative lag, then smoothed
+% with the example-plot Gaussian. Unmatched neurons are NaN.
+
+if nargin < 5 || isempty(smooth_half_s)
+    smooth_half_s = 0.06;
+end
+if nargin < 6 || isempty(skip_abs_lag_s)
+    skip_abs_lag_s = 0.02;
+end
+n_pop = numel(cluster_id);
+pop = zeros(0, 0);
+pos_lag = zeros(1, 0);
+note = sprintf(['Observed curves use the example-plot Gaussian: half-width %.3g s, ', ...
+    'standard deviation one quarter of that width, lags within %.3g s of zero left raw.'], ...
+    smooth_half_s, skip_abs_lag_s);
+if isempty(summary_path) || exist(summary_path, 'file') ~= 2
+    note = 'The locking summary was not found, so the observed autocorrelograms were not drawn.';
+    return
+end
+try
+    stored = load(summary_path, 'power_acg');
+catch
+    note = 'The locking summary could not be read, so the observed autocorrelograms were not drawn.';
+    return
+end
+if ~isfield(stored, 'power_acg') || ~isfield(stored.power_acg, 'all_neurons') ...
+        || ~isfield(stored.power_acg, 'centers')
+    note = 'The summary has no power_acg.all_neurons curves, so the observed autocorrelograms were not drawn.';
+    return
+end
+block = stored.power_acg.all_neurons;
+if ~isfield(block, curve_name) || ~isfield(block, 'session') || ~isfield(block, 'cluster_id')
+    note = sprintf(['The power summary has no %s autocorrelogram, ', ...
+        'so the observed lock-type figures were not drawn.'], curve_name);
+    return
+end
+centers = double(stored.power_acg.centers(:).');
+raw_curves = double(block.(curve_name));
+if size(raw_curves, 2) ~= numel(centers)
+    note = 'The observed autocorrelograms do not share one lag axis, so they were not drawn.';
+    return
+end
+[folded, pos_lag] = mirror_acg_matrix(raw_curves, centers);
+if numel(pos_lag) < 10
+    pos_lag = zeros(1, 0);
+    note = 'The observed autocorrelogram has too few positive lags, so it was not drawn.';
+    return
+end
+smoothed = smooth_observed_matrix(folded, pos_lag, smooth_half_s, skip_abs_lag_s);
+summary_keys = neuron_keys(block.session, block.cluster_id);
+pop_keys = neuron_keys(session, cluster_id);
+n_src = min(size(smoothed, 1), numel(summary_keys));
+if n_src < 1 || numel(pop_keys) ~= n_pop
+    pos_lag = zeros(1, 0);
+    pop = zeros(0, 0);
+    note = 'The observed autocorrelograms could not be aligned to the population, so they were not drawn.';
+    return
+end
+[found, loc] = ismember(pop_keys, summary_keys(1:n_src));
+use = found(:) & loc(:) >= 1 & loc(:) <= n_src;
+pop = nan(n_pop, numel(pos_lag));
+if any(use)
+    pop(use, :) = smoothed(loc(use), 1:numel(pos_lag));
+end
+note = sprintf('%s Matched %d of %d population neurons on the %s curve.', ...
+    note, sum(use), n_pop, curve_name);
+end
+
+
 function [high_pop, low_pop, pos_lag, note] = smoothed_observed_population( ...
     summary_path, session, cluster_id, smooth_half_s, skip_abs_lag_s)
 %SMOOTHED_OBSERVED_POPULATION  Gaussian-filtered observed ACG in population order.
@@ -9903,13 +10042,25 @@ color_map = [ ...
 end
 
 
+function style = lock_acg_style(source, y_label, image_limit, color_map, ...
+    symmetric_y, file_label)
+style.source = source;
+style.y_label = y_label;
+style.image_limit = image_limit;
+style.color_map = color_map;
+style.symmetric_y = logical(symmetric_y);
+style.file_label = file_label;
+end
+
+
 function draw_lock_type_acg(acg, lag, neuron_type, group_rows, group_name, ...
-    folder, color_limit, color_map)
-%DRAW_LOCK_TYPE_ACG  Mean all-runs logit by lock type, image above the mean.
+    folder, style)
+%DRAW_LOCK_TYPE_ACG  Mean all-runs curve by lock type, image above the mean.
 %
 % group_rows selects one population, oscillatory or non-oscillatory.
 % A logical mask keeps the population row order. Each column is one lock
-% type inside that population.
+% type inside that population. style chooses the percentile logit or the
+% Gaussian-filtered observed autocorrelogram.
 
 names = {'Trough', 'Peak', 'Unlocked'};
 n_type = numel(names);
@@ -9917,7 +10068,8 @@ lag = double(lag(:)).';
 group_rows = selected_population_rows(group_rows, numel(neuron_type));
 curves = cell(1, n_type);
 intervals = cell(1, n_type);
-y_abs = color_limit;
+y_abs = max(abs(style.image_limit));
+band_columns = zeros(numel(lag), 0);
 for k = 1:n_type
     keep = false(numel(group_rows), 1);
     for i = 1:numel(group_rows)
@@ -9930,9 +10082,17 @@ for k = 1:n_type
     if isfinite(peak)
         y_abs = max(y_abs, peak);
     end
+    band_columns = [band_columns, intervals{k}.mean(:), ...
+        intervals{k}.low(:), intervals{k}.high(:)]; %#ok<AGROW>
 end
-y_abs = y_abs * 1.08;
-open_full_figure(['ACG by lock type, ', group_name])
+if style.symmetric_y
+    y_lim = [-1.08, 1.08] * y_abs;
+    x_lim = lag([1 end]);
+else
+    x_lim = example_lag_limits(lag);
+    y_lim = example_acg_ylim(lag, band_columns, x_lim);
+end
+open_full_figure(['ACG by lock type, ', group_name, ', ', style.file_label])
 count_lines = cell(1, n_type);
 for k = 1:n_type
     this_acg = curves{k};
@@ -9945,18 +10105,24 @@ for k = 1:n_type
     elseif n == 1
         imagesc(lag, [0.5 1.5], this_acg)
         ylim([0.5 1.5])
-        axis tight
-        clim([-color_limit color_limit])
-        colormap(gca, color_map)
+        if style.symmetric_y
+            axis tight
+        end
+        xlim(x_lim)
+        set(gca, 'CLim', style.image_limit)
+        colormap(gca, style.color_map)
         ylabel('Neuron')
         title({names{k}, sprintf('n = %d', n)})
         box off
     else
         imagesc(lag, 1:n, this_acg)
         set(gca, 'YTick', [1 n])
-        axis tight
-        clim([-color_limit color_limit])
-        colormap(gca, color_map)
+        if style.symmetric_y
+            axis tight
+        end
+        xlim(x_lim)
+        set(gca, 'CLim', style.image_limit)
+        colormap(gca, style.color_map)
         ylabel('Neuron')
         title({names{k}, sprintf('n = %d', n)})
         box off
@@ -9966,24 +10132,24 @@ for k = 1:n_type
     end
     subplot(2, n_type, n_type + k)
     hold on
-    plot(lag([1 end]), [0 0], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+    plot(x_lim, [0 0], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
     if n >= 1
         draw_mean_interval(lag, intervals{k}, lock_bar_color(names{k}))
     end
-    xlim(lag([1 end]))
-    ylim([-y_abs y_abs])
+    xlim(x_lim)
+    ylim(y_lim)
     xlabel('Lag (s)')
-    ylabel('Mean logit')
+    ylabel(style.y_label)
     box off
 end
-sgtitle({['All-runs sum-to-1 percentile logit, ', group_name, ' neurons, by lock type.'], ...
+sgtitle({[style.source, ', ', group_name, ' neurons, by lock type.'], ...
     'The image is above the mean. The band is the 95% confidence interval of the mean.', ...
     'Trough, peak, and unlocked neurons are separate columns. Unclassified neurons are left out.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
 write_summary_section(folder, ['4. Mean autocorrelogram by lock type, ', group_name], ...
     join_summary_lines( ...
-    ['All-runs sum-to-1 percentile logit, ', group_name, ' neurons.'], ...
+    [style.source, ', ', group_name, ' neurons.'], ...
     'Each column is one lock type. The image keeps the population row order.', ...
     'The band is the 95% t confidence interval of the mean at that lag.', ...
     'A lag with fewer than two finite neurons has no interval.', ...
