@@ -24,6 +24,13 @@
 % ANOVAs keep a feature when oscillatory and non-oscillatory neurons
 % differ on the high-power value, or when high and low power differ
 % in the neurons that entered the split.
+% classify_on_observed_acg, at the start of section 1, chooses the
+% features used to split oscillatory neurons and to train the lock-type
+% classifiers. false uses the percentile logit. true uses the
+% Gaussian-filtered observed autocorrelogram. compare_power_on_observed_acg,
+% at the start of section 4, is independent. It chooses the high-versus-low
+% mean autocorrelogram and the paired feature differences. false draws the
+% percentile-logit images. true draws the Gaussian-filtered observed curves.
 % Section 7 counts runs per neuron and spikes per run in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row of each figure keeps only the runs that
 % enter the ACG shuffle. It can run after section 1.
@@ -35,7 +42,10 @@
 % Data\Analysis results\acg population nonoscillatory description. The files are
 % acg_population_nonosc_description_prep.mat, lock_type_model_cache_nonosc_description.mat,
 % oscillatory_neuron_labels_nonosc_description.csv, and analysis_summary_nonosc_description.txt.
-% Figure files are prefixed with nonosc_description_. This script does not read or
+% Figure files are prefixed with nonosc_description_. Each saved figure is
+% named Section XX Figure YYY, then its current name. XX is the script
+% section. YYY counts every figure in the run, and does not restart in
+% each section. Section 1 sets that count back to zero. This script does not read or
 % write the files saved by Plot_acg_population_logit or
 % Plot_acg_population_nonoscillatory.
 % area_comparison_areas, n_example_neurons, n_neurons_per_figure,
@@ -55,6 +65,12 @@
 % row is the stored percentile and is not smoothed again.
 % plot_example_neurons_only draws those neurons and leaves the other
 % section 4 figures unrun.
+% compare_power_on_observed_acg is also set at the start of section 4.
+% false draws the percentile-logit high and low images and the paired
+% feature differences from the percentile features. true draws the
+% Gaussian-filtered observed mean autocorrelograms and the paired
+% feature differences from those observed features. It does not change
+% classify_on_observed_acg.
 % classifier_method is set just before the lock-type classifier.
 % The default is naive Bayes, LDA, and a medium Gaussian SVM.
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
@@ -132,6 +148,10 @@
 %% 1. Load the checkpoint and build the imagesc matrices
 % output_folder is an input. Set it in the workspace before running this
 % section. Figures and analysis_summary_nonosc_description.txt are written there.
+% figure_count is the running total used in saved figure names. It starts
+% again here. Later sections keep the same count.
+figure_section = 1;
+figure_count = 0;
 if ~exist('output_folder', 'var') || isempty(output_folder)
     error('Plot_acg_population_logit:outputFolder', ...
         ['Set output_folder to the folder where figures should be saved, ' ...
@@ -152,6 +172,11 @@ acg_method = 'overlap';
 acg_count = 'pairs';
 % Switch between the saved shuffles. Change 500 to 2000 to use the other one.
 n_shuffles_choice = 500;
+% Classification features. false uses the percentile logit. true uses the
+% Gaussian-filtered observed autocorrelogram. This does not choose the
+% high-versus-low figures. That switch is compare_power_on_observed_acg
+% at the start of section 4.
+classify_on_observed_acg = false;
 if ~ismember(n_shuffles_choice, [500 2000])
     error('Plot_acg_population_logit:checkpoint', ...
         'n_shuffles_choice must be 500 or 2000.');
@@ -239,10 +264,17 @@ feature_table_low = append_nonosc_features(feature_table_low, imagesc_sum_power_
 summary_path = stratum_summary_path(checkpoint, acg_method, acg_count);
 [observed_feature_high, observed_feature_low, observed_feature_note] = ...
     observed_acg_feature_tables(summary_path, neuron_session, neuron_cluster_id);
+percentile_feature_high = feature_table;
+percentile_feature_low = feature_table_low;
+[feature_table, feature_table_low, classify_feature_source] = ...
+    select_classification_features(classify_on_observed_acg, ...
+    percentile_feature_high, percentile_feature_low, ...
+    observed_feature_high, observed_feature_low, numel(neuron_type));
+fprintf('Classification features: %s\n', classify_feature_source)
 write_population_feature_csv(estimate_folder, 'acg_features_percentile_high.csv', ...
-    feature_table, neuron_session, neuron_cluster_id);
+    percentile_feature_high, neuron_session, neuron_cluster_id);
 write_population_feature_csv(estimate_folder, 'acg_features_percentile_low.csv', ...
-    feature_table_low, neuron_session, neuron_cluster_id);
+    percentile_feature_low, neuron_session, neuron_cluster_id);
 write_population_feature_csv(estimate_folder, 'acg_features_observed_high.csv', ...
     observed_feature_high, neuron_session, neuron_cluster_id);
 write_population_feature_csv(estimate_folder, 'acg_features_observed_low.csv', ...
@@ -252,14 +284,17 @@ save(prep_file, 'lag', 'imagesc_logit', 'percentile', 'sort_score', ...
     'imagesc_sum_all', 'imagesc_sum_power_high', 'imagesc_sum_power_low', ...
     'neuron_type', 'neuron_record_index', 'neuron_session', 'neuron_area', ...
     'neuron_cluster_id', 'feature_table', 'feature_table_low', ...
+    'percentile_feature_high', 'percentile_feature_low', ...
     'observed_feature_high', 'observed_feature_low', 'observed_feature_note', ...
+    'classify_on_observed_acg', 'classify_feature_source', ...
     'high_power_delta', 'low_power_delta', ...
     'all_power_delta', ...
     'column_id', 'column_title', 'scale_id', 'scale_title', ...
     'n_shuffles', 'n_shuffles_choice', 'sort_window_s', 'checkpoint', 'prep_file');
 disp(['Section 1 saved the matrices to ', prep_file])
 disp('imagesc_sum_all is neurons by lag. neuron_type is the lock group of each row.')
-disp('feature_table is the percentile-logit features. observed_feature_high is the smoothed observed ACG.')
+disp(['feature_table is the classification source: ', classify_feature_source, '.'])
+disp('percentile_feature_high is the percentile logit. observed_feature_high is the smoothed observed ACG.')
 if exist(output_folder, 'dir') ~= 7
     mkdir(output_folder);
 end
@@ -279,7 +314,9 @@ write_summary_section(output_folder, '1. Checkpoint and population matrices', st
         sort_window_s(1), sort_window_s(2)), ...
     ['Percentile-logit feature columns, high-power sum-to-1, positive lags: ', ...
         strjoin(feature_table.Properties.VariableNames, ', ')], ...
-    'feature_table and feature_table_low are those percentile features after the logit. A percentile cannot pass the shuffle count, so high and low power can both sit on that ceiling.', ...
+    'percentile_feature_high and percentile_feature_low are those percentile features after the logit. A percentile cannot pass the shuffle count, so high and low power can both sit on that ceiling.', ...
+    ['Classification uses ', classify_feature_source, '. classify_on_observed_acg chooses this source.'], ...
+    'feature_table and feature_table_low are the classification copies. The high-versus-low figures in section 4 choose their own source.', ...
     'observed_feature_high and observed_feature_low are the oscillatory features of the observed sum-to-1 autocorrelogram.', ...
     'Each observed curve averages the positive lag with its negative-lag partner, then uses the example-plot Gaussian: half-width 0.06 s, standard deviation one quarter of that width, lags within 0.02 s of zero left raw.', ...
     observed_feature_note, ...
@@ -298,7 +335,9 @@ script_parameter_lines = { ...
     'Section 2 sets cluster_method to ward unless that line is changed.', ...
     'PCA, t-SNE, k-means, and Ward use oscillatory features only. Non-oscillatory features stay in the later tests.', ...
     'Section 4 sets example_smooth_half_s to 0.06 s and example_skip_abs_lag_s to 0.02 s.', ...
-    'The lock-type classifier uses naive Bayes, LDA, and a medium Gaussian SVM unless classifier_method is changed. n_accuracy_permutations is 1000.'};
+    'The lock-type classifier uses naive Bayes, LDA, and a medium Gaussian SVM unless classifier_method is changed. n_accuracy_permutations is 1000.', ...
+    sprintf('classify_on_observed_acg: %d. Classification source: %s.', ...
+        classify_on_observed_acg, classify_feature_source)};
 write_summary_opening(output_folder, '0. Shuffle file and analysis parameters', join_summary_lines( ...
     'This block is the start of the summary. Later sections are added after it.', ...
     checkpoint_lines, ...
@@ -308,6 +347,7 @@ write_summary_opening(output_folder, '0. Shuffle file and analysis parameters', 
     script_parameter_lines))
 
 %% 2. ACG features, PCA, t-SNE, and the two-group split
+figure_section = 2;
 % Re-run this section after changing the feature list or cluster_method.
 % Section 1 does not need to run again while feature_table is still in
 % the workspace. cluster_method is 'ward' by default. Set it to 'kmeans'
@@ -333,7 +373,21 @@ if ~exist('feature_table', 'var')
     positive_lag = lag > 0;
     feature_table = acg2features(imagesc_sum_power_high(:, positive_lag), lag(positive_lag));
 end
-if exist('imagesc_sum_power_high', 'var') && exist('lag', 'var')
+if ~exist('classify_on_observed_acg', 'var') || isempty(classify_on_observed_acg)
+    classify_on_observed_acg = false;
+end
+if exist('percentile_feature_high', 'var') && exist('observed_feature_high', 'var')
+    [feature_table, feature_table_low, classify_feature_source] = ...
+        select_classification_features(classify_on_observed_acg, ...
+        percentile_feature_high, percentile_feature_low, ...
+        observed_feature_high, observed_feature_low, numel(neuron_type));
+    fprintf('Classification features: %s\n', classify_feature_source)
+elseif classify_on_observed_acg
+    error('Plot_acg_population_nonoscillatory_description:classifyFeatures', ...
+        ['classify_on_observed_acg is true, but the observed feature tables are not in the workspace. ', ...
+        'Run section 1 first.']);
+end
+if ~classify_on_observed_acg && exist('imagesc_sum_power_high', 'var') && exist('lag', 'var')
     feature_table = append_nonosc_features(feature_table, imagesc_sum_power_high, lag);
 end
 if ~exist('n_shuffles', 'var') || isempty(n_shuffles)
@@ -757,6 +811,7 @@ write_summary_section(output_folder, '2. Extreme feature values', join_summary_l
 disp(['Run section 3 to keep ', cluster_method_label, ' cluster 1.'])
 
 %% 3. Choose the oscillatory neurons
+figure_section = 3;
 % Cluster 1 is the higher-modulation group of cluster_method. Its rows are
 % the complete feature rows, not yet the image rows. The strongest
 % modulation is placed first. This section also writes
@@ -834,6 +889,7 @@ write_summary_section(output_folder, '3. Oscillatory neurons kept for the figure
     type_lines))
 
 %% 4. Figures
+figure_section = 4;
 % Re-run this section after editing the figure. Section 3 does not need
 % to run again while shown_logit is still in the workspace. The low-power
 % PCA figure and the paired feature figure also need the section 2 PCA.
@@ -846,6 +902,12 @@ n_neurons_per_figure = 3;
 example_smooth_half_s = 0.06;
 example_skip_abs_lag_s = 0.02;
 plot_example_neurons_only = false;
+% High versus low power figures. false draws the percentile-logit images
+% and the feature differences from the percentile features. true draws the
+% Gaussian-filtered observed autocorrelogram, image above the mean, and the
+% feature differences from those observed features. Classification keeps
+% the source chosen by classify_on_observed_acg.
+compare_power_on_observed_acg = false;
 % Areas in the one-way and two-factor area ANOVAs, in axis order.
 % Delete a name to leave that area out. Neurons with any other label,
 % including an unstored area, stay out. A feature still needs two finite
@@ -902,6 +964,12 @@ classified_nonosc = false(numel(neuron_type), 1);
 classified_nonosc(complete_rows) = true;
 classified_nonosc(osc_rows) = false;
 classified_nonosc_rows = oscillatory_member_rows(classified_nonosc, osc_score);
+cycle_n = nan(1, numel(stratum_titles));
+cycle_r = cycle_n;
+cycle_p = cycle_n;
+high_vs_low_h = false(1, numel(lag));
+high_vs_low_p = nan(1, numel(lag));
+if ~compare_power_on_observed_acg
 [cycle_n, cycle_r, cycle_p] = draw_power_logit_pair( ...
     imagesc_logit, osc_rows, stratum_columns, stratum_titles, ...
     'oscillatory', n_osc, n_before_osc, lag, logit_color_limit, logit_map, ...
@@ -1035,6 +1103,95 @@ write_summary_section(output_folder, '4. Non-oscillatory high minus low power', 
     'Each lag is a paired t-test of the same non-oscillatory neurons, high power minus low power.', ...
     'These lag tests are not part of a Holm-Sidak family.', ...
     non_lag_line))
+else
+% Observed sum-to-1 autocorrelograms, Gaussian-filtered like the examples.
+% The image of each neuron is above that tail's mean. The paired
+% difference is a separate figure for each group.
+if ~exist('acg_method', 'var') || isempty(acg_method)
+    acg_method = 'overlap';
+end
+if ~exist('acg_count', 'var') || isempty(acg_count)
+    acg_count = 'pairs';
+end
+if ~exist('checkpoint', 'var') || isempty(checkpoint)
+    checkpoint = '';
+end
+if ~exist('neuron_session', 'var') || ~exist('neuron_cluster_id', 'var') ...
+        || numel(neuron_session) ~= numel(neuron_type) ...
+        || numel(neuron_cluster_id) ~= numel(neuron_type)
+    observed_high = [];
+    observed_low = [];
+    observed_lag = [];
+    observed_note = ['Session and neuron id are not in the workspace, ', ...
+        'so the observed autocorrelograms were not drawn.'];
+else
+    observed_summary_path = stratum_summary_path(checkpoint, acg_method, acg_count);
+    [observed_high, observed_low, observed_lag, observed_note] = ...
+        smoothed_observed_population(observed_summary_path, neuron_session, ...
+        neuron_cluster_id, example_smooth_half_s, example_skip_abs_lag_s);
+end
+observed_ready = ~isempty(observed_lag) && size(observed_high, 1) == numel(neuron_type) ...
+    && size(observed_low, 1) == numel(neuron_type);
+if ~observed_ready
+    write_summary_section(output_folder, ...
+        '4. Observed autocorrelogram, high and low power', ...
+        join_summary_lines(observed_note))
+    fprintf('Observed autocorrelogram figures were not drawn. %s\n', observed_note)
+else
+    observed_groups = {'oscillatory', 'non-oscillatory'};
+    observed_row_sets = {osc_rows, classified_nonosc_rows};
+    observed_order_notes = { ...
+        'Cluster 1, strongest modulation first.', ...
+        'Entered the split and not cluster 1, strongest remaining modulation first.'};
+    observed_mean_lines = cell(1, 2);
+    observed_diff_lines = cell(1, 2);
+    for g = 1:2
+        these_rows = observed_row_sets{g};
+        matched = draw_observed_power_pair(observed_high, observed_low, observed_lag, ...
+            these_rows, observed_groups{g}, numel(neuron_type), output_folder);
+        [obs_h, obs_p] = draw_observed_power_difference(observed_high, observed_low, ...
+            observed_lag, these_rows, observed_groups{g}, numel(neuron_type), output_folder);
+        observed_mean_lines{g} = sprintf('%s: %d neurons, %d with a curve. %s', ...
+            observed_groups{g}, numel(these_rows), matched, observed_order_notes{g});
+        observed_diff_lines{g} = observed_difference_line(observed_lag, obs_h, obs_p, ...
+            observed_groups{g}, numel(these_rows));
+        if g == 1
+            high_vs_low_h = obs_h;
+            high_vs_low_p = obs_p;
+        end
+    end
+    write_summary_section(output_folder, ...
+        '4. Observed autocorrelogram, high and low power', join_summary_lines( ...
+        observed_note, ...
+        'Each group has one figure. The top row is the image of every neuron. The bottom row is the mean.', ...
+        'High power and low power share the color range and the mean y-axis.', ...
+        'The color range uses lags at and after 0.05 s, so the unsmoothed center does not set it.', ...
+        observed_mean_lines))
+    write_summary_section(output_folder, ...
+        '4. Observed autocorrelogram, high minus low power', join_summary_lines( ...
+        'Each group has its own difference figure. The image is high power minus low power.', ...
+        'The lower panel is the mean of that paired difference.', ...
+        'Red points mark a paired t-test at uncorrected p < 0.05. These tests are not in a Holm-Sidak family.', ...
+        'The color range uses lags at and after 0.05 s.', ...
+        observed_diff_lines))
+end
+end
+if ~compare_power_on_observed_acg
+    write_summary_section(output_folder, ...
+        '4. Observed autocorrelogram, high and low power', join_summary_lines( ...
+        'compare_power_on_observed_acg is false, so the Gaussian-filtered observed figures were not drawn.', ...
+        'The high-versus-low images in this run are the percentile logit.'))
+    write_summary_section(output_folder, ...
+        '4. Observed autocorrelogram, high minus low power', join_summary_lines( ...
+        'compare_power_on_observed_acg is false, so this observed difference was not drawn.'))
+else
+    write_summary_section(output_folder, '4. Non-oscillatory logit figure', join_summary_lines( ...
+        'compare_power_on_observed_acg is true, so the percentile-logit images were not drawn.', ...
+        'The mean autocorrelogram in this run is the Gaussian-filtered observed curve.'))
+    write_summary_section(output_folder, '4. Non-oscillatory high minus low power', join_summary_lines( ...
+        'compare_power_on_observed_acg is true, so the percentile-logit difference was not drawn.', ...
+        'The paired difference in this run is the Gaussian-filtered observed autocorrelogram.'))
+end
 
 % One PCA and one t-SNE include the high-power neurons and the oscillatory
 % neurons at low power. Both use the oscillatory features from the split.
@@ -1048,15 +1205,23 @@ if ~exist('feature_mean', 'var') || ~exist('feature_sigma', 'var') ...
     error('Plot_acg_population_logit:pca', ...
         'The high-power features are not in the workspace. Run sections 2 and 3 first.');
 end
-positive_lag = lag > 0;
-feature_table_low = acg2features( ...
-    imagesc_sum_power_low(:, positive_lag), lag(positive_lag));
-feature_table_low = append_nonosc_features(feature_table_low, imagesc_sum_power_low, lag);
+if ~exist('classify_on_observed_acg', 'var') || isempty(classify_on_observed_acg)
+    classify_on_observed_acg = false;
+end
 if ~exist('n_shuffles', 'var') || isempty(n_shuffles)
     n_shuffles = 500;
 end
-[feature_table, feature_table_low, outlier_lines] = screen_extreme_features( ...
-    feature_table, feature_table_low, n_shuffles);
+if ~classify_on_observed_acg
+    positive_lag = lag > 0;
+    feature_table_low = acg2features( ...
+        imagesc_sum_power_low(:, positive_lag), lag(positive_lag));
+    feature_table_low = append_nonosc_features(feature_table_low, imagesc_sum_power_low, lag);
+    [feature_table, feature_table_low, outlier_lines] = screen_extreme_features( ...
+        feature_table, feature_table_low, n_shuffles);
+else
+    outlier_lines = {['Classification features are the Gaussian-filtered observed autocorrelogram. ', ...
+        'Section 2 applied the extreme-value screen. They were not replaced by the percentile logit.']};
+end
 for i_outlier = 1:numel(outlier_lines)
     fprintf('%s\n', outlier_lines{i_outlier})
 end
@@ -1175,8 +1340,21 @@ comparison_titles = { ...
     'Gamma R2', 'Gamma RMSE', ...
     'Diff-exp amplitude', 'Diff-exp rise', 'Diff-exp decay', 'Diff-exp baseline', ...
     'Diff-exp R2', 'Diff-exp RMSE', 'Peak amplitude', 'AUC'};
-low_names = feature_table_low.Properties.VariableNames;
-high_names = feature_table.Properties.VariableNames;
+if ~exist('percentile_feature_high', 'var') || ~exist('percentile_feature_low', 'var')
+    percentile_feature_high = table();
+    percentile_feature_low = table();
+end
+if ~exist('observed_feature_high', 'var') || ~exist('observed_feature_low', 'var')
+    observed_feature_high = table();
+    observed_feature_low = table();
+end
+[compare_high, compare_low, compare_source] = power_comparison_features( ...
+    compare_power_on_observed_acg, feature_table, feature_table_low, ...
+    percentile_feature_high, percentile_feature_low, ...
+    observed_feature_high, observed_feature_low, n_shuffles);
+fprintf('High versus low power features: %s\n', compare_source)
+low_names = compare_low.Properties.VariableNames;
+high_names = compare_high.Properties.VariableNames;
 high_compare = zeros(numel(osc_rows), 0);
 low_compare = zeros(numel(osc_rows), 0);
 compare_titles = {};
@@ -1186,8 +1364,8 @@ for j = 1:numel(comparison_names)
     if ~ismember(this_name, high_names) || ~ismember(this_name, low_names)
         continue
     end
-    high_column = feature_table{osc_rows, this_name};
-    low_column = feature_table_low{osc_rows, this_name};
+    high_column = compare_high{osc_rows, this_name};
+    low_column = compare_low{osc_rows, this_name};
     if ~isnumeric(high_column) || ~isnumeric(low_column)
         continue
     end
@@ -1198,10 +1376,10 @@ for j = 1:numel(comparison_names)
 end
 if all(ismember({'Peak1', 'Peak2'}, high_names)) ...
         && all(ismember({'Peak1', 'Peak2'}, low_names))
-    high_compare(:, end + 1) = feature_table{osc_rows, 'Peak1'} ...
-        - feature_table{osc_rows, 'Peak2'}; %#ok<AGROW>
-    low_compare(:, end + 1) = feature_table_low{osc_rows, 'Peak1'} ...
-        - feature_table_low{osc_rows, 'Peak2'}; %#ok<AGROW>
+    high_compare(:, end + 1) = compare_high{osc_rows, 'Peak1'} ...
+        - compare_high{osc_rows, 'Peak2'}; %#ok<AGROW>
+    low_compare(:, end + 1) = compare_low{osc_rows, 'Peak1'} ...
+        - compare_low{osc_rows, 'Peak2'}; %#ok<AGROW>
     compare_titles{end + 1} = 'Peak1 - Peak2'; %#ok<AGROW>
     compare_group{end + 1} = 'oscillatory'; %#ok<AGROW>
 end
@@ -1261,6 +1439,7 @@ if ~isempty(compare_titles)
             end
         end
         sgtitle({'Same oscillatory neurons at high and low power.', ...
+            compare_source, ...
             [component_groups{g}, ' features only.'], ...
             'Thin lines join one neuron. Thick bars are means and the line between them.', ...
             'Holm-Sidak is computed only across the panels in this figure.', ...
@@ -1271,10 +1450,10 @@ else
     paired_stats = empty_feature_stats();
     paired_stats(1) = [];
 end
-draw_paired_power_features(feature_table, feature_table_low, classified_nonosc_rows, ...
+draw_paired_power_features(compare_high, compare_low, classified_nonosc_rows, ...
     comparison_names, comparison_titles, output_folder, ...
     'non-oscillatory neurons', ...
-    'Same non-oscillatory neurons at high and low power.', ...
+    ['Same non-oscillatory neurons at high and low power. ', compare_source, '.'], ...
     '4. Feature comparison, high versus low power, non-oscillatory neurons')
 
 type_test = area_enrichment(lock_type_label, type_observed, type_total);
@@ -1881,10 +2060,12 @@ write_section_4_summary(output_folder, stratum_titles, cycle_n, cycle_r, cycle_p
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
     sum(osc_in_complete), sum(~osc_in_complete), sum(low_member), ...
     sum(low_member), sum(osc_in_complete) - sum(low_member), embed_perplexity, ...
-    paired_stats, compare_group, lock_type_label, type_observed, type_total, type_percent)
+    paired_stats, compare_group, lock_type_label, type_observed, type_total, type_percent, ...
+    compare_power_on_observed_acg)
 end
 
 %% 5. Within-neuron delta-power gap and the feature changes
+figure_section = 5;
 % Re-run this section after section 3. One row per neuron that has both
 % tails and a positive firing rate in each tail. The outcome is the
 % high-power mean minus the low-power mean. Each predictor is that same
@@ -2333,6 +2514,7 @@ write_summary_section(output_folder, '5b. Firing rates of the power strata', ...
 
 
 %% 6. Nested comparison of delta power across areas
+figure_section = 6;
 % Re-run this section after section 1. area_power_conditions chooses the
 % set of runs. 'high' is the high-power mean, 'low' is the low-power mean,
 % and 'all' is the mean over every run with a finite score.
@@ -2393,6 +2575,7 @@ for condition_index = 1:numel(area_power_conditions)
 end
 
 %% 7. Runs per neuron, spikes per run, and run length, by area
+figure_section = 7;
 % The upper row is every run with a finite spike count in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row keeps the runs that enter the ACG
 % shuffle for neurons stored in the shuffle checkpoint. The spike panels
@@ -4810,7 +4993,7 @@ for g = 1:numel(component_groups)
     save_script_figure(folder)
     write_summary_section(folder, [summary_title, ', ', component_groups{g}, ' features'], ...
         feature_comparison_report(paired_stats(keep), 'paired', ...
-        ['Paired t-tests. The same ', population_name, ' are compared at high and low power.']))
+        ['Paired t-tests. The same ', population_name, ' are compared at high and low power. ', caption]))
 end
 end
 
@@ -6774,6 +6957,8 @@ high_smooth = smooth_observed_matrix(high_fold, pos_lag, smooth_half_s, skip_abs
 low_smooth = smooth_observed_matrix(low_fold, pos_lag, smooth_half_s, skip_abs_lag_s);
 high_source = acg2features(high_smooth, pos_lag);
 low_source = acg2features(low_smooth, pos_lag);
+high_source = append_nonosc_features(high_source, high_smooth, pos_lag);
+low_source = append_nonosc_features(low_source, low_smooth, pos_lag);
 summary_keys = neuron_keys(block.session, block.cluster_id);
 if isempty(summary_keys) || size(high_source, 1) < 1
     note = 'The power summary has no observed autocorrelogram rows, so their features were not extracted.';
@@ -6800,6 +6985,84 @@ for i = 1:size(curves, 1)
     smoothed(i, 1:n_col) = smooth_example_acg( ...
         pos_lag(1:n_col), curves(i, 1:n_col), smooth_half_s, skip_abs_lag_s);
 end
+end
+
+
+function [high_pop, low_pop, pos_lag, note] = smoothed_observed_population( ...
+    summary_path, session, cluster_id, smooth_half_s, skip_abs_lag_s)
+%SMOOTHED_OBSERVED_POPULATION  Gaussian-filtered observed ACG in population order.
+%
+% Positive lags are averaged with the matching negative lag, then smoothed
+% with the example-plot Gaussian. Unmatched neurons are NaN.
+
+if nargin < 4 || isempty(smooth_half_s)
+    smooth_half_s = 0.06;
+end
+if nargin < 5 || isempty(skip_abs_lag_s)
+    skip_abs_lag_s = 0.02;
+end
+n_pop = numel(cluster_id);
+high_pop = zeros(0, 0);
+low_pop = zeros(0, 0);
+pos_lag = zeros(1, 0);
+note = sprintf(['Observed curves use the example-plot Gaussian: half-width %.3g s, ', ...
+    'standard deviation one quarter of that width, lags within %.3g s of zero left raw.'], ...
+    smooth_half_s, skip_abs_lag_s);
+if isempty(summary_path) || exist(summary_path, 'file') ~= 2
+    note = 'The locking summary was not found, so the observed autocorrelograms were not drawn.';
+    return
+end
+try
+    stored = load(summary_path, 'power_acg');
+catch
+    note = 'The locking summary could not be read, so the observed autocorrelograms were not drawn.';
+    return
+end
+if ~isfield(stored, 'power_acg') || ~isfield(stored.power_acg, 'all_neurons') ...
+        || ~isfield(stored.power_acg, 'centers')
+    note = 'The summary has no power_acg.all_neurons curves, so the observed autocorrelograms were not drawn.';
+    return
+end
+block = stored.power_acg.all_neurons;
+if ~isfield(block, 'high') || ~isfield(block, 'low') ...
+        || ~isfield(block, 'session') || ~isfield(block, 'cluster_id')
+    note = 'The power summary has no high and low autocorrelograms, so they were not drawn.';
+    return
+end
+centers = double(stored.power_acg.centers(:).');
+high_curves = double(block.high);
+low_curves = double(block.low);
+if size(high_curves, 2) ~= numel(centers) || size(low_curves, 2) ~= numel(centers) ...
+        || size(high_curves, 1) ~= size(low_curves, 1)
+    note = 'The observed autocorrelograms do not share one lag axis, so they were not drawn.';
+    return
+end
+[high_fold, pos_lag] = mirror_acg_matrix(high_curves, centers);
+[low_fold, ~] = mirror_acg_matrix(low_curves, centers);
+if numel(pos_lag) < 10
+    pos_lag = zeros(1, 0);
+    note = 'The observed autocorrelogram has too few positive lags, so it was not drawn.';
+    return
+end
+high_smooth = smooth_observed_matrix(high_fold, pos_lag, smooth_half_s, skip_abs_lag_s);
+low_smooth = smooth_observed_matrix(low_fold, pos_lag, smooth_half_s, skip_abs_lag_s);
+summary_keys = neuron_keys(block.session, block.cluster_id);
+pop_keys = neuron_keys(session, cluster_id);
+n_src = min([size(high_smooth, 1), size(low_smooth, 1), numel(summary_keys)]);
+if n_src < 1 || numel(pop_keys) ~= n_pop
+    pos_lag = zeros(1, 0);
+    note = 'The observed autocorrelograms could not be aligned to the population, so they were not drawn.';
+    return
+end
+[found, loc] = ismember(pop_keys, summary_keys(1:n_src));
+use = found(:) & loc(:) >= 1 & loc(:) <= n_src;
+high_pop = nan(n_pop, numel(pos_lag));
+low_pop = high_pop;
+if any(use)
+    high_pop(use, :) = high_smooth(loc(use), 1:numel(pos_lag));
+    low_pop(use, :) = low_smooth(loc(use), 1:numel(pos_lag));
+end
+note = sprintf('%s Matched %d of %d population neurons.', note, sum(use), n_pop);
 end
 
 
@@ -9090,12 +9353,12 @@ fig = gcf;
 make_figure_fullscreen(fig)
 square_plot_boxes(fig)
 drawnow
-name = regexprep(strtrim(get(fig, 'Name')), '[^\w]+', '_');
-name = regexprep(name, '^_|_$', '');
-if isempty(name)
-    name = sprintf('figure_%d', double(get(fig, 'Number')));
+[section_n, figure_n] = next_saved_figure_index();
+current_name = strtrim(get(fig, 'Name'));
+if isempty(current_name)
+    current_name = sprintf('figure %d', double(get(fig, 'Number')));
 end
-name = ['nonosc_description_', name];
+name = saved_figure_file_stem(section_n, figure_n, current_name);
 set(fig, 'PaperPositionMode', 'auto')
 svg_path = fullfile(folder, [name, '.svg']);
 jpg_path = fullfile(folder, [name, '.jpg']);
@@ -9103,6 +9366,48 @@ print(fig, svg_path, '-dsvg')
 print(fig, jpg_path, '-djpeg', '-r200')
 fprintf('Saved %s\n', svg_path)
 fprintf('Saved %s\n', jpg_path)
+end
+
+
+function [section_n, figure_n] = next_saved_figure_index()
+%NEXT_SAVED_FIGURE_INDEX  Section label and the running figure total.
+%
+% figure_section and figure_count live in the base workspace. Section 1
+% sets the count to zero. Every saved figure adds one, including figures
+% saved from a later section.
+
+section_n = base_figure_number('figure_section', 0);
+figure_n = base_figure_number('figure_count', 0) + 1;
+assignin('base', 'figure_count', figure_n);
+end
+
+
+function value = base_figure_number(name, fallback)
+value = fallback;
+try
+    value = evalin('base', name);
+catch
+    value = fallback;
+end
+if ~isscalar(value) || ~isfinite(value)
+    value = fallback;
+end
+value = round(double(value));
+end
+
+
+function name = saved_figure_file_stem(section_n, figure_n, current_name)
+%SAVED_FIGURE_FILE_STEM  Section XX Figure YYY, then the current figure name.
+%
+% YYY is the running total, not the count inside the section.
+
+label = sprintf('Section %02d Figure %03d %s', section_n, figure_n, current_name);
+name = regexprep(label, '[^\w]+', '_');
+name = regexprep(name, '^_|_$', '');
+if isempty(name)
+    name = sprintf('Section_%02d_Figure_%03d', section_n, figure_n);
+end
+name = ['nonosc_description_', name];
 end
 
 
@@ -9249,6 +9554,293 @@ end
 end
 
 
+function [feature_table, feature_table_low, source_name] = select_classification_features( ...
+    use_observed, percentile_high, percentile_low, observed_high, observed_low, n_neurons)
+%SELECT_CLASSIFICATION_FEATURES  Feature tables for the split and the classifiers.
+
+if use_observed
+    source_name = 'Gaussian-filtered observed autocorrelogram';
+    feature_table = observed_high;
+    feature_table_low = observed_low;
+    if isempty(feature_table) || size(feature_table, 1) ~= n_neurons ...
+            || isempty(feature_table_low) || size(feature_table_low, 1) ~= n_neurons
+        error('Plot_acg_population_nonoscillatory_description:classifyFeatures', ...
+            ['classify_on_observed_acg is true, but the Gaussian-filtered observed ', ...
+            'features do not have one row per neuron. Run section 1 where the locking summary can be read, ', ...
+            'or set classify_on_observed_acg to false.']);
+    end
+else
+    source_name = 'percentile logit';
+    feature_table = percentile_high;
+    feature_table_low = percentile_low;
+end
+end
+
+
+function [high_table, low_table, source_name] = power_comparison_features( ...
+    use_observed, fallback_high, fallback_low, percentile_high, percentile_low, ...
+    observed_high, observed_low, n_shuffles)
+%POWER_COMPARISON_FEATURES  High and low tables for the paired feature figures.
+%
+% The copies are screened here and are not written back onto the
+% classification tables.
+
+if use_observed
+    source_name = 'Gaussian-filtered observed autocorrelogram';
+    high_table = observed_high;
+    low_table = observed_low;
+else
+    source_name = 'percentile logit';
+    if ~isempty(percentile_high) && size(percentile_high, 1) > 0 ...
+            && ~isempty(percentile_low) && size(percentile_low, 1) > 0
+        high_table = percentile_high;
+        low_table = percentile_low;
+    else
+        high_table = fallback_high;
+        low_table = fallback_low;
+    end
+end
+if isempty(high_table) || size(high_table, 1) < 1 ...
+        || isempty(low_table) || size(low_table, 1) < 1
+    error('Plot_acg_population_nonoscillatory_description:powerComparison', ...
+        ['The %s features are not available for the high-versus-low comparison. ', ...
+        'Run section 1, or change compare_power_on_observed_acg.'], source_name);
+end
+[high_table, low_table, ~] = screen_extreme_features(high_table, low_table, n_shuffles);
+end
+
+
+function matched = draw_observed_power_pair(high_pop, low_pop, lag, rows, ...
+    group_name, n_population, folder)
+%DRAW_OBSERVED_POWER_PAIR  High and low observed ACG, image above the mean.
+
+rows = rows(:);
+group_high = high_pop(rows, :);
+group_low = low_pop(rows, :);
+panels = {group_high, group_low};
+titles = {'High 25% power', 'Low 25% power'};
+image_limit = observed_image_limit(lag, [group_high; group_low]);
+x_lim = example_lag_limits(lag);
+high_mean = mean(group_high, 1, 'omitnan');
+low_mean = mean(group_low, 1, 'omitnan');
+y_lim = example_acg_ylim(lag, [high_mean(:), low_mean(:)], x_lim);
+means = {high_mean, low_mean};
+n = numel(rows);
+matched = 0;
+for i = 1:n
+    if any(isfinite(group_high(i, :))) || any(isfinite(group_low(i, :)))
+        matched = matched + 1;
+    end
+end
+open_full_figure(['Observed ACG, ', group_name, ', high and low power'])
+for c = 1:2
+    subplot(2, 2, c)
+    if n < 1
+        title({titles{c}, sprintf('%s/n = 0/%d', group_name, n_population)})
+        axis off
+    elseif n == 1
+        imagesc(lag, [0.5 1.5], panels{c})
+        ylim([0.5 1.5])
+        xlim(x_lim)
+        set(gca, 'CLim', image_limit)
+        colormap(gca, observed_sequential_map())
+        ylabel('Neuron')
+        title({titles{c}, sprintf('%s/n = %d/%d', group_name, n, n_population)})
+        box off
+    else
+        imagesc(lag, 1:n, panels{c})
+        set(gca, 'YTick', [1 n])
+        xlim(x_lim)
+        set(gca, 'CLim', image_limit)
+        colormap(gca, observed_sequential_map())
+        ylabel('Neuron')
+        title({titles{c}, sprintf('%s/n = %d/%d', group_name, n, n_population)})
+        box off
+    end
+    if c == 2 && n >= 1
+        colorbar
+    end
+    subplot(2, 2, 2 + c)
+    hold on
+    if n >= 1
+        plot(lag, means{c}, 'k', 'LineWidth', 2.4)
+    end
+    xlim(x_lim)
+    ylim(y_lim)
+    xlabel('Lag (s)')
+    ylabel('Mean sum-to-1')
+    box off
+end
+figure_group = group_name;
+figure_group(1) = upper(figure_group(1));
+sgtitle({[figure_group, ' neurons, Gaussian-filtered autocorrelogram'], ...
+    'Each image is above its mean. Positive lags, both sides averaged.'}, ...
+    'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function [h, p] = draw_observed_power_difference(high_pop, low_pop, lag, rows, ...
+    group_name, n_population, folder)
+%DRAW_OBSERVED_POWER_DIFFERENCE  Paired high-minus-low observed ACG.
+
+rows = rows(:);
+group_high = high_pop(rows, :);
+group_low = low_pop(rows, :);
+difference = group_high - group_low;
+n = size(difference, 1);
+x_lim = example_lag_limits(lag);
+image_limit = observed_difference_limit(lag, difference);
+mean_difference = mean(difference, 1, 'omitnan');
+h = false(1, numel(lag));
+p = nan(1, numel(lag));
+if n >= 2
+    [h, p] = ttest(group_high, group_low);
+    h = h(:).';
+    p = p(:).';
+    if numel(h) ~= numel(lag)
+        h = false(1, numel(lag));
+        p = nan(1, numel(lag));
+    end
+end
+open_full_figure(['Observed ACG, ', group_name, ', high minus low power'])
+subplot(2, 1, 1)
+if n < 1
+    title('No neurons')
+    axis off
+elseif n == 1
+    imagesc(lag, [0.5 1.5], difference)
+    ylim([0.5 1.5])
+    xlim(x_lim)
+    set(gca, 'CLim', image_limit)
+    colormap(gca, observed_diverging_map())
+    ylabel('Neuron')
+    title({[group_name, ', high 25% power minus low 25% power'], ...
+        sprintf('n = %d/%d', n, n_population)})
+    colorbar
+    box off
+else
+    imagesc(lag, 1:n, difference)
+    set(gca, 'YTick', [1 n])
+    xlim(x_lim)
+    set(gca, 'CLim', image_limit)
+    colormap(gca, observed_diverging_map())
+    ylabel('Neuron')
+    title({[group_name, ', high 25% power minus low 25% power'], ...
+        sprintf('n = %d/%d', n, n_population)})
+    colorbar
+    box off
+end
+subplot(2, 1, 2)
+hold on
+plot(lag([1 end]), [0 0], ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off')
+if n >= 1 && any(isfinite(mean_difference))
+    plot(lag, mean_difference, 'k', 'LineWidth', 1.8)
+    significant = h == 1 & isfinite(mean_difference);
+    plot(lag(significant), mean_difference(significant), '.', ...
+        'Color', [0.7 0.25 0.25], 'MarkerSize', 14)
+end
+xlim(x_lim)
+ylim(observed_difference_mean_limit(mean_difference))
+xlabel('Lag (s)')
+ylabel('Mean difference')
+title('Red marks a paired difference at p < 0.05')
+box off
+figure_group = group_name;
+figure_group(1) = upper(figure_group(1));
+sgtitle({[figure_group, ' neurons, high power minus low power'], ...
+    'Gaussian-filtered sum-to-1 autocorrelogram.'}, 'Interpreter', 'none')
+save_script_figure(folder)
+end
+
+
+function line = observed_difference_line(lag, h, p, group_name, n_group)
+n_sig = sum(h(:) == 1);
+finite_p = isfinite(p);
+if any(finite_p)
+    [min_p, local_index] = min(p(finite_p));
+    finite_index = find(finite_p);
+    min_lag = lag(finite_index(local_index));
+    line = sprintf(['%s, n = %d. Paired t-tests across %d lag bins. ', ...
+        '%d bins have uncorrected p < 0.05. Smallest uncorrected p = %.4g at lag %.3f s.'], ...
+        group_name, n_group, numel(lag), n_sig, min_p, min_lag);
+else
+    line = sprintf('%s, n = %d. No paired lag test was run.', group_name, n_group);
+end
+end
+
+
+function image_limit = observed_image_limit(lag, curves)
+lag = double(lag(:)).';
+curves = double(curves);
+n = min(size(curves, 2), numel(lag));
+use = lag(1:n) >= 0.05;
+values = curves(:, use);
+values = values(isfinite(values(:)));
+if isempty(values)
+    image_limit = [0 1];
+    return
+end
+lo = min(values);
+hi = max(values);
+if lo >= 0
+    lo = 0;
+end
+if hi <= lo
+    hi = lo + 1;
+end
+image_limit = [lo, hi];
+end
+
+
+function image_limit = observed_difference_limit(lag, difference)
+lag = double(lag(:)).';
+difference = double(difference);
+n = min(size(difference, 2), numel(lag));
+use = lag(1:n) >= 0.05;
+values = difference(:, use);
+values = values(isfinite(values(:)));
+if isempty(values)
+    image_limit = [-1 1];
+    return
+end
+peak = max(abs(values));
+if ~isfinite(peak) || peak <= 0
+    peak = 1;
+end
+image_limit = [-peak, peak];
+end
+
+
+function y_lim = observed_difference_mean_limit(mean_difference)
+values = double(mean_difference(isfinite(mean_difference)));
+if isempty(values)
+    y_lim = [-1 1];
+    return
+end
+peak = max(abs([values(:); 0]));
+if ~isfinite(peak) || peak <= 0
+    peak = 1;
+end
+y_lim = [-1.08, 1.08] * peak;
+end
+
+
+function color_map = observed_sequential_map()
+n = 256;
+color_map = [linspace(0.97, 0.12, n)', linspace(0.97, 0.32, n)', ...
+    linspace(0.97, 0.62, n)'];
+end
+
+
+function color_map = observed_diverging_map()
+half = 128;
+color_map = [ ...
+    linspace(0.15, 0.96, half)', linspace(0.28, 0.96, half)', linspace(0.70, 0.96, half)'; ...
+    linspace(0.96, 0.70, half)', linspace(0.96, 0.18, half)', linspace(0.96, 0.18, half)'];
+end
+
+
 function [cycle_n, cycle_r, cycle_p] = draw_power_logit_pair(logit, rows, columns, titles, ...
     group_name, n_group, n_population, lag, color_limit, color_map, ...
     first_peak_lag, first_trough_lag, second_peak_lag, second_trough_lag, ...
@@ -9348,7 +9940,11 @@ function write_section_4_summary(folder, column_title, cycle_n, cycle_r, cycle_p
     lag, high_vs_low_h, high_vs_low_p, n_osc, ...
     n_osc_high, n_other_high, n_osc_low_pca, n_osc_low_tsne, n_omitted, ...
     embed_perplexity, paired_stats, compare_group, lock_type_label, ...
-    type_observed, type_total, type_percent)
+    type_observed, type_total, type_percent, compare_on_observed)
+
+if nargin < 22 || isempty(compare_on_observed)
+    compare_on_observed = false;
+end
 
 cycle_lines = cycle_summary_lines(column_title, cycle_n, cycle_r, cycle_p);
 n_sig = sum(high_vs_low_h(:) == 1);
@@ -9367,18 +9963,38 @@ for k = 1:numel(lock_type_label)
     type_lines{k} = sprintf('%-16s %d/%d   %.1f%%', lock_type_label{k}, ...
         type_observed(k), type_total(k), type_percent(k));
 end
+if compare_on_observed
+    image_lines = { ...
+        'compare_power_on_observed_acg is true, so the percentile-logit images were not drawn.', ...
+        'The mean autocorrelogram in this run is the Gaussian-filtered observed curve.'};
+    difference_lines = { ...
+        'The lag difference is the Gaussian-filtered observed autocorrelogram, high power minus low power.', ...
+        'Each lag is a paired t-test of the same oscillatory neurons.', ...
+        'Red points on the figure mark uncorrected p < 0.05.', ...
+        'These lag tests are not part of the Holm-Sidak correction used for the feature panels.', ...
+        lag_line};
+    pair_line = ['Paired t-tests on the Gaussian-filtered observed autocorrelogram. ', ...
+        'The same oscillatory neurons are compared at high and low power.'];
+else
+    image_lines = { ...
+        'The logit figure is two columns, high power and low power, and two rows, the neuron image and the mean logit.', ...
+        'Pearson correlation of the first cycle (peak minus trough) with the second cycle is reported here and is not drawn.', ...
+        'The p-values are uncorrected and are not in the Holm-Sidak family.'};
+    image_lines = [image_lines, cycle_lines];
+    difference_lines = { ...
+        'Each lag is a paired t-test of the same oscillatory neurons, high power minus low power, on the percentile logit.', ...
+        'Red points on the figure mark uncorrected p < 0.05.', ...
+        'These lag tests are not part of the Holm-Sidak correction used for the feature panels.', ...
+        lag_line};
+    pair_line = ['Paired t-tests on the percentile logit. ', ...
+        'The same oscillatory neurons are compared at high and low power.'];
+end
 write_summary_section(folder, '4. Oscillatory logit figure', join_summary_lines( ...
     ['Output folder: ', folder], ...
     'Figures from this section are saved there as jpg and svg.', ...
-    'The logit figure is two columns, high power and low power, and two rows, the neuron image and the mean logit.', ...
-    'Pearson correlation of the first cycle (peak minus trough) with the second cycle is reported here and is not drawn.', ...
-    'The p-values are uncorrected and are not in the Holm-Sidak family.', ...
-    cycle_lines))
+    image_lines))
 write_summary_section(folder, '4. High power minus low power across lag', join_summary_lines( ...
-    'Each lag is a paired t-test of the same oscillatory neurons, high power minus low power.', ...
-    'Red points on the figure mark uncorrected p < 0.05.', ...
-    'These lag tests are not part of the Holm-Sidak correction used for the feature panels.', ...
-    lag_line))
+    difference_lines))
 write_summary_section(folder, '4. Low-power points in the PCA and t-SNE', join_summary_lines( ...
     'One PCA and one t-SNE are fit on the high-power neurons plus the oscillatory neurons at low power.', ...
     'The oscillatory and non-oscillatory figures, and the lock-type figures, use that shared plane.', ...
@@ -9398,7 +10014,7 @@ for g = 1:numel(component_labels)
     end
     write_summary_section(folder, ...
         ['4. Feature comparison, high versus low power, ', component_labels{g}, ' features'], ...
-        feature_comparison_report(these_rows, 'paired'))
+        feature_comparison_report(these_rows, 'paired', pair_line))
 end
 write_summary_section(folder, '4. Oscillatory share of each lock type', join_summary_lines( ...
     'Percent of each lock type that belongs to the oscillatory group.', ...
