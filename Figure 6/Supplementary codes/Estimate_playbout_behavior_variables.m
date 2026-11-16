@@ -10,6 +10,8 @@
 %      Distance and vocalization are identical in both animals' matrices.
 %   6) Save one .mat per session with clear animal-code field names.
 %
+% Plot the saved matrices across animals with
+% Plot_playbout_behavior_variable_stacks.m.
 % Does not delete/replace Test_* plot scripts.
 
 %% Paths / options
