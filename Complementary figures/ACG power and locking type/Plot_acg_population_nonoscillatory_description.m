@@ -66,9 +66,10 @@
 % plot_example_neurons_only draws those neurons and leaves the other
 % section 4 figures unrun.
 % Section 4 also draws the all-runs sum-to-1 percentile logit by lock
-% type. Trough, peak, and unlocked neurons are one column each. The image
-% of those neurons is above their mean, and the band is the 95% confidence
-% interval of that mean.
+% type, once for oscillatory neurons and once for non-oscillatory
+% neurons. Trough, peak, and unlocked neurons are one column each. The
+% image of those neurons is above their mean, and the band is the 95%
+% confidence interval of that mean.
 % compare_power_on_observed_acg is also set at the start of section 4.
 % false draws the percentile-logit high and low images and the paired
 % feature differences from the percentile features. true draws the
@@ -993,8 +994,12 @@ classified_nonosc = false(numel(neuron_type), 1);
 classified_nonosc(complete_rows) = true;
 classified_nonosc(osc_rows) = false;
 classified_nonosc_rows = oscillatory_member_rows(classified_nonosc, osc_score);
-draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, output_folder, ...
-    logit_color_limit, logit_map)
+osc_mask = false(numel(neuron_type), 1);
+osc_mask(osc_rows) = true;
+draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, osc_mask, ...
+    'oscillatory', output_folder, logit_color_limit, logit_map)
+draw_lock_type_acg(imagesc_logit.sum.all, lag, neuron_type, ~osc_mask, ...
+    'non-oscillatory', output_folder, logit_color_limit, logit_map)
 cycle_n = nan(1, numel(stratum_titles));
 cycle_r = cycle_n;
 cycle_p = cycle_n;
@@ -9898,21 +9903,27 @@ color_map = [ ...
 end
 
 
-function draw_lock_type_acg(acg, lag, neuron_type, folder, color_limit, color_map)
+function draw_lock_type_acg(acg, lag, neuron_type, group_rows, group_name, ...
+    folder, color_limit, color_map)
 %DRAW_LOCK_TYPE_ACG  Mean all-runs logit by lock type, image above the mean.
+%
+% group_rows selects one population, oscillatory or non-oscillatory.
+% A logical mask keeps the population row order. Each column is one lock
+% type inside that population.
 
 names = {'Trough', 'Peak', 'Unlocked'};
 n_type = numel(names);
 lag = double(lag(:)).';
+group_rows = selected_population_rows(group_rows, numel(neuron_type));
 curves = cell(1, n_type);
 intervals = cell(1, n_type);
 y_abs = color_limit;
 for k = 1:n_type
-    rows = false(numel(neuron_type), 1);
-    for i = 1:numel(neuron_type)
-        rows(i) = strcmp(display_lock_label(neuron_type{i}), names{k});
+    keep = false(numel(group_rows), 1);
+    for i = 1:numel(group_rows)
+        keep(i) = strcmp(display_lock_label(neuron_type{group_rows(i)}), names{k});
     end
-    curves{k} = acg(rows, :);
+    curves{k} = acg(group_rows(keep), :);
     intervals{k} = acg_mean_interval(curves{k});
     band = [intervals{k}.low, intervals{k}.high, intervals{k}.mean];
     peak = max(abs(band(isfinite(band))));
@@ -9921,7 +9932,7 @@ for k = 1:n_type
     end
 end
 y_abs = y_abs * 1.08;
-open_full_figure('ACG by lock type')
+open_full_figure(['ACG by lock type, ', group_name])
 count_lines = cell(1, n_type);
 for k = 1:n_type
     this_acg = curves{k};
@@ -9965,18 +9976,38 @@ for k = 1:n_type
     ylabel('Mean logit')
     box off
 end
-sgtitle({'All-runs sum-to-1 percentile logit, by lock type.', ...
+sgtitle({['All-runs sum-to-1 percentile logit, ', group_name, ' neurons, by lock type.'], ...
     'The image is above the mean. The band is the 95% confidence interval of the mean.', ...
     'Trough, peak, and unlocked neurons are separate columns. Unclassified neurons are left out.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
-write_summary_section(folder, '4. Mean autocorrelogram by lock type', join_summary_lines( ...
-    'All-runs sum-to-1 percentile logit.', ...
+write_summary_section(folder, ['4. Mean autocorrelogram by lock type, ', group_name], ...
+    join_summary_lines( ...
+    ['All-runs sum-to-1 percentile logit, ', group_name, ' neurons.'], ...
     'Each column is one lock type. The image keeps the population row order.', ...
     'The band is the 95% t confidence interval of the mean at that lag.', ...
     'A lag with fewer than two finite neurons has no interval.', ...
     'Unclassified neurons are left out.', ...
+    sprintf('Neurons in this group: %d.', numel(group_rows)), ...
     count_lines))
+end
+
+
+function rows = selected_population_rows(group_rows, n_neurons)
+group_rows = group_rows(:);
+if islogical(group_rows)
+    if numel(group_rows) ~= n_neurons
+        error('Plot_acg_population_logit:lockrows', ...
+            'The group mask must have one entry per neuron.')
+    end
+    rows = find(group_rows);
+    return
+end
+if any(~isfinite(group_rows)) || any(group_rows < 1) || any(group_rows > n_neurons)
+    error('Plot_acg_population_logit:lockrows', ...
+        'A group row is outside the population.')
+end
+rows = group_rows;
 end
 
 
