@@ -71,6 +71,13 @@
 % Gaussian-filtered observed mean autocorrelograms and the paired
 % feature differences from those observed features. It does not change
 % classify_on_observed_acg.
+% Section 4 also draws one summary of the paired high-versus-low tests
+% for the oscillatory neurons and one for the non-oscillatory neurons.
+% Each summary keeps a feature when its Holm-Sidak p is below 0.05.
+% Oscillatory features are the top subplot and non-oscillatory features
+% are the bottom subplot. The bars are the high-power and low-power means
+% after z-scoring that feature across the complete pairs. Stars use that
+% Holm-Sidak p.
 % classifier_method is set just before the lock-type classifier.
 % The default is naive Bayes, LDA, and a medium Gaussian SVM.
 % 'all' adds the tree and multinomial logit. One name keeps that classifier.
@@ -1464,6 +1471,9 @@ if ~isempty(compare_titles)
             comparison_axis_note()})
         save_script_figure(output_folder)
     end
+    draw_power_pair_summary(high_compare, low_compare, compare_titles, ...
+        compare_group, paired_stats, output_folder, 'oscillatory neurons', ...
+        ['Same oscillatory neurons at high and low power. ', compare_source, '.'])
 else
     paired_stats = empty_feature_stats();
     paired_stats(1) = [];
@@ -5013,6 +5023,25 @@ for g = 1:numel(component_groups)
         feature_comparison_report(paired_stats(keep), 'paired', ...
         ['Paired t-tests. The same ', population_name, ' are compared at high and low power. ', caption]))
 end
+draw_power_pair_summary(high_compare, low_compare, compare_titles, ...
+    compare_group, paired_stats, folder, population_name, caption)
+end
+
+
+function draw_power_pair_summary(high_values, low_values, titles, families, stats, folder, population_name, title_line)
+%DRAW_POWER_PAIR_SUMMARY  Significant high-versus-low features for one neuron set.
+
+holm_p = nan(numel(stats), 1);
+for j = 1:numel(stats)
+    holm_p(j) = stats(j).holm_p;
+end
+panels = significant_paired_bars(high_values, low_values, titles, families, holm_p);
+draw_significant_group_bars(panels, '', {'High power', 'Low power'}, ...
+    ['Paired t summary high versus low power ', population_name], { ...
+    title_line, ...
+    'Only features with Holm-Sidak p < 0.05 in that family. Bars are group means of the within-feature z-score.', ...
+    '* p < 0.05, ** p < 0.01, *** p < 0.001.'});
+save_script_figure(folder)
 end
 
 
@@ -10059,6 +10088,9 @@ if strcmp(kind, 'paired')
         'raw p is uncorrected. Holm-Sidak p is adjusted across the rows in this table.', ...
         'Oscillatory features and non-oscillatory features are separate tables.', ...
         'The panel title shows the raw p and the Holm-Sidak p.', ...
+        'The summary figure keeps a feature when its Holm-Sidak p is below 0.05.', ...
+        'Its bars are the high-power and low-power means of the within-feature z-score, and the neurons are dots.', ...
+        'Stars on that figure use the Holm-Sidak p.', ...
         'A blank t means fewer than two complete pairs. That row is left out of the correction.'};
     header = sprintf('%-42s %6s %12s %12s %12s %10s %8s %10s %12s %14s %8s', ...
         'Feature', 'n', 'mean high', 'mean low', 'high-low', 't', 'df', ...
