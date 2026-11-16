@@ -2,8 +2,9 @@
 % Stack the peri-play-bout variables saved by
 % Estimate_playbout_behavior_variables.m and plot one figure per variable.
 %
-% Variables (each NP x T inside the saved NP x 4 x T matrices):
-%   speed, acceleration, distance, vocalization
+% Variables plotted (each NP x T inside the saved matrices):
+%   speed, acceleration, distance
+% Vocalization is saved with those matrices and is left out of these figures.
 % Window is the one stored with the matrices (onset at 0; default -20..+20 s).
 %
 % For each variable:
@@ -11,8 +12,8 @@
 %      over every finite peri-bout sample of that animal in that session,
 %      then applied to all of that animal's play bouts. Animals therefore
 %      share a color scale without one animal's raw units dominating.
-%   2) Distance and vocalization are stored twice (once per animal) and are
-%      the same trace. Those variables are kept once per play bout.
+%   2) Distance is stored twice (once per animal) and is the same trace.
+%      It is kept once per play bout.
 %   3) Figure, two rows:
 %        top    every play bout of every animal (color = z-scored value)
 %        bottom mean across those play bouts, with a 95% CI (mean +/- 1.96 SEM)
@@ -31,21 +32,27 @@ figure_folder = fullfile(data_folder, 'figures');
 
 color_limit = 3;   % symmetric z-score color range
 ci_z = 1.96;       % normal 95% confidence interval
+variables_to_plot = {'speed', 'acceleration', 'distance'};
 
 %% Load every session saved by Estimate_playbout_behavior_variables
 sessions = load_playbout_sessions(data_folder);
-variable_names = sessions{1}.variable_names;
+saved_names = sessions{1}.variable_names;
 psth_time = sessions{1}.psth_time;
 fprintf('Loaded %d sessions from\n%s\n', numel(sessions), data_folder);
-fprintf('Variables: %s\n', strjoin(variable_names, ', '));
+fprintf('Plotting: %s\n', strjoin(variables_to_plot, ', '));
 fprintf('Time: %.3g to %.3g s, %d bins\n', psth_time(1), psth_time(end), numel(psth_time));
 
 if exist(figure_folder, 'dir') ~= 7
     mkdir(figure_folder);
 end
 
-for variable_index = 1:numel(variable_names)
-    variable_name = variable_names{variable_index};
+for plot_index = 1:numel(variables_to_plot)
+    variable_name = variables_to_plot{plot_index};
+    variable_index = find(strcmp(saved_names, variable_name), 1);
+    if isempty(variable_index)
+        error('Saved matrices do not contain %s. Found: %s.', ...
+            variable_name, strjoin(saved_names, ', '));
+    end
     blocks = collect_variable_blocks(sessions, variable_index, variable_name);
     if isempty(blocks)
         warning('No finite play bouts for %s. Skipping.', variable_name);
@@ -416,8 +423,6 @@ switch lower(char(variable_name))
         name = 'Acceleration';
     case 'distance'
         name = 'Inter-animal distance';
-    case 'vocalization'
-        name = 'Vocalization';
     otherwise
         name = char(variable_name);
 end
