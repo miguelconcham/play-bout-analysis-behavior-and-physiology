@@ -4,10 +4,20 @@
 % The last section keeps the saved log10 power and finds sessions that
 % still have non-play samples at high locomotion speed.
 
+script_dir = fileparts(mfilename('fullpath'));
+if ~isempty(script_dir)
+    addpath(script_dir);
+end
+
 this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes\Speed and peak frequency\Analyze_speed_freq_relation.m';
 repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
+
+%% Saving folder for figures and the stats text file
+figure_folder = fullfile(data_root, 'Analysis results', 'speed freq relation');
+[figure_folder, stats_file, figures_before] = start_analysis_saving( ...
+    figure_folder, 'speed_freq_relation_stats.txt');
 
 %% Load precomputed speed-power model data
 load([saving_folder,'\psth_structure_speed_delta.mat'],'psth_structure')
@@ -78,7 +88,7 @@ mean_diff = mean(power_diff, 1, 'omitnan');
 
 [~, ~, samples2plot] = histcounts(data_together(:, 1), -5:.1:10);
 
-figure
+figure('Name', 'Relative speed scatter and play difference')
 bins_with_values = unique(samples2plot)';
 max_count = 500;
 min_count = 50;
@@ -160,7 +170,7 @@ end
 sig_bins = find(pValue < 0.05);
 fprintf('Speed bins with LME intercept p < 0.05: %d / %d\n', numel(sig_bins), n_bins);
 
-figure
+figure('Name', 'Relative speed mixed model difference')
 hold on
 no_nan_lme = ~isnan(CI_low) & ~isnan(CI_high);
 fill([variable_grid(no_nan_lme) fliplr(variable_grid(no_nan_lme))], ...
@@ -186,6 +196,7 @@ title('Mixed model Difference ~ 1 + (1|Animal); black bar: p < 0.05')
 %% Full-dataset correlation
 selection_index = ~any(isnan(data_together(:, :)), 2) & data_together(:, 1) < 1 & abs(data_together(:, 2)) < 3;
 [c, p] = corr(data_together(selection_index, 1), data_together(selection_index, 2));
+fprintf('Full-dataset correlation of relative speed and z-scored power: r = %.4f, p = %.4g\n', c, p);
 
 %% Sessions with enough high-speed non-play (raw log power, electrode 1)
 % model_data.Power is log10 spectrogram amplitude. It is not z-scored in the
@@ -248,6 +259,9 @@ if ~relative_is_distance
         min_ceiling_nonplay_s, min_ceiling_play_s, ...
         curve_bin_width, min_bin_nonplay_s, min_bin_play_s);
 end
+
+%% Save figures and close the stats text file
+finish_analysis_saving(figure_folder, stats_file, figures_before);
 
 function [r_distance, r_speed] = local_relative_speed_correlations(psth_structure, session_rows)
 r_distance = nan(numel(session_rows), 1);
@@ -331,6 +345,21 @@ for s = 1:n_sess
     end
 end
 
+top_cm = nan(n_sess, 1);
+max_play_cm = nan(n_sess, 1);
+max_nonplay_cm = nan(n_sess, 1);
+have_speed_cm = false;
+if strcmp(x_name, 'Speed')
+    [top_cm, have_speed_cm] = session_physical_edges(psth_structure, session_rows, ...
+        'Speed', 'SpeedCm', top_lo);
+    if have_speed_cm
+        [max_play_cm, ~] = session_physical_edges(psth_structure, session_rows, ...
+            'Speed', 'SpeedCm', max_play);
+        [max_nonplay_cm, ~] = session_physical_edges(psth_structure, session_rows, ...
+            'Speed', 'SpeedCm', max_nonplay);
+    end
+end
+
 [~, order] = sort(nonplay_high_s, 'descend');
 wind_ref = wind_s(find(~isnan(wind_s), 1, 'first'));
 hop_ref = hop_s(find(~isnan(hop_s), 1, 'first'));
@@ -354,6 +383,18 @@ for k = 1:n_sess
             top_lo(s), top_hi(s), top_nonplay_s(s), top_play_s(s), ...
             local_diff_text(diff_top(s), diff_top_z(s), top_lo(s) >= high_z));
     end
+    if have_speed_cm
+        fprintf(['  cm/s, %.4f cm/pixel at %d frames/s: max non-play %s, max play %s, ' ...
+            'highest bin start %s\n'], pixel_to_cm(), tracking_video_fps(), ...
+            local_cm_s_text(max_nonplay_cm(s)), local_cm_s_text(max_play_cm(s)), ...
+            local_cm_s_text(top_cm(s)));
+    end
+end
+if strcmp(x_name, 'Speed') && ~have_speed_cm
+    fprintf(['\nSpeed in cm/s is not in this mat. Frame speed converts as\n' ...
+        'cm/s = pixels per frame * %d * %.4f. Re-run GENERATE_SPEED_FREQ_RELATION\n' ...
+        'so model_data includes SpeedCm. The z-score speed plots stay as they are.\n'], ...
+        tracking_video_fps(), pixel_to_cm());
 end
 
 n_enough = nnz(enough_high);
@@ -385,6 +426,19 @@ curve_edges = linspace(-1, x_max, n_curve_edges);
     curve_edges, min_bin_play_s, min_bin_nonplay_s, true(n_sess, 1));
 [~, diff_cov, n_cov] = local_diff_curves(X_cell, Y_cell, play_cell, hop_s, ...
     curve_edges, min_bin_play_s, min_bin_nonplay_s, enough_high);
+
+fprintf(['\nPlay minus non-play at the highest %s, with sessions nested in animals.\n' ...
+    'A positive difference means higher log power during play.\n'], x_name);
+shared_high = shared_extreme_bin(diff_all, animals, 'high');
+if isempty(shared_high)
+    fprintf('No %s bin has both play and non-play in two animals.\n', x_name);
+else
+    fprintf('Highest shared %s bin center z = %.2f.\n', x_name, curve_x(shared_high));
+    print_repeated_animal_difference(diff_all(:, shared_high), animals, ...
+        sprintf('Highest shared %s bin', x_name));
+end
+print_repeated_animal_difference(diff_top, animals, ...
+    sprintf('Each session at its highest supported %s', x_name));
 
 y_label = 'Play − non-play (log10 amplitude)';
 figure('Name', ['High-speed coverage: ' x_name])
@@ -430,6 +484,14 @@ title('Each session at its highest supported speed')
 if any(below) && any(above)
     legend({'Bin starts below the high-speed cut', 'Bin starts at the high-speed cut'}, ...
         'Location', 'best')
+end
+
+if have_speed_cm
+    figure('Name', ['Highest supported speed in cm/s: ' x_name])
+    plot_physical_scatter(top_cm, diff_top, top_is_high, ...
+        'Start of highest supported speed bin (cm/s)', y_label, ...
+        'Each session at its highest supported speed', ...
+        'Bin starts below the high-speed cut', 'Bin starts at the high-speed cut');
 end
 end
 
@@ -544,6 +606,14 @@ for s = 1:n_sess
         end
     end
 end
+end
+
+function text = local_cm_s_text(value)
+if ~isfinite(value)
+    text = 'n/a';
+    return
+end
+text = sprintf('%.1f cm/s', value);
 end
 
 function text = local_diff_text(diff_log, diff_z, passes)

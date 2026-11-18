@@ -138,12 +138,14 @@ for ch_n = 1:numel(mid_PAG_channel)
     spect_time = spect_time + min(traking_time) + hist_range(1) - .5 * wind_length;
 
     disp('Estimating Onset and Offset PSTHs')
-    animal_speed_spect_time = interp1(full_traking_time(1:end - 1)', animal_speed, spect_time');
-    animal_speed_spect_time = (animal_speed_spect_time - mean(animal_speed_spect_time, 'omitmissing')) / std(animal_speed_spect_time, 'omitmissing');
+    animal_speed_px = interp1(full_traking_time(1:end - 1)', animal_speed, spect_time');
+    animal_speed_cm = frame_speed_to_cm_s(animal_speed_px);
+    animal_speed_spect_time = (animal_speed_px - mean(animal_speed_px, 'omitmissing')) / std(animal_speed_px, 'omitmissing');
     animal_accel_spect_time = interp1(full_traking_time(2:end - 1)', animal_accel, spect_time');
     animal_accel_spect_time = (animal_accel_spect_time - mean(animal_accel_spect_time, 'omitmissing')) / std(animal_accel_spect_time, 'omitmissing');
-    animal_dist_spect_time = interp1(full_traking_time, animal_dist, spect_time');
-    animal_dist_spect_time = (animal_dist_spect_time - mean(animal_dist_spect_time, 'omitmissing')) / std(animal_dist_spect_time, 'omitmissing');
+    animal_dist_px = interp1(full_traking_time, animal_dist, spect_time');
+    animal_dist_cm = pixels_to_cm(animal_dist_px);
+    animal_dist_spect_time = (animal_dist_px - mean(animal_dist_px, 'omitmissing')) / std(animal_dist_px, 'omitmissing');
     animal_rel_speed_spect_time = interp1(full_traking_time(1:end - 1)', animal_rel_speed, spect_time');
     animal_rel_speed_spect_time = (animal_rel_speed_spect_time - mean(animal_rel_speed_spect_time, 'omitmissing')) / std(animal_rel_speed_spect_time, 'omitmissing');
 
@@ -152,8 +154,8 @@ for ch_n = 1:numel(mid_PAG_channel)
     freq_pow = mean(log10(pow_spectrogram(f_index, :)));
     freq_pow = movmean(freq_pow, 1 / max(freq_range));
 
-    model_data = table(animal_speed_spect_time, animal_accel_spect_time, categorical(play_bout_index'), animal_dist_spect_time, animal_rel_speed_spect_time, freq_pow', ...
-        'VariableNames', {'Speed', 'Acc', 'Play', 'Distance', 'RelativeSpeed', 'Power'});
+    model_data = table(animal_speed_spect_time, animal_accel_spect_time, categorical(play_bout_index'), animal_dist_spect_time, animal_rel_speed_spect_time, freq_pow', animal_speed_cm(:), animal_dist_cm(:), ...
+        'VariableNames', {'Speed', 'Acc', 'Play', 'Distance', 'RelativeSpeed', 'Power', 'SpeedCm', 'DistanceCm'});
     lm = fitlm(model_data, 'Power ~ Speed + Acc + Distance + RelativeSpeed  +Play');
 
     if ch_n == 1

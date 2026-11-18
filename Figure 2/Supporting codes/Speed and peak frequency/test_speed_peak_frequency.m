@@ -107,6 +107,10 @@ speed_axis = (1:10).';
 delta_cf = 2 + 0.1 * speed_axis;
 theta_cf = 8 - 0.05 * speed_axis;
 stats = speed_peak_correlation(speed_axis, delta_cf, theta_cf, 3);
+cm_stats = speed_peak_correlation(speed_axis * pixel_to_cm(), delta_cf, theta_cf, 3);
+assert(abs(cm_stats.pearson_delta - stats.pearson_delta) < 1e-12 && ...
+    abs(cm_stats.pearson_theta - stats.pearson_theta) < 1e-12, ...
+    'Expressing speed in cm/s changed the peak-frequency correlation.');
 assert(abs(stats.pearson_delta - 1) < 1e-12, 'A perfect delta-speed line is not r = 1.');
 assert(abs(stats.pearson_theta + 1) < 1e-12, 'A perfect negative theta-speed line is not r = -1.');
 assert(abs(stats.pearson_delta_theta + 1) < 1e-12, ...
@@ -237,6 +241,8 @@ recording = fake_recording();
 [peak_table, correlation_table] = speed_peak_session_table(recording);
 assert(height(peak_table) == 2, 'The session table does not have one row per speed bin.');
 assert(peak_table.SpectrumSpeed(2) == 20, 'Spectrum speed was not copied.');
+assert(abs(peak_table.SpectrumSpeedCm(2) - 20 * pixel_to_cm()) < 1e-12, ...
+    'Spectrum speed in cm/s is not pixels/s times 0.1334.');
 assert(peak_table.WelchThetaCF(1) == 7, 'The Welch theta peak was not copied.');
 assert(peak_table.FourierDeltaCF(2) == 3, 'The Fourier delta peak was not copied.');
 assert(height(correlation_table) == 2, ...
