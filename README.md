@@ -65,7 +65,8 @@ play bout analysis behavior and physiology/
 │   ├── Estimate_acute_phase_locking.m
 │   ├── Analyze_acute_phase_locking.m
 │   ├── GENERATE_STIM_CALL_RESPONSES.m
-│   └── Estimate_stim_call_responses.m
+│   ├── Estimate_stim_call_responses.m
+│   └── Group cross correlation/   # Pooled CCGs of the six lock-by-oscillation groups
 ├── Synchronous spike artifacts/       # Synchronous-spike waveform and raw-LFP power checks
 │   ├── GENERATE_SYNC_SPIKE_WAVEFORMS.m
 │   ├── Estimate_sync_spike_waveforms.m
