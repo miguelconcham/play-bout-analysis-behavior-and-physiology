@@ -81,10 +81,11 @@
 % change classify_on_observed_acg.
 % Section 4 also draws the power spectrum of that same autocorrelogram
 % for oscillatory neurons. The spectrum uses lags after 100 ms. Each
-% figure has two columns. The left column divides each all-runs spectrum
-% by its own total power. In the high and low figure, both spectra of a
-% neuron are divided by that same all-runs total. A bar inside the mean
-% marks the frequencies in that total. The right column subtracts a
+% figure has two columns. The left column divides each spectrum by the
+% mean power of its full transform, through the Nyquist frequency, as
+% OscillationScore divides its peak by the mean of the whole spectrum.
+% High power and low power each use their own mean. A bar inside the mean
+% panel marks the frequencies in that reference. The right column subtracts a
 % fixed aperiodic fit from the unnormalized power. The fit is an offset
 % minus an exponent times log10(frequency), repeated on the frequencies
 % that sit on that background, so an oscillatory peak stays. The plotted
@@ -1081,7 +1082,7 @@ if ~compare_power_on_observed_acg
     spectrum_source = 'All-runs sum-to-1 percentile logit, oscillatory neurons.';
     spectrum_line = 'The spectrum is the folded sum-to-1 percentile logit after 100 ms.';
     spectrum_pair = ['Oscillatory neurons, high and low percentile-logit spectra. ', ...
-        'The left column is power over the all-runs total. The right column removes the aperiodic fit.'];
+        'The left column is power over the full-spectrum mean. The right column removes the aperiodic fit.'];
 else
     spectrum_checkpoint = '';
     spectrum_method = 'overlap';
@@ -1112,7 +1113,7 @@ else
     spectrum_line = ['The spectrum is the Gaussian-filtered observed autocorrelogram ', ...
         'after 100 ms, the same curve drawn in the other section 4 figures.'];
     spectrum_pair = ['Oscillatory neurons, high and low observed autocorrelogram spectra. ', ...
-        'The left column is power over the all-runs total. The right column removes the aperiodic fit.'];
+        'The left column is power over the full-spectrum mean. The right column removes the aperiodic fit.'];
 end
 if isempty(spectrum_curves.lag)
     write_spectrum_skip(output_folder, spectrum_note)
@@ -10141,15 +10142,19 @@ if isempty(osc_rows)
     fprintf('%s\n', note)
     return
 end
-all_power = spectrum_rows(curves.all, osc_rows, centers, delta_lag, f_grid);
-high_power = spectrum_rows(curves.high, osc_rows, centers, delta_lag, f_grid);
-low_power = spectrum_rows(curves.low, osc_rows, centers, delta_lag, f_grid);
-[high_norm, low_norm] = normalize_spectrum_pair(high_power, low_power, all_power);
-all_norm = normalize_spectrum_rows(all_power);
+all_curves = curves.all(osc_rows, :);
+high_curves = curves.high(osc_rows, :);
+low_curves = curves.low(osc_rows, :);
+all_power = acg_spectrum_stack(all_curves, centers, delta_lag, f_grid);
+high_power = acg_spectrum_stack(high_curves, centers, delta_lag, f_grid);
+low_power = acg_spectrum_stack(low_curves, centers, delta_lag, f_grid);
+[all_norm, all_range] = normalize_spectrum_like_score(all_curves, centers, delta_lag, f_grid);
+[high_norm, high_range] = normalize_spectrum_like_score(high_curves, centers, delta_lag, f_grid);
+[low_norm, low_range] = normalize_spectrum_like_score(low_curves, centers, delta_lag, f_grid);
 all_flat = remove_spectrum_aperiodic(all_power, f_grid);
 high_flat = remove_spectrum_aperiodic(high_power, f_grid);
 low_flat = remove_spectrum_aperiodic(low_power, f_grid);
-norm_range = normalization_frequency_range(f_grid);
+norm_range = join_frequency_ranges(all_range, high_range, low_range);
 draw_one_spectrum(all_norm, all_flat, f_grid, f_band, norm_range, folder, ...
     'ACG spectrum, oscillatory', source_line, spectrum_line, ...
     [0.15 0.15 0.15], '4. Oscillatory autocorrelogram spectrum', load_note)
@@ -10211,22 +10216,13 @@ write_summary_section(folder, ...
 end
 
 
-function stack = spectrum_rows(curves, rows, centers, delta_lag, f_grid)
-if isempty(curves) || size(curves, 2) ~= numel(centers)
-    stack = nan(numel(rows), numel(f_grid));
-    return
-end
-stack = acg_spectrum_stack(curves(rows, :), centers, delta_lag, f_grid);
-end
-
-
 function draw_one_spectrum(power_stack, flat_stack, f_grid, f_band, norm_range, ...
     folder, figure_name, source_line, spectrum_line, color, summary_title, load_note)
 %DRAW_ONE_SPECTRUM  Normalized power beside the aperiodic-removed spectrum.
 %
 % Each column puts the neuron image above the mean. The left column is
-% power divided by its total. The right column is the unnormalized power
-% after its aperiodic fit is removed.
+% power divided by the mean of the full spectrum. The right column is the
+% unnormalized power after its aperiodic fit is removed.
 
 power_interval = acg_mean_interval(power_stack);
 flat_interval = acg_mean_interval(flat_stack);
@@ -10239,7 +10235,7 @@ draw_spectrum_image(power_stack, f_grid, 'Neuron', observed_sequential_map())
 if n_power >= 1
     colorbar
 end
-title({source_line, 'Power / total', sprintf('n = %d, with a spectrum %d', n, n_power)})
+title({source_line, 'Power / full-spectrum mean', sprintf('n = %d, with a spectrum %d', n, n_power)})
 subplot(2, 2, 2)
 draw_spectrum_image(flat_stack, f_grid, 'Neuron', observed_diverging_map(), ...
     spectrum_residual_limit(flat_stack))
@@ -10255,11 +10251,11 @@ shade_spectrum_band(f_band, power_lim)
 if n_power >= 1
     draw_mean_interval(f_grid, power_interval, color)
 end
-mark_normalization_range(norm_range, shown_lim)
+mark_normalization_range(norm_range, shown_lim, f_grid([1 end]))
 xlim(f_grid([1 end]))
 ylim(shown_lim)
 xlabel('Frequency (Hz)')
-ylabel('Mean relative power')
+ylabel('Power / full-spectrum mean')
 box off
 subplot(2, 2, 4)
 hold on
@@ -10274,8 +10270,8 @@ xlabel('Frequency (Hz)')
 ylabel('Log10 power minus aperiodic fit')
 box off
 sgtitle({source_line, ...
-    'Left: each spectrum divided by its own total power. The bar marks those frequencies.', ...
-    'Right: the same power with its aperiodic fit removed. That column is not normalized.', ...
+    'Left: power divided by the mean of the full spectrum, as in OscillationScore.', ...
+    'The bar names the frequencies in that mean. Right: aperiodic fit removed, not normalized.', ...
     'The image is above the mean. The band is the 95% confidence interval. Gold is 2-5 Hz.'}, ...
     'Interpreter', 'none')
 save_script_figure(folder)
@@ -10284,8 +10280,9 @@ write_summary_section(folder, summary_title, join_summary_lines( ...
     source_line, ...
     'Each row is one oscillatory neuron. The order is strongest modulation first.', ...
     spectrum_line, ...
-    'The left column divides each spectrum by the sum of its finite bins.', ...
-    sprintf('Those bins run from %.3g to %.3g Hz. The mean panel marks that range.', ...
+    'The left column divides each spectrum by the mean power of its full transform.', ...
+    'That mean is the same reference OscillationScore uses for its whole spectrum.', ...
+    sprintf('The mean uses %.3g to %.3g Hz. The panel marks that range.', ...
         norm_range(1), norm_range(2)), ...
     'The right column is log10 of the unnormalized power minus its aperiodic fit.', ...
     'The aperiodic fit is not given a normalized spectrum.', ...
@@ -10321,7 +10318,7 @@ draw_spectrum_image(high_power, f_grid, 'Neuron', observed_sequential_map(), pow
 if n_high >= 1
     colorbar
 end
-title({'High 25% delta power', 'Power / all-runs total', ...
+title({'High 25% delta power', 'Power / full-spectrum mean', ...
     sprintf('n = %d, with a spectrum %d', n, n_high)})
 subplot(3, 2, 2)
 draw_spectrum_image(high_flat, f_grid, 'Neuron', observed_diverging_map(), flat_limit)
@@ -10335,7 +10332,7 @@ draw_spectrum_image(low_power, f_grid, 'Neuron', observed_sequential_map(), powe
 if n_low >= 1
     colorbar
 end
-title({'Low 25% delta power', 'Power / all-runs total', ...
+title({'Low 25% delta power', 'Power / full-spectrum mean', ...
     sprintf('n = %d, with a spectrum %d', n, n_low)})
 subplot(3, 2, 4)
 draw_spectrum_image(low_flat, f_grid, 'Neuron', observed_diverging_map(), flat_limit)
@@ -10349,11 +10346,11 @@ hold on
 shade_spectrum_band(f_band, power_lim)
 draw_spectrum_mean(f_grid, high_interval, [0.85 0.25 0.20], 'High 25% power')
 draw_spectrum_mean(f_grid, low_interval, [0.20 0.45 0.75], 'Low 25% power')
-mark_normalization_range(norm_range, shown_lim)
+mark_normalization_range(norm_range, shown_lim, f_grid([1 end]))
 xlim(f_grid([1 end]))
 ylim(shown_lim)
 xlabel('Frequency (Hz)')
-ylabel('Mean power / all-runs total')
+ylabel('Power / full-spectrum mean')
 legend('Location', 'northeast')
 box off
 subplot(3, 2, 6)
@@ -10368,7 +10365,7 @@ ylabel('Log10 power minus aperiodic fit')
 legend('Location', 'northeast')
 box off
 sgtitle({pair_title, ...
-    'Left column: both tails divided by the same all-runs total. The bar marks those frequencies.', ...
+    'Left column: each tail divided by the mean of its own full spectrum, as in OscillationScore.', ...
     'Right column: the unnormalized power with its aperiodic fit removed.', ...
     'The band around each mean is the 95% confidence interval. The gold band is 2-5 Hz.'}, ...
     'Interpreter', 'none')
@@ -10382,8 +10379,8 @@ write_summary_section(folder, ...
     'Each band is the 95% t confidence interval of that mean.', ...
     'The two images in one column share one color range.', ...
     spectrum_line, ...
-    'High and low power in the left column are divided by the all-runs total.', ...
-    sprintf('That total uses %.3g to %.3g Hz. The mean panel marks that range.', ...
+    'High power and low power are each divided by the mean of their own full spectrum.', ...
+    sprintf('That mean uses %.3g to %.3g Hz. The mean panel marks that range.', ...
         norm_range(1), norm_range(2)), ...
     'The right column fits the aperiodic component on the unnormalized power.', ...
     sprintf('Gold band: %.3g to %.3g Hz.', f_band(1), f_band(2)), ...
@@ -10438,16 +10435,21 @@ patch([f_band(1) f_band(2) f_band(2) f_band(1)], ...
 end
 
 
-function f_range = normalization_frequency_range(f_grid)
-%NORMALIZATION_FREQUENCY_RANGE  Frequencies that enter each spectrum total.
+function f_range = join_frequency_ranges(varargin)
+%JOIN_FREQUENCY_RANGES  Smallest and largest frequency across ranges.
 
-f_grid = double(f_grid(:)).';
-keep = isfinite(f_grid) & f_grid > 0;
-if ~any(keep)
+values = [];
+for k = 1:nargin
+    one = double(varargin{k}(:)).';
+    if numel(one) == 2 && all(isfinite(one))
+        values = [values, one]; %#ok<AGROW>
+    end
+end
+if isempty(values)
     f_range = [nan nan];
     return
 end
-f_range = [min(f_grid(keep)), max(f_grid(keep))];
+f_range = [min(values), max(values)];
 end
 
 
@@ -10460,8 +10462,11 @@ y_lim(2) = y_lim(2) + 0.18 * span;
 end
 
 
-function mark_normalization_range(f_range, y_lim)
-%MARK_NORMALIZATION_RANGE  Bar and label for the frequencies in the total.
+function mark_normalization_range(f_range, y_lim, visible)
+%MARK_NORMALIZATION_RANGE  Bar and label for the frequencies in the mean.
+%
+% The bar stays inside the plotted frequencies. The label names the full
+% range that entered the mean, including frequencies beyond the axis.
 
 if numel(f_range) ~= 2 || any(~isfinite(f_range)) || f_range(2) <= f_range(1)
     return
@@ -10470,17 +10475,26 @@ span = y_lim(2) - y_lim(1);
 if ~isfinite(span) || span <= 0
     return
 end
+left = f_range(1);
+right = f_range(2);
+if numel(visible) == 2 && all(isfinite(visible))
+    left = max(left, visible(1));
+    right = min(right, visible(2));
+end
+if ~(right > left)
+    return
+end
 y = y_lim(2) - 0.07 * span;
 tick = 0.02 * span;
 color = [0.10 0.30 0.55];
-plot([f_range(1) f_range(2)], [y y], 'Color', color, 'LineWidth', 2.2, ...
+plot([left right], [y y], 'Color', color, 'LineWidth', 2.2, ...
     'HandleVisibility', 'off')
-plot([f_range(1) f_range(1)], [y - tick, y + tick], 'Color', color, ...
+plot([left left], [y - tick, y + tick], 'Color', color, ...
     'LineWidth', 1.4, 'HandleVisibility', 'off')
-plot([f_range(2) f_range(2)], [y - tick, y + tick], 'Color', color, ...
+plot([right right], [y - tick, y + tick], 'Color', color, ...
     'LineWidth', 1.4, 'HandleVisibility', 'off')
-text(mean(f_range), y - tick, ...
-    sprintf('Normalized %.3g-%.3g Hz', f_range(1), f_range(2)), ...
+text(mean([left right]), y - tick, ...
+    sprintf('Mean of %.3g-%.3g Hz', f_range(1), f_range(2)), ...
     'Color', color, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'top', ...
     'FontSize', 8, 'Interpreter', 'none', 'HandleVisibility', 'off')
 end
