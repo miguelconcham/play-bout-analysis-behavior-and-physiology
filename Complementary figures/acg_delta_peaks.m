@@ -72,9 +72,20 @@ end
 peaks.first_measurable = true;
 level = y_seg(isfinite(y_seg));
 scale = prctile(level, 90) - prctile(level, 10);
+% findpeaks requires the minimum distance and width to be shorter than
+% the search window. A short autocorrelogram, including one the shuffle
+% scores before the axis reaches a full second, is still searched.
+span = t_seg(end) - t_seg(1);
+if ~isfinite(span) || span <= 0
+    peaks.first_prominence = 0;
+    peaks.n_cycles = 0;
+    return
+end
+peak_distance = min(min_distance, span * (1 - 1e-6));
+peak_width = min(min_width, span * (1 - 1e-6));
 
 [pk, locs, ~, prom] = findpeaks(y_seg, t_seg, ...
-    'MinPeakDistance', min_distance, 'MinPeakWidth', min_width);
+    'MinPeakDistance', peak_distance, 'MinPeakWidth', peak_width);
 if isempty(locs)
     peaks.first_prominence = 0;
     peaks.n_cycles = 0;
