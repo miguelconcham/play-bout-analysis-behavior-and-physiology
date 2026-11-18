@@ -400,6 +400,19 @@ curve_edges = linspace(-1, x_max, n_curve_edges);
 [~, diff_cov, n_cov] = local_diff_curves(X_cell, Y_cell, play_cell, hop_s, ...
     curve_edges, min_bin_play_s, min_bin_nonplay_s, enough_high);
 
+fprintf(['\nPlay minus non-play at the highest %s, with sessions nested in animals.\n' ...
+    'A positive difference means higher log power during play.\n'], x_name);
+shared_high = shared_extreme_bin(diff_all, animals, 'high');
+if isempty(shared_high)
+    fprintf('No %s bin has both play and non-play in two animals.\n', x_name);
+else
+    fprintf('Highest shared %s bin center z = %.2f.\n', x_name, curve_x(shared_high));
+    print_repeated_animal_difference(diff_all(:, shared_high), animals, ...
+        sprintf('Highest shared %s bin', x_name));
+end
+print_repeated_animal_difference(diff_top, animals, ...
+    sprintf('Each session at its highest supported %s', x_name));
+
 y_label = 'Play − non-play (log10 amplitude)';
 figure('Name', ['High-speed coverage: ' x_name])
 subplot(2, 2, 1)

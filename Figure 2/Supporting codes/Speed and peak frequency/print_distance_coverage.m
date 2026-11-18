@@ -27,6 +27,7 @@ fprintf(['A session has enough far distance when non-play >= %.1f s and play >= 
     options.min_nonplay_s, options.min_play_s, options.high_z, -options.high_z);
 
 print_matched_distance_power(report);
+print_extreme_distance_animals(report);
 
 fprintf(['\nSessions at each %.2f-wide distance bin.\n' ...
     '  play: sessions with >= %.1f s of play in the bin.\n' ...
@@ -114,6 +115,29 @@ for k = 1:n_sess
             'bin stays at the close cut', 'bin extends past the close cut'));
     end
 end
+end
+
+function print_extreme_distance_animals(report)
+fprintf(['\nPlay minus non-play at the extreme distances, with sessions nested in animals.\n' ...
+    'A positive difference means higher delta log power during play.\n']);
+low_bin = shared_extreme_bin(report.diff_all, report.animals, 'low');
+high_bin = shared_extreme_bin(report.diff_all, report.animals, 'high');
+if isempty(low_bin)
+    fprintf('No distance bin has both play and non-play in two animals.\n');
+else
+    fprintf('Closest shared distance bin center z = %.2f.\n', report.curve_x(low_bin));
+    print_repeated_animal_difference(report.diff_all(:, low_bin), report.animals, ...
+        'Closest shared distance bin');
+    if high_bin ~= low_bin
+        fprintf('Farthest shared distance bin center z = %.2f.\n', report.curve_x(high_bin));
+        print_repeated_animal_difference(report.diff_all(:, high_bin), report.animals, ...
+            'Farthest shared distance bin');
+    end
+end
+print_repeated_animal_difference(report.diff_close_bin, report.animals, ...
+    'Each session at its closest supported distance');
+print_repeated_animal_difference(report.diff_far_bin, report.animals, ...
+    'Each session at its farthest supported distance');
 end
 
 function print_matched_distance_power(report)
