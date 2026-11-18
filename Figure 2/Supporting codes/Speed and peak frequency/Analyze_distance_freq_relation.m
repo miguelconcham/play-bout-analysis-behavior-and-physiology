@@ -49,6 +49,7 @@ sessions = distance_coverage_sessions(psth_structure, animal_names);
 report = distance_coverage_report(sessions, options);
 print_distance_coverage(report);
 plot_distance_coverage(report);
+print_and_plot_distance_cm(psth_structure, animal_names, report);
 
 %% Save figures and close the stats text file
 finish_analysis_saving(figure_folder, stats_file, figures_before);

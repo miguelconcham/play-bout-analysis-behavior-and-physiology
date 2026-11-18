@@ -345,6 +345,21 @@ for s = 1:n_sess
     end
 end
 
+top_cm = nan(n_sess, 1);
+max_play_cm = nan(n_sess, 1);
+max_nonplay_cm = nan(n_sess, 1);
+have_speed_cm = false;
+if strcmp(x_name, 'Speed')
+    [top_cm, have_speed_cm] = session_physical_edges(psth_structure, session_rows, ...
+        'Speed', 'SpeedCm', top_lo);
+    if have_speed_cm
+        [max_play_cm, ~] = session_physical_edges(psth_structure, session_rows, ...
+            'Speed', 'SpeedCm', max_play);
+        [max_nonplay_cm, ~] = session_physical_edges(psth_structure, session_rows, ...
+            'Speed', 'SpeedCm', max_nonplay);
+    end
+end
+
 [~, order] = sort(nonplay_high_s, 'descend');
 wind_ref = wind_s(find(~isnan(wind_s), 1, 'first'));
 hop_ref = hop_s(find(~isnan(hop_s), 1, 'first'));
@@ -368,6 +383,18 @@ for k = 1:n_sess
             top_lo(s), top_hi(s), top_nonplay_s(s), top_play_s(s), ...
             local_diff_text(diff_top(s), diff_top_z(s), top_lo(s) >= high_z));
     end
+    if have_speed_cm
+        fprintf(['  cm/s, %.4f cm/pixel at %d frames/s: max non-play %s, max play %s, ' ...
+            'highest bin start %s\n'], pixel_to_cm(), tracking_video_fps(), ...
+            local_cm_s_text(max_nonplay_cm(s)), local_cm_s_text(max_play_cm(s)), ...
+            local_cm_s_text(top_cm(s)));
+    end
+end
+if strcmp(x_name, 'Speed') && ~have_speed_cm
+    fprintf(['\nSpeed in cm/s is not in this mat. Frame speed converts as\n' ...
+        'cm/s = pixels per frame * %d * %.4f. Re-run GENERATE_SPEED_FREQ_RELATION\n' ...
+        'so model_data includes SpeedCm. The z-score speed plots stay as they are.\n'], ...
+        tracking_video_fps(), pixel_to_cm());
 end
 
 n_enough = nnz(enough_high);
@@ -457,6 +484,14 @@ title('Each session at its highest supported speed')
 if any(below) && any(above)
     legend({'Bin starts below the high-speed cut', 'Bin starts at the high-speed cut'}, ...
         'Location', 'best')
+end
+
+if have_speed_cm
+    figure('Name', ['Highest supported speed in cm/s: ' x_name])
+    plot_physical_scatter(top_cm, diff_top, top_is_high, ...
+        'Start of highest supported speed bin (cm/s)', y_label, ...
+        'Each session at its highest supported speed', ...
+        'Bin starts below the high-speed cut', 'Bin starts at the high-speed cut');
 end
 end
 
@@ -571,6 +606,14 @@ for s = 1:n_sess
         end
     end
 end
+end
+
+function text = local_cm_s_text(value)
+if ~isfinite(value)
+    text = 'n/a';
+    return
+end
+text = sprintf('%.1f cm/s', value);
 end
 
 function text = local_diff_text(diff_log, diff_z, passes)
