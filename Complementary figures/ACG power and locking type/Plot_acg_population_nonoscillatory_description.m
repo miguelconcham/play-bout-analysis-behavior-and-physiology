@@ -29,8 +29,9 @@
 % classifiers. false uses the percentile logit. true uses the
 % Gaussian-filtered observed autocorrelogram. compare_power_on_observed_acg,
 % at the start of section 4, is independent. It chooses the high-versus-low
-% mean autocorrelogram and the paired feature differences. false draws the
-% percentile-logit images. true draws the Gaussian-filtered observed curves.
+% mean autocorrelogram, the autocorrelogram spectra, and the paired feature
+% differences. false draws the percentile-logit images. true draws the
+% Gaussian-filtered observed curves.
 % Section 7 counts runs per neuron and spikes per run in DR, SC, LPAG,
 % VLPAG, and DLPAG. The lower row of each figure keeps only the runs that
 % enter the ACG shuffle. It can run after section 1.
@@ -72,20 +73,20 @@
 % interval of that mean.
 % compare_power_on_observed_acg is also set at the start of section 4.
 % false draws the percentile-logit high and low images, the lock-type
-% figures, and the paired feature differences from the percentile
-% features. true draws the Gaussian-filtered observed autocorrelogram
-% for those same figures and the paired feature differences from those
-% observed features. The lock-type figures then use the all-runs
-% observed curve. It does not change classify_on_observed_acg.
-% Section 4 also draws the power spectrum of the sum-to-1 autocorrelogram
+% figures, the autocorrelogram spectra, and the paired feature
+% differences from the percentile features. true draws the
+% Gaussian-filtered observed autocorrelogram for those same figures and
+% the paired feature differences from those observed features. The
+% lock-type figures then use the all-runs observed curve. It does not
+% change classify_on_observed_acg.
+% Section 4 also draws the power spectrum of that same autocorrelogram
 % for oscillatory neurons. The spectrum uses lags after 100 ms. Each
 % all-runs spectrum is divided by its own total power. In the high and
 % low figure, both spectra of a neuron are divided by that same all-runs
 % total. The first figure puts every neuron in an image above the mean,
 % with the 95% confidence interval of that mean. The second figure stacks
 % the high-power image, the low-power image, and the two means with their
-% confidence intervals. These spectra stay on the saved autocorrelogram.
-% They do not follow compare_power_on_observed_acg.
+% confidence intervals.
 % Section 4 also draws one summary of the paired high-versus-low tests
 % for the oscillatory neurons and one for the non-oscillatory neurons.
 % Each summary keeps a feature when its Holm-Sidak p is below 0.05.
@@ -1065,30 +1066,56 @@ else
             'non-oscillatory', output_folder, lock_style)
     end
 end
-spectrum_checkpoint = '';
-spectrum_method = 'overlap';
-spectrum_count = 'pairs';
-spectrum_session = {};
-spectrum_cluster = [];
-spectrum_ready = exist('neuron_session', 'var') && exist('neuron_cluster_id', 'var') ...
-    && numel(neuron_session) == numel(neuron_type) ...
-    && numel(neuron_cluster_id) == numel(neuron_type);
-if exist('checkpoint', 'var') && ~isempty(checkpoint)
-    spectrum_checkpoint = checkpoint;
+if ~compare_power_on_observed_acg
+    spectrum_curves.all = imagesc_logit.sum.all;
+    spectrum_curves.high = imagesc_logit.sum.power_high;
+    spectrum_curves.low = imagesc_logit.sum.power_low;
+    spectrum_curves.lag = lag;
+    spectrum_note = ['The spectra use the sum-to-1 percentile logit, ', ...
+        'the same curves drawn in the other section 4 figures.'];
+    spectrum_source = 'All-runs sum-to-1 percentile logit, oscillatory neurons.';
+    spectrum_line = 'The spectrum is the folded sum-to-1 percentile logit after 100 ms.';
+    spectrum_pair = ['Oscillatory neurons, high and low percentile-logit spectra ', ...
+        'on the all-runs total.'];
+else
+    spectrum_checkpoint = '';
+    spectrum_method = 'overlap';
+    spectrum_count = 'pairs';
+    spectrum_session = {};
+    spectrum_cluster = [];
+    if exist('checkpoint', 'var') && ~isempty(checkpoint)
+        spectrum_checkpoint = checkpoint;
+    end
+    if exist('acg_method', 'var') && ~isempty(acg_method)
+        spectrum_method = acg_method;
+    end
+    if exist('acg_count', 'var') && ~isempty(acg_count)
+        spectrum_count = acg_count;
+    end
+    if exist('neuron_session', 'var') && exist('neuron_cluster_id', 'var') ...
+            && numel(neuron_session) == numel(neuron_type) ...
+            && numel(neuron_cluster_id) == numel(neuron_type)
+        spectrum_session = neuron_session;
+        spectrum_cluster = neuron_cluster_id;
+    end
+    [spectrum_curves, spectrum_note] = observed_display_spectra( ...
+        spectrum_checkpoint, spectrum_method, spectrum_count, ...
+        spectrum_session, spectrum_cluster, numel(neuron_type), ...
+        example_smooth_half_s, example_skip_abs_lag_s);
+    spectrum_source = ['All-runs Gaussian-filtered observed autocorrelogram, ', ...
+        'oscillatory neurons.'];
+    spectrum_line = ['The spectrum is the Gaussian-filtered observed autocorrelogram ', ...
+        'after 100 ms, the same curve drawn in the other section 4 figures.'];
+    spectrum_pair = ['Oscillatory neurons, high and low observed autocorrelogram ', ...
+        'spectra on the all-runs total.'];
 end
-if exist('acg_method', 'var') && ~isempty(acg_method)
-    spectrum_method = acg_method;
+if isempty(spectrum_curves.lag)
+    write_spectrum_skip(output_folder, spectrum_note)
+    fprintf('%s\n', spectrum_note)
+else
+    draw_oscillatory_acg_spectra(osc_rows, spectrum_curves, output_folder, ...
+        spectrum_note, spectrum_source, spectrum_line, spectrum_pair)
 end
-if exist('acg_count', 'var') && ~isempty(acg_count)
-    spectrum_count = acg_count;
-end
-if spectrum_ready
-    spectrum_session = neuron_session;
-    spectrum_cluster = neuron_cluster_id;
-end
-draw_oscillatory_acg_spectra(osc_rows, numel(neuron_type), output_folder, ...
-    spectrum_checkpoint, spectrum_method, spectrum_count, ...
-    spectrum_session, spectrum_cluster)
 cycle_n = nan(1, numel(stratum_titles));
 cycle_r = cycle_n;
 cycle_p = cycle_n;
@@ -10075,30 +10102,30 @@ color_map = [ ...
 end
 
 
-function draw_oscillatory_acg_spectra(osc_rows, n_neurons, folder, ...
-    checkpoint, method, count, session, cluster_id)
+function draw_oscillatory_acg_spectra(osc_rows, curves, folder, load_note, ...
+    source_line, spectrum_line, pair_title)
 %DRAW_OSCILLATORY_ACG_SPECTRA  Mean spectrum of the oscillatory autocorrelograms.
 %
-% The first figure is the all-runs spectrum. The second figure stacks the
-% high-power image, the low-power image, and both means. Rows follow
-% osc_rows, strongest modulation first.
+% curves holds the all, high, and low autocorrelograms already chosen for
+% the other section 4 figures, with lag. The first figure is the all-runs
+% spectrum. The second figure stacks the high-power image, the low-power
+% image, and both means. Rows follow osc_rows, strongest modulation first.
 
 f_grid = 0.25:0.25:12;
 delta_lag = [0.2 0.5];
 f_band = [1 / delta_lag(2), 1 / delta_lag(1)];
+centers = double(curves.lag(:)).';
+n_neurons = size(curves.all, 1);
 osc_rows = osc_rows(:);
 osc_rows = osc_rows(isfinite(osc_rows) & osc_rows >= 1 & osc_rows <= n_neurons);
-if isempty(session) || isempty(cluster_id) || numel(session) ~= n_neurons ...
-        || numel(cluster_id) ~= n_neurons
-    note = ['Session and neuron id are not in the workspace, ', ...
-        'so the oscillatory autocorrelogram spectra were not drawn.'];
-    write_spectrum_skip(folder, note)
-    fprintf('%s\n', note)
-    return
-end
-summary_path = stratum_summary_path(checkpoint, method, count);
-[curves, centers, note] = aligned_two_sided_acgs(summary_path, session, cluster_id);
-if isempty(centers)
+if isempty(centers) || size(curves.all, 2) ~= numel(centers) ...
+        || size(curves.high, 2) ~= numel(centers) ...
+        || size(curves.low, 2) ~= numel(centers)
+    note = ['The autocorrelograms do not share one lag axis, ', ...
+        'so the spectra were not drawn.'];
+    if ~isempty(load_note)
+        note = [load_note, ' ', note];
+    end
     write_spectrum_skip(folder, note)
     fprintf('%s\n', note)
     return
@@ -10115,10 +10142,54 @@ low_spec = spectrum_rows(curves.low, osc_rows, centers, delta_lag, f_grid);
 [high_spec, low_spec] = normalize_spectrum_pair(high_spec, low_spec, all_spec);
 all_spec = normalize_spectrum_rows(all_spec);
 draw_one_spectrum(all_spec, f_grid, f_band, folder, ...
-    'ACG spectrum, oscillatory', ...
-    'All-runs sum-to-1 autocorrelogram, oscillatory neurons.', ...
-    [0.15 0.15 0.15], '4. Oscillatory autocorrelogram spectrum', note)
-draw_power_spectra(high_spec, low_spec, f_grid, f_band, folder, note)
+    'ACG spectrum, oscillatory', source_line, spectrum_line, ...
+    [0.15 0.15 0.15], '4. Oscillatory autocorrelogram spectrum', load_note)
+draw_power_spectra(high_spec, low_spec, f_grid, f_band, folder, load_note, ...
+    spectrum_line, pair_title)
+end
+
+
+function [curves, note] = observed_display_spectra(checkpoint, method, count, ...
+    session, cluster_id, n_neurons, smooth_half_s, skip_abs_lag_s)
+%OBSERVED_DISPLAY_SPECTRA  Gaussian-filtered curves used by the section 4 figures.
+%
+% Positive lags are the displayed curves. They are reflected so the folded
+% spectrum is the spectrum of that positive side.
+
+curves.all = [];
+curves.high = [];
+curves.low = [];
+curves.lag = [];
+if isempty(session) || isempty(cluster_id) || numel(session) ~= n_neurons ...
+        || numel(cluster_id) ~= n_neurons
+    note = ['Session and neuron id are not in the workspace, ', ...
+        'so the observed autocorrelogram spectra were not drawn.'];
+    return
+end
+summary_path = stratum_summary_path(checkpoint, method, count);
+[all_curves, all_lag, all_note] = smoothed_observed_named(summary_path, ...
+    session, cluster_id, 'all', smooth_half_s, skip_abs_lag_s);
+[high_curves, low_curves, pair_lag, pair_note] = smoothed_observed_population( ...
+    summary_path, session, cluster_id, smooth_half_s, skip_abs_lag_s);
+note = sprintf(['%s %s The spectra use the Gaussian-filtered observed ', ...
+    'autocorrelogram, the same curves drawn in the other section 4 figures.'], ...
+    all_note, pair_note);
+all_lag = double(all_lag(:)).';
+pair_lag = double(pair_lag(:)).';
+if isempty(all_lag) || isempty(pair_lag) || numel(all_lag) ~= numel(pair_lag) ...
+        || max(abs(all_lag - pair_lag)) > 1e-9 ...
+        || size(all_curves, 1) ~= n_neurons || size(high_curves, 1) ~= n_neurons ...
+        || size(low_curves, 1) ~= n_neurons
+    return
+end
+[curves.all, curves.lag] = reflect_positive_acg(all_curves, all_lag);
+[curves.high, ~] = reflect_positive_acg(high_curves, pair_lag);
+[curves.low, ~] = reflect_positive_acg(low_curves, pair_lag);
+if isempty(curves.lag) || size(curves.all, 2) ~= numel(curves.lag) ...
+        || size(curves.high, 2) ~= numel(curves.lag) ...
+        || size(curves.low, 2) ~= numel(curves.lag)
+    curves.lag = [];
+end
 end
 
 
@@ -10140,76 +10211,8 @@ stack = acg_spectrum_stack(curves(rows, :), centers, delta_lag, f_grid);
 end
 
 
-function [curves, centers, note] = aligned_two_sided_acgs(summary_path, session, cluster_id)
-%ALIGNED_TWO_SIDED_ACGS  Sum-to-1 autocorrelograms in population order.
-%
-% The curves stay two-sided. The spectrum function folds them.
-
-n_pop = numel(cluster_id);
-curves.all = zeros(0, 0);
-curves.high = zeros(0, 0);
-curves.low = zeros(0, 0);
-centers = zeros(1, 0);
-note = 'Observed autocorrelograms are the saved sum-to-1 curves.';
-if isempty(summary_path) || exist(summary_path, 'file') ~= 2
-    note = 'The locking summary was not found, so the autocorrelogram spectra were not drawn.';
-    return
-end
-try
-    stored = load(summary_path, 'power_acg');
-catch
-    note = 'The locking summary could not be read, so the autocorrelogram spectra were not drawn.';
-    return
-end
-if ~isfield(stored, 'power_acg') || ~isfield(stored.power_acg, 'all_neurons') ...
-        || ~isfield(stored.power_acg, 'centers')
-    note = 'The summary has no power_acg.all_neurons curves, so the spectra were not drawn.';
-    return
-end
-block = stored.power_acg.all_neurons;
-centers = double(stored.power_acg.centers(:)).';
-if ~isfield(block, 'session') || ~isfield(block, 'cluster_id')
-    centers = zeros(1, 0);
-    note = 'The power summary has no session and cluster id, so the spectra were not drawn.';
-    return
-end
-summary_keys = neuron_keys(block.session, block.cluster_id);
-pop_keys = neuron_keys(session, cluster_id);
-if numel(pop_keys) ~= n_pop || isempty(summary_keys)
-    centers = zeros(1, 0);
-    note = 'The autocorrelograms could not be aligned to the population, so the spectra were not drawn.';
-    return
-end
-n_src = numel(summary_keys);
-[found, loc] = ismember(pop_keys, summary_keys(1:n_src));
-use = found(:) & loc(:) >= 1 & loc(:) <= n_src;
-curves.all = place_acg_rows(block, 'all', loc, use, n_pop, numel(centers));
-curves.high = place_acg_rows(block, 'high', loc, use, n_pop, numel(centers));
-curves.low = place_acg_rows(block, 'low', loc, use, n_pop, numel(centers));
-note = sprintf('%s Matched %d of %d population neurons.', note, sum(use), n_pop);
-end
-
-
-function placed = place_acg_rows(block, curve_name, loc, use, n_pop, n_lag)
-placed = nan(n_pop, n_lag);
-if ~isfield(block, curve_name)
-    return
-end
-raw = double(block.(curve_name));
-if size(raw, 2) ~= n_lag || isempty(raw)
-    placed = nan(n_pop, 0);
-    return
-end
-n_src = size(raw, 1);
-keep = use(:) & loc(:) >= 1 & loc(:) <= n_src;
-if any(keep)
-    placed(keep, :) = raw(loc(keep), :);
-end
-end
-
-
 function draw_one_spectrum(stack, f_grid, f_band, folder, figure_name, source_line, ...
-    color, summary_title, load_note)
+    spectrum_line, color, summary_title, load_note)
 %DRAW_ONE_SPECTRUM  Neuron image above the mean spectrum.
 
 interval = acg_mean_interval(stack);
@@ -10243,7 +10246,7 @@ write_summary_section(folder, summary_title, join_summary_lines( ...
     load_note, ...
     source_line, ...
     'Each row is one oscillatory neuron. The order is strongest modulation first.', ...
-    'The spectrum is the folded sum-to-1 autocorrelogram after 100 ms.', ...
+    spectrum_line, ...
     'Each neuron is divided by the sum of its own finite spectrum bins.', ...
     'The band is the 95% t confidence interval of the mean at that frequency.', ...
     'A frequency with fewer than two finite neurons has no interval.', ...
@@ -10252,7 +10255,8 @@ write_summary_section(folder, summary_title, join_summary_lines( ...
 end
 
 
-function draw_power_spectra(high_spec, low_spec, f_grid, f_band, folder, load_note)
+function draw_power_spectra(high_spec, low_spec, f_grid, f_band, folder, load_note, ...
+    spectrum_line, pair_title)
 %DRAW_POWER_SPECTRA  High image, low image, then both means.
 
 high_interval = acg_mean_interval(high_spec);
@@ -10288,7 +10292,7 @@ xlabel('Frequency (Hz)')
 ylabel('Mean power / all-runs total')
 legend('Location', 'northeast')
 box off
-sgtitle({'Oscillatory neurons, high and low spectra on the all-runs total.', ...
+sgtitle({pair_title, ...
     'High power is above low power. Both are divided by the same all-runs total.', ...
     'The band around each mean is the 95% confidence interval. The gold band is 2-5 Hz.'}, ...
     'Interpreter', 'none')
@@ -10300,7 +10304,7 @@ write_summary_section(folder, ...
     'The first panel is the high-power autocorrelogram. The second panel is the low-power autocorrelogram.', ...
     'The third panel draws both means. Each band is the 95% t confidence interval of that mean.', ...
     'The two images share one color range.', ...
-    'The spectrum is the folded sum-to-1 autocorrelogram after 100 ms.', ...
+    spectrum_line, ...
     sprintf('Gold band: %.3g to %.3g Hz.', f_band(1), f_band(2)), ...
     sprintf('Oscillatory neurons: %d. High-power spectra: %d. Low-power spectra: %d.', ...
         n, n_high, n_low)))
