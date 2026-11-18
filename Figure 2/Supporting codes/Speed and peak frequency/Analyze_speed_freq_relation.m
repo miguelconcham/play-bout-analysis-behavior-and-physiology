@@ -4,10 +4,20 @@
 % The last section keeps the saved log10 power and finds sessions that
 % still have non-play samples at high locomotion speed.
 
+script_dir = fileparts(mfilename('fullpath'));
+if ~isempty(script_dir)
+    addpath(script_dir);
+end
+
 this_file = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Figure 2\Supporting codes\Speed and peak frequency\Analyze_speed_freq_relation.m';
 repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
+
+%% Saving folder for figures and the stats text file
+figure_folder = fullfile(data_root, 'Analysis results', 'speed freq relation');
+[figure_folder, stats_file, figures_before] = start_analysis_saving( ...
+    figure_folder, 'speed_freq_relation_stats.txt');
 
 %% Load precomputed speed-power model data
 load([saving_folder,'\psth_structure_speed_delta.mat'],'psth_structure')
@@ -78,7 +88,7 @@ mean_diff = mean(power_diff, 1, 'omitnan');
 
 [~, ~, samples2plot] = histcounts(data_together(:, 1), -5:.1:10);
 
-figure
+figure('Name', 'Relative speed scatter and play difference')
 bins_with_values = unique(samples2plot)';
 max_count = 500;
 min_count = 50;
@@ -160,7 +170,7 @@ end
 sig_bins = find(pValue < 0.05);
 fprintf('Speed bins with LME intercept p < 0.05: %d / %d\n', numel(sig_bins), n_bins);
 
-figure
+figure('Name', 'Relative speed mixed model difference')
 hold on
 no_nan_lme = ~isnan(CI_low) & ~isnan(CI_high);
 fill([variable_grid(no_nan_lme) fliplr(variable_grid(no_nan_lme))], ...
@@ -186,6 +196,7 @@ title('Mixed model Difference ~ 1 + (1|Animal); black bar: p < 0.05')
 %% Full-dataset correlation
 selection_index = ~any(isnan(data_together(:, :)), 2) & data_together(:, 1) < 1 & abs(data_together(:, 2)) < 3;
 [c, p] = corr(data_together(selection_index, 1), data_together(selection_index, 2));
+fprintf('Full-dataset correlation of relative speed and z-scored power: r = %.4f, p = %.4g\n', c, p);
 
 %% Sessions with enough high-speed non-play (raw log power, electrode 1)
 % model_data.Power is log10 spectrogram amplitude. It is not z-scored in the
@@ -248,6 +259,9 @@ if ~relative_is_distance
         min_ceiling_nonplay_s, min_ceiling_play_s, ...
         curve_bin_width, min_bin_nonplay_s, min_bin_play_s);
 end
+
+%% Save figures and close the stats text file
+finish_analysis_saving(figure_folder, stats_file, figures_before);
 
 function [r_distance, r_speed] = local_relative_speed_correlations(psth_structure, session_rows)
 r_distance = nan(numel(session_rows), 1);

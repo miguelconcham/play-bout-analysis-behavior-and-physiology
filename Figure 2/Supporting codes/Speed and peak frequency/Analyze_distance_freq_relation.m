@@ -25,6 +25,11 @@ repo_root = fileparts(fileparts(fileparts(fileparts(this_file))));
 data_root = fullfile(repo_root, 'Data');
 saving_folder = fullfile(data_root, 'Analysis results', 'psth power by frequency and behavior');
 
+%% Saving folder for figures and the stats text file
+figure_folder = fullfile(data_root, 'Analysis results', 'distance freq relation');
+[figure_folder, stats_file, figures_before] = start_analysis_saving( ...
+    figure_folder, 'distance_freq_relation_stats.txt');
+
 load([saving_folder, '\psth_structure_speed_delta.mat'], 'psth_structure')
 load([saving_folder, '\animal_names_speed_delta.mat'], 'animal_names')
 
@@ -44,6 +49,9 @@ sessions = distance_coverage_sessions(psth_structure, animal_names);
 report = distance_coverage_report(sessions, options);
 print_distance_coverage(report);
 plot_distance_coverage(report);
+
+%% Save figures and close the stats text file
+finish_analysis_saving(figure_folder, stats_file, figures_before);
 
 function print_distance_column_check(psth_structure, session_rows)
 r_relative = nan(numel(session_rows), 1);
