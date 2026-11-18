@@ -11,7 +11,15 @@ end
 
 options = report.options;
 x_label = 'Inter-animal distance (session z)';
-y_label = 'Play - non-play (log10 amplitude)';
+y_label = 'Play - non-play (log10 delta amplitude)';
+
+figure('Name', 'Matched distance delta power')
+subplot(1, 2, 1)
+plot_matched_means(report.curve_x, report.play_power, report.nonplay_power, ...
+    options.high_z)
+subplot(1, 2, 2)
+plot_diff_curve(report.curve_x, report.diff_all, x_label, y_label, ...
+    'Play minus non-play at the same distance', options.high_z)
 
 figure('Name', 'Distance coverage')
 subplot(2, 3, 1)
@@ -57,6 +65,33 @@ plot_supported_bins(report.close_bin_lo, report.diff_close_bin, ...
     report.close_bin_hi <= -options.high_z, -options.high_z, ...
     'Start of closest supported distance bin (z)', y_label, ...
     'Bin extends past the close cut', 'Bin stays at the close cut')
+end
+
+function plot_matched_means(x, play_power, nonplay_power, high_z)
+hold on
+play_mu = mean(play_power, 1, 'omitnan');
+nonplay_mu = mean(nonplay_power, 1, 'omitnan');
+if isempty(x) || ~any(isfinite(play_mu))
+    if ~isempty(x)
+        xlim([x(1) x(end)])
+    end
+    ylim([-1 1])
+    mark_distance_cuts(high_z)
+    title('Mean delta power at the same distance')
+    xlabel('Inter-animal distance (session z)')
+    ylabel('Log10 delta amplitude')
+    text(mean(xlim), 0, 'No bin has both play and non-play', ...
+        'HorizontalAlignment', 'center')
+    return
+end
+plot(x, nonplay_mu, 'k', 'LineWidth', 1.5)
+plot(x, play_mu, 'Color', [0.85 0.15 0.15], 'LineWidth', 1.5)
+mark_distance_cuts(high_z)
+xlabel('Inter-animal distance (session z)')
+ylabel('Log10 delta amplitude')
+title('Mean delta power at the same distance')
+legend({'Non-play', 'Play'}, 'Location', 'best')
+axis tight
 end
 
 function plot_diff_curve(x, diff_mat, x_label, y_label, plot_title, high_z)

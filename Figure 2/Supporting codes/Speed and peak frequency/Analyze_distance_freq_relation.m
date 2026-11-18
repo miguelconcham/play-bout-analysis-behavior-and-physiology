@@ -1,18 +1,19 @@
 %% Analyze_distance_freq_relation
-% Distance version of the high-speed coverage section in
-% Analyze_speed_freq_relation.m.
+% Is delta power higher during play than at the same inter-animal distance
+% outside play?
 %
 % Loads the delta-band speed-power mats and keeps electrode 1. Distance is
 % the saved within-session z-score of the separation between the implanted
 % animal and its partner. Positive z is farther than that session's mean.
-% Power is the saved log10 spectrogram amplitude.
+% Power is the saved log10 spectrogram amplitude in the delta file.
 %
-% For each distance bin the script counts how many sessions have enough
-% play, enough non-play, or both. Both is the set that can be compared at
-% that distance. The same duration minima are then applied to the far tail
-% (z >= 1) and the close tail (z <= -1).
+% Each distance bin keeps sessions that have both play and non-play there.
+% The first table and the first figure compare those two powers. A positive
+% difference means higher delta power during play. The later output counts
+% how many sessions supply each distance, including the far tail (z >= 1)
+% and the close tail (z <= -1).
 %
-% test_distance_session_coverage checks the counts without these mats.
+% test_distance_session_coverage checks the comparison without these mats.
 
 script_dir = fileparts(mfilename('fullpath'));
 if ~isempty(script_dir)

@@ -1,9 +1,11 @@
 function report = distance_coverage_report(sessions, options)
-%DISTANCE_COVERAGE_REPORT  Play vs non-play coverage along inter-animal distance.
+%DISTANCE_COVERAGE_REPORT  Matched-distance delta power and session coverage.
 %
 % sessions is the struct array from distance_coverage_sessions. options
-% defaults to distance_coverage_options. Durations are frame counts times
-% the spectrogram hop, the same span used for the high-speed coverage.
+% defaults to distance_coverage_options. play_power and nonplay_power are
+% the mean log10 delta amplitude in each distance bin, kept only when that
+% session has both play and non-play there. diff_all is play minus non-play.
+% Durations are frame counts times the spectrogram hop.
 %
 % A distance bin is [left, right) except the last bin, which includes its
 % right edge. A session counts in a bin when the play frames in that bin
@@ -121,8 +123,8 @@ else
 end
 
 use_all = true(n_sess, 1);
-[curve_x, diff_all, n_both, n_play, n_nonplay] = coverage_curves( ...
-    X_cell, Y_cell, play_cell, hop_s, curve_edges, ...
+[curve_x, diff_all, n_both, n_play, n_nonplay, play_power, nonplay_power] = ...
+    coverage_curves(X_cell, Y_cell, play_cell, hop_s, curve_edges, ...
     options.min_bin_play_s, options.min_bin_nonplay_s, use_all);
 [~, diff_far_curve, n_both_far, n_play_far, n_nonplay_far] = coverage_curves( ...
     X_cell, Y_cell, play_cell, hop_s, curve_edges, ...
@@ -166,6 +168,8 @@ report = struct( ...
     'diff_close_bin_z', diff_close_bin_z, ...
     'curve_edges', curve_edges, ...
     'curve_x', curve_x, ...
+    'play_power', play_power, ...
+    'nonplay_power', nonplay_power, ...
     'diff_all', diff_all, ...
     'n_both', n_both, ...
     'n_play', n_play, ...
@@ -287,13 +291,15 @@ n_edges = round((hi - lo) / bin_width) + 1;
 edges = linspace(lo, hi, max(n_edges, 2));
 end
 
-function [centers, diff_mat, n_both, n_play, n_nonplay] = coverage_curves( ...
-    X_cell, Y_cell, play_cell, hop_s, edges, min_play_s, min_nonplay_s, use_session)
+function [centers, diff_mat, n_both, n_play, n_nonplay, play_power, nonplay_power] = ...
+    coverage_curves(X_cell, Y_cell, play_cell, hop_s, edges, min_play_s, min_nonplay_s, use_session)
 
 centers = edges(1:end - 1) + diff(edges) / 2;
 n_sess = numel(X_cell);
 n_bins = numel(centers);
 diff_mat = nan(n_sess, n_bins);
+play_power = nan(n_sess, n_bins);
+nonplay_power = nan(n_sess, n_bins);
 n_both = zeros(1, n_bins);
 n_play = zeros(1, n_bins);
 n_nonplay = zeros(1, n_bins);
@@ -317,7 +323,11 @@ for s = 1:n_sess
             n_nonplay(b) = n_nonplay(b) + 1;
         end
         if play_ok && nonplay_ok
-            diff_mat(s, b) = mean(Y(in_bin & is_play)) - mean(Y(in_bin & ~is_play));
+            this_play = mean(Y(in_bin & is_play));
+            this_nonplay = mean(Y(in_bin & ~is_play));
+            play_power(s, b) = this_play;
+            nonplay_power(s, b) = this_nonplay;
+            diff_mat(s, b) = this_play - this_nonplay;
             n_both(b) = n_both(b) + 1;
         end
     end

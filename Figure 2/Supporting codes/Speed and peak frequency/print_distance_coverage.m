@@ -1,9 +1,9 @@
 function print_distance_coverage(report)
-%PRINT_DISTANCE_COVERAGE  Command-window count of sessions at each distance.
+%PRINT_DISTANCE_COVERAGE  Delta power at matched distance, then session counts.
 %
-% The bin table is the distance analogue of the high-speed session count:
-% how many electrode-1 sessions have play, non-play, or both at that
-% within-session distance z.
+% The first table is the check: at each inter-animal distance that has both
+% play and non-play, is delta log power higher during play? The later lines
+% count how many sessions supply that comparison.
 
 if isempty(report.animals)
     fprintf('No electrode-1 sessions.\n');
@@ -25,6 +25,8 @@ end
 fprintf(['A session has enough far distance when non-play >= %.1f s and play >= %.1f s at z >= %.1f.\n' ...
     'A session has enough close distance when those same minima hold at z <= %.1f.\n'], ...
     options.min_nonplay_s, options.min_play_s, options.high_z, -options.high_z);
+
+print_matched_distance_power(report);
 
 fprintf(['\nSessions at each %.2f-wide distance bin.\n' ...
     '  play: sessions with >= %.1f s of play in the bin.\n' ...
@@ -111,6 +113,99 @@ for k = 1:n_sess
             report.close_bin_hi(s) <= -options.high_z, ...
             'bin stays at the close cut', 'bin extends past the close cut'));
     end
+end
+end
+
+function print_matched_distance_power(report)
+options = report.options;
+fprintf(['\nDelta power at the same inter-animal distance.\n' ...
+    'A session enters a bin when play spans at least %.1f s and non-play spans at least %.1f s there.\n' ...
+    'Power is log10 delta amplitude. A positive difference means higher delta power during play.\n'], ...
+    options.min_bin_play_s, options.min_bin_nonplay_s);
+
+n_bins = numel(report.curve_x);
+n_compared = 0;
+n_higher = 0;
+n_sig_higher = 0;
+tested = false;
+for b = 1:n_bins
+    diffs = report.diff_all(:, b);
+    play_vals = report.play_power(:, b);
+    nonplay_vals = report.nonplay_power(:, b);
+    animals = report.animals;
+    keep = isfinite(diffs);
+    diffs = diffs(keep);
+    play_vals = play_vals(keep);
+    nonplay_vals = nonplay_vals(keep);
+    animals = animals(keep);
+    if isempty(diffs)
+        continue
+    end
+    n_compared = n_compared + 1;
+    diff_mu = mean(diffs);
+    p_val = NaN;
+    if numel(diffs) >= 2 && exist('ttest', 'file') == 2
+        [~, p_val] = ttest(diffs);
+        tested = true;
+    end
+    if diff_mu > 0
+        direction = 'play higher';
+        n_higher = n_higher + 1;
+        if isfinite(p_val) && p_val < 0.05
+            n_sig_higher = n_sig_higher + 1;
+        end
+    elseif diff_mu < 0
+        direction = 'non-play higher';
+    else
+        direction = 'equal';
+    end
+    if b == n_bins
+        right_bracket = ']';
+    else
+        right_bracket = ')';
+    end
+    if isfinite(p_val)
+        p_text = sprintf('p = %.4f', p_val);
+    else
+        p_text = 'p not tested';
+    end
+    lme_p = bin_lme_p(diffs, animals);
+    if isfinite(lme_p)
+        lme_text = sprintf('  LME p = %.4f', lme_p);
+    else
+        lme_text = '';
+    end
+    fprintf(['  [%.2f, %.2f%c  n = %d  play %.4f  non-play %.4f  ' ...
+        'diff %+.4f  %s  %s%s\n'], ...
+        report.curve_edges(b), report.curve_edges(b + 1), right_bracket, ...
+        numel(diffs), mean(play_vals), mean(nonplay_vals), diff_mu, ...
+        p_text, direction, lme_text);
+end
+if n_compared == 0
+    fprintf('  no distance bin has both play and non-play\n');
+    return
+end
+fprintf('Distance bins with both play and non-play: %d\n', n_compared);
+fprintf('Bins with higher mean delta power during play: %d\n', n_higher);
+if tested
+    fprintf('Of those, two-sided p < 0.05: %d\n', n_sig_higher);
+else
+    fprintf('The t-test was not available, so those bins were not significance-tested.\n');
+end
+end
+
+function lme_p = bin_lme_p(diffs, animals)
+lme_p = NaN;
+if numel(diffs) < 3 || numel(unique(animals)) < 2 || exist('fitlme', 'file') ~= 2
+    return
+end
+try
+    lme = fitlme(table(diffs, categorical(animals), ...
+        'VariableNames', {'Difference', 'Animal'}), ...
+        'Difference ~ 1 + (1|Animal)');
+    lme_p = lme.Coefficients.pValue(1);
+catch
+    lme_p = NaN;
 end
 end
 
