@@ -41,6 +41,7 @@ partner_pos(:, 2) = interp1(traking_time, smoothdata(traking_structure.partner_p
 
 animal_dist      = sqrt(sum((partner_pos - animal_pos) .* (partner_pos - animal_pos), 2));
 animal_speed     = sqrt(sum(diff(animal_pos) .* diff(animal_pos), 2));
+animal_speed_cm_s = speed_cm_per_s(animal_speed, diff(full_traking_time(:)));
 animal_accel     = abs(diff(animal_speed));
 animal_rel_speed = diff(animal_dist);
 
@@ -139,7 +140,7 @@ for ch_n = 1:numel(mid_PAG_channel)
 
     disp('Estimating Onset and Offset PSTHs')
     animal_speed_px = interp1(full_traking_time(1:end - 1)', animal_speed, spect_time');
-    animal_speed_cm = frame_speed_to_cm_s(animal_speed_px);
+    animal_speed_cm = interp1(full_traking_time(1:end - 1)', animal_speed_cm_s, spect_time');
     animal_speed_spect_time = (animal_speed_px - mean(animal_speed_px, 'omitmissing')) / std(animal_speed_px, 'omitmissing');
     animal_accel_spect_time = interp1(full_traking_time(2:end - 1)', animal_accel, spect_time');
     animal_accel_spect_time = (animal_accel_spect_time - mean(animal_accel_spect_time, 'omitmissing')) / std(animal_accel_spect_time, 'omitmissing');

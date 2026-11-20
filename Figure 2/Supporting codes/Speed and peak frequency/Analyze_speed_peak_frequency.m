@@ -12,9 +12,10 @@
 % The pooled model is outcome ~ predictor + (1|Animal) + (1|Session),
 % with maximum likelihood. Session is the animal, partner, and session
 % index, so channels of one behavioral session share that intercept.
-% Per-session slopes use raw pixels per second. The same lines are drawn
-% again in cm/s, with cm/s = pixels/s * 0.1334. A positive scale does not
-% change the Pearson or Spearman correlation. Pooled PeakHz and
+% Per-session slopes use raw pixels per second. The same axes carry a
+% top ruler in cm/s, with cm/s = pixels/s * 0.1334. The points are not
+% moved. A positive scale does not change the Pearson or Spearman
+% correlation. Pooled PeakHz and
 % log(PeakHz) use a within-animal speed z-score, because a pixel scale
 % multiplies a linear slope and the animal intercept only shifts the
 % baseline. Pooled PeakHz ~ log(Speed) keeps pixels per second, because
@@ -81,9 +82,8 @@ fprintf(['Speed unit: %s\nDelta %.1f-%.1f Hz, theta %.1f-%.1f Hz\n' ...
     100 * analysis_parameters.speed_bin_fraction_limits(2), ...
     analysis_parameters.spectrum_speed_definition);
 fprintf(['FOOOF Gaussian peaks: delta and theta, Welch and Fourier.\n' ...
-    'Additional figures use cm/s = pixels/s * %.4f. ' ...
-    'The correlations themselves are unchanged by that scale.\n' ...
-    'This conversion reads the saved pixels/s. ' ...
+    'Speed axes keep pixels/s and add cm/s = pixels/s * %.4f on top.\n' ...
+    'The points and the correlations are unchanged by that scale.\n' ...
     'Estimate_speed_peak_frequency does not need to be run again.\n'], ...
     pixel_to_cm());
 
@@ -161,8 +161,6 @@ correlation_summary_table = summarize_correlations( ...
 
 plot_peak_vs_speed(peak_table, session_keys, delta_columns, theta_columns, methods, ...
     1, 'pixels/s');
-plot_peak_vs_speed(peak_table, session_keys, delta_columns, theta_columns, methods, ...
-    pixel_to_cm(), 'cm/s');
 plot_session_correlations(correlation_table);
 plot_correlation_histograms(correlation_table, correlation_summary_table, ...
     correlation_histogram_parameters);
@@ -171,11 +169,6 @@ plot_correlation_pvalue_histograms(correlation_table, ...
 plot_peak_model_fits(peak_table, session_keys, methods, delta_columns, ...
     theta_columns, analysis_parameters.min_bins_for_correlation, ...
     model_plot_parameters, 1, 'pixels/s');
-cm_plot_parameters = model_plot_parameters;
-cm_plot_parameters.log_speed_xlim = model_plot_parameters.log_speed_xlim + log(pixel_to_cm());
-plot_peak_model_fits(peak_table, session_keys, methods, delta_columns, ...
-    theta_columns, analysis_parameters.min_bins_for_correlation, ...
-    cm_plot_parameters, pixel_to_cm(), 'cm/s');
 
 if ~isfolder(saving_folder)
     mkdir(saving_folder);
@@ -239,6 +232,7 @@ for method_n = 1:numel(methods)
     if n_sessions <= 12
         legend(labels, 'Location', 'eastoutside')
     end
+    add_figure_speed_cm_axes(gcf);
 end
 end
 
@@ -269,6 +263,9 @@ xlabel(['Spectrum speed (' speed_unit ')'])
 ylabel('Peak frequency (Hz)')
 title(plot_title)
 box off
+if speed_scale == 1
+    set(gca, 'Tag', 'speed-px-linear')
+end
 end
 
 function plot_session_correlations(correlation_table)
@@ -528,7 +525,8 @@ for session_n = 1:height(session_keys)
                     bands{band_n}, model.formula, model.slope, model.slope_p, ...
                     model.r_squared, model.aic_hz, model.n);
                 if strcmp(model.formula, 'PeakHz ~ Speed') && isfinite(model.slope)
-                    fprintf('    same line in cm/s: slope %+.4g Hz per (cm/s)\n', ...
+                    fprintf(['    same line, cm/s axis: slope %+.4g Hz per (cm/s). ' ...
+                        'The plotted line is unchanged.\n'], ...
                         model.slope / pixel_to_cm());
                 end
             end
@@ -819,6 +817,19 @@ for method_n = 1:numel(methods)
         title(sprintf('%s: dash-dot PeakHz ~ log(Speed)', bands{band_n}))
     end
     add_peak_model_legend(legend_axis)
+    add_figure_speed_cm_axes(gcf);
+end
+end
+
+function add_figure_speed_cm_axes(figure_handle)
+pixel_axes = findall(figure_handle, 'Type', 'axes');
+for axis_n = 1:numel(pixel_axes)
+    tag = get(pixel_axes(axis_n), 'Tag');
+    if strcmp(tag, 'speed-px-linear')
+        add_speed_cm_axis(pixel_axes(axis_n), 'linear');
+    elseif strcmp(tag, 'speed-px-log')
+        add_speed_cm_axis(pixel_axes(axis_n), 'log');
+    end
 end
 end
 
@@ -843,6 +854,9 @@ for session_n = 1:height(session_keys)
         draw_fit_line(models, 'linear', speed, colors(session_n, :), '-')
         draw_log_frequency_curve(models, speed, colors(session_n, :))
         xlabel(['Spectrum speed (' speed_unit ')'])
+        if speed_scale == 1
+            set(gca, 'Tag', 'speed-px-linear')
+        end
     else
         log_speed = log(speed);
         visible = log_speed >= plot_parameters.log_speed_xlim(1) & ...
@@ -860,6 +874,9 @@ for session_n = 1:height(session_keys)
 end
 if strcmp(x_scale, 'log_speed')
     xlim(plot_parameters.log_speed_xlim)
+    if speed_scale == 1
+        set(gca, 'Tag', 'speed-px-log')
+    end
 end
 ylabel('Peak frequency (Hz)')
 box off
