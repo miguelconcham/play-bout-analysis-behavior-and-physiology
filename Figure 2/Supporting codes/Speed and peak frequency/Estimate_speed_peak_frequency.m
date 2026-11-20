@@ -16,6 +16,8 @@
 %       analysis_parameters, failures
 %   speed_peak_by_session.csv
 %   speed_peak_correlations.csv
+% An existing file is left untouched. A new result is written beside it
+% with _rebuilt in the name.
 %
 % analysis_parameters is the full settings struct, including the frequency
 % grid, FOOOF settings, speed-bin fractions, and band limits.
@@ -111,12 +113,12 @@ if ~isfolder(saving_folder)
     mkdir(saving_folder);
 end
 [peak_table, correlation_table] = speed_peak_session_table(recordings);
-output_file = fullfile(saving_folder, 'speed_peak_frequency.mat');
+output_file = path_without_overwrite(fullfile(saving_folder, 'speed_peak_frequency.mat'));
 fprintf('Saving %s\n', output_file);
 save(output_file, 'recordings', 'animal_names', 'peak_table', ...
     'correlation_table', 'analysis_parameters', 'failures', '-v7.3');
-writetable(peak_table, fullfile(saving_folder, 'speed_peak_by_session.csv'));
-writetable(correlation_table, fullfile(saving_folder, 'speed_peak_correlations.csv'));
+writetable(peak_table, path_without_overwrite(fullfile(saving_folder, 'speed_peak_by_session.csv')));
+writetable(correlation_table, path_without_overwrite(fullfile(saving_folder, 'speed_peak_correlations.csv')));
 if ~isempty(correlation_table)
     disp(correlation_table);
 end

@@ -391,6 +391,34 @@ assert(strcmp(analysis_figure_basename('Matched distance delta power', 1), ...
     'Matched distance delta power'), ...
     'A plain figure name was changed.');
 
+temp_dir = tempname;
+mkdir(temp_dir);
+precious = fullfile(temp_dir, 'psth_structure_speed_delta.mat');
+fid = fopen(precious, 'w');
+fwrite(fid, 'precious');
+fclose(fid);
+missing = fullfile(temp_dir, 'psth_structure_speed_theta_v2.mat');
+assert(strcmp(path_without_overwrite(missing), missing), ...
+    'A missing mat was not offered as the save path.');
+rebuilt = path_without_overwrite(precious);
+assert(~strcmp(rebuilt, precious), 'An existing mat was offered for overwrite.');
+assert(exist(rebuilt, 'file') ~= 2, 'The rebuilt path already existed.');
+fid = fopen(precious, 'r');
+stored = fread(fid, inf, '*char')';
+fclose(fid);
+assert(strcmp(stored, 'precious'), 'The existing mat contents changed.');
+fid = fopen(rebuilt, 'w');
+fwrite(fid, 'rebuilt');
+fclose(fid);
+rebuilt_again = path_without_overwrite(precious);
+assert(~strcmp(rebuilt_again, precious) && ~strcmp(rebuilt_again, rebuilt), ...
+    'A second run was pointed at the original or the first rebuilt file.');
+fid = fopen(precious, 'r');
+stored = fread(fid, inf, '*char')';
+fclose(fid);
+assert(strcmp(stored, 'precious'), 'A second save path changed the original mat.');
+rmdir(temp_dir, 's');
+
 disp('test_distance_session_coverage passed');
 end
 

@@ -1,16 +1,18 @@
 %% Estimate_speed_freq_relation
-% Rebuild the speed and distance mats, including SpeedCm and DistanceCm.
+% Build speed and distance mats that include SpeedCm and DistanceCm.
 %
-% Run this script again after the pixel-to-cm change. It calls
-% GENERATE_SPEED_FREQ_RELATION for each animal-partner pair, once for delta
-% and once for theta.
+% An existing mat is not replaced. If psth_structure_speed_delta.mat is
+% already in the results folder, this script reads its frequency grid and
+% writes the new result to psth_structure_speed_delta_rebuilt.mat. The same
+% rule applies to the animal-name files and to the theta files.
+% Analyze_distance_freq_relation.m and Analyze_speed_freq_relation.m keep
+% reading the original names.
 %
-% Delta files, read by Analyze_distance_freq_relation.m and
-% Analyze_speed_freq_relation.m:
+% Original delta files:
 %   psth_structure_speed_delta.mat
 %   animal_names_speed_delta.mat
 %
-% Theta files:
+% Original theta files:
 %   psth_structure_speed_theta_v2.mat
 %   animal_names_speed_theta_v2.mat
 %
@@ -103,7 +105,9 @@ for band_n = 1:numel(band_label)
         end
     end
 
-    fprintf('Saving %s\n', structure_path);
-    save(structure_path, 'psth_structure')
-    save(names_path, 'animal_names')
+    structure_output = path_without_overwrite(structure_path);
+    names_output = path_without_overwrite(names_path);
+    fprintf('Saving %s\n', structure_output);
+    save(structure_output, 'psth_structure')
+    save(names_output, 'animal_names')
 end
