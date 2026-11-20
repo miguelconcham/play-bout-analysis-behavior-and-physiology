@@ -1,16 +1,18 @@
 %% Estimate_speed_freq_relation
-% Rebuild the speed and distance mats, including SpeedCm and DistanceCm.
+% Build speed and distance mats that include SpeedCm and DistanceCm.
 %
-% Run this script again after the pixel-to-cm change. It calls
-% GENERATE_SPEED_FREQ_RELATION for each animal-partner pair, once for delta
-% and once for theta.
+% An existing mat is not replaced. If psth_structure_speed_delta.mat is
+% already in the results folder, this script reads its frequency grid and
+% writes the new result to psth_structure_speed_delta_rebuilt.mat. The same
+% rule applies to the animal-name files and to the theta files.
+% Analyze_distance_freq_relation.m and Analyze_speed_freq_relation.m keep
+% reading the original names.
 %
-% Delta files, read by Analyze_distance_freq_relation.m and
-% Analyze_speed_freq_relation.m:
+% Original delta files:
 %   psth_structure_speed_delta.mat
 %   animal_names_speed_delta.mat
 %
-% Theta files:
+% Original theta files:
 %   psth_structure_speed_theta_v2.mat
 %   animal_names_speed_theta_v2.mat
 %
@@ -35,11 +37,13 @@ list_of_paertner = {[1 2],[1 2],[1 2],[1 2],[1 2],[1 2],[1 2 3]};
 saving_folder = '\\experimentfs.home.bccn-berlin.de\experiment\PlayNeuralData\NPX-OPTO PLAY NMM\PlayBout Analysis\play bout analysis behavior and physiology\Data\Analysis results\psth power by frequency and behavior';
 
 %% One pass per band. Delta is the file the coverage scripts load.
-wind_length = .250;
-wind_overlap = 0.249;
+% Defaults are used only when that mat does not already store a grid.
+% An existing mat keeps its own f and freq_range, so play minus non-play
+% stays on the same power. The centimetre columns do not move those signs.
 band_label = {'delta', 'theta'};
-freq_ranges = {[1 5], [6 12]};
-frequency_grids = {1:.1:16, 5:.1:16};
+fallback_settings = { ...
+    struct('freq_range', [1 5], 'f', 1:.1:16, 'wind_length', 0.250, 'wind_overlap', 0.249), ...
+    struct('freq_range', [6 12], 'f', 5:.1:16, 'wind_length', 0.250, 'wind_overlap', 0.249)};
 structure_files = { ...
     'psth_structure_speed_delta.mat', ...
     'psth_structure_speed_theta_v2.mat'};
@@ -47,14 +51,35 @@ names_files = { ...
     'animal_names_speed_delta.mat', ...
     'animal_names_speed_theta_v2.mat'};
 
-fprintf(['Pixel scale %.4f cm/pixel. SpeedCm is pixels per frame * %d * %.4f.\n' ...
-    'DistanceCm is pixels * %.4f.\n'], ...
-    pixel_to_cm(), tracking_video_fps(), pixel_to_cm(), pixel_to_cm());
+fprintf(['Pixel scale %.4f cm/pixel. SpeedCm is pixels per second * %.4f,\n' ...
+    'using the time between frames. DistanceCm is pixels * %.4f.\n' ...
+    'The saved Speed column stays the within-session z-score.\n'], ...
+    pixel_to_cm(), pixel_to_cm(), pixel_to_cm());
 
 for band_n = 1:numel(band_label)
-    freq_range = freq_ranges{band_n};
-    f = frequency_grids{band_n};
-    fprintf('\n%s band %.1f-%.1f Hz\n', band_label{band_n}, freq_range(1), freq_range(2));
+    structure_path = fullfile(saving_folder, structure_files{band_n});
+    names_path = fullfile(saving_folder, names_files{band_n});
+    band_settings = fallback_settings{band_n};
+    if exist(structure_path, 'file') == 2
+        previous = load(structure_path, 'psth_structure');
+        if isfield(previous, 'psth_structure') && ~isempty(previous.psth_structure)
+            band_settings = stored_band_settings(previous.psth_structure(1), band_settings);
+        end
+    end
+    freq_range = band_settings.freq_range;
+    f = band_settings.f;
+    wind_length = band_settings.wind_length;
+    wind_overlap = band_settings.wind_overlap;
+    if isfield(band_settings, 'reused') && band_settings.reused
+        fprintf(['\n%s reuses the stored grid %.4g-%.4g Hz (%d frequencies), ' ...
+            'window %.3f s, overlap %.3f s.\n' ...
+            'Play minus non-play is not moved by the centimetre scale.\n'], ...
+            band_label{band_n}, freq_range(1), freq_range(2), numel(f), ...
+            wind_length, wind_overlap);
+    else
+        fprintf(['\n%s has no stored grid. Using %.4g-%.4g Hz (%d frequencies).\n'], ...
+            band_label{band_n}, freq_range(1), freq_range(2), numel(f));
+    end
 
     psth_structure = [];
     animal_names = [];
@@ -80,9 +105,9 @@ for band_n = 1:numel(band_label)
         end
     end
 
-    structure_path = fullfile(saving_folder, structure_files{band_n});
-    names_path = fullfile(saving_folder, names_files{band_n});
-    fprintf('Saving %s\n', structure_path);
-    save(structure_path, 'psth_structure')
-    save(names_path, 'animal_names')
+    structure_output = path_without_overwrite(structure_path);
+    names_output = path_without_overwrite(names_path);
+    fprintf('Saving %s\n', structure_output);
+    save(structure_output, 'psth_structure')
+    save(names_output, 'animal_names')
 end

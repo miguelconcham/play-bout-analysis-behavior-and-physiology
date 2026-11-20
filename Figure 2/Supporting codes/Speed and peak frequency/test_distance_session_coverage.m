@@ -342,6 +342,18 @@ print_repeated_animal_difference([1; 1; 3], {'A'; 'A'; 'B'}, ...
 pixels = [10; 20; 30; 40];
 pixel_z = (pixels - mean(pixels)) / std(pixels);
 distance_cm = pixels_to_cm(pixels);
+previous = struct('freq_range', [1 4], 'f', 1:.5:9, 'wind_length', 0.25, 'wind_overlap', 0.249);
+kept = stored_band_settings(previous, struct( ...
+    'freq_range', [1 5], 'f', 1:.1:16, 'wind_length', 0.25, 'wind_overlap', 0.249));
+assert(isequal(kept.freq_range, [1 4]), ...
+    'A stored delta band was replaced, which would move points across zero.');
+assert(isequal(kept.f, 1:.5:9), ...
+    'A stored frequency grid was replaced.');
+assert(kept.reused, 'A stored grid was treated as a new default.');
+fresh = stored_band_settings([], struct( ...
+    'freq_range', [1 5], 'f', 1:.1:16, 'wind_length', 0.25, 'wind_overlap', 0.249));
+assert(isequal(fresh.freq_range, [1 5]) && ~fresh.reused, ...
+    'A missing mat did not keep the default band.');
 assert(abs(pixel_to_cm() - 0.1334) < 1e-12, 'The pixel scale is not 0.1334 cm.');
 assert(abs(frame_speed_to_cm_s(2) - 2 * 30 * 0.1334) < 1e-12, ...
     'Two pixels per frame is not 8.004 cm/s.');
@@ -378,6 +390,34 @@ assert(strcmp(analysis_figure_basename('', 4), 'figure 4'), ...
 assert(strcmp(analysis_figure_basename('Matched distance delta power', 1), ...
     'Matched distance delta power'), ...
     'A plain figure name was changed.');
+
+temp_dir = tempname;
+mkdir(temp_dir);
+precious = fullfile(temp_dir, 'psth_structure_speed_delta.mat');
+fid = fopen(precious, 'w');
+fwrite(fid, 'precious');
+fclose(fid);
+missing = fullfile(temp_dir, 'psth_structure_speed_theta_v2.mat');
+assert(strcmp(path_without_overwrite(missing), missing), ...
+    'A missing mat was not offered as the save path.');
+rebuilt = path_without_overwrite(precious);
+assert(~strcmp(rebuilt, precious), 'An existing mat was offered for overwrite.');
+assert(exist(rebuilt, 'file') ~= 2, 'The rebuilt path already existed.');
+fid = fopen(precious, 'r');
+stored = fread(fid, inf, '*char')';
+fclose(fid);
+assert(strcmp(stored, 'precious'), 'The existing mat contents changed.');
+fid = fopen(rebuilt, 'w');
+fwrite(fid, 'rebuilt');
+fclose(fid);
+rebuilt_again = path_without_overwrite(precious);
+assert(~strcmp(rebuilt_again, precious) && ~strcmp(rebuilt_again, rebuilt), ...
+    'A second run was pointed at the original or the first rebuilt file.');
+fid = fopen(precious, 'r');
+stored = fread(fid, inf, '*char')';
+fclose(fid);
+assert(strcmp(stored, 'precious'), 'A second save path changed the original mat.');
+rmdir(temp_dir, 's');
 
 disp('test_distance_session_coverage passed');
 end
