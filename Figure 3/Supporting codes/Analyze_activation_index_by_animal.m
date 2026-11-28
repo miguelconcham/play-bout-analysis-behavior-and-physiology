@@ -1,4 +1,4 @@
-%% Animal-balanced activation index for SupCol and LPAG
+%% Animal-balanced activation index for SupCol, LPAG, and VLPAG
 %
 % Descriptive analysis only. The animal-balanced estimates compare neurons
 % only within the same biological animal and area, then give animals equal
@@ -20,7 +20,7 @@ clc
 % Data/Analysis results/activation index/.
 output_folder = '';
 
-selected_area_names = ["SupCol", "LPAG"];
+selected_area_names = ["SupCol", "LPAG", "VLPAG"];
 cell_count_area_names = ["SupCol", "DLPAG", "LPAG", "VLPAG", "DR"];
 
 % One common behavior definition is used for both the behavior heatmaps and
@@ -60,7 +60,7 @@ pooled_checkpoint_file = fullfile(activation_folder, ...
 
 if isempty(output_folder)
     output_folder = fullfile(activation_folder, ...
-        'animal level SupCol LPAG');
+        'animal level SupCol LPAG VLPAG');
 end
 if ~exist(output_folder, 'dir')
     mkdir(output_folder);
