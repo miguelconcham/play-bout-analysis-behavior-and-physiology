@@ -19,6 +19,7 @@ clc
 output_folder = '';
 
 selected_area_names = ["SupCol", "LPAG"];
+cell_count_area_names = ["SupCol", "DLPAG", "LPAG", "VLPAG", "DR"];
 
 % One common behavior definition is used for both the behavior heatmaps and
 % the play/non-play averages. These are the behavior indices displayed in
@@ -125,6 +126,17 @@ for area_number = 1:numel(selected_area_names)
 end
 n_areas = numel(selected_area_names);
 
+cell_count_area_index = nan(numel(cell_count_area_names),1);
+for area_number = 1:numel(cell_count_area_names)
+    match = find(source_area_names == cell_count_area_names(area_number));
+    if numel(match) ~= 1
+        error('Cell-count area %s was not found exactly once.', ...
+            cell_count_area_names(area_number));
+    end
+    cell_count_area_index(area_number) = match;
+end
+n_cell_count_areas = numel(cell_count_area_names);
+
 animal_file_info = dir(animal_checkpoint_file);
 input_signature = struct;
 input_signature.file_bytes = animal_file_info.bytes;
@@ -144,8 +156,8 @@ end
 
 %% Biological-animal map
 all_sessions = strings(0,1);
-for area_number = 1:n_areas
-    source_area = selected_area_index(area_number);
+for area_number = 1:n_cell_count_areas
+    source_area = cell_count_area_index(area_number);
     sessions = string(all_activation_order{1,source_area,3});
     all_sessions = [all_sessions; sessions(:)]; %#ok<AGROW>
 end
@@ -166,9 +178,10 @@ disp(session_to_animal)
 
 % Classification counts do not depend on behavior. Use the first stored
 % PSTH block only to obtain the aligned locking labels and session IDs.
-classification_cell_count = zeros(n_areas,n_types,n_animals);
-for area_number = 1:n_areas
-    source_area = selected_area_index(area_number);
+classification_cell_count = zeros( ...
+    n_cell_count_areas,n_types,n_animals);
+for area_number = 1:n_cell_count_areas
+    source_area = cell_count_area_index(area_number);
     [~, type_index, sessions] = activation_block( ...
         all_activation_order, 1, source_area, n_time);
     animal_for_row = biological_animal_id(sessions);
@@ -182,7 +195,7 @@ for area_number = 1:n_areas
     end
 end
 cell_count_table = build_cell_count_table(classification_cell_count, ...
-    selected_area_names,cell_type_names,animal_ids);
+    cell_count_area_names,cell_type_names,animal_ids);
 writetable(cell_count_table,fullfile(output_folder, ...
     'locking_type_cell_counts_by_animal_and_area.csv'));
 
@@ -774,10 +787,12 @@ print_figure_both(figure_handle, output_folder, ...
 %% Figure 2b: locking-type cell counts by animal and area
 figure_handle = figure('Visible',settings.figure_visible, ...
     'Color','w', 'Units','normalized', ...
-    'OuterPosition',[0 0 0.8 0.75]);
-tiledlayout(1,n_areas, 'TileSpacing','compact', ...
+    'OuterPosition',[0 0 1 1]);
+n_table_columns = 2;
+n_table_rows = ceil(n_cell_count_areas/n_table_columns);
+tiledlayout(n_table_rows,n_table_columns, 'TileSpacing','compact', ...
     'Padding','compact');
-for area_number = 1:n_areas
+for area_number = 1:n_cell_count_areas
     nexttile
     count_matrix = reshape(classification_cell_count( ...
         area_number,:,:),n_types,n_animals)';
@@ -791,7 +806,7 @@ for area_number = 1:n_areas
     xtickangle(25)
     yticks(1:n_animals)
     yticklabels(animal_ids)
-    title(selected_area_names(area_number))
+    title(cell_count_area_names(area_number))
     for animal_number = 1:n_animals
         for column_number = 1:(n_types+1)
             text(column_number,animal_number, ...
@@ -1326,7 +1341,8 @@ save(fullfile(output_folder, ...
     'animal_balanced_activation_index_results.mat'), ...
     'settings', 'selected_area_names', 'cell_type_names', ...
     'animal_ids', 'session_to_animal', 'behavior_indices', ...
-    'classification_cell_count', 'cell_count_table', ...
+    'cell_count_area_names', 'classification_cell_count', ...
+    'cell_count_table', ...
     'selected_behavior_names', 'play_behavior_indices', ...
     'nonplay_behavior_indices', 'activation_time', ...
     'animal_activation_index', 'type_neuron_count', ...
@@ -1743,7 +1759,8 @@ fprintf(file_id, ['Leave-one-animal-out estimates overlap strongly and ' ...
     'must not be treated as independent replicates or entered into a ' ...
     'statistical test.\n']);
 fprintf(file_id, ['locking_type_cell_count_table reports classification ' ...
-    'counts before behavior-specific PSTH eligibility filters.\n\n']);
+    'counts for SupCol, DLPAG, LPAG, VLPAG, and DR before ' ...
+    'behavior-specific PSTH eligibility filters.\n\n']);
 fprintf(file_id, ['All original, animal-balanced, and leave-one-out ' ...
     'comparison panels use one shared y-axis range within each brain ' ...
     'area.\n\n']);
