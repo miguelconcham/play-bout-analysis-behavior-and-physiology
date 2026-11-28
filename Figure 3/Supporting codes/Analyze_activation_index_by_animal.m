@@ -38,6 +38,7 @@ settings.figure_visible = 'on';
 settings.jpeg_resolution = 300;
 settings.activation_color_limits = [-4 4];
 settings.paper_summary_y_limits = [-2 2];
+settings.shared_y_padding_fraction = 0.05;
 
 %% Paths and inputs
 experiment_root = ['\\experimentfs.home.bccn-berlin.de\experiment\' ...
@@ -490,6 +491,35 @@ for area_number = 1:n_areas
     end
 end
 
+%% Shared activation-index y limits for all comparison figures
+%
+% Every panel from the same brain area uses the same range across original
+% pooled, individual-animal, equal-animal, and leave-one-animal-out results.
+area_activation_y_limits = nan(n_areas,2);
+for area_number = 1:n_areas
+    values = [ ...
+        reshape(animal_condition_activation(area_number,:,:,:,:),[],1); ...
+        reshape(group_condition_activation(area_number,:,:,:),[],1); ...
+        reshape(leave_one_out_activation(area_number,:,:,:,:),[],1); ...
+        reshape(pooled_condition_activation(area_number,:,:,:),[],1); ...
+        reshape(paper_behavior_ci95(area_number,:,:,:,:),[],1)];
+    values = values(isfinite(values));
+    if isempty(values)
+        area_activation_y_limits(area_number,:) = ...
+            settings.paper_summary_y_limits;
+        continue
+    end
+    lower_limit = min([values;0]);
+    upper_limit = max([values;0]);
+    value_range = upper_limit-lower_limit;
+    if value_range <= eps
+        value_range = max(1,abs(upper_limit));
+    end
+    padding = settings.shared_y_padding_fraction*value_range;
+    area_activation_y_limits(area_number,:) = ...
+        [lower_limit-padding,upper_limit+padding];
+end
+
 %% Descriptive tables
 coverage_table = build_coverage_table(type_neuron_count, ...
     area_neuron_count, reference_neuron_count, selected_area_names, ...
@@ -673,6 +703,7 @@ for area_number = 1:n_areas
         xline(5,'k:');
         yline(0,'k:');
         xlim([activation_time(1), activation_time(end)])
+        ylim(area_activation_y_limits(area_number,:))
         if type_number == 1
             ylabel({selected_area_names(area_number), ...
                 'Activation index'})
@@ -737,7 +768,7 @@ for area_number = 1:n_areas
         xline(5,'k:');
         yline(0,'k:');
         xlim([activation_time(1), activation_time(end)])
-        ylim(settings.paper_summary_y_limits)
+        ylim(area_activation_y_limits(area_number,:))
         if type_number == 1
             ylabel({selected_area_names(area_number), ...
                 'Activation index'})
@@ -794,6 +825,7 @@ for area_number = 1:n_areas
             'Color',condition_colors(2,:), 'LineWidth',3);
         yline(0,'k:');
         xlim([0.5 2.5])
+        ylim(area_activation_y_limits(area_number,:))
         xticks([1 2])
         xticklabels(condition_names)
         if type_number == 1
@@ -838,6 +870,7 @@ for area_number = 1:n_areas
         xline(5,'k:');
         yline(0,'k:');
         xlim([activation_time(1), activation_time(end)])
+        ylim(area_activation_y_limits(area_number,:))
         if type_number == 1
             ylabel({selected_area_names(area_number), ...
                 'Activation index'})
@@ -884,6 +917,7 @@ for area_number = 1:n_areas
         xline(5,'k:');
         yline(0,'k:');
         xlim([activation_time(1), activation_time(end)])
+        ylim(area_activation_y_limits(area_number,:))
         if type_number == 1
             ylabel({selected_area_names(area_number), ...
                 'Activation index'})
@@ -950,6 +984,7 @@ for area_number = 1:n_areas
         xline(5,'k:');
         yline(0,'k:');
         xlim([activation_time(1),activation_time(end)])
+        ylim(area_activation_y_limits(area_number,:))
         if type_number == 1
             ylabel({selected_area_names(area_number), ...
                 'Activation index'})
@@ -1052,6 +1087,7 @@ for area_number = 1:n_areas
         xline(3,'Color',[0.8 0.8 0.8]);
         xline(6,'Color',[0.8 0.8 0.8]);
         xlim([0.5 8.5])
+        ylim(area_activation_y_limits(area_number,:))
         xticks([1 2 4 5 7 8])
         xticklabels({'Animal play','Animal non-play', ...
             'LOAO play','LOAO non-play', ...
@@ -1087,6 +1123,7 @@ save(fullfile(output_folder, ...
     'animal_condition_behavior_count', ...
     'group_condition_activation', 'n_animals_by_condition', ...
     'leave_one_out_activation', 'pooled_condition_activation', ...
+    'area_activation_y_limits', ...
     'coverage_table', 'behavior_table', 'condition_table', ...
     'consistency_table', '-v7.3');
 
@@ -1396,6 +1433,9 @@ fprintf(file_id, ['Leave-one-animal-out estimates overlap strongly and ' ...
     'statistical test.\n']);
 fprintf(file_id, ['locking_type_cell_count_table reports classification ' ...
     'counts before behavior-specific PSTH eligibility filters.\n\n']);
+fprintf(file_id, ['All original, animal-balanced, and leave-one-out ' ...
+    'comparison panels use one shared y-axis range within each brain ' ...
+    'area.\n\n']);
 fprintf(file_id, 'Areas: %s\n', strjoin(area_names, ', '));
 fprintf(file_id, 'Animals (%d): %s\n', numel(animal_ids), ...
     strjoin(animal_ids, ', '));
